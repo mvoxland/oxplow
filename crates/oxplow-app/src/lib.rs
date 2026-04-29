@@ -10,6 +10,7 @@
 pub mod agent_command;
 pub mod agent_pane;
 pub mod agent_prompt;
+pub mod code_quality_runner;
 pub mod background_task;
 pub mod config_service;
 pub mod events;
