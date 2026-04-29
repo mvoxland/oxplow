@@ -1,25 +1,4 @@
 # IPC and stores: end-to-end pattern
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 What this doc covers: the layered flow you follow whenever a feature
@@ -31,40 +10,40 @@ For the actual data shapes, see [data-model.md](./data-model.md).
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
 
-1. **Migration** — `src/persistence/migrations.ts`. Append a new entry to
+1. **Migration** — `crates/oxplow-db/migrations/V1__initial_schema.sql`. Append a new entry to
    `MIGRATIONS` with the next version number. Migrations are append-only;
    never edit a prior entry. `runMigrations` runs them inside a
    transaction and updates `PRAGMA user_version`.
 
-2. **Store class** — `src/persistence/<thing>-store.ts`. Wraps the SQLite
+2. **Store class** — `crates/oxplow-db/src/<thing>-store.ts`. Wraps the SQLite
    connection (`getStateDatabase(projectDir)`). Exposes typed read/write
    methods, fires `subscribe()` listeners via the shared `StoreEmitter`
-   (`src/persistence/store-emitter.ts`) on changes, validates inputs
+   (`crates/oxplow-db/src/store-emitter.ts`) on changes, validates inputs
    (kinds, statuses, length limits) before writing. Don't reimplement
    the subscribe/emit pattern — instantiate `StoreEmitter<YourChange>`
    in the constructor and delegate.
 
-3. **Runtime method** — `src/electron/runtime.ts`. Adds a method to
-   `ElectronRuntime` that resolves stream/thread as needed and delegates
+3. **Runtime method** — `crates/oxplow-app/src/lib.rs`. Adds a method to
+   `Services` that resolves stream/thread as needed and delegates
    to the store. Where cross-store atomicity matters, the runtime owns
    that orchestration.
 
-4. **IPC contract** — `src/electron/ipc-contract.ts`. Add the method
+4. **IPC contract** — `crates/oxplow-tauri-ipc/src/commands/`. Add the method
    signature to the `OxplowApi` interface. This is the source of truth for
    what's exposed to the renderer.
 
-5. **Preload binding** — `src/electron/preload.ts`. One line per method:
+5. **Preload binding** — `(removed under Tauri)`. One line per method:
    `name: (args) => ipcRenderer.invoke("oxplow:name", args)`. Channel
    names follow `oxplow:<methodName>`.
 
-6. **Main-process handler** — `src/electron/main.ts`.
+6. **Main-process handler** — `apps/desktop/src-tauri/src/main.rs`.
    `handle("oxplow:name", (_event, ...args) => currentRuntime.name(...args))`.
    Use the local `handle()` wrapper, not `ipcMain.handle` directly —
    the wrapper records the channel so `disposeRuntime()` can remove
    every handler before the SQLite database closes (otherwise late
    in-flight requests crash with "database is not open" during quit).
 
-7. **UI api wrapper** — `src/ui/api.ts`. `desktopApi().name(...)` with a
+7. **UI api wrapper** — `apps/desktop/src/api.ts`. `desktopApi().name(...)` with a
    typed return.
 
 The component then calls the api wrapper and (if the data is reactive)
@@ -81,7 +60,7 @@ work.
 
 ## Event bus
 
-`src/core/event-bus.ts` defines the typed `OxplowEvent` discriminated
+`crates/oxplow-app/src/events.rs` defines the typed `OxplowEvent` discriminated
 union. To add an event:
 
 1. Add a new interface (`type: "thing.changed"; …`).
@@ -93,7 +72,7 @@ union. To add an event:
 ## Git dashboard / cross-worktree IPC
 
 The Git Dashboard page added five renderer-callable methods to
-`DesktopApi`. Each delegates to a helper in `src/git/git.ts` after
+`DesktopApi`. Each delegates to a helper in `crates/oxplow-git/src/lib.rs` after
 resolving the stream's `worktree_path` (the same pattern as
 `getGitLog`):
 
@@ -120,7 +99,7 @@ the *current* stream's working dir. See
 [git-integration.md](./git-integration.md) for the rationale on why
 no symmetric "push commits into another worktree" IPC exists.
 
-For commonly-filtered events there are scoped helpers in `src/ui/api.ts`:
+For commonly-filtered events there are scoped helpers in `apps/desktop/src/api.ts`:
 
 - `subscribeWorkspaceEvents(streamId, fn)` — filters
   `workspace.changed` by stream.
@@ -133,7 +112,7 @@ filter.
 
 **Listener count:** each UI subscriber adds one listener to
 `ipcRenderer`. Electron's default `MaxListeners=10` is too low for
-oxplow (~11 stores subscribe on startup), so `src/electron/preload.ts`
+oxplow (~11 stores subscribe on startup), so `(removed under Tauri)`
 calls `ipcRenderer.setMaxListeners(64)` at load time. These are
 long-lived per-store subscribers and grow only when we add a store —
 not a leak. If the count ever climbs into dozens, switch to a single
@@ -156,19 +135,19 @@ statements inside a single `db.transaction()` block. Don't inline SQL.
 ## Tests
 
 Each store has a colocated `bun:test` file
-(`src/persistence/<thing>-store.test.ts`). Tests use `mkdtempSync` to
+(`crates/oxplow-db/src/<thing>-store.test.ts`). Tests use `mkdtempSync` to
 spin up a fresh project dir and exercise the public store API. Cross-
 store / Stop-hook / MCP behavior goes in
-`src/electron/runtime.test.ts`. Run with `bun test <path>`.
+`crates/oxplow-app/src/runtime.test.ts`. Run with `bun test <path>`.
 
 Don't mock the DB — every store test hits a real SQLite file. Migrations
-are tested in `src/persistence/migrations.test.ts`; if you add a new
+are tested in `crates/oxplow-db/src/migrations.test.ts`; if you add a new
 migration, add a test that runs it from a clean state and asserts the
 expected schema.
 
 ## Snapshot store
 
-`SnapshotStore` (`src/persistence/snapshot-store.ts`) is a hybrid: a
+`SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`) is a hybrid: a
 SQLite-indexed table (`file_snapshot`) plus an on-disk content-
 addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`. Snapshots
 are time-ordered and deduplicated on a `version_hash` (no parent
@@ -182,7 +161,7 @@ runtime publishes `file-snapshot.created` on the EventBus after each
 successful flush that actually inserted a row.
 
 IPC methods (all go through `ipc-contract.ts` → `main.ts` →
-`preload.ts` → `src/ui/api.ts`):
+`preload.ts` → `apps/desktop/src/api.ts`):
 
 - `listSnapshots(streamId, limit?)` — snapshot rows newest-first,
   baseline excluded, each with `label`/`label_kind`.
@@ -208,7 +187,7 @@ UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 
 ## Transient agent follow-ups
 
-`FollowupStore` (`src/electron/followup-store.ts`) is a pure in-memory
+`FollowupStore` (`crates/oxplow-app/src/followup.rs`) is a pure in-memory
 map keyed by `threadId`. It backs three orchestrator-only MCP tools —
 `oxplow__add_followup`, `oxplow__remove_followup`,
 `oxplow__list_followups` — and lets the agent stash a "I'll get back to
@@ -247,10 +226,10 @@ and remove it in the same turn you handle it. Never carry both.
 
 ## Background tasks (long-running op progress)
 
-`BackgroundTaskStore` (`src/electron/background-task-store.ts`) is
+`BackgroundTaskStore` (`crates/oxplow-app/src/background_task.rs`) is
 another in-memory store, modeled on `FollowupStore`. It surfaces "what
 is the runtime doing right now" rows in the bottom-bar
-`BackgroundTaskIndicator` (`src/ui/components/`). No SQLite, no
+`BackgroundTaskIndicator` (`apps/desktop/src/components/`). No SQLite, no
 migration, lost on restart. Done/failed rows linger for a 4s grace
 window so the UI can flash a checkmark before evicting.
 
@@ -263,16 +242,16 @@ UI). Active producers:
 - **Git pull/push/merge/rebase** — `runtime.gitPull` /
   `runtime.gitPush` / `runtime.gitMergeInto` / `runtime.gitRebaseOnto`
   use `gitPullAsync` / `gitPushAsync` / `gitMergeAsync` /
-  `gitRebaseAsync` from `src/git/git.ts` so the main process doesn't
+  `gitRebaseAsync` from `crates/oxplow-git/src/lib.rs` so the main process doesn't
   block during the network or merge work. Indeterminate.
 - **Code-quality scans** — `runtime.runCodeQualityScan` opens a row in
   parallel with the existing `code-quality.scanned` event flow. The
   scan-status strip in CodeQualityPanel keeps its panel-local spinner;
   the bottom-bar row is the global indicator. Indeterminate.
-- **LSP cold start** — `LspSessionManager` (`src/lsp/lsp.ts`) takes
+- **LSP cold start** — `LspSessionManager` (`crates/oxplow-lsp/src/lsp.ts`) takes
   optional `onInitializeStart` / `onInitializeEnd` hooks. The runtime
   wires them to `start`/`complete`. Indeterminate.
-- **Notes wiki resync** — `NotesWatcher.start` (`src/git/notes-watch.ts`)
+- **Notes wiki resync** — `NotesWatcher.start` (`crates/oxplow-fs-watch/src/lib.rs`)
   takes `onScanStart` / `onScanProgress` / `onScanEnd` callbacks. The
   runtime registers a row only when `total >= 5` (smaller dirs aren't
   worth a flash). Determinate.
@@ -333,7 +312,7 @@ runtime → ipc-contract → preload → main → ui/api).
 
 ## Generic usage tracking
 
-`UsageStore` (`src/persistence/usage-store.ts`) records `(kind, key,
+`UsageStore` (`crates/oxplow-db/src/analytics_stores.rs`) records `(kind, key,
 event)` rows with optional `stream_id` and a 30s coalesce window. The
 runtime exposes four read methods + one writer over IPC:
 
@@ -352,7 +331,7 @@ runtime exposes four read methods + one writer over IPC:
 Subscribe in the UI via `subscribeUsageEvents(fn, { kind })`. The bus
 event is `usage.recorded` with `{ kind, key, streamId, threadId }`.
 
-Active write hookpoints (all in `src/ui/App.tsx`, all pass both
+Active write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
 `streamId` and the active `threadId` so per-stream and per-thread
 queries both work):
 
@@ -383,7 +362,7 @@ IPC:
   ref except `agent`/`new-stream`/`new-work-item`. The label is
   resolved from richer context first (work item title) and falls back
   to `deriveDefaultLabel(ref)` from
-  `src/ui/components/RailHud/history.ts`.
+  `apps/desktop/src/components/RailHud/history.ts`.
 - `listRecentPageVisits({threadId,limit,dedupeByRef,excludeKinds})`
   — newest-first; with `dedupeByRef` collapses to one row per
   `ref_id`. Drives the rail's History section.
@@ -404,8 +383,8 @@ event fires on `forget`, with `threadId: null` (the row spans threads).
 
 ## Code quality scans
 
-`CodeQualityStore` (`src/persistence/code-quality-store.ts`) is
-another straightforward 7-layer instance, plus a `src/subprocess/`
+`CodeQualityStore` (`crates/oxplow-db/src/analytics_stores.rs`) is
+another straightforward 7-layer instance, plus a `crates/oxplow-app/src/`
 module (the first user) that wraps the external CLIs. The runtime
 method `runCodeQualityScan` shows the canonical pattern for "store
 + subprocess + git-diff scoping":

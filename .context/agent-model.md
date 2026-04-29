@@ -1,25 +1,4 @@
 # Agent execution model
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 What this doc covers: how a Claude (or copilot) process is launched in a
@@ -77,7 +56,7 @@ oxplow agent:
   `.xterm`. Click that element to focus, type with regular keystrokes —
   xterm pipes them through the PTY to claude.
 - **When a turn is done.** `deriveThreadAgentStatus`
-  (`src/session/agent-status.ts`) reduces hook events to two states:
+  (`crates/oxplow-domain/src/hook.rs`) reduces hook events to two states:
   `working` (agent is actively burning cycles) or `waiting` (agent
   isn't doing anything; user owes the next move). Brand-new threads,
   finished turns, exited processes, and permission prompts all
@@ -113,7 +92,7 @@ oxplow agent:
 
 ## Launching the agent
 
-`buildAgentCommandForSession` in `src/agent/agent-command.ts` constructs a
+`buildAgentCommandForSession` in `crates/oxplow-app/src/agent_command.rs` constructs a
 shell command that:
 
 - `cd`s into the stream's worktree
@@ -125,12 +104,12 @@ shell command that:
 plumbing — it just `cd && exec copilot`.
 
 The command is launched in a tmux pane via `ensureAgentPane`
-(`src/terminal/fleet.ts`). Switching streams or threads doesn't kill
+(`crates/oxplow-app/src/agent_pane.rs`). Switching streams or threads doesn't kill
 existing agent sessions; tmux keeps them alive in the background.
 
 ## Plugin hook bridge
 
-`createElectronPlugin` (`src/session/claude-plugin.ts`) writes a per-project
+`createElectronPlugin` (`crates/oxplow-app/src/agent_command.rs`) writes a per-project
 Claude Code plugin into `<projectDir>/.oxplow/runtime/claude-plugin/`. The
 plugin's `hooks.json` registers HTTP hooks for `PreToolUse`, `PostToolUse`,
 `UserPromptSubmit`, `SessionStart`, `SessionEnd`, `Stop`, and `Notification`.
@@ -140,7 +119,7 @@ are not supported for SessionStart" in `claude --debug-file`). Only command-
 type hooks are supported there. Everywhere else we rely on hook events to
 learn the session id, so we adopt whichever id shows up on the *next* hook
 that does fire (`UserPromptSubmit`, `PreToolUse`, `Stop`, `SessionEnd`, …) —
-see `decideResumeUpdate` in `src/session/resume-tracker.ts`.
+see `decideResumeUpdate` in `crates/oxplow-app/src/agent_pane.rs`.
 
 `oxplow__get_batch_context` returns, besides the caller's stream/thread
 ids + summary, an `otherActiveBatches: Array<{ streamId, streamTitle,
@@ -171,7 +150,7 @@ to `runtime.handleHookEnvelope`, which:
    live `<session-context>` block (stream + thread + writer, rebuilt
    from the stores — see `buildSessionContextBlock` in `runtime.ts`)
    followed by the editor-focus summary from
-   `src/session/editor-focus.ts`. The session-context block refreshes
+   `(removed under Tauri)`. The session-context block refreshes
    on every turn so the agent notices when the user promoted a
    different thread to writer mid-session; the frozen ids in the
    launch-time system prompt no longer win.
@@ -180,7 +159,7 @@ to `runtime.handleHookEnvelope`, which:
 ## Stop-hook pipeline
 
 The decision logic lives in `decideStopDirective` (a pure function in
-`src/electron/stop-hook-pipeline.ts`). The runtime's
+`crates/oxplow-runtime/src/stop_hook.rs`). The runtime's
 `computeStopDirective(threadId)` builds a `ThreadSnapshot` from the
 live stores, calls the pure function, then applies any returned side
 effects (currently only `record-audit-signature`). Keeping the decision
@@ -369,7 +348,7 @@ summary, moveItemIds? })` — one transaction that:
    carried over rather than a bare title.
 
 Returns `{ newThreadId }`. Implementation lives on
-`ElectronRuntime.forkThread` (`src/electron/runtime.ts`); the MCP tool
+`Services.forkThread` (`crates/oxplow-app/src/lib.rs`); the MCP tool
 is just a thin surface.
 
 ## Orchestrator pattern
@@ -404,7 +383,7 @@ Related small fixes get batched into one task ("fix 4 test fixtures" =
 one item, not four). Claude Code's built-in `TaskCreate` is a
 within-turn micro-planner and never mirrors oxplow items.
 
-`oxplow__read_work_options` (defined in `src/mcp/mcp-tools.ts`, backed by
+`oxplow__read_work_options` (defined in `crates/oxplow-mcp/src/lib.rs`, backed by
 `WorkItemStore.readWorkOptions`) returns one of three shapes:
 - `{ mode: "epic", epic, children }` — the highest-priority ready item is
   an epic; all ready descendants (filtered for blocks links, transitively)
@@ -424,7 +403,7 @@ primary tool for queue-driven dispatch.
 
 ## MCP tools
 
-`buildWorkItemMcpTools` (`src/mcp/mcp-tools.ts`) registers the agent's
+`buildWorkItemMcpTools` (`crates/oxplow-mcp/src/lib.rs`) registers the agent's
 tool surface. Internally each `ToolDef.name` carries an `oxplow__`
 prefix (historical), but `mcp-server.ts` strips that prefix at the
 `tools/list` boundary via `exposedToolName` so the harness sees clean
@@ -476,18 +455,18 @@ intermediate `ready` step.
   stash bookmarks they'll never come back to handle. See the agent
   skill at `.oxplow/runtime/claude-plugin/skills/oxplow-runtime/SKILL.md`
   for the decision rule (follow-up vs. task). Storage:
-  `src/electron/followup-store.ts`; runtime publishes the bus event
+  `crates/oxplow-app/src/followup.rs`; runtime publishes the bus event
   `followup.changed` so the UI re-fetches `getThreadWorkState`.
 - `fork_thread({ sourceThreadId, title, summary, moveItemIds? })` — see
   "fork_thread" above. Creates a new queued thread on the same stream,
   seeds a note item, optionally moves ready / blocked items across in
   one transaction.
 
-`buildLspMcpTools` (`src/mcp/lsp-mcp-tools.ts`) adds language-server
+`buildLspMcpTools` (`crates/oxplow-mcp/src/lib.rs`) adds language-server
 queries (definition, references, hover) the agent can use without
 shelling out.
 
-`buildWikiNoteMcpTools` (`src/mcp/wiki-note-mcp-tools.ts`) surfaces the
+`buildWikiNoteMcpTools` (`crates/oxplow-mcp/src/lib.rs`) surfaces the
 per-project wiki (`wiki_note` table + `.oxplow/notes/*.md` files — see
 `data-model.md`). Tools are metadata-only: `list_notes`,
 `get_note_metadata`, `resync_note`, `search_notes` (title),
@@ -500,7 +479,7 @@ on every file event; `resync_note` forces an immediate re-baseline
 when the agent wants freshness pinned to the current HEAD without
 waiting for the debounce.
 
-The `oxplow-wiki-capture` skill (`src/session/wiki-capture-skill.ts`)
+The `oxplow-wiki-capture` skill (`crates/oxplow-session/src/wiki-capture-skill.ts`)
 loads when the agent uses these tools or when the user asks an
 exploration question ("how does X work", "where is X", "explain X")
 or types `/note`. It carries the find-or-create flow (search by
@@ -514,12 +493,12 @@ with optional `:line` suffix and `|display` override. Git commits are
 written as `[[abc1234]]` (bare 7-40 char hex) or `[[git:abc1234]]` —
 both resolve to the GitCommitPage. Backticks remain for code-ish
 identifiers. The wiki renderer
-(`src/ui/components/Notes/MarkdownView.tsx`, `preprocessWikilinks`)
+(`apps/desktop/src/components/Notes/MarkdownView.tsx`, `preprocessWikilinks`)
 rewrites `[[ ]]` into clickable links — SHA-shaped targets become
 `gitcommit:` links that dispatch through `onOpenCommit`; file-shaped
 targets become `file:` links that open in an editor tab via
 `onOpenFile`; bare slugs route to wiki navigation. The reference
-parser (`src/persistence/wiki-note-refs.ts`) already picks paths out
+parser (`crates/oxplow-db/src/wiki-note-refs.ts`) already picks paths out
 of `[[ ]]` because the bracket characters fall outside its lookbehind,
 so backlinks/freshness work without parser changes. The
 `<wiki-capture-hint>` block injected on exploration UserPromptSubmits
@@ -534,13 +513,13 @@ agent panes). Letting their agents write would corrupt the writer's
 in-progress changes.
 
 - **Hook enforcement.** `buildWriteGuardResponse`
-  (`src/electron/write-guard.ts`) returns a `PreToolUse` deny for `Write`,
+  (`crates/oxplow-runtime/src/write_guard.rs`) returns a `PreToolUse` deny for `Write`,
   `Edit`, `MultiEdit`, `NotebookEdit` from any non-`active` thread. When
   the tool's target path resolves OUTSIDE the project root AND outside
   the project's `.oxplow/`, the call is allowed (e.g. writing to
   `~/.claude/plans/foo.md`); the deny message names the specific
   absolute path. Containment checks use `isInsideWorktree` from
-  `src/electron/runtime-paths.ts`, shared with the runtime's hook-path
+  `crates/oxplow-app/src/runtime-paths.ts`, shared with the runtime's hook-path
   filter.
 - **Wiki-notes carve-out.** Writes to `.oxplow/notes/<slug>.md` are
   allowed even on non-writer threads — the per-project wiki is not
@@ -559,7 +538,7 @@ in-progress changes.
 ## Dev-time MCP live-reload (opt-in)
 
 Set `OXPLOW_DEV_RELOAD=1` before launching the runtime to watch
-`src/mcp/` and `src/persistence/` recursively. On any `.ts`/`.tsx`
+`crates/oxplow-mcp/src/` and `crates/oxplow-db/src/` recursively. On any `.ts`/`.tsx`
 change, a debounced (250ms) restart stops the current MCP server and
 calls `startMcpServer` again so the rebuilt tool registrations and a
 fresh TCP port + lockfile are live.
@@ -586,8 +565,8 @@ Claude Code defers MCP tool schemas (surfacing them as names only until
 every oxplow tool with full `inputSchema`; the harness picks which to
 eagerly inline vs defer. There is no MCP-spec annotation and no plugin
 config knob to declare a tool "always loaded". If this ever becomes
-tunable, the wiring is `src/mcp/mcp-server.ts` `tools/list` response +
-`src/mcp/mcp-tools.ts` tool registrations (see wi-2998dfa502da).
+tunable, the wiring is `crates/oxplow-mcp/src/lib.rs` `tools/list` response +
+`crates/oxplow-mcp/src/lib.rs` tool registrations (see wi-2998dfa502da).
 
 ## Harness-injected system-reminders (not ours)
 
@@ -647,7 +626,7 @@ turns don't grow.
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer
 flag, and a pointer to the skills. Procedural policy is consolidated in
-one orchestrator-side skill (`src/session/agent-skills.ts`):
+one orchestrator-side skill (`crates/oxplow-session/src/agent-skills.ts`):
 `oxplow-runtime` merges filing (when to file, how to shape items,
 acceptance-criteria style, epic-with-children rule), lifecycle
 (status conventions, epic rollup, notes), and dispatch (orchestrator
@@ -663,9 +642,9 @@ tools).
 ## Custom prompt addendum
 
 `config.agentPromptAppend` (loaded from `oxplow.yaml` via
-`loadProjectConfig` in `src/config/config.ts`) is concatenated into every
+`loadProjectConfig` in `crates/oxplow-config/src/lib.rs`) is concatenated into every
 agent's system prompt by `buildBatchAgentPrompt` (in `runtime.ts`). The
-Settings modal (`src/ui/components/SettingsModal.tsx`) reads/writes this
+Settings modal (`apps/desktop/src/components/SettingsModal.tsx`) reads/writes this
 via `runtime.setAgentPromptAppend` which calls `writeProjectConfig` to
 persist back to YAML.
 
@@ -685,7 +664,7 @@ provide finer-grained overrides without displacing earlier context.
 
 ## Agent status
 
-`deriveThreadAgentStatus` (`src/session/agent-status.ts`) reduces a stream
+`deriveThreadAgentStatus` (`crates/oxplow-domain/src/hook.rs`) reduces a stream
 of hook events into one of two states: `working` or `waiting`. The
 runtime recomputes on every hook arrival and emits
 `agent-status.changed`. The UI shows it as a colored dot on each thread
@@ -824,7 +803,7 @@ complete_task`). This fires even when the agent never touches
 `create_work_item` next turn — the most reliable failure mode was the
 agent investigating/reverting in-place on a correction without
 recording a new effort. See `buildRecentDoneReminder` in
-`src/electron/runtime.ts` and the wiring in `handleHookEnvelope`'s
+`crates/oxplow-app/src/lib.rs` and the wiring in `handleHookEnvelope`'s
 `UserPromptSubmit` branch. Window is 15 minutes by default.
 
 **Redo-hint on `create_work_item`.** When the caller files a new row
@@ -837,7 +816,7 @@ genuinely separate concern *should* get its own row. The heuristic
 just makes the reopen path impossible to miss when the most common
 trap (user rejects the last effort → agent reflexively files a
 "Fix …" task) is most likely to be tripped. See
-`findRecentDoneItem` in `src/mcp/mcp-tools.ts`.
+`findRecentDoneItem` in `crates/oxplow-mcp/src/lib.rs`.
 
 **1-vs-many rendering rule.** The Local History panel renders one row
 per effort ending at a snapshot, *not* one row per snapshot. For a

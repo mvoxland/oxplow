@@ -1,25 +1,4 @@
 # Git integration
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 What this doc covers: the three filesystem watchers that keep git state
@@ -35,7 +14,7 @@ Each cares about a different slice of the project state.
 
 ### 1. Workspace watcher
 
-`src/git/workspace-watch.ts` — `WorkspaceWatcherRegistry`. One watcher
+`crates/oxplow-fs-watch/src/lib.rs` — `WorkspaceWatcherRegistry`. One watcher
 per stream, recursive on the worktree (`fs.watch(rootDir, { recursive: true })`),
 **explicitly excluding `.git`** via `shouldIgnoreWorkspaceWatchPath`.
 
@@ -71,7 +50,7 @@ than per-stream.
 
 ### 3. Git refs watcher
 
-`src/git/git-refs-watch.ts` — `GitRefsWatcherRegistry`. One watcher per
+`crates/oxplow-git/src/refs_watch.rs` — `GitRefsWatcherRegistry`. One watcher per
 stream, recursive on the stream's `.git/` directory, debounced ~200ms
 (a single `git commit` fires a dozen events touching `HEAD`, `refs/*`,
 `logs/*`, `index`, `ORIG_HEAD`, …).
@@ -98,7 +77,7 @@ that don't support recursive mode.
 
 ### 4. Notes watcher
 
-`src/git/notes-watch.ts` — not really a git watcher, but lives next
+`crates/oxplow-fs-watch/src/lib.rs` — not really a git watcher, but lives next
 to the others because it wraps `fs.watch` the same way. Watches
 `.oxplow/notes/` for `.md` file create/change/delete, debounces
 ~200ms per slug, and calls `syncNoteFromDisk` → `WikiNoteStore.upsert`
@@ -123,7 +102,7 @@ that don't touch source files.
 
 ## Runtime git operations
 
-All git invocations go through `src/git/git.ts`. Notable:
+All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
 
 - `gitBlame(projectDir, path)` — `git blame --porcelain HEAD` parsed via
   `parseBlamePorcelain`. Powers the editor blame overlay.
@@ -190,7 +169,7 @@ The supported direction is the inverse: from the other stream, the
 Git Dashboard's worktrees card lists *our* branch with a
 "Merge into current" action so a human in that stream pulls our
 commits in safely. Tests pin this invariant: the gitMerge sibling-
-worktree test in `src/git/git.test.ts` asserts byte-equal HEAD,
+worktree test in `crates/oxplow-git/src/git.test.ts` asserts byte-equal HEAD,
 status, and file content on the sibling after merging *its* branch
 into the primary.
 
@@ -216,7 +195,7 @@ textarea is `files-commit-message` and the submit button is
 
 ### Non-writer threads still cannot call git
 
-`NON_WRITER_PROMPT_BLOCK` (`src/electron/write-guard.ts`) explicitly
+`NON_WRITER_PROMPT_BLOCK` (`crates/oxplow-runtime/src/write_guard.rs`) explicitly
 forbids git mutations for non-writer threads — they share the
 worktree with the writer and any ref/index change corrupts the
 writer's in-progress work. The write-guard hook denies Write/Edit/

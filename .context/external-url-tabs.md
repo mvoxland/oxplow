@@ -1,25 +1,4 @@
 # External URL tabs
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 What this doc covers: the security model for the in-app `external-url`
@@ -43,10 +22,10 @@ trade safe.
 
 | Layer | Where | What it enforces |
 |---|---|---|
-| Scheme allowlist (renderer) | `src/ui/external-url-allowlist.ts` | Only http(s) URLs get a tab. Everything else (file:, javascript:, data:, blob:, app:, custom protocols) returns a structured rejection that surfaces a refusal in `ExternalUrlPage` instead of attaching the webview. |
-| Scheme allowlist (main) | `oxplow:openExternalUrl` IPC in `src/electron/main.ts` | Re-validates before calling `shell.openExternal`. The renderer can't smuggle a non-http(s) URL into the OS browser through this IPC. |
-| Per-tag webPreferences | `src/ui/pages/ExternalUrlPage.tsx` | `<webview webpreferences="contextIsolation=yes,sandbox=yes,nodeIntegration=no">` plus `partition="persist:external"`. First line of defense. |
-| `will-attach-webview` (main) | `src/electron/external-content-lockdown.ts` | Hard-strips `preload`, forces `sandbox=true`/`contextIsolation=true`/`webSecurity=true`/`allowRunningInsecureContent=false`/`experimentalFeatures=false`/`nodeIntegration*=false`, and pins `params.partition` to `persist:external` regardless of what the JSX requested. Non-http(s) `params.src` is rewritten to `about:blank` at the boundary. |
+| Scheme allowlist (renderer) | `apps/desktop/src/external-url-allowlist.ts` | Only http(s) URLs get a tab. Everything else (file:, javascript:, data:, blob:, app:, custom protocols) returns a structured rejection that surfaces a refusal in `ExternalUrlPage` instead of attaching the webview. |
+| Scheme allowlist (main) | `oxplow:openExternalUrl` IPC in `apps/desktop/src-tauri/src/main.rs` | Re-validates before calling `shell.openExternal`. The renderer can't smuggle a non-http(s) URL into the OS browser through this IPC. |
+| Per-tag webPreferences | `apps/desktop/src/pages/ExternalUrlPage.tsx` | `<webview webpreferences="contextIsolation=yes,sandbox=yes,nodeIntegration=no">` plus `partition="persist:external"`. First line of defense. |
+| `will-attach-webview` (main) | `crates/oxplow-app/src/external-content-lockdown.ts` | Hard-strips `preload`, forces `sandbox=true`/`contextIsolation=true`/`webSecurity=true`/`allowRunningInsecureContent=false`/`experimentalFeatures=false`/`nodeIntegration*=false`, and pins `params.partition` to `persist:external` regardless of what the JSX requested. Non-http(s) `params.src` is rewritten to `about:blank` at the boundary. |
 | Guest hardening | `applyGuestContentsHardening` (same file) | On `did-attach-webview`: `setWindowOpenHandler` denies popups (http(s) intents fall through to `shell.openExternal`); `will-navigate` and `will-redirect` block non-http(s); permission requests + checks deny by default; `devtools-opened` is auto-closed in packaged builds. |
 | Host renderer pin | `web-contents-created` `will-navigate` listener | The host frame can't be navigated away from `file://` (bundled index.html) or localhost. Anything else is blocked, with http(s) routed to the OS browser instead of taking over the app. |
 | Session policy | `configureExternalSession()` | On `persist:external`: strips Authorization / Cookie / Proxy-Authorization on outbound requests (`sanitizeOutboundHeaders`), pins `Referrer-Policy: strict-origin-when-cross-origin`, blocks any request aimed at app-internal origins (`isInternalUrl`), and injects `Content-Security-Policy: frame-ancestors 'none';` when the upstream sent no CSP. |
@@ -61,19 +40,19 @@ before the guest webContents starts.
 
 | File | Purpose |
 |---|---|
-| `src/ui/external-url-allowlist.ts` | Pure: `classifyExternalUrl(url)` → `{ ok, url } \| { ok: false, reason }`, `isAllowedExternalUrl`, `describeRejection`. Default policy: http(s) only. Tested in `external-url-allowlist.test.ts`. |
-| `src/ui/tabs/pageRefs.ts` | `externalUrlRef(url)` — must be called only after passing through the allowlist. |
-| `src/ui/pages/ExternalUrlPage.tsx` | The `<webview>`-rendering page. Loading / error states, "Open in browser" header action, page-title-updated wiring. |
-| `src/electron/external-content-policy.ts` | Pure: `isInternalUrl`, `sanitizeOutboundHeaders`, `withInjectedCsp`, `EXTERNAL_PARTITION`. Tested in `external-content-policy.test.ts`. |
-| `src/electron/external-content-lockdown.ts` | Wires the pure policy into Electron: `web-contents-created` / `will-attach-webview` / `did-attach-webview` / `webRequest` hooks on the external partition. Registered once from `main.ts` after `app.whenReady()`. |
-| `src/electron/main.ts` (`oxplow:openExternalUrl`) | IPC for routing http(s) URLs to `shell.openExternal`, allowlist-gated. |
+| `apps/desktop/src/external-url-allowlist.ts` | Pure: `classifyExternalUrl(url)` → `{ ok, url } \| { ok: false, reason }`, `isAllowedExternalUrl`, `describeRejection`. Default policy: http(s) only. Tested in `external-url-allowlist.test.ts`. |
+| `apps/desktop/src/tabs/pageRefs.ts` | `externalUrlRef(url)` — must be called only after passing through the allowlist. |
+| `apps/desktop/src/pages/ExternalUrlPage.tsx` | The `<webview>`-rendering page. Loading / error states, "Open in browser" header action, page-title-updated wiring. |
+| `crates/oxplow-app/src/external-content-policy.ts` | Pure: `isInternalUrl`, `sanitizeOutboundHeaders`, `withInjectedCsp`, `EXTERNAL_PARTITION`. Tested in `external-content-policy.test.ts`. |
+| `crates/oxplow-app/src/external-content-lockdown.ts` | Wires the pure policy into Electron: `web-contents-created` / `will-attach-webview` / `did-attach-webview` / `webRequest` hooks on the external partition. Registered once from `main.ts` after `app.whenReady()`. |
+| `apps/desktop/src-tauri/src/main.rs` (`oxplow:openExternalUrl`) | IPC for routing http(s) URLs to `shell.openExternal`, allowlist-gated. |
 
 ## Adding a new scheme to the allowlist
 
 Don't, unless you've thought about every layer in the table above. The
 allowlist is intentionally narrow. If a feature needs a new scheme:
 
-1. Update `ALLOWED_SCHEMES` in `src/ui/external-url-allowlist.ts` and
+1. Update `ALLOWED_SCHEMES` in `apps/desktop/src/external-url-allowlist.ts` and
    add tests covering the new scheme + a representative reject case.
 2. Decide whether the new scheme should also be allowed by the host's
    `will-navigate` host-frame guard in `external-content-lockdown.ts` —

@@ -1,25 +1,4 @@
 # Pages and tabs
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 What this doc covers: the per-thread tab store, the shared `Page` chrome,
@@ -44,33 +23,33 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 
 | File | Purpose |
 |---|---|
-| `src/ui/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
-| `src/ui/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
-| `src/ui/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `noteRef(slug)`, `workItemRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
-| `src/ui/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. Reads only semantic CSS variables (skin via theme). |
-| `src/ui/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks dropdown (popover). Mounted by `Page` when context or explicit `navBar` prop is present. |
-| `src/ui/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. |
-| `src/ui/pages/FilePage.tsx` | Thin Page wrapper around `EditorPane`. Calls `usePageTitle(basename + ● dirty)` so the file's name flows into the shared chrome title. EditorPane keeps owning Monaco / blame / context menus; the wrapper only provides chrome above. |
-| `src/ui/pages/DiffPage.tsx` | Thin Page wrapper around `DiffPane` for diff tabs. Calls `usePageTitle(basename + (label))`. |
-| `src/ui/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it. Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
-| `src/ui/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, **bookmarks** (when present), recent files, pages directory. Passive — never auto-opens tabs. Bookmark rows show a single-letter scope badge (T/S/G) and a per-row remove button. |
-| `src/ui/tabs/bookmarks.ts` + `useBookmarks.ts` | Per-scope (thread / stream / global) bookmark store backed by localStorage. Pages bookmark via the `PageNavigationContext.bookmark` binding; the rail HUD reads the merged set. |
-| `src/ui/tabs/appPageBacklinks.ts` | App-page backlinks providers — pure `(payload, ctx) → BacklinkEntry[]` functions for `git-dashboard`, `git-history`, `uncommitted-changes`, `git-commit`. `useBacklinks` dispatches to them when `target.kind` matches. Add a new app-page provider by registering it in `APP_PAGE_BACKLINKS` and extending `useBacklinks` to fetch any new data slice it needs. |
-| `src/ui/pages/GitCommitPage.tsx` | Single-commit page (`git-commit:<sha>`). Reuses `CommitDetailBody` (now exported from `CommitDetailSlideover`). Routed via `gitCommitRef(sha)`. Bookmark-/history-friendly alternative to the slideover. |
-| `src/ui/components/RailHud/sections.ts` | Pure helpers: `computeActiveItem`, `computeUpNext`, `sortRecentFiles`, `computePagesDirectory`. The pages directory is a pure function so it can be unit-tested without mounting the React rail. |
-| `src/ui/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", recent remote branches with per-row pull/push. All ref-mutating actions confirm the exact `git` command before running. Routed via `gitDashboardRef()`. |
-| `src/ui/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
-| `src/ui/pages/UncommittedChangesPage.tsx` | Stats-focused view of working-tree changes: M/A/D/R/U + total +/-, collapsible folder tree with per-folder rollup of files / +/-, Commit-all action. Distinct from `FilesPage` which is the full project file tree. Routed via `uncommittedChangesRef()`. |
-| `src/ui/tabs/backlinksIndex.ts` | Pure cross-kind backlinks indexer. `computeBacklinks(target, ctx)` returns `BacklinkEntry[]` linking notes ↔ files ↔ work items ↔ findings. Inputs are plain data slices (notes, work items with `touched_files`, findings) — no IPC, no side effects, fully unit-tested. |
-| `src/ui/tabs/useBacklinks.ts` | React hook that materializes a `BacklinkContext` (notes bodies + findings + work-item touched-files) from live IPC and pipes into `computeBacklinks`. Used by `WorkItemPage`, `NotePage`, `FindingPage`. |
-| `src/ui/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
-| `src/ui/pages/WorkItemPage.tsx` | Single-record page for a work item — wraps `WorkItemDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
-| `src/ui/pages/NotePage.tsx` | Single-record page for a wiki note — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get the unified chrome (title from `usePageTitle`, browser-style back/forward + star, Backlinks panel). `NoteTab` no longer renders its own header — freshness badge + Edit/Save/Revert/Delete/Create live in a thin secondary toolbar inside the body. In-tab wikilink-to-note clicks route through `PageNavigationContext.navigate(noteRef)` so they participate in tab-level history. |
-| `src/ui/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
-| `src/ui/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
-| `src/ui/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
-| `src/ui/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt). Replaces the in-rail ThreadRail settings modal. Routed via `threadSettingsRef(threadId)`. |
-| `src/ui/components/Slideover.tsx` | Right-edge panel primitive (~38vw, backdrop-click + Escape close, focus-into-panel on open) for form-shaped flows that don't justify a full page. Use instead of a centered modal. |
+| `apps/desktop/src/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
+| `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
+| `apps/desktop/src/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `noteRef(slug)`, `workItemRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
+| `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. Reads only semantic CSS variables (skin via theme). |
+| `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks dropdown (popover). Mounted by `Page` when context or explicit `navBar` prop is present. |
+| `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. |
+| `apps/desktop/src/pages/FilePage.tsx` | Thin Page wrapper around `EditorPane`. Calls `usePageTitle(basename + ● dirty)` so the file's name flows into the shared chrome title. EditorPane keeps owning Monaco / blame / context menus; the wrapper only provides chrome above. |
+| `apps/desktop/src/pages/DiffPage.tsx` | Thin Page wrapper around `DiffPane` for diff tabs. Calls `usePageTitle(basename + (label))`. |
+| `apps/desktop/src/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it. Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
+| `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, **bookmarks** (when present), recent files, pages directory. Passive — never auto-opens tabs. Bookmark rows show a single-letter scope badge (T/S/G) and a per-row remove button. |
+| `apps/desktop/src/tabs/bookmarks.ts` + `useBookmarks.ts` | Per-scope (thread / stream / global) bookmark store backed by localStorage. Pages bookmark via the `PageNavigationContext.bookmark` binding; the rail HUD reads the merged set. |
+| `apps/desktop/src/tabs/appPageBacklinks.ts` | App-page backlinks providers — pure `(payload, ctx) → BacklinkEntry[]` functions for `git-dashboard`, `git-history`, `uncommitted-changes`, `git-commit`. `useBacklinks` dispatches to them when `target.kind` matches. Add a new app-page provider by registering it in `APP_PAGE_BACKLINKS` and extending `useBacklinks` to fetch any new data slice it needs. |
+| `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`git-commit:<sha>`). Reuses `CommitDetailBody` (now exported from `CommitDetailSlideover`). Routed via `gitCommitRef(sha)`. Bookmark-/history-friendly alternative to the slideover. |
+| `apps/desktop/src/components/RailHud/sections.ts` | Pure helpers: `computeActiveItem`, `computeUpNext`, `sortRecentFiles`, `computePagesDirectory`. The pages directory is a pure function so it can be unit-tested without mounting the React rail. |
+| `apps/desktop/src/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", recent remote branches with per-row pull/push. All ref-mutating actions confirm the exact `git` command before running. Routed via `gitDashboardRef()`. |
+| `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
+| `apps/desktop/src/pages/UncommittedChangesPage.tsx` | Stats-focused view of working-tree changes: M/A/D/R/U + total +/-, collapsible folder tree with per-folder rollup of files / +/-, Commit-all action. Distinct from `FilesPage` which is the full project file tree. Routed via `uncommittedChangesRef()`. |
+| `apps/desktop/src/tabs/backlinksIndex.ts` | Pure cross-kind backlinks indexer. `computeBacklinks(target, ctx)` returns `BacklinkEntry[]` linking notes ↔ files ↔ work items ↔ findings. Inputs are plain data slices (notes, work items with `touched_files`, findings) — no IPC, no side effects, fully unit-tested. |
+| `apps/desktop/src/tabs/useBacklinks.ts` | React hook that materializes a `BacklinkContext` (notes bodies + findings + work-item touched-files) from live IPC and pipes into `computeBacklinks`. Used by `WorkItemPage`, `NotePage`, `FindingPage`. |
+| `apps/desktop/src/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
+| `apps/desktop/src/pages/WorkItemPage.tsx` | Single-record page for a work item — wraps `WorkItemDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
+| `apps/desktop/src/pages/NotePage.tsx` | Single-record page for a wiki note — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get the unified chrome (title from `usePageTitle`, browser-style back/forward + star, Backlinks panel). `NoteTab` no longer renders its own header — freshness badge + Edit/Save/Revert/Delete/Create live in a thin secondary toolbar inside the body. In-tab wikilink-to-note clicks route through `PageNavigationContext.navigate(noteRef)` so they participate in tab-level history. |
+| `apps/desktop/src/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
+| `apps/desktop/src/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
+| `apps/desktop/src/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
+| `apps/desktop/src/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt). Replaces the in-rail ThreadRail settings modal. Routed via `threadSettingsRef(threadId)`. |
+| `apps/desktop/src/components/Slideover.tsx` | Right-edge panel primitive (~38vw, backdrop-click + Escape close, focus-into-panel on open) for form-shaped flows that don't justify a full page. Use instead of a centered modal. |
 
 ## Page kinds
 
@@ -97,7 +76,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | Kind | Id format | Example |
 |---|---|---|
 | agent | `agent` | `agent` |
-| file | `file:<path>` | `file:src/electron/runtime.ts` |
+| file | `file:<path>` | `file:crates/oxplow-app/src/lib.rs` |
 | diff | `diff:<path>\|<from>\|<to>\|<labelOverride>` | `diff:src/a.ts\|abc\|def\|` |
 | note | `note:<slug>` | `note:how-stop-hook-fires` |
 | work-item | `wi:<id>` | `wi:wi-142` |
@@ -144,7 +123,7 @@ The full IA redesign ships in phases (see plan
 - ✅ Phase 1 — Tab store + page chrome + page refs (this doc).
 - ✅ Phase 2 — Rail HUD shell (this doc).
 - ✅ Phase 3 — Page migration: every rail HUD "Pages" entry now opens
-  a Page-wrapped renderer in `src/ui/pages/`:
+  a Page-wrapped renderer in `apps/desktop/src/pages/`:
   Start, Settings, Code quality, Local history, Git history, Files,
   Notes, All work, Subsystem docs. Both docks have since been removed
   — the rail HUD is THE left chrome and pages are THE center surface
@@ -171,11 +150,11 @@ The full IA redesign ships in phases (see plan
   next to each link), WikiActivityBar entry pills + overflow rows
   (per-row kebab), TerminalPane (xterm `contextmenu` listener
   removed; header-bar kebab with Copy/Paste/Clear). 5d landed the
-  `Slideover` primitive (`src/ui/components/Slideover.tsx`) plus the
+  `Slideover` primitive (`apps/desktop/src/components/Slideover.tsx`) plus the
   BranchPicker rename Slideover, ProjectPanel commit-dialog
   Slideover, and the cross-page detail wrappers
-  `SnapshotDetailSlideover` (`src/ui/components/Snapshots/SnapshotDetailSlideover.tsx`)
-  and `CommitDetailSlideover` (`src/ui/components/History/CommitDetailSlideover.tsx`).
+  `SnapshotDetailSlideover` (`apps/desktop/src/components/Snapshots/SnapshotDetailSlideover.tsx`)
+  and `CommitDetailSlideover` (`apps/desktop/src/components/History/CommitDetailSlideover.tsx`).
   5e landed the per-stream and per-thread settings as
   `StreamSettingsPage` and `ThreadSettingsPage`, the inline-new-row
   that retired `CreateThreadModal`, and the new-stream / new-work-
@@ -184,7 +163,7 @@ The full IA redesign ships in phases (see plan
   `PlanPane` `NewWorkItemModal` only backs the edit-double-click
   flow now; new flows route through pages.
 - ✅ Phase 6 — Selection action bar + drag-to-add-context polish.
-  `SelectionActionBar` (`src/ui/components/Plan/SelectionActionBar.tsx`)
+  `SelectionActionBar` (`apps/desktop/src/components/Plan/SelectionActionBar.tsx`)
   appears at the top of `PlanPane`'s work-group region whenever ≥1
   rows are marked. It owns no state; PlanPane reads its existing
   marked-set and routes Change status / Change priority / Add to
@@ -261,7 +240,7 @@ suppressed across all four — archive flow is owned by the
 dedicated Archived page link.
 
 The four pages reuse the shared `<Card>` + `cardLinkButton` from
-`src/ui/components/Card.tsx` for cross-page "View X →" affordances;
+`apps/desktop/src/components/Card.tsx` for cross-page "View X →" affordances;
 GitDashboardPage uses the same shell so the dashboard vocabulary is
 consistent across IA.
 
@@ -336,12 +315,12 @@ keeps its "always-new-tab" behavior outside a page.
 
 Reference implementations:
 
-- `src/ui/components/LeftPanel/FileTree.tsx` — tree row dispatches
+- `apps/desktop/src/components/LeftPanel/FileTree.tsx` — tree row dispatches
   via `useRouteDispatch(fileRef(path), { onNavigate: (_, opts) => onOpenFile(path, opts) })`.
-- `src/ui/components/Notes/NotesPane.tsx` — `NoteRow` and `SearchRow`
+- `apps/desktop/src/components/Notes/NotesPane.tsx` — `NoteRow` and `SearchRow`
   use the hook with `noteRef(slug)` and a `() => onOpenNote(slug)`
   fallback.
-- `src/ui/tabs/BacklinksList.tsx` — the older pattern (manual
+- `apps/desktop/src/tabs/BacklinksList.tsx` — the older pattern (manual
   `ctxNav.navigate` + per-event new-tab branches). Both forms are
   acceptable; `useRouteDispatch` is preferred for new code.
 

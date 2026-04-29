@@ -1,13 +1,5 @@
 # Architecture guidance: VS Code-inspired workflow without full workbench adoption
 
-> **Note (April 2026, post-Tauri rewrite):** the implementation
-> details below predate the Electron→Tauri migration. The core design
-> principles (stream/worktree model, custom React shell, Monaco-as-
-> widget) still hold, but path references like `src/electron/` are
-> stale. Current layout: `apps/desktop/` (Tauri shell + frontend) and
-> `crates/` (reusable Rust libraries). See `CLAUDE.md` "Repo layout"
-> section. The other `.context/*.md` files are similarly mid-port.
-
 ## Goal
 
 Use a lot of the **workflow concepts** and selected building blocks from VS Code without turning this app into the full VS Code IDE shell.
@@ -33,7 +25,7 @@ There is exactly one **primary** stream (`kind: "primary"`). It represents the r
 
 Every other stream is a **worktree** stream (`kind: "worktree"`). At creation it gets its own `git worktree add` under `.oxplow/worktrees/<slug>/` (slug fixed at creation).
 
-Both kinds can switch branches — either via the StreamRail "Switch branch…" context menu (routed through `ElectronRuntime.checkoutStreamBranch()`), or by an external `git checkout` in the worktree dir (picked up by the `GitRefsWatcherRegistry` → `maybeSyncStreamBranch()`). Git's own errors (dirty tree, missing branch, already checked out elsewhere) propagate verbatim to the UI; oxplow does no pre-flight validation.
+Both kinds can switch branches — either via the StreamRail "Switch branch…" context menu (routed through `Services.checkoutStreamBranch()`), or by an external `git checkout` in the worktree dir (picked up by the `GitRefsWatcherRegistry` → `maybeSyncStreamBranch()`). Git's own errors (dirty tree, missing branch, already checked out elsewhere) propagate verbatim to the UI; oxplow does no pre-flight validation.
 
 ## Workspace isolation rule
 
