@@ -1,4 +1,4 @@
-import type { WorkspaceStatusSummary } from "../api.js";
+import type { WorkspaceStatusSummary } from "../tauri-bridge/index.js";
 
 /**
  * Shared `A## M## D## U##` cell — green/muted/red/yellow, mono-spaced

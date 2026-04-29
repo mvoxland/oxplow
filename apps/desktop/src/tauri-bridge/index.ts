@@ -43,6 +43,8 @@ export type {
   ThreadId,
   ThreadStatus,
   Timestamp,
+  WorkspaceContext,
+  WorkspaceStatusSummary,
   UpdateWorkItemChanges,
   WorkItem,
   WorkItemActorKind,
