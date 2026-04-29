@@ -20,7 +20,6 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
-use tracing::warn;
 
 use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore, HookEventStore};
 use oxplow_domain::{
@@ -367,9 +366,4 @@ mod tests {
         assert!(!payload_signals_await_user(r#"{"await_user":false}"#));
     }
 
-    /// Suppress unused warning if/when warn! goes away.
-    #[allow(dead_code)]
-    fn _silence_warn() {
-        warn!("noop");
-    }
 }

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 use tokio::process::Command;
+#[cfg(test)]
 use tracing::warn;
 
 #[derive(Debug, Error)]
