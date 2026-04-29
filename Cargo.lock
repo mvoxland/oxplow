@@ -2741,6 +2741,7 @@ name = "oxplow-app"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "git2",
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",

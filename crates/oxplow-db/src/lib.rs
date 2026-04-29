@@ -9,7 +9,7 @@ mod stream_store;
 mod thread_store;
 mod work_item_store;
 
-pub use database::Database;
+pub use database::{Database, DbInitError};
 pub use stream_store::SqliteStreamStore;
 pub use thread_store::SqliteThreadStore;
 pub use work_item_store::SqliteWorkItemStore;

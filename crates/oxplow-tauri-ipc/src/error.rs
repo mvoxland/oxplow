@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
@@ -7,7 +7,7 @@ use thiserror::Error;
 /// All `#[tauri::command]` functions return `Result<T, IpcError>`.
 /// Internal errors from the service layer are converted here so the
 /// JS side never has to reason about Rust-specific error types.
-#[derive(Debug, Clone, Serialize, Type, Error)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Error)]
 #[serde(rename_all = "camelCase")]
 #[error("{message}")]
 pub struct IpcError {
