@@ -177,6 +177,7 @@ export const commands = {
 	listRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError>(__TAURI_INVOKE("list_recent_remote_branches", { limit })),
 	listFileCommits: (path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { path, limit })),
 	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
+	searchWorkspaceText: (query: string, limit: number | null) => typedError<TextSearchHit[], IpcError>(__TAURI_INVOKE("search_workspace_text", { query, limit })),
 	getGitLog: (limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { limit, all })),
 	getCommitDetail: (sha: string) => typedError<{
 	sha: string,
@@ -529,6 +530,12 @@ export type StreamId = string;
 
 // Whether a stream is the project's primary stream or a worktree.
 export type StreamKind = "primary" | "worktree";
+
+export type TextSearchHit = {
+	path: string,
+	line: number,
+	snippet: string,
+};
 
 export type Thread = {
 	id: ThreadId,

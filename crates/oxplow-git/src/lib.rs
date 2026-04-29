@@ -36,7 +36,7 @@ pub use repo::{detect_current_branch, is_git_repo, is_git_worktree};
 pub use status::{list_git_statuses, status_for_path};
 pub use sync::{
     add_path, commit_all, fetch, merge, pull, pull_remote_into_current, push, push_current_to,
-    rebase, GitOpResult,
+    rebase, search_workspace_text, GitOpResult, TextSearchHit,
 };
 pub use workspace::{
     create_workspace_directory, create_workspace_file, delete_workspace_path,

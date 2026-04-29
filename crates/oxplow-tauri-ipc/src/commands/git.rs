@@ -1,6 +1,6 @@
 use oxplow_git::{
     AheadBehind, GitOpResult, GitOperationKind, GroupedGitRefs, RemoteBranchEntry,
-    RepoConflictState,
+    RepoConflictState, TextSearchHit,
 };
 
 use crate::error::IpcError;
@@ -204,6 +204,21 @@ pub async fn list_file_commits(
     let limit = limit.unwrap_or(50);
     Ok(
         tokio::task::spawn_blocking(move || oxplow_git::list_file_commits(&project, &path, limit))
+            .await
+            .map_err(|e| IpcError::internal(e.to_string()))?,
+    )
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn search_workspace_text(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<TextSearchHit>, IpcError> {
+    let project = project_dir(&state);
+    Ok(
+        tokio::task::spawn_blocking(move || oxplow_git::search_workspace_text(&project, &query, limit))
             .await
             .map_err(|e| IpcError::internal(e.to_string()))?,
     )
