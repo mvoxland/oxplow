@@ -1,0 +1,29 @@
+[package]
+name = "oxplow-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+oxplow-domain = { workspace = true }
+oxplow-db = { workspace = true }
+oxplow-config = { workspace = true }
+oxplow-fs-watch = { workspace = true }
+oxplow-git = { workspace = true }
+oxplow-session = { workspace = true }
+oxplow-runtime = { workspace = true }
+oxplow-tmux = { workspace = true }
+oxplow-pty = { workspace = true }
+oxplow-lsp = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+specta = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

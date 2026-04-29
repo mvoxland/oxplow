@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Oxplow",
+  "version": "0.3.0",
+  "identifier": "com.voxland.oxplow",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "bun run --cwd .. dev",
+    "beforeBuildCommand": "bun run --cwd .. build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Oxplow",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 500,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Oxplow",
+    "longDescription": "Stream-aware IDE shell for AI agent workflows."
+  }
+}

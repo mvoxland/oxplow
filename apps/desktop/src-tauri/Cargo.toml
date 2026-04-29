@@ -1,0 +1,31 @@
+[package]
+name = "oxplow-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Oxplow desktop app (Tauri shell)"
+
+[[bin]]
+name = "oxplow"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+oxplow-app = { workspace = true }
+oxplow-tauri-ipc = { workspace = true }
+oxplow-mcp = { workspace = true }
+tauri = { workspace = true, features = [] }
+tauri-plugin-dialog = { workspace = true }
+tauri-plugin-clipboard-manager = { workspace = true }
+tauri-plugin-shell = { workspace = true }
+tauri-plugin-updater = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

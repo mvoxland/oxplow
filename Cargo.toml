@@ -1,0 +1,103 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/desktop/src-tauri",
+    "crates/oxplow-domain",
+    "crates/oxplow-db",
+    "crates/oxplow-config",
+    "crates/oxplow-fs-watch",
+    "crates/oxplow-git",
+    "crates/oxplow-session",
+    "crates/oxplow-runtime",
+    "crates/oxplow-tmux",
+    "crates/oxplow-pty",
+    "crates/oxplow-lsp",
+    "crates/oxplow-mcp",
+    "crates/oxplow-app",
+    "crates/oxplow-tauri-ipc",
+]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.80"
+authors = ["Nathan Voxland <nathan@voxland.net>"]
+license = "MIT"
+repository = "https://github.com/nvoxland/oxplow"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization & types
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+specta = { version = "2.0.0-rc.20", features = ["derive", "time"] }
+
+# Error handling & logging
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# IDs / time
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+
+# DB
+rusqlite = { version = "0.32", features = ["bundled", "time", "uuid", "serde_json"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+refinery = { version = "0.8", features = ["rusqlite"] }
+
+# Filesystem
+notify = "7.0"
+notify-debouncer-full = "0.4"
+tempfile = "3.14"
+
+# Git
+git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+
+# PTY
+portable-pty = "0.8"
+bytes = "1.8"
+
+# LSP / JSON-RPC
+lsp-types = "0.97"
+
+# MCP
+rmcp = { version = "0.16", features = ["server", "transport-io"] }
+
+# Tauri
+tauri = { version = "2", features = [] }
+tauri-build = "2"
+tauri-specta = { version = "2.0.0-rc.24", features = ["derive", "typescript"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+
+# Internal
+oxplow-domain = { path = "crates/oxplow-domain" }
+oxplow-db = { path = "crates/oxplow-db" }
+oxplow-config = { path = "crates/oxplow-config" }
+oxplow-fs-watch = { path = "crates/oxplow-fs-watch" }
+oxplow-git = { path = "crates/oxplow-git" }
+oxplow-session = { path = "crates/oxplow-session" }
+oxplow-runtime = { path = "crates/oxplow-runtime" }
+oxplow-tmux = { path = "crates/oxplow-tmux" }
+oxplow-pty = { path = "crates/oxplow-pty" }
+oxplow-lsp = { path = "crates/oxplow-lsp" }
+oxplow-mcp = { path = "crates/oxplow-mcp" }
+oxplow-app = { path = "crates/oxplow-app" }
+oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
