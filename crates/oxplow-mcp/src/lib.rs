@@ -182,6 +182,29 @@ pub struct EpicChildSpec {
     pub kind: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DispatchWorkItemParams {
+    pub thread_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ForkThreadParams {
+    pub source_thread_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FindNotesForFileParams {
+    pub path: String,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ResyncNoteParams {
+    pub slug: String,
+}
+
 #[tool_router]
 impl OxplowMcp {
     pub fn new(services: Arc<Services>) -> Self {
@@ -765,6 +788,122 @@ impl OxplowMcp {
         Ok(CallToolResult::success(vec![Content::text(
             bundle.to_string(),
         )]))
+    }
+
+    #[tool(description = "Pick the next ready work item on the thread, transition it to in_progress, and return a dispatch brief.")]
+    async fn dispatch_work_item(
+        &self,
+        params: Parameters<DispatchWorkItemParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let thread_id = ThreadId::from(params.0.thread_id);
+        let items = self
+            .services
+            .work_item_store
+            .list_for_thread(&thread_id)
+            .await
+            .map_err(internal)?;
+        let next = items
+            .into_iter()
+            .find(|i| matches!(i.status, oxplow_domain::WorkItemStatus::Ready));
+        let Some(item) = next else {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "no ready item on thread",
+            )]));
+        };
+        let updated = self
+            .services
+            .work_items
+            .update(
+                &item.id,
+                oxplow_app::UpdateWorkItemChanges {
+                    status: Some(oxplow_domain::WorkItemStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        let brief = serde_json::json!({
+            "id": updated.id,
+            "title": updated.title,
+            "description": updated.description,
+            "acceptance_criteria": updated.acceptance_criteria,
+        });
+        Ok(CallToolResult::success(vec![Content::text(
+            brief.to_string(),
+        )]))
+    }
+
+    #[tool(description = "Branch a new thread off an existing one (shared stream, fresh thread row).")]
+    async fn fork_thread(
+        &self,
+        params: Parameters<ForkThreadParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let source = ThreadId::from(params.0.source_thread_id);
+        let parent = self
+            .services
+            .thread_store
+            .get(&source)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| McpError::invalid_params("source thread not found", None))?;
+        let child = self
+            .services
+            .threads
+            .create(&parent.stream_id, params.0.title, parent.pane_target)
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        json_result(&child)
+    }
+
+    #[tool(description = "Wiki notes whose body contains the file path. Substring match against the body excerpt + path index.")]
+    async fn find_notes_for_file(
+        &self,
+        params: Parameters<FindNotesForFileParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        // Body search hits whose snippet mentions the path. The new
+        // wiki schema doesn't have a dedicated path index yet (per
+        // MIGRATION_REVIEW2 §3); FTS body search is a useful proxy.
+        let hits = self
+            .services
+            .wiki_note_store
+            .search_bodies(&p.path, p.limit as usize)
+            .await
+            .map_err(internal)?;
+        json_result(&hits)
+    }
+
+    #[tool(description = "Re-read a wiki note's body file and refresh the FTS index.")]
+    async fn resync_note(
+        &self,
+        params: Parameters<ResyncNoteParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let slug = params.0.slug;
+        let mut note = self
+            .services
+            .wiki_note_store
+            .get(&slug)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| McpError::invalid_params(format!("note not found: {slug}"), None))?;
+        let body_path = self
+            .services
+            .layout
+            .project_dir
+            .join(".oxplow")
+            .join("notes")
+            .join(format!("{slug}.md"));
+        let body = std::fs::read_to_string(&body_path).unwrap_or_default();
+        // Refresh excerpt + size; upsert re-syncs the FTS mirror.
+        note.body_excerpt = body.chars().take(500).collect();
+        note.body_size_bytes = body.len() as i64;
+        note.updated_at = oxplow_domain::Timestamp::now();
+        self.services
+            .wiki_note_store
+            .upsert(&note)
+            .await
+            .map_err(internal)?;
+        json_result(&note)
     }
 }
 
