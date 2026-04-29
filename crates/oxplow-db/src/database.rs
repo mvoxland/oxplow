@@ -46,8 +46,10 @@ impl Database {
         })
     }
 
-    /// In-memory DB for tests. Each test gets a fresh DB.
-    #[cfg(test)]
+    /// In-memory DB for tests. Each call returns a fresh DB.
+    ///
+    /// Public so other crates' tests can build a Services graph
+    /// without needing a tempfile.
     pub fn in_memory() -> Self {
         let manager = SqliteConnectionManager::memory().with_init(|c| {
             c.pragma_update(None, "foreign_keys", "ON")?;
