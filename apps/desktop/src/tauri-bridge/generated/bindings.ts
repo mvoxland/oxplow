@@ -189,6 +189,12 @@ export const commands = {
 	listRecentUsage: (limit: number) => typedError<UsageEvent[], IpcError>(__TAURI_INVOKE("list_recent_usage", { limit })),
 	listCodeQualityScans: (limit: number) => typedError<CodeQualityScan[], IpcError>(__TAURI_INVOKE("list_code_quality_scans", { limit })),
 	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
+	/**
+	 *  Run a fresh lizard or jscpd scan, persist its findings, and
+	 *  return the scan id. Tool name is one of `"lizard"` / `"jscpd"`.
+	 *  `scope` is a free-form label (typically `"workspace"`).
+	 */
+	runCodeQualityScan: (tool: string, scope: string, files: string[] | null) => typedError<number, IpcError>(__TAURI_INVOKE("run_code_quality_scan", { tool, scope, files })),
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
 	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
 	getSnapshot: (id: number) => typedError<{

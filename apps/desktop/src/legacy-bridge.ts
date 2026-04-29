@@ -408,11 +408,14 @@ export function buildLegacyAdapter(): DesktopApi {
       // eslint-disable-next-line no-console
       console.log("[ui]", payload);
     },
-    runCodeQualityScan: async () => {
-      throw new Error(
-        "runCodeQualityScan: subprocess driver (lizard / jscpd) not yet ported",
-      );
-    },
+    runCodeQualityScan: async (
+      tool: string,
+      scope?: string,
+      files?: string[],
+    ) =>
+      unwrap(
+        await commands.runCodeQualityScan(tool, scope ?? "workspace", files ?? null),
+      ),
     openLspClient: async () => {
       throw new Error("openLspClient: LSP session manager not yet ported");
     },
