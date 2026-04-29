@@ -995,12 +995,29 @@ export async function gitBlame(
   return desktopApi().gitBlame(streamId, path);
 }
 
-export type { LocalBlameEntry } from "./legacy-local-blame.js";
+// Legacy LocalBlameEntry shape — wider than the bindings type so the
+// editor's blame margin can attach work-item attribution and parsed
+// git metadata. The runtime adapter currently only fills in fields
+// the bindings provide; the optional `workItem` overlay arrives once
+// the snapshot blob store lands.
+export interface LocalBlameEntry {
+  line: number;
+  capturedAt: string;
+  path: string;
+  preview: string;
+  kind: "local" | "git";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  git?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  workItem?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
 
 export async function localBlame(
   streamId: string,
   path: string,
-): Promise<import("./legacy-local-blame.js").LocalBlameEntry[]> {
+): Promise<LocalBlameEntry[]> {
   return desktopApi().localBlame(streamId, path);
 }
 
