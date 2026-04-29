@@ -18,6 +18,7 @@ pub mod followup;
 pub mod hook_ingest;
 pub mod lsp_sessions;
 pub mod recovery;
+pub mod snapshot_capture;
 pub mod work_item_service;
 
 pub use events::{EventBus, OxplowEvent};
