@@ -178,6 +178,9 @@ export const commands = {
 	listFileCommits: (path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { path, limit })),
 	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
 	searchWorkspaceText: (query: string, limit: number | null) => typedError<TextSearchHit[], IpcError>(__TAURI_INVOKE("search_workspace_text", { query, limit })),
+	listExistingWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_existing_worktrees")),
+	listSiblingWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_sibling_worktrees")),
+	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
 	/**
 	 *  Land an envelope from the hook subprocess. Drives the agent_turn /
 	 *  agent_status state machine inside HookIngestService.
@@ -453,6 +456,16 @@ export type GitOpResult = {
 };
 
 export type GitOperationKind = "merge" | "rebase" | "cherry-pick" | "revert";
+
+export type GitWorktreeEntry = {
+	path: string,
+	branch: string | null,
+	head_sha: string | null,
+	is_main: boolean,
+	is_detached: boolean,
+	is_locked: boolean,
+	is_prunable: boolean,
+};
 
 export type GroupedGitRefs = {
 	locals: RefOption[],

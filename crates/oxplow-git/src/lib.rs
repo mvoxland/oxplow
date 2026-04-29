@@ -45,4 +45,7 @@ pub use workspace::{
     WorkspaceEntryKind, WorkspaceError, WorkspaceFile, WorkspaceIndexedFile,
     WorkspaceStatusSummary,
 };
-pub use worktree::{ensure_worktree, EnsureWorktreeError};
+pub use worktree::{
+    ensure_worktree, list_adoptable_worktrees, list_existing_worktrees, list_sibling_worktrees,
+    EnsureWorktreeError, GitWorktreeEntry,
+};
