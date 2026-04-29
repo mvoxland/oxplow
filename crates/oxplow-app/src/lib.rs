@@ -1,21 +1,171 @@
 //! Application services / use-cases layer.
 //!
-//! Wires the infrastructure crates (db, git, fs-watch, pty, tmux, lsp,
-//! config) and the runtime/session services into a single `Services`
-//! struct. The Tauri command crate and the MCP crate both call into
+//! Constructs the dependency graph: Database → store impls →
+//! services. The Tauri command crate and the MCP crate both call into
 //! this layer; they never reach into infrastructure crates directly.
+//!
+//! Held inside `Arc<Services>` and registered as Tauri state. Methods
+//! on `Services` are the high-level "use cases" the IPC layer calls.
 
-/// The orchestration container constructed once at startup.
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use thiserror::Error;
+use tracing::info;
+
+use oxplow_config::OxplowConfig;
+use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore, SqliteWorkItemStore};
+use oxplow_session::{StreamService, WorkspaceLayout};
+
+#[derive(Debug, Error)]
+pub enum AppInitError {
+    #[error("config: {0}")]
+    Config(#[from] oxplow_config::ConfigError),
+    #[error("db: {0}")]
+    Db(#[from] oxplow_db::DbInitError),
+    #[error("session: {0}")]
+    Session(#[from] oxplow_session::SessionError),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Layout of the on-disk state for one project. Lives under
+/// `<project>/.oxplow/`.
+pub struct AppLayout {
+    pub project_dir: PathBuf,
+    pub state_dir: PathBuf,
+    pub state_db_path: PathBuf,
+}
+
+impl AppLayout {
+    pub fn for_project(project_dir: impl Into<PathBuf>) -> Self {
+        let project_dir = project_dir.into();
+        let state_dir = project_dir.join(".oxplow");
+        let state_db_path = state_dir.join("state.sqlite");
+        Self {
+            project_dir,
+            state_dir,
+            state_db_path,
+        }
+    }
+}
+
+/// All the long-lived services oxplow needs to serve a UI.
 ///
-/// Held inside `Arc<Services>` and registered as Tauri state. Methods
-/// on `Services` are the high-level "use cases" the IPC layer calls.
-#[derive(Default)]
+/// Cheap to clone — the inner pieces are `Arc`'d.
 pub struct Services {
-    // Fields land as their owning crates come online.
+    pub config: OxplowConfig,
+    pub db: Database,
+    pub layout: AppLayout,
+    pub streams: StreamService,
+    pub thread_store: Arc<SqliteThreadStore>,
+    pub work_item_store: Arc<SqliteWorkItemStore>,
+    pub pty: oxplow_pty::PtyManager,
+    pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
 }
 
 impl Services {
-    pub fn new() -> Self {
-        Self::default()
+    /// Bootstrap. Run once at app startup.
+    pub fn boot(layout: AppLayout) -> Result<Self, AppInitError> {
+        std::fs::create_dir_all(&layout.state_dir)?;
+
+        let config = oxplow_config::load_project_config(&layout.project_dir)?;
+        info!(project = %layout.project_dir.display(), agent = ?config.agent, "config loaded");
+
+        let db = Database::open(&layout.state_db_path)?;
+
+        let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
+        let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
+        let work_item_store = Arc::new(SqliteWorkItemStore::new(db.clone()));
+
+        let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
+        let streams = StreamService::new(workspace_layout, stream_store.clone());
+
+        let pty = oxplow_pty::PtyManager::spawn();
+        let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
+
+        Ok(Self {
+            config,
+            db,
+            layout,
+            streams,
+            thread_store,
+            work_item_store,
+            pty,
+            tmux,
+        })
+    }
+
+    /// Test-only constructor with an in-memory DB. Useful for the
+    /// IPC layer's smoke tests where we want a real Services without
+    /// hitting the filesystem.
+    pub fn in_memory(project_dir: impl Into<PathBuf>) -> Result<Self, AppInitError> {
+        let project_dir = project_dir.into();
+        let state_dir = project_dir.join(".oxplow");
+        std::fs::create_dir_all(&state_dir)?;
+        let layout = AppLayout {
+            project_dir: project_dir.clone(),
+            state_dir: state_dir.clone(),
+            state_db_path: state_dir.join("state.sqlite"),
+        };
+        let config = oxplow_config::load_project_config(&project_dir)?;
+        let db = Database::in_memory();
+        let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
+        let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
+        let work_item_store = Arc::new(SqliteWorkItemStore::new(db.clone()));
+        let workspace_layout = WorkspaceLayout::for_project(&project_dir);
+        let streams = StreamService::new(workspace_layout, stream_store.clone());
+        let pty = oxplow_pty::PtyManager::spawn();
+        let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
+        Ok(Self {
+            config,
+            db,
+            layout,
+            streams,
+            thread_store,
+            work_item_store,
+            pty,
+            tmux,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn boot_creates_state_dir() {
+        let project = tempdir().unwrap();
+        // Init a git repo so session validation passes for any
+        // future calls that go through StreamService.
+        let repo = git2::Repository::init(project.path()).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "test").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        let sig = repo.signature().unwrap();
+        let tree_id = {
+            let mut idx = repo.index().unwrap();
+            idx.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+
+        let layout = AppLayout::for_project(project.path());
+        let services = Services::boot(layout).unwrap();
+        assert!(services.layout.state_dir.exists());
+        assert!(services.layout.state_db_path.exists());
+    }
+
+    #[tokio::test]
+    async fn in_memory_does_not_touch_disk_db() {
+        let project = tempdir().unwrap();
+        let services = Services::in_memory(project.path()).unwrap();
+        // The state dir is created (config load needs it for fallback
+        // basename) but the DB is in-memory.
+        assert!(services.layout.state_dir.exists());
+        // Writing to db should be fine; the file path will not exist.
+        assert!(!services.layout.state_db_path.exists());
     }
 }
