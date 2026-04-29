@@ -1,4 +1,5 @@
-import { checkoutStreamBranch, type Stream } from "../api.js";
+import { checkoutStreamBranch } from "../api.js";
+import type { Stream } from "../tauri-bridge/index.js";
 import { BackgroundTaskIndicator } from "./BackgroundTaskIndicator.js";
 import { BranchPicker, type PickedRef } from "./BranchPicker.js";
 
