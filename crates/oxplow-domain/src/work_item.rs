@@ -133,6 +133,31 @@ pub mod limits {
 /// attached to any thread). Matches the TS `BACKLOG_SCOPE` constant.
 pub const BACKLOG_SCOPE: &str = "__backlog__";
 
+/// A note attached to either a work item or a thread (mutually
+/// exclusive — enforced at the DB CHECK constraint).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct WorkNote {
+    pub id: crate::ids::NoteId,
+    pub work_item_id: Option<WorkItemId>,
+    pub thread_id: Option<ThreadId>,
+    pub body: String,
+    pub author: String,
+    pub created_at: Timestamp,
+}
+
+/// Audit-log entry for state changes on a work item.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct WorkItemEvent {
+    pub id: String,
+    pub thread_id: ThreadId,
+    pub item_id: Option<WorkItemId>,
+    pub event_type: String,
+    pub actor_kind: WorkItemActorKind,
+    pub actor_id: String,
+    pub payload_json: String,
+    pub created_at: Timestamp,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

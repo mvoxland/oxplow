@@ -9,10 +9,10 @@
 
 use async_trait::async_trait;
 
-use crate::ids::{StreamId, ThreadId, WorkItemId};
+use crate::ids::{NoteId, StreamId, ThreadId, WorkItemId};
 use crate::stream::Stream;
 use crate::thread::Thread;
-use crate::work_item::WorkItem;
+use crate::work_item::{WorkItem, WorkItemEvent, WorkItemLink, WorkItemLinkType, WorkNote};
 use crate::DomainError;
 
 #[async_trait]
@@ -39,4 +39,44 @@ pub trait WorkItemStore: Send + Sync {
     async fn get(&self, id: &WorkItemId) -> Result<Option<WorkItem>, DomainError>;
     async fn upsert(&self, item: &WorkItem) -> Result<(), DomainError>;
     async fn soft_delete(&self, id: &WorkItemId) -> Result<(), DomainError>;
+}
+
+#[async_trait]
+pub trait WorkNoteStore: Send + Sync {
+    async fn add_for_item(
+        &self,
+        item: &WorkItemId,
+        body: &str,
+        author: &str,
+    ) -> Result<WorkNote, DomainError>;
+    async fn add_for_thread(
+        &self,
+        thread: &ThreadId,
+        body: &str,
+        author: &str,
+    ) -> Result<WorkNote, DomainError>;
+    async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkNote>, DomainError>;
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkNote>, DomainError>;
+    async fn delete(&self, id: &NoteId) -> Result<(), DomainError>;
+}
+
+#[async_trait]
+pub trait WorkItemLinkStore: Send + Sync {
+    async fn create(
+        &self,
+        thread: &ThreadId,
+        from: &WorkItemId,
+        to: &WorkItemId,
+        link_type: WorkItemLinkType,
+    ) -> Result<WorkItemLink, DomainError>;
+    async fn list_outgoing(&self, item: &WorkItemId) -> Result<Vec<WorkItemLink>, DomainError>;
+    async fn list_incoming(&self, item: &WorkItemId) -> Result<Vec<WorkItemLink>, DomainError>;
+    async fn delete(&self, id: &str) -> Result<(), DomainError>;
+}
+
+#[async_trait]
+pub trait WorkItemEventStore: Send + Sync {
+    async fn append(&self, event: &WorkItemEvent) -> Result<(), DomainError>;
+    async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkItemEvent>, DomainError>;
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkItemEvent>, DomainError>;
 }

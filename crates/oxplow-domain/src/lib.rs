@@ -19,6 +19,6 @@ pub use stream::{Stream, StreamKind};
 pub use thread::{Thread, ThreadStatus};
 pub use time::Timestamp;
 pub use work_item::{
-    WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemKind, WorkItemLink, WorkItemLinkType,
-    WorkItemPriority, WorkItemStatus,
+    WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemEvent, WorkItemKind, WorkItemLink,
+    WorkItemLinkType, WorkItemPriority, WorkItemStatus, WorkNote,
 };
