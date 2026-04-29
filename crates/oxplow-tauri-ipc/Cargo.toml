@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 oxplow-domain = { workspace = true }
+oxplow-session = { workspace = true }
 oxplow-app = { workspace = true }
 tauri = { workspace = true }
 tauri-specta = { workspace = true }

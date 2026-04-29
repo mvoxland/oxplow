@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::Value;
 use specta::Type;
 
-use oxplow_domain::{Thread, ThreadStatus};
+use oxplow_domain::Thread;
 
 /// Tool names that mutate the shared worktree. Bash is intentionally
 /// excluded; see the TS source for rationale.
@@ -53,21 +53,17 @@ pub struct WriteGuardContext<'a> {
 /// Returns a deny body when the thread is not the stream's writer and
 /// the tool would mutate the shared worktree. Returns `None` to let
 /// the call proceed.
+///
+/// "Writer" is `ThreadStatus::Active`; everything else
+/// (`Queued`, `Closed`) is read-only.
 pub fn build_write_guard_response(
     thread: Option<&Thread>,
     tool_name: &str,
     context: WriteGuardContext<'_>,
 ) -> Option<WriteGuardDeny> {
     let thread = thread?;
-    // Active = the writer thread; everything else is read-only.
-    // Domain enum is `Open | Closed`. The TS code's "active" status
-    // maps to "writer-thread", which the runtime tracks separately
-    // via `pane_target` / a stream-level pointer. For this guard we
-    // mirror the TS test cases: pass `None` when the thread is the
-    // writer; pass `Some(thread)` for read-only threads.
-    if thread.status == ThreadStatus::Closed {
-        // Closed threads can't write either, but the read-only deny
-        // applies regardless.
+    if thread.status.is_writer() {
+        return None;
     }
     if tool_name.is_empty() {
         return None;
@@ -144,7 +140,7 @@ fn is_inside(path: &Path, root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::{StreamId, ThreadId, Timestamp};
+    use oxplow_domain::{StreamId, ThreadId, ThreadStatus, Timestamp};
     use serde_json::json;
 
     fn read_only_thread() -> Thread {
@@ -152,14 +148,23 @@ mod tests {
             id: ThreadId::from("b-readonly"),
             stream_id: StreamId::from("s-1"),
             title: "explore".into(),
-            status: ThreadStatus::Open,
+            status: ThreadStatus::Queued,
             sort_index: 0,
             pane_target: "talking".into(),
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
             created_at: Timestamp::now(),
             updated_at: Timestamp::now(),
+        }
+    }
+
+    fn writer_thread() -> Thread {
+        Thread {
+            status: ThreadStatus::Active,
+            ..read_only_thread()
         }
     }
 
@@ -167,6 +172,21 @@ mod tests {
     fn no_thread_means_no_deny() {
         let result = build_write_guard_response(None, "Write", WriteGuardContext::default());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn writer_thread_never_denied() {
+        let t = writer_thread();
+        let result = build_write_guard_response(Some(&t), "Write", WriteGuardContext::default());
+        assert!(result.is_none(), "writer thread must be allowed to mutate");
+    }
+
+    #[test]
+    fn closed_thread_treated_as_read_only() {
+        let mut t = read_only_thread();
+        t.status = ThreadStatus::Closed;
+        let result = build_write_guard_response(Some(&t), "Write", WriteGuardContext::default());
+        assert!(result.is_some(), "closed thread must be denied like queued");
     }
 
     #[test]

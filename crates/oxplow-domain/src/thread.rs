@@ -10,11 +10,26 @@ use specta::Type;
 use crate::ids::{StreamId, ThreadId};
 use crate::time::Timestamp;
 
+/// Thread lifecycle status — mirrors the TS `ThreadState` shape.
+///
+/// `Active` is the writer thread for its stream (only one per stream
+/// can mutate the worktree at a time). `Queued` is a non-writer
+/// thread sharing the same worktree in read-only mode. `Closed` is
+/// terminated; closed threads are excluded from the rail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadStatus {
-    Open,
+    Active,
+    Queued,
     Closed,
+}
+
+impl ThreadStatus {
+    /// True when this thread is the writer for its stream — i.e.
+    /// the only thread allowed to mutate the shared worktree.
+    pub fn is_writer(&self) -> bool {
+        matches!(self, ThreadStatus::Active)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -29,6 +44,12 @@ pub struct Thread {
     pub resume_session_id: String,
     pub summary: String,
     pub summary_updated_at: Option<Timestamp>,
+    /// Timestamp when the thread was closed (status transitions to
+    /// `Closed`). `None` for active/queued threads.
+    pub closed_at: Option<Timestamp>,
+    /// Per-thread custom prompt appended to the agent's system message.
+    /// `None` when unset; `Some("")` is distinct (empty override).
+    pub custom_prompt: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -44,12 +65,14 @@ mod tests {
             id: ThreadId::from("b-1"),
             stream_id: StreamId::from("s-1"),
             title: "explore".into(),
-            status: ThreadStatus::Open,
+            status: ThreadStatus::Active,
             sort_index: 0,
             pane_target: "working".into(),
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
             created_at: now,
             updated_at: now,
         };
@@ -60,6 +83,15 @@ mod tests {
 
     #[test]
     fn status_uses_snake_case() {
-        assert_eq!(serde_json::to_string(&ThreadStatus::Open).unwrap(), "\"open\"");
+        assert_eq!(serde_json::to_string(&ThreadStatus::Active).unwrap(), "\"active\"");
+        assert_eq!(serde_json::to_string(&ThreadStatus::Queued).unwrap(), "\"queued\"");
+        assert_eq!(serde_json::to_string(&ThreadStatus::Closed).unwrap(), "\"closed\"");
+    }
+
+    #[test]
+    fn only_active_is_writer() {
+        assert!(ThreadStatus::Active.is_writer());
+        assert!(!ThreadStatus::Queued.is_writer());
+        assert!(!ThreadStatus::Closed.is_writer());
     }
 }

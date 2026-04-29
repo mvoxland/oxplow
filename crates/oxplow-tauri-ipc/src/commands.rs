@@ -29,21 +29,13 @@ pub async fn app_version() -> Result<AppVersion, IpcError> {
 #[tauri::command]
 #[specta::specta]
 pub async fn list_streams(state: tauri::State<'_, AppState>) -> Result<Vec<Stream>, IpcError> {
-    state
-        .streams
-        .list_streams()
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    Ok(state.streams.list_streams().await?)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn ensure_primary(state: tauri::State<'_, AppState>) -> Result<Stream, IpcError> {
-    state
-        .streams
-        .ensure_primary()
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    Ok(state.streams.ensure_primary().await?)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -61,11 +53,10 @@ pub async fn create_worktree(
     state: tauri::State<'_, AppState>,
     req: CreateWorktreeRequest,
 ) -> Result<Stream, IpcError> {
-    state
+    Ok(state
         .streams
         .create_worktree(&req.slug, req.title, req.branch, req.branch_source)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+        .await?)
 }
 
 #[tauri::command]
@@ -74,11 +65,7 @@ pub async fn delete_stream(
     state: tauri::State<'_, AppState>,
     id: StreamId,
 ) -> Result<(), IpcError> {
-    state
-        .streams
-        .delete_stream(&id)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    Ok(state.streams.delete_stream(&id).await?)
 }
 
 #[tauri::command]
@@ -87,11 +74,7 @@ pub async fn list_threads(
     state: tauri::State<'_, AppState>,
     stream_id: StreamId,
 ) -> Result<Vec<Thread>, IpcError> {
-    state
-        .thread_store
-        .list_for_stream(&stream_id)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    Ok(state.thread_store.list_for_stream(&stream_id).await?)
 }
 
 #[tauri::command]
@@ -100,11 +83,7 @@ pub async fn list_work_items_for_thread(
     state: tauri::State<'_, AppState>,
     thread_id: ThreadId,
 ) -> Result<Vec<WorkItem>, IpcError> {
-    state
-        .work_item_store
-        .list_for_thread(&thread_id)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    Ok(state.work_item_store.list_for_thread(&thread_id).await?)
 }
 
 #[tauri::command]
@@ -112,11 +91,7 @@ pub async fn list_work_items_for_thread(
 pub async fn list_backlog(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<WorkItem>, IpcError> {
-    state
-        .work_item_store
-        .list_backlog()
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+    Ok(state.work_item_store.list_backlog().await?)
 }
 
 /// Open an external URL in a sandboxed `WebviewWindow`.

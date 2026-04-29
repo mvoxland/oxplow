@@ -175,7 +175,15 @@ struct PaneEntry {
     /// Dead-code-warning suppressed: it's load-bearing via clones.
     #[allow(dead_code)]
     sender: broadcast::Sender<PaneEvent>,
-    child: Option<Box<dyn Child + Send + Sync>>,
+    /// Shared with the wait task; whichever path (Kill or natural
+    /// exit) gets there first owns the child and handles cleanup. The
+    /// other path sees `None` and no-ops.
+    child: Arc<std::sync::Mutex<Option<Box<dyn Child + Send + Sync>>>>,
+    /// PID stashed at spawn time so Kill can signal the process even
+    /// when the wait task is currently holding the Child handle. Some
+    /// processes (e.g. `sleep`) ignore SIGHUP from a closed PTY, so
+    /// we can't rely on master-drop alone to terminate.
+    pid: Option<u32>,
 }
 
 impl Drop for PaneEntry {
@@ -184,7 +192,7 @@ impl Drop for PaneEntry {
         // bookkeeping runs. This is the core of the Windows ConPTY
         // race mitigation.
         let _ = self.master.take();
-        if let Some(mut child) = self.child.take() {
+        if let Some(mut child) = self.child.lock().ok().and_then(|mut g| g.take()) {
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -231,8 +239,35 @@ async fn owner_loop(mut cmd_rx: mpsc::Receiver<Cmd>) {
             }
             Cmd::Kill { id, reply } => {
                 let result = match panes.remove(&id) {
-                    // PaneEntry's Drop kills the child + frees the master.
-                    Some(_entry) => Ok(()),
+                    Some(entry) => {
+                        // Two paths to ensure the process dies:
+                        //
+                        // 1. If the entry still holds the Child handle
+                        //    (no natural exit raced us), use the
+                        //    portable_pty Child::kill, which sends
+                        //    SIGKILL on Unix.
+                        // 2. Otherwise the wait task is blocking on
+                        //    child.wait(); send SIGTERM directly to
+                        //    the PID so wait() returns. This covers
+                        //    processes that ignore SIGHUP from a
+                        //    closed PTY (e.g. `sleep`).
+                        let child_taken = entry
+                            .child
+                            .lock()
+                            .ok()
+                            .and_then(|mut g| g.take());
+                        if let Some(mut child) = child_taken {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                        } else if let Some(pid) = entry.pid {
+                            kill_pid(pid);
+                        }
+                        // entry's Drop runs at end of scope and frees
+                        // the master, completing the Windows-safe
+                        // teardown order.
+                        drop(entry);
+                        Ok(())
+                    }
                     None => Err(PtyError::NotFound(id.0.clone())),
                 };
                 let _ = reply.send(result);
@@ -242,6 +277,31 @@ async fn owner_loop(mut cmd_rx: mpsc::Receiver<Cmd>) {
 
     debug!("pty manager shutting down; releasing {} panes", panes.len());
     panes.clear();
+}
+
+/// Best-effort process termination by PID. Unix sends SIGKILL via
+/// `libc::kill`; Windows uses `TerminateProcess` via the win32 API.
+/// Used as a fallback when the wait task already owns the
+/// `portable_pty::Child` handle and Kill can't reach it directly.
+fn kill_pid(pid: u32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if !handle.is_null() {
+            TerminateProcess(handle, 1);
+            CloseHandle(handle);
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+    }
 }
 
 async fn spawn_one(
@@ -269,6 +329,7 @@ async fn spawn_one(
         .slave
         .spawn_command(cmd)
         .map_err(|e| PtyError::Spawn(e.to_string()))?;
+    let pid = child.process_id();
 
     // Slave end can be dropped now that the child has it.
     drop(pair.slave);
@@ -284,6 +345,14 @@ async fn spawn_one(
 
     let (sender, _) = broadcast::channel::<PaneEvent>(1024);
     let id = PaneId::new();
+
+    // Shared child handle: lives in the entry (so Kill can call
+    // `child.kill()`) AND in the wait task (so it can call `wait()`
+    // to get the exit code). Both paths take it out of the Option
+    // when they need exclusive access; whichever wins handles
+    // cleanup, the other no-ops.
+    let child_handle: Arc<std::sync::Mutex<Option<Box<dyn Child + Send + Sync>>>> =
+        Arc::new(std::sync::Mutex::new(Some(child)));
 
     // Reader task: blocking read in a spawn_blocking, push to broadcast.
     {
@@ -312,55 +381,34 @@ async fn spawn_one(
         });
     }
 
-    // Wait task: when child exits, emit Exit and let the entry get
-    // cleaned up by a Kill command (we don't auto-remove from the
-    // HashMap to avoid racing with subsequent Write/Resize).
-    let exit_sender = sender.clone();
-    // We can't easily move `child` into a wait task and *also* keep
-    // it for the entry — `Child` is the only handle. Use Arc<Mutex>?
-    // The simpler shape: put child in entry and have the reader task
-    // (above) drive completion detection by reading until EOF, which
-    // happens when the child closes its end. Then emit Exit from
-    // here using a parallel `wait()` call wrapped in spawn_blocking.
-    let entry_child: Arc<std::sync::Mutex<Option<Box<dyn Child + Send + Sync>>>> =
-        Arc::new(std::sync::Mutex::new(Some(child)));
-    let wait_child = Arc::clone(&entry_child);
-    tokio::task::spawn_blocking(move || {
-        let exit_code = {
-            let mut guard = match wait_child.lock() {
-                Ok(g) => g,
-                Err(_) => return,
+    // Wait task: on child exit, emit Exit. Takes the child out of the
+    // shared Option; if Kill already took it, this no-ops. We use
+    // spawn_blocking because portable_pty::Child::wait is synchronous.
+    {
+        let exit_sender = sender.clone();
+        let wait_handle = Arc::clone(&child_handle);
+        tokio::task::spawn_blocking(move || {
+            let mut child = match wait_handle.lock().ok().and_then(|mut g| g.take()) {
+                Some(c) => c,
+                None => return,
             };
-            let Some(child) = guard.as_mut() else { return };
-            child.wait().ok().map(|s| s.exit_code() as i32)
-        };
-        let _ = exit_sender.send(PaneEvent::Exit { exit_code });
-    });
+            let exit_code = child.wait().ok().map(|s| s.exit_code() as i32);
+            let _ = exit_sender.send(PaneEvent::Exit { exit_code });
+        });
+    }
 
     let events = sender.subscribe();
 
-    // We keep `child` reachable from the entry via the Arc — but the
-    // entry's Drop wants `Box<dyn Child>` so it can call `kill()`.
-    // Move ownership out of the Arc when constructing the entry: the
-    // wait task already saw the child (it took it), and after that we
-    // hold None. That's fine — when the user calls Kill, the entry's
-    // Drop falls through (already-waited child), the master is freed,
-    // and the slave goes away with it.
     panes.insert(
         id.clone(),
         PaneEntry {
             master: Some(pair.master),
             writer,
             sender,
-            child: None,
+            child: child_handle,
+            pid,
         },
     );
-    // Tie the wait-thread's child handle back into the entry so kill()
-    // works: replace via mem::take after spawning, before the user
-    // calls Kill. Simplest: leave it where it is (the wait thread) —
-    // a Kill that lands while wait is in flight will only free the
-    // master, which is also fine.
-    drop(entry_child);
 
     Ok(PaneHandle { id, events })
 }
@@ -433,6 +481,44 @@ mod tests {
         );
 
         mgr.kill(&handle.id).await.unwrap();
+    }
+
+    /// Regression test for the kill-doesn't-actually-kill bug found
+    /// in code review: the kill command must terminate the spawned
+    /// process, not just remove the registry entry. We verify by
+    /// spawning a long-running `sleep`, killing it, and observing an
+    /// `Exit` event arrives quickly.
+    #[tokio::test]
+    async fn kill_terminates_running_child() {
+        let mgr = PtyManager::spawn();
+        let req = SpawnRequest {
+            command: "sleep".into(),
+            args: vec!["60".into()],
+            cwd: tempdir().unwrap().keep(),
+            env: vec![],
+            cols: 80,
+            rows: 24,
+        };
+        let mut handle = mgr.spawn_pane(req).await.unwrap();
+        // Wait for the spawn to settle.
+        let _ = timeout(Duration::from_millis(100), handle.events.recv()).await;
+
+        mgr.kill(&handle.id).await.unwrap();
+
+        // The wait task should observe the killed child and emit Exit
+        // within a reasonable window. If kill silently failed, we'd
+        // wait the full 60s for sleep to finish naturally.
+        let exit = timeout(Duration::from_secs(5), async {
+            loop {
+                match handle.events.recv().await {
+                    Ok(PaneEvent::Exit { .. }) => return Ok::<(), ()>(()),
+                    Ok(_) => continue, // skip output bytes
+                    Err(_) => return Err(()),
+                }
+            }
+        })
+        .await;
+        assert!(exit.is_ok(), "child should exit promptly after kill");
     }
 
     #[tokio::test]
