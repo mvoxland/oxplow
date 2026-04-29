@@ -26,6 +26,40 @@ function notPorted(name: string): never {
   throw new Error(`oxplow legacy API method "${name}" is not yet ported to Tauri`);
 }
 
+/// Adapt a bindings-shape Stream to the legacy api.ts Stream by
+/// synthesizing the nested `panes` / `resume` sub-objects from the
+/// flat working_pane / talking_pane / *_session_id fields.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function adaptStream(s: any): any {
+  if (!s) return s;
+  return {
+    ...s,
+    custom_prompt: s.custom_prompt ?? null,
+    panes: {
+      working: s.working_pane ?? "",
+      talking: s.talking_pane ?? "",
+    },
+    resume: {
+      working_session_id: s.working_session_id ?? "",
+      talking_session_id: s.talking_session_id ?? "",
+    },
+  };
+}
+
+/// Adapt a bindings-shape Thread. Legacy `status` was `"active" |
+/// "queued"`; the bindings add `"closed"`. Map closed threads to
+/// queued for legacy callers (closed threads aren't normally in
+/// the active list anyway).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function adaptThread(t: any): any {
+  if (!t) return t;
+  return {
+    ...t,
+    status: t.status === "closed" ? "queued" : t.status,
+    closed_at: t.closed_at ?? null,
+  };
+}
+
 /**
  * Build the legacy adapter. Returns a frozen object suitable for
  * `window.oxplowApi`. Methods backed by a real Tauri command call
@@ -37,27 +71,28 @@ export function buildLegacyAdapter(): DesktopApi {
     ping: async () => unwrap(await commands.ping()),
 
     // -- streams --
-    listStreams: async () => unwrap(await commands.listStreams()),
+    listStreams: async () =>
+      (unwrap(await commands.listStreams()) as unknown[]).map(adaptStream),
     getCurrentStream: async () => {
       const cur = unwrap(await commands.getCurrentStream());
-      if (cur) return cur;
+      if (cur) return adaptStream(cur);
       // Fallback to primary if no current pointer is set.
       const primary = unwrap(await commands.getPrimaryStream());
       if (!primary) throw new Error("no primary stream available");
-      return primary;
+      return adaptStream(primary);
     },
     switchStream: async (id: string) => {
       unwrap(await commands.switchStream(id));
       const got = unwrap(await commands.getCurrentStream());
-      return got;
+      return adaptStream(got);
     },
     renameCurrentStream: async (title: string) => {
       const cur = unwrap(await commands.getCurrentStream());
       if (!cur) throw new Error("no current stream to rename");
-      return unwrap(await commands.renameStream({ id: cur.id, title }));
+      return adaptStream(unwrap(await commands.renameStream({ id: cur.id, title })));
     },
     renameStream: async (id: string, title: string) =>
-      unwrap(await commands.renameStream({ id, title })),
+      adaptStream(unwrap(await commands.renameStream({ id, title }))),
     setStreamPrompt: async (id: string, prompt: string | null) =>
       unwrap(await commands.setStreamPrompt({ id, prompt })),
     checkoutStreamBranch: async (id: string, branch: string) =>
@@ -75,23 +110,32 @@ export function buildLegacyAdapter(): DesktopApi {
     },
 
     // -- threads --
-    closeThread: async (id: string) => unwrap(await commands.closeThread(id)),
-    reopenThread: async (id: string) => unwrap(await commands.reopenThread(id)),
-    promoteThread: async (id: string) => unwrap(await commands.promoteThread(id)),
+    closeThread: async (id: string) => adaptThread(unwrap(await commands.closeThread(id))),
+    reopenThread: async (id: string) => adaptThread(unwrap(await commands.reopenThread(id))),
+    promoteThread: async (id: string) => adaptThread(unwrap(await commands.promoteThread(id))),
     renameThread: async (id: string, title: string) =>
-      unwrap(await commands.renameThread({ id, title })),
+      adaptThread(unwrap(await commands.renameThread({ id, title }))),
     setThreadPrompt: async (id: string, prompt: string | null) =>
-      unwrap(await commands.setThreadPrompt({ id, prompt })),
+      adaptThread(unwrap(await commands.setThreadPrompt({ id, prompt }))),
     listClosedThreads: async (streamId: string) =>
-      unwrap(await commands.listClosedThreads(streamId)),
+      (unwrap(await commands.listClosedThreads(streamId)) as unknown[]).map(adaptThread),
     selectThread: async (streamId: string, threadId: string | null) =>
       unwrap(await commands.selectThread({ streamId, threadId })),
     createThread: async (streamId: string, title: string, paneTarget?: string) =>
-      unwrap(await commands.createThread({ streamId, title, paneTarget: paneTarget ?? null })),
+      adaptThread(
+        unwrap(
+          await commands.createThread({ streamId, title, paneTarget: paneTarget ?? null }),
+        ),
+      ),
     reorderThreadQueue: async (streamId: string, order: string[]) =>
       unwrap(await commands.reorderThreadQueue({ streamId, order })),
-    getThreadState: async (streamId: string) =>
-      unwrap(await commands.getThreadState(streamId)),
+    getThreadState: async (streamId: string) => {
+      const raw = unwrap(await commands.getThreadState(streamId)) as {
+        threads: unknown[];
+        [k: string]: unknown;
+      };
+      return { ...raw, threads: raw.threads.map(adaptThread) };
+    },
     getThreadWorkState: async (_streamId: string, threadId: string) =>
       unwrap(await commands.getThreadWorkState(threadId)),
 

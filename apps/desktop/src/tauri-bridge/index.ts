@@ -12,48 +12,11 @@ import { commands } from "./generated/bindings";
 export { commands };
 export * as oxplow from "./generated/bindings";
 
-// Re-export every type the renderer typically reaches for. Kept in
-// alphabetical order so additions stay merge-friendly.
-export type {
-  AgentStatus,
-  AgentStatusState,
-  AgentTurn,
-  AgentTurnId,
-  AppVersion,
-  BacklogState,
-  BlameLine,
-  BranchChangeEntry,
-  BranchChanges,
-  ChangeKind,
-  CreateWorkItemInput,
-  CreateWorktreeRequest,
-  GitOpResult,
-  GitWorktreeEntry,
-  GroupedGitRefs,
-  HookEvent,
-  HookEventId,
-  HookKind,
-  IpcError,
-  RemoteBranchEntry,
-  Stream,
-  StreamId,
-  StreamKind,
-  TextSearchHit,
-  Thread,
-  ThreadId,
-  ThreadStatus,
-  Timestamp,
-  WorkspaceContext,
-  WorkspaceStatusSummary,
-  UpdateWorkItemChanges,
-  WorkItem,
-  WorkItemActorKind,
-  WorkItemAuthor,
-  WorkItemId,
-  WorkItemKind,
-  WorkItemPriority,
-  WorkItemStatus,
-} from "./generated/bindings";
+// Re-export every type the renderer reaches for. The bindings file
+// has ~99 types; we re-export them all so call sites can do
+// `import type { X } from "../tauri-bridge"` without first checking
+// whether X is on the export list.
+export type * from "./generated/bindings";
 
 /// Discriminant kinds for the cross-store event bus. Mirrors the
 /// `OxplowEvent` enum on the Rust side.
