@@ -1,6 +1,6 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import { listen } from "@tauri-apps/api/event";
-import type { DesktopApi, OxplowEvent } from "./legacy-ipc-contract.js";
+import type { DesktopApi, OxplowEvent } from "./api-types.js";
 
 // -- Legacy adapter helpers (formerly in legacy-bridge.ts). Inlined
 // here so the legacy compatibility layer lives in a single file.
@@ -394,8 +394,8 @@ function buildLegacyAdapter(): DesktopApi {
   }) as DesktopApi;
 }
 
-export type { OxplowEvent } from "./legacy-ipc-contract.js";
-export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry, RemoteBranchEntry } from "./legacy-ipc-contract.js";
+export type { OxplowEvent } from "./api-types.js";
+export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry, RemoteBranchEntry } from "./api-types.js";
 
 // Stream / Thread types re-exported from the Tauri bindings. The
 // legacy adapter (`legacy-bridge.ts`) augments runtime values with
@@ -594,23 +594,23 @@ export async function renameStream(streamId: string, title: string): Promise<Str
   return desktopApi().renameStream(streamId, title);
 }
 
-export async function getConfig(): Promise<import("./legacy-ipc-contract.js").OxplowConfig> {
+export async function getConfig(): Promise<import("./api-types.js").OxplowConfig> {
   return desktopApi().getConfig();
 }
 
-export async function setAgentPromptAppend(text: string): Promise<import("./legacy-ipc-contract.js").OxplowConfig> {
+export async function setAgentPromptAppend(text: string): Promise<import("./api-types.js").OxplowConfig> {
   return desktopApi().setAgentPromptAppend(text);
 }
 
-export async function setGeneratedDirs(dirs: string[]): Promise<import("./legacy-ipc-contract.js").OxplowConfig> {
+export async function setGeneratedDirs(dirs: string[]): Promise<import("./api-types.js").OxplowConfig> {
   return desktopApi().setGeneratedDirs(dirs);
 }
 
-export async function setSnapshotRetentionDays(days: number): Promise<import("./legacy-ipc-contract.js").OxplowConfig> {
+export async function setSnapshotRetentionDays(days: number): Promise<import("./api-types.js").OxplowConfig> {
   return desktopApi().setSnapshotRetentionDays(days);
 }
 
-export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("./legacy-ipc-contract.js").OxplowConfig> {
+export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("./api-types.js").OxplowConfig> {
   return desktopApi().setSnapshotMaxFileBytes(bytes);
 }
 
@@ -622,15 +622,15 @@ export async function getDefaultBranch(): Promise<string | null> {
   return desktopApi().getDefaultBranch();
 }
 
-export async function listGitRefs(): Promise<import("./legacy-ipc-contract.js").GroupedGitRefs> {
+export async function listGitRefs(): Promise<import("./api-types.js").GroupedGitRefs> {
   return desktopApi().listGitRefs();
 }
 
-export async function renameGitBranch(from: string, to: string): Promise<import("./legacy-ipc-contract.js").GitOpResult> {
+export async function renameGitBranch(from: string, to: string): Promise<import("./api-types.js").GitOpResult> {
   return desktopApi().renameGitBranch(from, to);
 }
 
-export async function deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<import("./legacy-ipc-contract.js").GitOpResult> {
+export async function deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<import("./api-types.js").GitOpResult> {
   return desktopApi().deleteGitBranch(branch, options);
 }
 
@@ -682,11 +682,11 @@ export async function createStream(input:
   return desktopApi().createStream(input);
 }
 
-export async function listAdoptableWorktrees(): Promise<import("./legacy-ipc-contract.js").GitWorktreeEntry[]> {
+export async function listAdoptableWorktrees(): Promise<import("./api-types.js").GitWorktreeEntry[]> {
   return desktopApi().listAdoptableWorktrees();
 }
 
-export async function listSiblingWorktrees(streamId: string): Promise<import("./legacy-ipc-contract.js").GitWorktreeEntry[]> {
+export async function listSiblingWorktrees(streamId: string): Promise<import("./api-types.js").GitWorktreeEntry[]> {
   return desktopApi().listSiblingWorktrees(streamId);
 }
 
@@ -869,20 +869,20 @@ export async function moveBacklogItemToThread(
 export async function getGitLog(
   streamId: string,
   options?: { limit?: number; all?: boolean },
-): Promise<import("./legacy-ipc-contract.js").GitLogResult> {
+): Promise<import("./api-types.js").GitLogResult> {
   return desktopApi().getGitLog(streamId, options);
 }
 
 export async function getCommitDetail(
   streamId: string,
   sha: string,
-): Promise<import("./legacy-ipc-contract.js").CommitDetail | null> {
+): Promise<import("./api-types.js").CommitDetail | null> {
   return desktopApi().getCommitDetail(streamId, sha);
 }
 
 export async function getChangeScopes(
   streamId: string,
-): Promise<import("./legacy-ipc-contract.js").ChangeScopes> {
+): Promise<import("./api-types.js").ChangeScopes> {
   return desktopApi().getChangeScopes(streamId);
 }
 
@@ -890,19 +890,19 @@ export async function searchWorkspaceText(
   streamId: string,
   query: string,
   options?: { limit?: number },
-): Promise<import("./legacy-ipc-contract.js").TextSearchHit[]> {
+): Promise<import("./api-types.js").TextSearchHit[]> {
   return desktopApi().searchWorkspaceText(streamId, query, options);
 }
 
-export async function gitRestorePath(streamId: string, path: string): Promise<import("./legacy-ipc-contract.js").GitOpResult> {
+export async function gitRestorePath(streamId: string, path: string): Promise<import("./api-types.js").GitOpResult> {
   return desktopApi().gitRestorePath(streamId, path);
 }
 
-export async function gitAddPath(streamId: string, path: string): Promise<import("./legacy-ipc-contract.js").GitOpResult> {
+export async function gitAddPath(streamId: string, path: string): Promise<import("./api-types.js").GitOpResult> {
   return desktopApi().gitAddPath(streamId, path);
 }
 
-export async function gitAppendToGitignore(streamId: string, path: string): Promise<import("./legacy-ipc-contract.js").GitOpResult> {
+export async function gitAppendToGitignore(streamId: string, path: string): Promise<import("./api-types.js").GitOpResult> {
   return desktopApi().gitAppendToGitignore(streamId, path);
 }
 
@@ -934,7 +934,7 @@ export async function gitCommitAll(
   streamId: string,
   message: string,
   options?: { includeUntracked?: boolean; paths?: string[] },
-): Promise<import("./legacy-ipc-contract.js").GitOpResult & { sha?: string }> {
+): Promise<import("./api-types.js").GitOpResult & { sha?: string }> {
   return desktopApi().gitCommitAll(streamId, message, options);
 }
 
@@ -951,14 +951,14 @@ export async function getCommitsAheadOf(
   base: string,
   head: string,
   limit?: number,
-): Promise<import("./legacy-ipc-contract.js").GitLogCommit[]> {
+): Promise<import("./api-types.js").GitLogCommit[]> {
   return desktopApi().getCommitsAheadOf(streamId, base, head, limit);
 }
 
 export async function listRecentRemoteBranches(
   streamId: string,
   limit?: number,
-): Promise<import("./legacy-ipc-contract.js").RemoteBranchEntry[]> {
+): Promise<import("./api-types.js").RemoteBranchEntry[]> {
   return desktopApi().listRecentRemoteBranches(streamId, limit);
 }
 
@@ -984,14 +984,14 @@ export async function listFileCommits(
   streamId: string,
   path: string,
   limit?: number,
-): Promise<import("./legacy-ipc-contract.js").GitLogCommit[]> {
+): Promise<import("./api-types.js").GitLogCommit[]> {
   return desktopApi().listFileCommits(streamId, path, limit);
 }
 
 export async function gitBlame(
   streamId: string,
   path: string,
-): Promise<import("./legacy-ipc-contract.js").BlameLine[]> {
+): Promise<import("./api-types.js").BlameLine[]> {
   return desktopApi().gitBlame(streamId, path);
 }
 
@@ -1021,9 +1021,9 @@ export async function localBlame(
   return desktopApi().localBlame(streamId, path);
 }
 
-export type WikiNoteSummary = import("./legacy-ipc-contract.js").WikiNoteSummary;
-export type WikiNoteSearchHit = import("./legacy-ipc-contract.js").WikiNoteSearchHit;
-export type UsageRollup = import("./legacy-ipc-contract.js").UsageRollup;
+export type WikiNoteSummary = import("./api-types.js").WikiNoteSummary;
+export type WikiNoteSearchHit = import("./api-types.js").WikiNoteSearchHit;
+export type UsageRollup = import("./api-types.js").UsageRollup;
 
 export async function listWikiNotes(streamId: string): Promise<WikiNoteSummary[]> {
   return desktopApi().listWikiNotes(streamId);
@@ -1093,12 +1093,12 @@ export async function listCurrentlyOpenUsage(input: {
   return desktopApi().listCurrentlyOpenUsage(input);
 }
 
-export type CodeQualityTool = import("./legacy-ipc-contract.js").CodeQualityTool;
-export type CodeQualityScope = import("./legacy-ipc-contract.js").CodeQualityScope;
-export type CodeQualityScanStatus = import("./legacy-ipc-contract.js").CodeQualityScanStatus;
-export type CodeQualityFindingKind = import("./legacy-ipc-contract.js").CodeQualityFindingKind;
-export type CodeQualityScanRow = import("./legacy-ipc-contract.js").CodeQualityScanRow;
-export type CodeQualityFindingRow = import("./legacy-ipc-contract.js").CodeQualityFindingRow;
+export type CodeQualityTool = import("./api-types.js").CodeQualityTool;
+export type CodeQualityScope = import("./api-types.js").CodeQualityScope;
+export type CodeQualityScanStatus = import("./api-types.js").CodeQualityScanStatus;
+export type CodeQualityFindingKind = import("./api-types.js").CodeQualityFindingKind;
+export type CodeQualityScanRow = import("./api-types.js").CodeQualityScanRow;
+export type CodeQualityFindingRow = import("./api-types.js").CodeQualityFindingRow;
 
 export async function runCodeQualityScan(input: {
   streamId: string;
@@ -1138,7 +1138,7 @@ export function subscribeCodeQualityEvents(
 export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
   id: string;
   title: string;
-  status: import("./legacy-ipc-contract.js").WorkItemStatus;
+  status: import("./api-types.js").WorkItemStatus;
   thread_id: string | null;
 }>> {
   return desktopApi().getWorkItemSummaries(ids);
@@ -1171,7 +1171,7 @@ export async function removeFollowup(threadId: string, id: string): Promise<void
   return desktopApi().removeFollowup(threadId, id);
 }
 
-export type BackgroundTask = import("./legacy-ipc-contract.js").BackgroundTask;
+export type BackgroundTask = import("./api-types.js").BackgroundTask;
 
 export async function listBackgroundTasks(): Promise<BackgroundTask[]> {
   return desktopApi().listBackgroundTasks();
@@ -1231,7 +1231,7 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
   });
 }
 
-export async function listAllRefs(streamId: string): Promise<import("./legacy-ipc-contract.js").RefOption[]> {
+export async function listAllRefs(streamId: string): Promise<import("./api-types.js").RefOption[]> {
   return desktopApi().listAllRefs(streamId);
 }
 
@@ -1535,7 +1535,7 @@ export async function forgetPage(refKind: string, refId: string): Promise<void> 
 
 export async function getRepoConflictState(
   streamId: string,
-): Promise<import("./legacy-ipc-contract.js").RepoConflictState> {
+): Promise<import("./api-types.js").RepoConflictState> {
   return desktopApi().getRepoConflictState(streamId);
 }
 
