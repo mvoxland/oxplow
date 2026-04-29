@@ -6,11 +6,33 @@
 //! cover well (e.g. `git worktree add`).
 
 mod branch;
+mod branch_ops;
 mod conflict;
+pub mod log;
+mod refs_watch;
 mod repo;
+pub mod status;
+pub mod workspace;
 mod worktree;
 
 pub use branch::{list_branches, BranchRef, BranchRefKind};
+pub use branch_ops::{
+    append_to_gitignore, delete_branch, detect_default_branch, get_ahead_behind,
+    get_commits_ahead_of, rename_branch, restore_path, AheadBehind, BranchOpError,
+};
 pub use conflict::{get_repo_conflict_state, GitOperationKind, RepoConflictState};
+pub use log::{
+    get_commit_detail, get_git_log, CommitDetail, CommitDetailFile, GitLogCommit, GitLogOptions,
+    GitLogResult,
+};
+pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
 pub use repo::{detect_current_branch, is_git_repo, is_git_worktree};
+pub use status::{list_git_statuses, status_for_path};
+pub use workspace::{
+    create_workspace_directory, create_workspace_file, delete_workspace_path,
+    list_workspace_entries, list_workspace_files, read_workspace_file, rename_workspace_path,
+    summarize_git_statuses, write_workspace_file, GitFileStatus, WorkspaceEntry,
+    WorkspaceEntryKind, WorkspaceError, WorkspaceFile, WorkspaceIndexedFile,
+    WorkspaceStatusSummary,
+};
 pub use worktree::{ensure_worktree, EnsureWorktreeError};

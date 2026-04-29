@@ -118,4 +118,143 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
     }
+
+    /// Schema regression: every table the v1 migration is supposed to
+    /// produce should exist after `Database::in_memory()`. Failing this
+    /// test means the migration SQL drifted from the type system —
+    /// catch it before stores try to query a missing table.
+    #[test]
+    fn v1_creates_expected_tables() {
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        let expected = [
+            "streams",
+            "runtime_state",
+            "threads",
+            "thread_selection",
+            "work_items",
+            "work_item_links",
+            "work_item_events",
+            "work_notes",
+            "agent_turn",
+        ];
+        let mut stmt = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap();
+        let actual: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            // refinery's migration tracking table is internal noise.
+            .filter(|n| !n.starts_with("refinery_"))
+            // sqlite's autoindex bookkeeping isn't a "table" we care about.
+            .filter(|n| !n.starts_with("sqlite_"))
+            .collect();
+        for table in expected {
+            assert!(
+                actual.iter().any(|a| a == table),
+                "expected table `{table}` to exist; got: {actual:?}"
+            );
+        }
+    }
+
+    /// The unique-primary-stream and unique-active-thread invariants
+    /// must be enforced by partial indexes, not just by the
+    /// application layer. A direct INSERT bypassing the stores should
+    /// still fail.
+    #[test]
+    fn primary_stream_uniqueness_enforced_at_db() {
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        let now = "2026-04-29T00:00:00Z";
+        conn.execute(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+             VALUES ('s-a', 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
+            [now],
+        ).unwrap();
+        let result = conn.execute(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+             VALUES ('s-b', 'primary', 'b', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
+            [now],
+        );
+        assert!(result.is_err(), "DB should reject a second primary stream");
+    }
+
+    #[test]
+    fn active_thread_uniqueness_enforced_at_db() {
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        let now = "2026-04-29T00:00:00Z";
+        conn.execute(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+             VALUES ('s-1', 'primary', 'a', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
+            [now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+             VALUES ('b-a', 's-1', 'a', 'active', ?1, ?1)",
+            [now],
+        ).unwrap();
+        let result = conn.execute(
+            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+             VALUES ('b-b', 's-1', 'b', 'active', ?1, ?1)",
+            [now],
+        );
+        assert!(
+            result.is_err(),
+            "DB should reject a second active thread on the same stream"
+        );
+    }
+
+    #[test]
+    fn foreign_keys_enabled() {
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        let result = conn.execute(
+            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+             VALUES ('b-orphan', 's-nope', 't', 'queued', '2026-01-01', '2026-01-01')",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "FK enforcement must be on so dangling stream_id is rejected"
+        );
+    }
+
+    #[test]
+    fn work_note_xor_invariant_enforced() {
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        // Setup minimal parent rows.
+        let now = "2026-04-29T00:00:00Z";
+        conn.execute(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+             VALUES ('s-1', 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
+            [now],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+             VALUES ('b-1', 's-1', 't', 'active', ?1, ?1)",
+            [now],
+        ).unwrap();
+        // Both null — must fail.
+        let r = conn.execute(
+            "INSERT INTO work_notes (id, body, author, created_at) VALUES ('n-bad', 'b', 'u', ?1)",
+            [now],
+        );
+        assert!(r.is_err(), "work_notes with neither parent should fail CHECK");
+        // Both set — must fail.
+        let r = conn.execute(
+            "INSERT INTO work_items (id, kind, title, status, priority, created_by, created_at, updated_at)
+             VALUES ('wi-1', 'task', 't', 'ready', 'medium', 'user', ?1, ?1)",
+            [now],
+        );
+        assert!(r.is_ok());
+        let r = conn.execute(
+            "INSERT INTO work_notes (id, work_item_id, thread_id, body, author, created_at)
+             VALUES ('n-bad2', 'wi-1', 'b-1', 'b', 'u', ?1)",
+            [now],
+        );
+        assert!(r.is_err(), "work_notes with both parents should fail CHECK");
+    }
 }

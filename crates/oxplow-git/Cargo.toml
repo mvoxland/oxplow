@@ -18,5 +18,9 @@ serde = { workspace = true }
 specta = { workspace = true }
 time = { workspace = true }
 
+[dependencies.serde_json]
+workspace = true
+
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true }
