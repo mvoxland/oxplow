@@ -73,7 +73,7 @@ import {
   setOpenFileLoading,
   updateFileDraft,
   type FileSessionState,
-} from "./legacy-file-session.js";
+} from "./editor-session.js";
 import { buildMenuGroupSnapshots, buildMenuGroups } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
