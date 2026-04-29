@@ -1,8 +1,129 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use thiserror::Error;
 use tracing::info;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct GitWorktreeEntry {
+    pub path: String,
+    pub branch: Option<String>,
+    pub head_sha: Option<String>,
+    pub is_main: bool,
+    pub is_detached: bool,
+    pub is_locked: bool,
+    pub is_prunable: bool,
+}
+
+/// Parses `git worktree list --porcelain` output. Records are
+/// blank-line-separated; each record is line-oriented `key value`
+/// pairs.
+pub fn list_existing_worktrees(repo_root: impl AsRef<Path>) -> Vec<GitWorktreeEntry> {
+    let repo_root = repo_root.as_ref();
+    if !crate::repo::is_git_repo(repo_root) {
+        return vec![];
+    }
+    let output = match Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo_root)
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return vec![],
+    };
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut out = Vec::new();
+    let mut current: Option<GitWorktreeEntry> = None;
+    let mut is_first = true;
+    for line in raw.split('\n') {
+        if line.is_empty() {
+            if let Some(mut e) = current.take() {
+                e.is_main = is_first;
+                is_first = false;
+                out.push(e);
+            }
+            continue;
+        }
+        let entry = current.get_or_insert_with(|| GitWorktreeEntry {
+            path: String::new(),
+            branch: None,
+            head_sha: None,
+            is_main: false,
+            is_detached: false,
+            is_locked: false,
+            is_prunable: false,
+        });
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            entry.path = rest.to_string();
+        } else if let Some(rest) = line.strip_prefix("HEAD ") {
+            entry.head_sha = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("branch ") {
+            entry.branch = Some(
+                rest.strip_prefix("refs/heads/")
+                    .unwrap_or(rest)
+                    .to_string(),
+            );
+        } else if line == "detached" {
+            entry.is_detached = true;
+        } else if line == "locked" || line.starts_with("locked ") {
+            entry.is_locked = true;
+        } else if line == "prunable" || line.starts_with("prunable ") {
+            entry.is_prunable = true;
+        }
+    }
+    if let Some(mut e) = current.take() {
+        e.is_main = is_first;
+        out.push(e);
+    }
+    out
+}
+
+/// Worktrees that are siblings of `repo_root` (under the same parent
+/// dir). Used by the streams page to surface "other worktrees" for
+/// quick switching.
+pub fn list_sibling_worktrees(repo_root: impl AsRef<Path>) -> Vec<GitWorktreeEntry> {
+    let repo_root = repo_root.as_ref();
+    let parent = match repo_root.parent() {
+        Some(p) => p.to_path_buf(),
+        None => return vec![],
+    };
+    list_existing_worktrees(repo_root)
+        .into_iter()
+        .filter(|e| {
+            let p = std::path::Path::new(&e.path);
+            p != repo_root && p.starts_with(&parent)
+        })
+        .collect()
+}
+
+/// Existing worktrees on disk that aren't yet registered as oxplow
+/// streams. Caller filters against the StreamStore. Path comparison
+/// is canonicalized so `/var/...` vs `/private/var/...` (macOS) and
+/// trailing-slash quirks don't cause false negatives.
+pub fn list_adoptable_worktrees(
+    repo_root: impl AsRef<Path>,
+    registered_paths: &[String],
+) -> Vec<GitWorktreeEntry> {
+    let canon_registered: Vec<PathBuf> = registered_paths
+        .iter()
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .collect();
+    list_existing_worktrees(repo_root)
+        .into_iter()
+        .filter(|e| {
+            if e.is_main {
+                return false;
+            }
+            let canon = std::fs::canonicalize(&e.path).ok();
+            match canon {
+                Some(c) => !canon_registered.iter().any(|r| r == &c),
+                None => !registered_paths.iter().any(|p| p == &e.path),
+            }
+        })
+        .collect()
+}
 
 #[derive(Debug, Error)]
 pub enum EnsureWorktreeError {
@@ -150,5 +271,40 @@ mod tests {
         let dir = tempdir().unwrap();
         let result = ensure_worktree(dir.path(), dir.path().join("wt"), "x", "y");
         assert!(matches!(result, Err(EnsureWorktreeError::NotRepo(_))));
+    }
+
+    #[test]
+    fn list_existing_worktrees_returns_main() {
+        let repo_dir = init_repo();
+        let entries = list_existing_worktrees(repo_dir.path());
+        assert!(entries.iter().any(|e| e.is_main));
+    }
+
+    #[test]
+    fn list_existing_worktrees_includes_added_one() {
+        let repo_dir = init_repo();
+        let repo = git2::Repository::open(repo_dir.path()).unwrap();
+        let main = current_branch(&repo);
+        let wt_root = tempdir().unwrap();
+        let wt_path = wt_root.path().join("feat");
+        ensure_worktree(repo_dir.path(), &wt_path, "feat", &main).unwrap();
+        let entries = list_existing_worktrees(repo_dir.path());
+        assert!(entries.iter().any(|e| e.branch.as_deref() == Some("feat")));
+    }
+
+    #[test]
+    fn list_adoptable_excludes_registered_paths() {
+        let repo_dir = init_repo();
+        let repo = git2::Repository::open(repo_dir.path()).unwrap();
+        let main = current_branch(&repo);
+        let wt_root = tempdir().unwrap();
+        let wt_path = wt_root.path().join("feat");
+        ensure_worktree(repo_dir.path(), &wt_path, "feat", &main).unwrap();
+        let registered = vec![wt_path.to_string_lossy().into_owned()];
+        let adoptable = list_adoptable_worktrees(repo_dir.path(), &registered);
+        assert!(adoptable.is_empty());
+        let none_registered: Vec<String> = vec![];
+        let adoptable = list_adoptable_worktrees(repo_dir.path(), &none_registered);
+        assert!(adoptable.iter().any(|e| e.branch.as_deref() == Some("feat")));
     }
 }

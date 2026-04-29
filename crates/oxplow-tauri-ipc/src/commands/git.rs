@@ -1,7 +1,8 @@
 use oxplow_git::{
-    AheadBehind, GitOpResult, GitOperationKind, GroupedGitRefs, RemoteBranchEntry,
+    AheadBehind, GitOpResult, GitOperationKind, GitWorktreeEntry, GroupedGitRefs, RemoteBranchEntry,
     RepoConflictState, TextSearchHit,
 };
+use oxplow_domain::stores::StreamStore;
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -207,6 +208,48 @@ pub async fn list_file_commits(
             .await
             .map_err(|e| IpcError::internal(e.to_string()))?,
     )
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_existing_worktrees(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<GitWorktreeEntry>, IpcError> {
+    let path = project_dir(&state);
+    Ok(tokio::task::spawn_blocking(move || oxplow_git::list_existing_worktrees(&path))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_sibling_worktrees(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<GitWorktreeEntry>, IpcError> {
+    let path = project_dir(&state);
+    Ok(tokio::task::spawn_blocking(move || oxplow_git::list_sibling_worktrees(&path))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_adoptable_worktrees(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<GitWorktreeEntry>, IpcError> {
+    let path = project_dir(&state);
+    let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
+    let registered: Vec<String> = store
+        .list()
+        .await?
+        .into_iter()
+        .map(|s| s.worktree_path)
+        .collect();
+    Ok(tokio::task::spawn_blocking(move || {
+        oxplow_git::list_adoptable_worktrees(&path, &registered)
+    })
+    .await
+    .map_err(|e| IpcError::internal(e.to_string()))?)
 }
 
 #[tauri::command]
