@@ -1,3 +1,5 @@
+import { legacyApi } from "./api.js";
+
 export type UiLogLevel = "debug" | "info" | "warn" | "error";
 
 const CLIENT_ID_KEY = "oxplow-ui-client-id";
@@ -71,7 +73,7 @@ export function getUiClientId(): string {
 
 async function sendUiLog(level: UiLogLevel, message: string, context?: Record<string, unknown>): Promise<void> {
   try {
-    await window.oxplowApi.logUi({
+    await legacyApi().logUi({
       clientId: getUiClientId(),
       level,
       message,
