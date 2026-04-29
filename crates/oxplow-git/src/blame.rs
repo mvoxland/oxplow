@@ -14,6 +14,44 @@ use specta::Type;
 
 pub const BLAME_ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
+/// Per-line attribution combining git blame with a local "this line was
+/// last touched in oxplow effort X" overlay. The full TS implementation
+/// could match against snapshot file contents to attribute lines to
+/// efforts; the new schema only persists blob hashes (not full text)
+/// so this Rust port currently surfaces git blame + the BLAME_ZERO_SHA
+/// → "uncommitted" mapping. The work-item effort attribution arrives
+/// once content-addressed snapshot blob storage lands (see
+/// MIGRATION_REVIEW2 §3 / sharp edge §5).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct LocalBlameEntry {
+    pub line: u32,
+    /// "git", "uncommitted", or eventually "local" (once snapshot
+    /// blobs are available).
+    pub source: String,
+    pub git: Option<BlameLine>,
+}
+
+pub fn local_blame(repo: &Path, path: &str, disk_text: &str) -> Vec<LocalBlameEntry> {
+    let git = git_blame(repo, path);
+    let line_count = disk_text.split('\n').count() as u32;
+    let mut out = Vec::with_capacity(line_count as usize);
+    for line_no in 1..=line_count {
+        let blame = git.iter().find(|b| b.line == line_no).cloned();
+        let source = match &blame {
+            Some(b) if b.sha == BLAME_ZERO_SHA => "uncommitted",
+            Some(_) => "git",
+            None => "uncommitted",
+        }
+        .to_string();
+        out.push(LocalBlameEntry {
+            line: line_no,
+            source,
+            git: blame,
+        });
+    }
+    out
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct BlameLine {
     pub line: u32,

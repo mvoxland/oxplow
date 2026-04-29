@@ -246,6 +246,7 @@ export const commands = {
 	listSiblingWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_sibling_worktrees")),
 	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
 	gitBlame: (path: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("git_blame", { path })),
+	localBlame: (path: string, diskText: string) => typedError<LocalBlameEntry[], IpcError>(__TAURI_INVOKE("local_blame", { path, diskText })),
 	getBranchChanges: (baseRef: string) => typedError<BranchChanges, IpcError>(__TAURI_INVOKE("get_branch_changes", { baseRef })),
 	getChangeScopes: () => typedError<ChangeScopes, IpcError>(__TAURI_INVOKE("get_change_scopes")),
 	/**
@@ -674,6 +675,26 @@ export type IpcError = {
 	code: string,
 	message: string,
 	cause: string | null,
+};
+
+/**
+ *  Per-line attribution combining git blame with a local "this line was
+ *  last touched in oxplow effort X" overlay. The full TS implementation
+ *  could match against snapshot file contents to attribute lines to
+ *  efforts; the new schema only persists blob hashes (not full text)
+ *  so this Rust port currently surfaces git blame + the BLAME_ZERO_SHA
+ *  → "uncommitted" mapping. The work-item effort attribution arrives
+ *  once content-addressed snapshot blob storage lands (see
+ *  MIGRATION_REVIEW2 §3 / sharp edge §5).
+ */
+export type LocalBlameEntry = {
+	line: number,
+	/**
+	 *  "git", "uncommitted", or eventually "local" (once snapshot
+	 *  blobs are available).
+	 */
+	source: string,
+	git: BlameLine | null,
 };
 
 export type LspServerConfig = {
