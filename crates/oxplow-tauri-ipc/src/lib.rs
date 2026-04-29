@@ -114,6 +114,13 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::git::list_file_commits,
         commands::git::read_file_at_ref,
         commands::git::search_workspace_text,
+        // hooks / agent lifecycle
+        commands::hooks::ingest_hook_event,
+        commands::hooks::list_hook_events,
+        commands::hooks::list_hook_events_by_kind,
+        commands::hooks::list_agent_statuses,
+        commands::hooks::list_open_agent_turns,
+        commands::hooks::list_recent_agent_turns,
         // log
         commands::log::get_git_log,
         commands::log::get_commit_detail,

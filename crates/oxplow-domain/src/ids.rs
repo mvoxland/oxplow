@@ -50,6 +50,8 @@ id_type!(ThreadId, "b"); // "b" matches existing TS convention (b-...)
 id_type!(WorkItemId, "wi");
 id_type!(NoteId, "n");
 id_type!(AgentTurnId, "at");
+id_type!(HookEventId, "he");
+id_type!(EffortId, "ef");
 
 #[cfg(test)]
 mod tests {

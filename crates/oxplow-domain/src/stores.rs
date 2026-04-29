@@ -9,7 +9,8 @@
 
 use async_trait::async_trait;
 
-use crate::ids::{NoteId, StreamId, ThreadId, WorkItemId};
+use crate::hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
+use crate::ids::{AgentTurnId, NoteId, StreamId, ThreadId, WorkItemId};
 use crate::stream::Stream;
 use crate::thread::Thread;
 use crate::work_item::{WorkItem, WorkItemEvent, WorkItemLink, WorkItemLinkType, WorkNote};
@@ -94,4 +95,54 @@ pub trait WorkItemEventStore: Send + Sync {
     async fn append(&self, event: &WorkItemEvent) -> Result<(), DomainError>;
     async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkItemEvent>, DomainError>;
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkItemEvent>, DomainError>;
+}
+
+#[async_trait]
+pub trait HookEventStore: Send + Sync {
+    async fn append(&self, event: &HookEvent) -> Result<(), DomainError>;
+    /// Most recent first, capped at `limit` (default 200).
+    async fn list_recent(
+        &self,
+        thread: Option<&ThreadId>,
+        limit: usize,
+    ) -> Result<Vec<HookEvent>, DomainError>;
+    async fn list_by_kind(
+        &self,
+        kind: HookKind,
+        limit: usize,
+    ) -> Result<Vec<HookEvent>, DomainError>;
+}
+
+#[async_trait]
+pub trait AgentStatusStore: Send + Sync {
+    async fn upsert(
+        &self,
+        thread: &ThreadId,
+        pane_target: &str,
+        state: AgentStatusState,
+        detail: Option<String>,
+    ) -> Result<AgentStatus, DomainError>;
+    async fn get(
+        &self,
+        thread: &ThreadId,
+        pane_target: &str,
+    ) -> Result<Option<AgentStatus>, DomainError>;
+    async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError>;
+}
+
+#[async_trait]
+pub trait AgentTurnStore: Send + Sync {
+    async fn open(&self, turn: &AgentTurn) -> Result<(), DomainError>;
+    async fn close(
+        &self,
+        id: &AgentTurnId,
+        answer: Option<String>,
+    ) -> Result<(), DomainError>;
+    async fn get(&self, id: &AgentTurnId) -> Result<Option<AgentTurn>, DomainError>;
+    async fn list_open(&self, thread: &ThreadId) -> Result<Vec<AgentTurn>, DomainError>;
+    async fn list_for_thread(
+        &self,
+        thread: &ThreadId,
+        limit: usize,
+    ) -> Result<Vec<AgentTurn>, DomainError>;
 }

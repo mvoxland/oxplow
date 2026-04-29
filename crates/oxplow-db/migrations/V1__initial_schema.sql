@@ -221,3 +221,77 @@ CREATE TABLE agent_turn (
 CREATE INDEX idx_agent_turn_thread ON agent_turn(thread_id, started_at DESC);
 CREATE INDEX idx_agent_turn_item ON agent_turn(work_item_id, started_at DESC);
 CREATE INDEX idx_agent_turn_open ON agent_turn(thread_id) WHERE ended_at IS NULL;
+
+-- Durable hook-event log. Surfaces in the HookEventsPage and feeds
+-- the stop-hook pipeline / write-guard / filing-enforcement deciders.
+CREATE TABLE hook_event (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
+    stream_id TEXT REFERENCES streams(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    session_id TEXT,
+    payload_json TEXT NOT NULL,
+    received_at TEXT NOT NULL
+);
+CREATE INDEX idx_hook_event_thread_time ON hook_event(thread_id, received_at DESC);
+CREATE INDEX idx_hook_event_kind_time ON hook_event(kind, received_at DESC);
+
+-- Per-thread agent status snapshot. Updated on hook events and pane
+-- lifecycle. One row per (thread_id, pane_target).
+CREATE TABLE agent_status (
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    pane_target TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('idle', 'running', 'awaiting_user', 'stopped', 'error')),
+    detail TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (thread_id, pane_target)
+);
+CREATE INDEX idx_agent_status_state ON agent_status(state, updated_at DESC);
+
+-- Work-item commit attribution: which commits the agent produced
+-- under a given item. Powers the "commits this item shipped" rail.
+CREATE TABLE work_item_commit (
+    work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+    commit_sha TEXT NOT NULL,
+    stream_id TEXT REFERENCES streams(id) ON DELETE SET NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (work_item_id, commit_sha)
+);
+CREATE INDEX idx_work_item_commit_sha ON work_item_commit(commit_sha);
+
+-- Work-item effort tracking. An "effort" is one continuous push of
+-- agent work on an item — bounded by snapshots at start and end. The
+-- effort_file rows attribute concrete file changes.
+CREATE TABLE work_item_effort (
+    id TEXT PRIMARY KEY,
+    work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    start_snapshot_id INTEGER REFERENCES file_snapshot(id) ON DELETE SET NULL,
+    end_snapshot_id INTEGER REFERENCES file_snapshot(id) ON DELETE SET NULL,
+    summary TEXT
+);
+CREATE INDEX idx_work_item_effort_item ON work_item_effort(work_item_id, started_at DESC);
+CREATE INDEX idx_work_item_effort_thread ON work_item_effort(thread_id, started_at DESC);
+
+CREATE TABLE work_item_effort_file (
+    effort_id TEXT NOT NULL REFERENCES work_item_effort(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    change_kind TEXT NOT NULL CHECK (change_kind IN ('created', 'updated', 'deleted')),
+    PRIMARY KEY (effort_id, path)
+);
+
+CREATE TABLE work_item_effort_turn (
+    effort_id TEXT NOT NULL REFERENCES work_item_effort(id) ON DELETE CASCADE,
+    turn_id TEXT NOT NULL REFERENCES agent_turn(id) ON DELETE CASCADE,
+    PRIMARY KEY (effort_id, turn_id)
+);
+
+-- Per-thread last-seen wiki-note timestamps for the freshness badge.
+CREATE TABLE wiki_note_thread_update (
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    slug TEXT NOT NULL REFERENCES wiki_note(slug) ON DELETE CASCADE,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (thread_id, slug)
+);

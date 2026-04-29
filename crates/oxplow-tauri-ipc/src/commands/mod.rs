@@ -12,6 +12,7 @@ pub mod branch;
 pub mod code_quality;
 pub mod followup;
 pub mod git;
+pub mod hooks;
 pub mod log;
 pub mod notes;
 pub mod page_visit;

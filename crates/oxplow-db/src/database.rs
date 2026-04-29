@@ -143,6 +143,13 @@ mod tests {
             "code_quality_scan",
             "code_quality_finding",
             "file_snapshot",
+            "hook_event",
+            "agent_status",
+            "work_item_commit",
+            "work_item_effort",
+            "work_item_effort_file",
+            "work_item_effort_turn",
+            "wiki_note_thread_update",
         ];
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
