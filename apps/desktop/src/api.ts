@@ -1651,7 +1651,7 @@ function desktopApi(): DesktopApi {
  * should eventually migrate off this onto `commands.*` from
  * `tauri-bridge`, at which point this export can go away.
  */
-export function legacyApi(): DesktopApi {
+export function desktopBridge(): DesktopApi {
   return desktopApi();
 }
 

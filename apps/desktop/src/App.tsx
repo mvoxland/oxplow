@@ -24,7 +24,7 @@ import {
   deleteWorkspacePath,
   getCurrentStream,
   getWorkspaceContext,
-  legacyApi,
+  desktopBridge,
   listStreams,
   probeDaemon,
   readWorkspaceFile,
@@ -1380,14 +1380,14 @@ export function App() {
 
   useEffect(() => {
     if (!isElectron) return;
-    void legacyApi().setNativeMenu(menuGroupSnapshots).catch((error) => {
+    void desktopBridge().setNativeMenu(menuGroupSnapshots).catch((error) => {
       logUi("error", "failed to update native menu", { error: String(error) });
     });
   }, [isElectron, menuGroupSnapshots]);
 
   useEffect(() => {
     if (!isElectron) return;
-    return legacyApi().onMenuCommand((commandId) => {
+    return desktopBridge().onMenuCommand((commandId) => {
       const command = commandMap.get(commandId);
       if (!command || !command.run) return;
       // React 18 only auto-flushes effects synchronously for discrete
