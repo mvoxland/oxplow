@@ -2,7 +2,7 @@ import { commands } from "./tauri-bridge/generated/bindings.js";
 import { listen } from "@tauri-apps/api/event";
 import type { DesktopApi, OxplowEvent } from "./api-types.js";
 
-// -- Legacy adapter helpers (formerly in legacy-bridge.ts). Inlined
+// -- Legacy adapter helpers (now lives here). Inlined
 // here so the legacy compatibility layer lives in a single file.
 
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
@@ -398,7 +398,7 @@ export type { OxplowEvent } from "./api-types.js";
 export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry, RemoteBranchEntry } from "./api-types.js";
 
 // Stream / Thread types re-exported from the Tauri bindings. The
-// legacy adapter (`legacy-bridge.ts`) augments runtime values with
+// adapter at the bottom of this file augments runtime values with
 // nested `panes` / `resume` sub-objects so any UI code that reads
 // those keeps working even though the type itself doesn't model them
 // explicitly. New code should reach for the flat fields
