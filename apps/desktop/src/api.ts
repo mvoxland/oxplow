@@ -1,3 +1,4 @@
+import { buildLegacyAdapter } from "./legacy-bridge.js";
 import type { DesktopApi, OxplowEvent } from "./legacy-ipc-contract.js";
 
 export type { OxplowEvent } from "./legacy-ipc-contract.js";
@@ -1293,11 +1294,22 @@ export function subscribeHookEvents(
   });
 }
 
+// Lazy-built adapter that maps the legacy DesktopApi method shape to
+// real Tauri `commands.*` calls. Constructed once on first access so
+// any module that imports this file picks up the same instance.
+let cachedAdapter: DesktopApi | null = null;
 function desktopApi(): DesktopApi {
-  if (!window.oxplowApi) {
-    throw new Error("oxplow Electron API is unavailable");
+  if (!cachedAdapter) {
+    cachedAdapter = buildLegacyAdapter();
+    // Keep `window.oxplowApi` working for legacy direct-access call
+    // sites (logger.ts / lsp.ts / TerminalPane / App.tsx). Each of
+    // those needs to migrate to the bridge eventually; until then,
+    // they read from this object.
+    if (typeof window !== "undefined") {
+      window.oxplowApi = cachedAdapter;
+    }
   }
-  return window.oxplowApi;
+  return cachedAdapter;
 }
 
 /**

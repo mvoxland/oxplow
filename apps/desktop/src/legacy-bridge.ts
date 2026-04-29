@@ -367,13 +367,3 @@ export function buildLegacyAdapter(): DesktopApi {
   }) as DesktopApi;
 }
 
-/**
- * Install the legacy adapter on `window.oxplowApi`. Call once at app
- * boot, before any module that calls `desktopApi()` runs. Idempotent.
- */
-export function installLegacyAdapter(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any;
-  if (w.oxplowApi) return;
-  w.oxplowApi = buildLegacyAdapter();
-}

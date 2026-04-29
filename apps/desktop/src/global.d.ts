@@ -1,8 +1,9 @@
-// Ambient declarations for globals the legacy UI code expects.
-// `window.oxplowApi` was the Electron preload's injected facade;
-// under Tauri it doesn't exist, but the typecheck still references
-// it through `desktopApi()`. The shim throws at runtime — declarations
-// here only quiet TS.
+// Globals carried over from the Electron-era preload shim. Both are
+// scheduled for removal as the legacy components migrate off the
+// `desktopApi()` helper in `api.ts`. `oxplowApi` is now populated
+// lazily by `api.ts` on first access (mirrors `cachedAdapter`) so
+// any direct `window.oxplowApi.*` call still works even though
+// nothing installs it eagerly.
 
 import type { DesktopApi } from "./legacy-ipc-contract";
 
