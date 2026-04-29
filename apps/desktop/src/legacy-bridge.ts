@@ -209,7 +209,44 @@ export function buildLegacyAdapter(): DesktopApi {
     localBlame: async (path: string, diskText: string) =>
       unwrap(await commands.localBlame(path, diskText)),
     listAllRefs: async () => unwrap(await commands.listAllRefs()),
-    listGitRefs: async () => unwrap(await commands.listAllRefs()),
+    /// The legacy `listGitRefs` shape was a UI-flavored grouping
+    /// (local branches as BranchRef[], remotes grouped per remote,
+    /// recent branches by name). The new `commands.listAllRefs`
+    /// returns the raw RefOption flat lists. Transform here so
+    /// existing UI code keeps working — once each consumer migrates
+    /// to the new shape this transform can go away.
+    listGitRefs: async () => {
+      const raw = unwrap(await commands.listAllRefs());
+      const localBranches = raw.locals.map((r) => ({
+        kind: "local" as const,
+        name: r.label,
+        ref: r.ref,
+      }));
+      // Group remotes by the leading "<remote>/" segment.
+      const byRemote = new Map<string, Array<{ kind: "remote"; name: string; ref: string; remote: string }>>();
+      for (const r of raw.remotes) {
+        const slash = r.label.indexOf("/");
+        const remote = slash >= 0 ? r.label.slice(0, slash) : "origin";
+        const name = slash >= 0 ? r.label.slice(slash + 1) : r.label;
+        if (!byRemote.has(remote)) byRemote.set(remote, []);
+        byRemote.get(remote)!.push({ kind: "remote", name, ref: r.ref, remote });
+      }
+      return {
+        local: localBranches,
+        remote: Array.from(byRemote.values()).flat(),
+        remotes: Array.from(byRemote.entries()).map(([remote, branches]) => ({
+          remote,
+          branches,
+        })),
+        tags: raw.tags.map((t) => ({
+          name: t.label,
+          ref: t.ref,
+        })),
+        // Naive "recent" = first 5 local branches; real recency would
+        // need a separate API. The picker treats this as a hint.
+        recent: localBranches.slice(0, 5).map((b) => b.name),
+      };
+    },
     listFileCommits: async (path: string, limit?: number) =>
       unwrap(await commands.listFileCommits(path, limit ?? null)),
     listRecentRemoteBranches: async (limit?: number) =>
@@ -220,7 +257,20 @@ export function buildLegacyAdapter(): DesktopApi {
       unwrap(await commands.searchWorkspaceText(query, limit ?? null)),
     getBranchChanges: async (baseRef: string) =>
       unwrap(await commands.getBranchChanges(baseRef)),
-    getChangeScopes: async () => unwrap(await commands.getChangeScopes()),
+    getChangeScopes: async () => {
+      const raw = unwrap(await commands.getChangeScopes());
+      // Map snake_case from the bindings to the camelCase legacy
+      // shape the renderer expects, plus zero-fill the legacy arrays
+      // (which now only get populated by `getBranchChanges`).
+      return {
+        staged: [] as never[],
+        unstaged: [] as never[],
+        currentBranch: raw.current_branch ?? undefined,
+        branchBase: raw.branch_base ?? undefined,
+        upstream: raw.upstream ?? undefined,
+        onDefaultBranch: raw.on_default_branch,
+      };
+    },
     listAdoptableWorktrees: async () => unwrap(await commands.listAdoptableWorktrees()),
     listSiblingWorktrees: async () => unwrap(await commands.listSiblingWorktrees()),
     getCommitDetail: async (sha: string) => unwrap(await commands.getCommitDetail(sha)),

@@ -1,4 +1,3 @@
-// @ts-nocheck — pending Tauri migration; legacy types drifted from the bridge bindings. Each call site needs to be ported to apps/desktop/src/tauri-bridge.
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1006,7 +1005,14 @@ function FileHistoryModal({
         state.commits.map((commit) => (
           <button type="button"
             key={commit.sha}
-            onDoubleClick={() => onOpenDiff(commit.sha, commit.parents[0]?.sha ?? null)}
+            onDoubleClick={() => {
+              const parent = commit.parents[0];
+              const parentSha =
+                typeof parent === "string"
+                  ? parent
+                  : (parent as { sha?: string } | undefined)?.sha ?? null;
+              onOpenDiff(commit.sha, parentSha);
+            }}
             title="Double-click to open diff"
             style={modalRowStyle}
           >
