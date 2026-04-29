@@ -28,6 +28,25 @@ fn main() {
         }
     });
 
+    // Start the periodic file-snapshot capture loop against the
+    // project root. Runs for the lifetime of the daemon; events
+    // funnel into the file_snapshot table so cross-turn diffs are
+    // available even before content-addressed blob storage lands.
+    let snap_store = state.snapshot_store.clone();
+    let project_dir = state.layout.project_dir.clone();
+    let max_bytes = state
+        .config
+        .read()
+        .map(|c| c.snapshot_max_file_bytes)
+        .unwrap_or(5 * 1024 * 1024);
+    oxplow_app::snapshot_capture::SnapshotCaptureService::new(
+        snap_store,
+        project_dir,
+        None,
+        max_bytes,
+    )
+    .spawn();
+
     let specta = specta_builder();
 
     tauri::Builder::default()
