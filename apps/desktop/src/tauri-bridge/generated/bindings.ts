@@ -164,6 +164,19 @@ export const commands = {
 	getAheadBehind: (base: string, head: string) => typedError<AheadBehind, IpcError>(__TAURI_INVOKE("get_ahead_behind", { base, head })),
 	appendToGitignore: (entry: string) => typedError<null, IpcError>(__TAURI_INVOKE("append_to_gitignore", { entry })),
 	restorePath: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("restore_path", { path })),
+	gitFetch: (remote: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_fetch", { remote })),
+	gitPull: () => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull")),
+	gitPullRemoteIntoCurrent: (remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull_remote_into_current", { remote, branch })),
+	gitPush: () => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push")),
+	gitPushCurrentTo: (remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push_current_to", { remote, branch })),
+	gitMergeInto: (source: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_merge_into", { source })),
+	gitRebaseOnto: (onto: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_rebase_onto", { onto })),
+	gitCommitAll: (message: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_commit_all", { message })),
+	gitAddPath: (path: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_add_path", { path })),
+	listAllRefs: () => typedError<GroupedGitRefs, IpcError>(__TAURI_INVOKE("list_all_refs")),
+	listRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError>(__TAURI_INVOKE("list_recent_remote_branches", { limit })),
+	listFileCommits: (path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { path, limit })),
+	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
 	getGitLog: (limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { limit, all })),
 	getCommitDetail: (sha: string) => typedError<{
 	sha: string,
@@ -387,7 +400,27 @@ export type GitLogResult = {
 	commits: GitLogCommit[],
 };
 
+/**
+ *  Result of a git sync operation.
+ * 
+ *  `success` is true iff the underlying `git` exited 0. `stdout` /
+ *  `stderr` are captured verbatim; the UI surfaces them in a toast or
+ *  the operation log.
+ */
+export type GitOpResult = {
+	success: boolean,
+	stdout: string,
+	stderr: string,
+	status: number | null,
+};
+
 export type GitOperationKind = "merge" | "rebase" | "cherry-pick" | "revert";
+
+export type GroupedGitRefs = {
+	locals: RefOption[],
+	remotes: RefOption[],
+	tags: RefOption[],
+};
 
 /**
  *  Frontend-facing error envelope.
@@ -421,6 +454,21 @@ export type PageVisit = {
 export type PageVisitDay = {
 	day: string,
 	count: number,
+};
+
+export type RefKind = "local" | "remote" | "tag" | "head";
+
+export type RefOption = {
+	label: string,
+	ref: string,
+	kind: RefKind,
+};
+
+export type RemoteBranchEntry = {
+	ref_name: string,
+	short_name: string,
+	last_commit_at: number,
+	last_commit_subject: string,
 };
 
 export type RenameStreamRequest = {
