@@ -9,9 +9,11 @@ mod branch;
 mod branch_ops;
 mod conflict;
 pub mod log;
+pub mod refs;
 mod refs_watch;
 mod repo;
 pub mod status;
+pub mod sync;
 pub mod workspace;
 mod worktree;
 
@@ -25,9 +27,17 @@ pub use log::{
     get_commit_detail, get_git_log, CommitDetail, CommitDetailFile, GitLogCommit, GitLogOptions,
     GitLogResult,
 };
+pub use refs::{
+    list_all_refs, list_file_commits, list_recent_remote_branches, read_file_at_ref,
+    GroupedGitRefs, RefKind, RefOption, RemoteBranchEntry,
+};
 pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
 pub use repo::{detect_current_branch, is_git_repo, is_git_worktree};
 pub use status::{list_git_statuses, status_for_path};
+pub use sync::{
+    add_path, commit_all, fetch, merge, pull, pull_remote_into_current, push, push_current_to,
+    rebase, GitOpResult,
+};
 pub use workspace::{
     create_workspace_directory, create_workspace_file, delete_workspace_path,
     list_workspace_entries, list_workspace_files, read_workspace_file, rename_workspace_path,
