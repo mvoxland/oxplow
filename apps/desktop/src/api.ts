@@ -4,35 +4,14 @@ import type { DesktopApi, OxplowEvent } from "./legacy-ipc-contract.js";
 export type { OxplowEvent } from "./legacy-ipc-contract.js";
 export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry, RemoteBranchEntry } from "./legacy-ipc-contract.js";
 
-export interface Stream {
-  id: string;
-  title: string;
-  summary: string;
-  branch: string;
-  branch_ref: string;
-  branch_source: "local" | "remote" | "new";
-  worktree_path: string;
-  kind: "primary" | "worktree";
-  created_at: string;
-  updated_at: string;
-  custom_prompt: string | null;
-  panes: { working: string; talking: string };
-  resume: { working_session_id: string; talking_session_id: string };
-}
-
-export interface Thread {
-  id: string;
-  stream_id: string;
-  title: string;
-  status: "active" | "queued";
-  sort_index: number;
-  created_at: string;
-  updated_at: string;
-  pane_target: string;
-  resume_session_id: string;
-  custom_prompt: string | null;
-  closed_at: string | null;
-}
+// Stream / Thread types re-exported from the Tauri bindings. The
+// legacy adapter (`legacy-bridge.ts`) augments runtime values with
+// nested `panes` / `resume` sub-objects so any UI code that reads
+// those keeps working even though the type itself doesn't model them
+// explicitly. New code should reach for the flat fields
+// (`working_pane` / `talking_pane` / `*_session_id`) directly.
+import type { Stream, Thread } from "./tauri-bridge/index.js";
+export type { Stream, Thread };
 
 export interface ThreadState {
   selectedThreadId: string | null;
@@ -40,36 +19,18 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
-export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
-
-export interface WorkItem {
-  id: string;
-  thread_id: string | null;
-  parent_id: string | null;
-  kind: WorkItemKind;
-  title: string;
-  description: string;
-  acceptance_criteria: string | null;
-  status: WorkItemStatus;
-  priority: WorkItemPriority;
-  sort_index: number;
-  created_by: "user" | "agent" | "system";
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  note_count: number;
-  /** Semantic origin of the row: `"agent"` for items the agent explicitly
-   *  created via MCP, `"user"` for items the human filed, or `null` for
-   *  legacy rows (including pre-v29 `agent-auto` rows that the store
-   *  maps to null on read). See `WorkItemAuthor` in the persistence store. */
-  author: "user" | "agent" | null;
-  /** Backlog grouping bucket. Free text. Persists across promote/demote. */
-  category: string | null;
-  /** Backlog tags (comma-separated, normalized server-side). */
-  tags: string | null;
-}
+// Work-item types now come from the Tauri bindings. The bindings
+// emit a `deleted_at` field that the legacy interface didn't model;
+// readers either ignore it or filter on it (legacy stores already
+// excluded soft-deleted rows in their list queries). New code can
+// read `deleted_at` directly when needed.
+import type {
+  WorkItem,
+  WorkItemKind,
+  WorkItemStatus,
+  WorkItemPriority,
+} from "./tauri-bridge/index.js";
+export type { WorkItem, WorkItemKind, WorkItemStatus, WorkItemPriority };
 
 export interface WorkNote {
   id: string;
@@ -79,16 +40,8 @@ export interface WorkNote {
   created_at: string;
 }
 
-export interface WorkItemEvent {
-  id: string;
-  thread_id: string;
-  item_id: string | null;
-  event_type: string;
-  actor_kind: "user" | "agent" | "system";
-  actor_id: string;
-  payload_json: string;
-  created_at: string;
-}
+import type { WorkItemEvent } from "./tauri-bridge/index.js";
+export type { WorkItemEvent };
 
 export type SnapshotSource =
   | "task-start"
