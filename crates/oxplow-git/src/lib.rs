@@ -21,7 +21,10 @@ mod worktree;
 
 pub use blame::{git_blame, parse_porcelain, BlameLine, BLAME_ZERO_SHA};
 pub use branch::{list_branches, BranchRef, BranchRefKind};
-pub use branch_changes::{list_branch_changes, BranchChangeEntry, BranchChanges, ChangeKind};
+pub use branch_changes::{
+    get_change_scopes, list_branch_changes, BranchChangeEntry, BranchChanges, ChangeKind,
+    ChangeScopes,
+};
 pub use branch_ops::{
     append_to_gitignore, delete_branch, detect_default_branch, get_ahead_behind,
     get_commits_ahead_of, rename_branch, restore_path, AheadBehind, BranchOpError,

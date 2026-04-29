@@ -189,6 +189,7 @@ export const commands = {
 	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
 	gitBlame: (path: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("git_blame", { path })),
 	getBranchChanges: (baseRef: string) => typedError<BranchChanges, IpcError>(__TAURI_INVOKE("get_branch_changes", { baseRef })),
+	getChangeScopes: () => typedError<ChangeScopes, IpcError>(__TAURI_INVOKE("get_change_scopes")),
 	/**
 	 *  Land an envelope from the hook subprocess. Drives the agent_turn /
 	 *  agent_status state machine inside HookIngestService.
@@ -377,6 +378,14 @@ export type BranchRef = {
 export type BranchRefKind = "local" | "remote";
 
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
+
+// "Where am I?" branch context the UI shows above the diff/log views.
+export type ChangeScopes = {
+	current_branch: string | null,
+	branch_base: string | null,
+	upstream: string | null,
+	on_default_branch: boolean,
+};
 
 export type CodeQualityFinding = {
 	id: number,
