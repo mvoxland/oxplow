@@ -5,33 +5,271 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	appVersion: () => typedError<AppVersion, IpcError>(__TAURI_INVOKE("app_version")),
+	// Liveness check the UI uses to verify the daemon is reachable.
+	ping: () => typedError<string, IpcError>(__TAURI_INVOKE("ping")),
 	listStreams: () => typedError<Stream[], IpcError>(__TAURI_INVOKE("list_streams")),
 	ensurePrimary: () => typedError<Stream, IpcError>(__TAURI_INVOKE("ensure_primary")),
 	createWorktree: (req: CreateWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("create_worktree", { req })),
 	deleteStream: (id: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_stream", { id })),
+	/**
+	 *  Returns the primary stream — the project root. Useful for any UI
+	 *  path that needs to know "what does the user think of as 'this'
+	 *  project?" without enumerating the full list.
+	 */
+	getPrimaryStream: () => typedError<{
+	id: StreamId,
+	kind: StreamKind,
+	title: string,
+	summary: string,
+	branch: string,
+	branch_ref: string,
+	branch_source: string,
+	worktree_path: string,
+	working_pane: string,
+	talking_pane: string,
+	working_session_id: string,
+	talking_session_id: string,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+} | null, IpcError>(__TAURI_INVOKE("get_primary_stream")),
 	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),
+	getThread: (threadId: ThreadId) => typedError<{
+	id: ThreadId,
+	stream_id: StreamId,
+	title: string,
+	status: ThreadStatus,
+	sort_index: number,
+	// Which pane (working/talking) is the agent's primary attach point.
+	pane_target: string,
+	resume_session_id: string,
+	summary: string,
+	summary_updated_at: Timestamp | null,
+	/**
+	 *  Timestamp when the thread was closed (status transitions to
+	 *  `Closed`). `None` for active/queued threads.
+	 */
+	closed_at: Timestamp | null,
+	/**
+	 *  Per-thread custom prompt appended to the agent's system message.
+	 *  `None` when unset; `Some("")` is distinct (empty override).
+	 */
+	custom_prompt: string | null,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+} | null, IpcError>(__TAURI_INVOKE("get_thread", { threadId })),
+	upsertThread: (thread: Thread) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_thread", { thread })),
+	deleteThread: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_thread", { threadId })),
 	listWorkItemsForThread: (threadId: ThreadId) => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_work_items_for_thread", { threadId })),
+	getWorkItem: (id: WorkItemId) => typedError<{
+	id: WorkItemId,
+	// `None` when the item is on the project-wide backlog.
+	thread_id: ThreadId | null,
+	parent_id: WorkItemId | null,
+	kind: WorkItemKind,
+	title: string,
+	description: string,
+	acceptance_criteria: string | null,
+	status: WorkItemStatus,
+	priority: WorkItemPriority,
+	sort_index: number,
+	created_by: WorkItemActorKind,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+	completed_at: Timestamp | null,
+	deleted_at: Timestamp | null,
+	note_count: number,
+	// Legacy rows have `None`; v29+ rows are always populated.
+	author: WorkItemAuthor | null,
+	// Free-text grooming bucket used by the Backlog page's group-by.
+	category: string | null,
+	// Comma-separated tags used by the Backlog page filter chips.
+	tags: string | null,
+} | null, IpcError>(__TAURI_INVOKE("get_work_item", { id })),
+	upsertWorkItem: (item: WorkItem) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_work_item", { item })),
+	deleteWorkItem: (id: WorkItemId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_item", { id })),
 	listBacklog: () => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_backlog")),
+	addWorkNote: (workItemId: WorkItemId, body: string, author: string) => typedError<WorkNote, IpcError>(__TAURI_INVOKE("add_work_note", { workItemId, body, author })),
+	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<WorkNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
+	listWorkNotes: (workItemId: WorkItemId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_work_notes", { workItemId })),
+	listThreadNotes: (threadId: ThreadId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
+	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
+	listWikiNotes: () => typedError<WikiNote[], IpcError>(__TAURI_INVOKE("list_wiki_notes")),
+	getWikiNote: (slug: string) => typedError<{
+	slug: string,
+	title: string,
+	body_path: string,
+	body_excerpt: string,
+	body_size_bytes: number,
+	file_refs: string[],
+	related_notes: string[],
+	created_at: Timestamp,
+	updated_at: Timestamp,
+} | null, IpcError>(__TAURI_INVOKE("get_wiki_note", { slug })),
+	upsertWikiNote: (note: WikiNote) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_wiki_note", { note })),
+	deleteWikiNote: (slug: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_wiki_note", { slug })),
+	searchWikiTitles: (query: string, limit: number) => typedError<WikiNote[], IpcError>(__TAURI_INVOKE("search_wiki_titles", { query, limit })),
+	searchWikiBodies: (query: string, limit: number) => typedError<WikiNoteSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
+	recordPageVisit: (pageKind: string, pageId: string, durationMs: number | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, durationMs })),
+	listRecentPageVisits: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit })),
+	topVisitedPages: (limit: number) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit })),
+	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
+	countPageVisitsByDay: (days: number) => typedError<PageVisitDay[], IpcError>(__TAURI_INVOKE("count_page_visits_by_day", { days })),
+	recordUsage: (kind: string, payload: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never }) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payload })),
+	listRecentUsage: (limit: number) => typedError<UsageEvent[], IpcError>(__TAURI_INVOKE("list_recent_usage", { limit })),
+	listCodeQualityScans: (limit: number) => typedError<CodeQualityScan[], IpcError>(__TAURI_INVOKE("list_code_quality_scans", { limit })),
+	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
+	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
+	listBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_branches")),
+	getDefaultBranch: () => typedError<string | null, IpcError>(__TAURI_INVOKE("get_default_branch")),
+	renameBranch: (from: string, to: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_branch", { from, to })),
+	deleteBranch: (branch: string, force: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("delete_branch", { branch, force })),
+	// Filter helper for the UI that wants only locals or only remotes.
+	listLocalBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_local_branches")),
+	getRepoConflictState: () => typedError<RepoConflictState, IpcError>(__TAURI_INVOKE("get_repo_conflict_state")),
+	getAheadBehind: (base: string, head: string) => typedError<AheadBehind, IpcError>(__TAURI_INVOKE("get_ahead_behind", { base, head })),
+	appendToGitignore: (entry: string) => typedError<null, IpcError>(__TAURI_INVOKE("append_to_gitignore", { entry })),
+	restorePath: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("restore_path", { path })),
+	getGitLog: (limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { limit, all })),
+	getCommitDetail: (sha: string) => typedError<{
+	sha: string,
+	short_sha: string,
+	author: string,
+	email: string,
+	timestamp_secs: number,
+	subject: string,
+	body: string,
+	parents: string[],
+	files: CommitDetailFile[],
+} | null, IpcError>(__TAURI_INVOKE("get_commit_detail", { sha })),
+	getCommitsAheadOf: (base: string, head: string, limit: number) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("get_commits_ahead_of", { base, head, limit })),
+	listWorkspaceEntries: (relativePath: string) => typedError<WorkspaceEntry[], IpcError>(__TAURI_INVOKE("list_workspace_entries", { relativePath })),
+	listWorkspaceFiles: () => typedError<WorkspaceIndexedFile[], IpcError>(__TAURI_INVOKE("list_workspace_files")),
+	readWorkspaceFile: (relativePath: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("read_workspace_file", { relativePath })),
+	writeWorkspaceFile: (relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("write_workspace_file", { relativePath, content })),
+	createWorkspaceFile: (relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("create_workspace_file", { relativePath, content })),
+	createWorkspaceDirectory: (relativePath: string) => typedError<string, IpcError>(__TAURI_INVOKE("create_workspace_directory", { relativePath })),
+	renameWorkspacePath: (fromPath: string, toPath: string) => typedError<[string, string], IpcError>(__TAURI_INVOKE("rename_workspace_path", { fromPath, toPath })),
+	deleteWorkspacePath: (relativePath: string) => typedError<string, IpcError>(__TAURI_INVOKE("delete_workspace_path", { relativePath })),
+	getWorkspaceStatusSummary: () => typedError<WorkspaceStatusSummary, IpcError>(__TAURI_INVOKE("get_workspace_status_summary")),
+	listBackgroundTasks: () => typedError<BackgroundTask[], IpcError>(__TAURI_INVOKE("list_background_tasks")),
+	getBackgroundTask: (id: string) => typedError<{
+	id: string,
+	kind: BackgroundTaskKind,
+	label: string,
+	detail: string | null,
+	// 0..=1 for determinate, `None` for indeterminate.
+	progress: number | null,
+	status: BackgroundTaskStatus,
+	started_at: number,
+	ended_at: number | null,
+	error: string | null,
+	// Producer-supplied opaque JSON attached at complete/fail.
+	result: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never } | null,
+} | null, IpcError>(__TAURI_INVOKE("get_background_task", { id })),
+	startBackgroundTask: (kind: BackgroundTaskKind, label: string, detail: string | null) => typedError<BackgroundTask, IpcError>(__TAURI_INVOKE("start_background_task", { kind, label, detail })),
+	completeBackgroundTask: (id: string, result: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: ("Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Vec<Value> }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never })[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: Map<string, Value> }) & { Array?: never; Bool?: never; Number?: never; String?: never } } }) & { Array?: never; Bool?: never; Number?: never; String?: never } | null) => typedError<null, IpcError>(__TAURI_INVOKE("complete_background_task", { id, result })),
+	failBackgroundTask: (id: string, error: string) => typedError<null, IpcError>(__TAURI_INVOKE("fail_background_task", { id, error })),
+	updateBackgroundTask: (id: string, label: string | null, detail: string | null, progress: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("update_background_task", { id, label, detail, progress })),
+	listFollowups: (threadId: ThreadId) => typedError<Followup[], IpcError>(__TAURI_INVOKE("list_followups", { threadId })),
+	addFollowup: (threadId: ThreadId, body: string) => typedError<Followup, IpcError>(__TAURI_INVOKE("add_followup", { threadId, body })),
+	removeFollowup: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_followup", { id })),
+	clearFollowupsForThread: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("clear_followups_for_thread", { threadId })),
 	/**
 	 *  Open an external URL in a sandboxed `WebviewWindow`.
 	 * 
 	 *  Replaces the legacy `<webview>` tag flow. The new window inherits
 	 *  the `external-url` capability defined in
 	 *  `apps/desktop/src-tauri/capabilities/external-url.json`, which
-	 *  grants zero oxplow commands and zero plugin permissions — the
-	 *  embedded content can't call back into the host.
-	 * 
-	 *  `url` must be `http(s)://`. Anything else returns an `INVALID`
-	 *  IpcError; the UI is expected to validate before calling, but the
-	 *  Rust side enforces the invariant since the URL ultimately controls
-	 *  what the new webview loads.
+	 *  grants zero oxplow commands and zero plugin permissions.
 	 */
 	openExternalUrl: (url: string) => typedError<string, IpcError>(__TAURI_INVOKE("open_external_url", { url })),
+	/**
+	 *  Read clipboard text via the OS. Routed through Rust so we don't
+	 *  have to grant the renderer the broader clipboard plugin permission.
+	 */
+	clipboardReadText: () => typedError<string, IpcError>(__TAURI_INVOKE("clipboard_read_text")),
 };
 
 /* Types */
+export type AheadBehind = {
+	ahead: number,
+	behind: number,
+};
+
 export type AppVersion = {
 	version: string,
+};
+
+export type BackgroundTask = {
+	id: string,
+	kind: BackgroundTaskKind,
+	label: string,
+	detail: string | null,
+	// 0..=1 for determinate, `None` for indeterminate.
+	progress: number | null,
+	status: BackgroundTaskStatus,
+	started_at: number,
+	ended_at: number | null,
+	error: string | null,
+	// Producer-supplied opaque JSON attached at complete/fail.
+	result: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never } | null,
+};
+
+export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync";
+
+export type BackgroundTaskStatus = "running" | "done" | "failed";
+
+export type BranchRef = {
+	kind: BranchRefKind,
+	name: string,
+	// Full ref name (e.g. `refs/heads/main`).
+	ref_: string,
+	// Remote name for `kind = Remote`; `None` for locals.
+	remote: string | null,
+};
+
+export type BranchRefKind = "local" | "remote";
+
+export type CodeQualityFinding = {
+	id: number,
+	scan_id: number,
+	path: string,
+	start_line: number,
+	end_line: number,
+	kind: string,
+	metric_value: number,
+	extra_json: string | null,
+};
+
+export type CodeQualityScan = {
+	id: number,
+	tool: string,
+	scope: string,
+	status: CodeQualityScanStatus,
+	started_at: Timestamp,
+	ended_at: Timestamp | null,
+	error: string | null,
+};
+
+export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
+
+export type CommitDetail = {
+	sha: string,
+	short_sha: string,
+	author: string,
+	email: string,
+	timestamp_secs: number,
+	subject: string,
+	body: string,
+	parents: string[],
+	files: CommitDetailFile[],
+};
+
+export type CommitDetailFile = {
+	path: string,
+	additions: number,
+	deletions: number,
+	status: string,
 };
 
 export type CreateWorktreeRequest = {
@@ -40,6 +278,41 @@ export type CreateWorktreeRequest = {
 	branch: string,
 	branchSource: string,
 };
+
+export type FileSnapshot = {
+	id: number,
+	stream_id: StreamId | null,
+	path: string,
+	blob_hash: string | null,
+	size_bytes: number,
+	captured_at: Timestamp,
+	oversize: boolean,
+};
+
+export type Followup = {
+	id: string,
+	thread_id: ThreadId,
+	body: string,
+	created_at: number,
+};
+
+export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
+
+export type GitLogCommit = {
+	sha: string,
+	short_sha: string,
+	author: string,
+	email: string,
+	timestamp_secs: number,
+	subject: string,
+	parents: string[],
+};
+
+export type GitLogResult = {
+	commits: GitLogCommit[],
+};
+
+export type GitOperationKind = "merge" | "rebase" | "cherry-pick" | "revert";
 
 /**
  *  Frontend-facing error envelope.
@@ -52,6 +325,28 @@ export type IpcError = {
 	code: string,
 	message: string,
 	cause: string | null,
+};
+
+export type NoteId = string;
+
+export type PageVisit = {
+	id: string,
+	page_kind: string,
+	page_id: string,
+	visited_at: Timestamp,
+	duration_ms: number | null,
+};
+
+export type PageVisitDay = {
+	day: string,
+	count: number,
+};
+
+export type RepoConflictState = {
+	// Active long-running git op, or `None` when the worktree is clean.
+	operation: GitOperationKind | null,
+	// Number of paths reported as unmerged by `git status --porcelain`.
+	conflicted_count: number,
 };
 
 export type Stream = {
@@ -116,6 +411,38 @@ export type ThreadStatus = "active" | "queued" | "closed";
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
 
+export type UsageEvent = {
+	id: string,
+	kind: string,
+	payload_json: string,
+	occurred_at: Timestamp,
+};
+
+export type VisitedPage = {
+	page_kind: string,
+	page_id: string,
+	visit_count: number,
+};
+
+export type WikiNote = {
+	slug: string,
+	title: string,
+	body_path: string,
+	body_excerpt: string,
+	body_size_bytes: number,
+	file_refs: string[],
+	related_notes: string[],
+	created_at: Timestamp,
+	updated_at: Timestamp,
+};
+
+export type WikiNoteSearchHit = {
+	slug: string,
+	title: string,
+	snippet: string,
+	updated_at: Timestamp,
+};
+
 /**
  *  A work item row.
  * 
@@ -174,6 +501,48 @@ export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
 export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
 
 export type WorkItemStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
+
+/**
+ *  A note attached to either a work item or a thread (mutually
+ *  exclusive — enforced at the DB CHECK constraint).
+ */
+export type WorkNote = {
+	id: NoteId,
+	work_item_id: WorkItemId | null,
+	thread_id: ThreadId | null,
+	body: string,
+	author: string,
+	created_at: Timestamp,
+};
+
+export type WorkspaceEntry = {
+	name: string,
+	path: string,
+	kind: WorkspaceEntryKind,
+	git_status: GitFileStatus | null,
+	has_changes: boolean,
+};
+
+export type WorkspaceEntryKind = "file" | "directory";
+
+export type WorkspaceFile = {
+	path: string,
+	content: string,
+};
+
+export type WorkspaceIndexedFile = {
+	path: string,
+	git_status: GitFileStatus | null,
+};
+
+export type WorkspaceStatusSummary = {
+	modified: number,
+	added: number,
+	deleted: number,
+	renamed: number,
+	untracked: number,
+	total: number,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
