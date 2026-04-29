@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import type { TerminalEvent } from "../legacy-file-session.js";
+import type { TerminalEvent } from "../editor-session.js";
 import { legacyApi } from "../api.js";
 import { logUi } from "../logger.js";
 import {
