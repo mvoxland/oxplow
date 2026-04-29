@@ -1230,15 +1230,19 @@ let cachedAdapter: DesktopApi | null = null;
 function desktopApi(): DesktopApi {
   if (!cachedAdapter) {
     cachedAdapter = buildLegacyAdapter();
-    // Keep `window.oxplowApi` working for legacy direct-access call
-    // sites (logger.ts / lsp.ts / TerminalPane / App.tsx). Each of
-    // those needs to migrate to the bridge eventually; until then,
-    // they read from this object.
-    if (typeof window !== "undefined") {
-      window.oxplowApi = cachedAdapter;
-    }
   }
   return cachedAdapter;
+}
+
+/**
+ * Exposes the legacy adapter for the few files that historically read
+ * `window.oxplowApi` directly (logger, lsp, TerminalPane, App.tsx).
+ * Replaces the global; same shape, just imported. Each call site
+ * should eventually migrate off this onto `commands.*` from
+ * `tauri-bridge`, at which point this export can go away.
+ */
+export function legacyApi(): DesktopApi {
+  return desktopApi();
 }
 
 /**

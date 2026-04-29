@@ -1,4 +1,4 @@
-import type { Stream } from "./api.js";
+import { legacyApi, type Stream } from "./api.js";
 import { logUi } from "./logger.js";
 
 export interface EditorNavigationTarget {
@@ -104,7 +104,7 @@ export class LspClient {
     this.unsubscribeMessages?.();
     this.unsubscribeMessages = null;
     if (clientId) {
-      void window.oxplowApi.closeLspClient(clientId);
+      void legacyApi().closeLspClient(clientId);
     }
   }
 
@@ -115,13 +115,13 @@ export class LspClient {
     logUi("debug", "lsp: ensureOpen start", { streamId: this.streamId, languageId: this.languageId });
     this.openPromise = new Promise<void>((resolve, reject) => {
       let opened = false;
-      this.unsubscribeMessages = window.oxplowApi.onLspEvent((event) => {
+      this.unsubscribeMessages = legacyApi().onLspEvent((event) => {
         if (event.clientId !== this.clientId) return;
         const parsed = parseJsonRpc(event.message);
         if (!parsed) return;
         this.handleMessage(parsed);
       });
-      void window.oxplowApi.openLspClient(this.streamId, this.languageId).then((clientId) => {
+      void legacyApi().openLspClient(this.streamId, this.languageId).then((clientId) => {
         this.clientId = clientId;
         opened = true;
         logUi("debug", "lsp: ensureOpen resolved", {
@@ -163,7 +163,7 @@ export class LspClient {
       this.queued.push(payload);
       return;
     }
-    void window.oxplowApi.sendLspMessage(this.clientId, payload).catch((error) => {
+    void legacyApi().sendLspMessage(this.clientId, payload).catch((error) => {
       this.emitStatus(`LSP unavailable: ${errorMessage(error)}`);
     });
   }
