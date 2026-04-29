@@ -1,5 +1,13 @@
 # Architecture guidance: VS Code-inspired workflow without full workbench adoption
 
+> **Note (April 2026, post-Tauri rewrite):** the implementation
+> details below predate the Electron→Tauri migration. The core design
+> principles (stream/worktree model, custom React shell, Monaco-as-
+> widget) still hold, but path references like `src/electron/` are
+> stale. Current layout: `apps/desktop/` (Tauri shell + frontend) and
+> `crates/` (reusable Rust libraries). See `CLAUDE.md` "Repo layout"
+> section. The other `.context/*.md` files are similarly mid-port.
+
 ## Goal
 
 Use a lot of the **workflow concepts** and selected building blocks from VS Code without turning this app into the full VS Code IDE shell.

@@ -82,11 +82,34 @@ the matching `.context/` doc in the same commit**. Concrete triggers:
 
 Docs reference source by **path only** (no line numbers — they drift).
 
+## Repo layout (post-Tauri rewrite)
+
+The backend is Rust; the desktop frontend is React/Monaco/xterm.
+
+- `apps/desktop/` — the Tauri 2 desktop product. Frontend TS lives in
+  `apps/desktop/src/`; the Tauri shell crate is at
+  `apps/desktop/src-tauri/`. `tauri.conf.json` lives next to the
+  shell crate; `bun run tauri:dev` (run from anywhere via root
+  workspace scripts) boots Vite + the shell.
+- `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
+  store traits), `oxplow-db` (rusqlite stores + migrations),
+  `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
+  `oxplow-runtime` (write guard + filing enforcement),
+  `oxplow-tmux`, `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
+  `oxplow-app` (Services orchestration), `oxplow-tauri-ipc`
+  (`#[tauri::command]` adapters + `tauri-specta` exports).
+- Old top-level `src/` (the Electron/Node backend) is gone; nothing
+  TS lives at the repo root anymore.
+
 ## Tests
 
-Stores have colocated `bun:test` files. Cross-store / Stop-hook / MCP
-behavior goes in `src/electron/runtime.test.ts`. Don't mock the DB —
-tests use a fresh `mkdtempSync` project dir against a real SQLite file.
+Each crate has its own `cargo test` suite. Cross-crate behavior tests
+live in `crates/oxplow-app/`. Don't mock the DB — tests use
+`oxplow_db::Database::in_memory()` (a fresh in-memory SQLite per
+test) or a tempfile-backed DB.
+
+Frontend tests still use `bun test` (run from `apps/desktop/`); root
+`bun run test` invokes both Rust and TS suites.
 
 ## Work items are observational
 

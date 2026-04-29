@@ -5,16 +5,9 @@ on:
     branches: [main]
   pull_request:
 
-# Workspace-local cache dirs so one actions/cache step covers bun's
-# install cache, the Electron binary download (~100MB per platform),
-# and electron-builder's tool cache — all of which are re-fetched on
-# every run otherwise. Using $GITHUB_WORKSPACE sub-paths avoids the
-# OS-specific path dance (~/.cache/electron vs %LOCALAPPDATA%/electron
-# vs ~/Library/Caches/electron).
 env:
-  BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/.ci-cache/bun
-  ELECTRON_CACHE: ${{ github.workspace }}/.ci-cache/electron
-  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.ci-cache/electron-builder
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
 
 jobs:
   test:
@@ -28,31 +21,60 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Restore caches
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # webkit2gtk is required by Tauri on Linux; the rest are standard
+      # build deps for the Rust→C native deps (libgit2 vendored, etc.).
+      - name: Install Linux Tauri deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            tmux
+
+      - name: Cache Cargo registry + target
         uses: actions/cache@v5
         with:
-          path: .ci-cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: ${{ runner.os }}-bun-
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
-      # `node-pty` compiles C++ against node headers at install time, so
-      # the ubuntu runner needs the usual build toolchain. Windows and
-      # macOS runners already have their equivalents.
-      - name: Install Linux build deps for node-pty
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3
-
-      - name: Install dependencies
+      - name: Install JS deps
         run: bun install --frozen-lockfile
 
-      # `bun test` also runs `bunx tsc --noEmit` first (see package.json).
-      - name: Test
-        run: bun test
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Cargo test
+        run: cargo test --workspace --all-features
+
+      # Drift guard: if `cargo test` regenerated TS bindings (because a
+      # Rust signature changed), the diff fails the PR.
+      - name: Verify generated TS bindings are up to date
+        run: |
+          if [ -n "$(git status --porcelain apps/desktop/src/tauri-bridge/generated)" ]; then
+            echo "::error::tauri-specta bindings drifted — re-run cargo test and commit the result"
+            git --no-pager diff apps/desktop/src/tauri-bridge/generated
+            exit 1
+          fi
+
+      - name: Cargo fmt
+        run: cargo fmt --all --check
+
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   package:
-    # Three-platform matrix confirms electron-builder can produce
-    # installers on each target OS, catching platform-specific
-    # regressions (node-pty native-module rebuild, path separators,
-    # macOS-only signing flags, etc.) before they hit users.
     needs: test
     strategy:
       fail-fast: false
@@ -68,46 +90,51 @@ jobs:
         with:
           bun-version: latest
 
-      # Key includes bun.lock so dependency changes invalidate cleanly;
-      # restore-keys falls back to the latest cache for this OS when the
-      # lockfile changes, so most of the Electron binary can still be
-      # reused across lockfile bumps.
-      - name: Restore caches
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential
+
+      - name: Cache Cargo registry + target
         uses: actions/cache@v5
         with:
-          path: .ci-cache
-          key: ${{ runner.os }}-build-${{ hashFiles('bun.lock') }}
-          restore-keys: ${{ runner.os }}-build-
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-build-
 
-      - name: Install Linux build deps for node-pty
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3
-
-      - name: Install dependencies
+      - name: Install JS deps
         run: bun install --frozen-lockfile
 
-      - name: Build JS bundles
-        run: bun run build
-
-      # Unsigned build — no code-signing certs in CI. electron-builder
-      # still produces working installers; users will see a "not signed"
-      # warning on macOS/Windows. Set `CSC_IDENTITY_AUTO_DISCOVERY: false`
-      # so the macOS runner doesn't try to find a keychain cert.
-      - name: Package with electron-builder
-        run: bunx electron-builder --publish=never
+      - name: Tauri build
+        run: bun run tauri:build
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Unsigned build — no code-signing certs in CI. Tauri's
+          # bundler still produces working installers; users will see
+          # a "not signed" warning on macOS/Windows.
+          CI: "true"
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
           name: oxplow-${{ matrix.os }}
           path: |
-            release/*.dmg
-            release/*.zip
-            release/*.exe
-            release/*.AppImage
-            release/*.deb
-          if-no-files-found: error
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.app.tar.gz
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.deb
+          if-no-files-found: warn
           retention-days: 14

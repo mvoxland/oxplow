@@ -118,3 +118,48 @@ pub async fn list_backlog(
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
 }
+
+/// Open an external URL in a sandboxed `WebviewWindow`.
+///
+/// Replaces the legacy `<webview>` tag flow. The new window inherits
+/// the `external-url` capability defined in
+/// `apps/desktop/src-tauri/capabilities/external-url.json`, which
+/// grants zero oxplow commands and zero plugin permissions — the
+/// embedded content can't call back into the host.
+///
+/// `url` must be `http(s)://`. Anything else returns an `INVALID`
+/// IpcError; the UI is expected to validate before calling, but the
+/// Rust side enforces the invariant since the URL ultimately controls
+/// what the new webview loads.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_external_url(
+    app: tauri::AppHandle,
+    url: String,
+) -> Result<String, IpcError> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(IpcError::invalid(format!(
+            "external URL must be http or https: {url}"
+        )));
+    }
+
+    let parsed = tauri::Url::parse(&url)
+        .map_err(|e| IpcError::invalid(format!("bad URL: {e}")))?;
+
+    // Label format must match the `ext-url-*` glob in
+    // capabilities/external-url.json — that's what restricts the new
+    // webview to the empty-permission scope.
+    let label = format!("ext-url-{}", uuid::Uuid::new_v4().simple());
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::External(parsed),
+    )
+    .title(format!("{} — Oxplow", url))
+    .inner_size(1100.0, 800.0)
+    .build()
+    .map_err(|e| IpcError::internal(format!("create webview window: {e}")))?;
+
+    Ok(label)
+}
