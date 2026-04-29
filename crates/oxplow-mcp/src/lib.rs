@@ -23,7 +23,7 @@ use oxplow_domain::stores::{
     WorkItemStore, WorkNoteStore,
 };
 use oxplow_domain::{
-    NoteId, ThreadId, WorkItem, WorkItemActorKind, WorkItemId, WorkItemKind, WorkItemLinkType,
+    NoteId, ThreadId, WorkItem, WorkItemId, WorkItemKind, WorkItemLinkType,
     WorkItemStatus,
 };
 
