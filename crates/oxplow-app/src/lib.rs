@@ -88,7 +88,13 @@ impl AppLayout {
 
 /// All the long-lived services oxplow needs to serve a UI.
 ///
-/// Cheap to clone — the inner pieces are `Arc`'d.
+/// Registered with Tauri as `tauri::State<Arc<Services>>`, so the
+/// renderer never clones `Services` directly — every reader bumps the
+/// `Arc` refcount instead. The inner pieces (PtyManager, EventBus,
+/// SqliteSnapshotStore, etc.) all derive `Clone` and route through
+/// shared owner tasks via `mpsc`/`broadcast`, so even an accidental
+/// `Services.clone()` doesn't spawn a duplicate runtime — it just
+/// hands out another sender into the same backing task.
 pub struct Services {
     pub config: Arc<RwLock<OxplowConfig>>,
     pub db: Database,
