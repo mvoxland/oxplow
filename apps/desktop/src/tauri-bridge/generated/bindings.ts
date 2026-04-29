@@ -56,11 +56,12 @@ export const commands = {
 	 *  when this stream is active. `None` (or empty) clears it.
 	 */
 	setStreamPrompt: (req: SetStreamPromptRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("set_stream_prompt", { req })),
+	checkoutStreamBranch: (id: StreamId, branch: string) => typedError<Stream, IpcError>(__TAURI_INVOKE("checkout_stream_branch", { id, branch })),
 	/**
 	 *  Switch the worktree's HEAD branch. Updates the stream row and runs
 	 *  `git checkout` inside the worktree.
 	 */
-	checkoutStreamBranch: (id: StreamId, branch: string) => typedError<Stream, IpcError>(__TAURI_INVOKE("checkout_stream_branch", { id, branch })),
+	reorderStreams: (order: StreamId[]) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_streams", { order })),
 	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),
 	getThread: (threadId: ThreadId) => typedError<{
 	id: ThreadId,
@@ -134,6 +135,7 @@ export const commands = {
 	updateWorkItem: (req: UpdateWorkItemRequest) => typedError<WorkItem, IpcError>(__TAURI_INVOKE("update_work_item", { req })),
 	reorderWorkItems: (req: ReorderWorkItemsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_work_items", { req })),
 	moveWorkItem: (req: MoveWorkItemRequest) => typedError<WorkItem, IpcError>(__TAURI_INVOKE("move_work_item", { req })),
+	getWorkItemSummaries: (threadId: string | null) => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("get_work_item_summaries", { threadId })),
 	listBacklog: () => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_backlog")),
 	// Bucketed backlog view: ready/blocked/in_progress/done.
 	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
@@ -264,6 +266,9 @@ export const commands = {
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
 	ensureAgentPane: (req: EnsureAgentPaneRequest) => typedError<EnsureAgentPaneResponse, IpcError>(__TAURI_INVOKE("ensure_agent_pane", { req })),
 	teardownAgentPanes: (streamId: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("teardown_agent_panes", { streamId })),
+	listWorkItemEfforts: (itemId: WorkItemId) => typedError<WorkItemEffort[], IpcError>(__TAURI_INVOKE("list_work_item_efforts", { itemId })),
+	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
+	listEffortsEndingAtSnapshots: (snapshotIds: number[]) => typedError<WorkItemEffort[], IpcError>(__TAURI_INVOKE("list_efforts_ending_at_snapshots", { snapshotIds })),
 	getGitLog: (limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { limit, all })),
 	getCommitDetail: (sha: string) => typedError<{
 	sha: string,
@@ -515,6 +520,16 @@ export type CreateWorktreeRequest = {
 	branch: string,
 	branchSource: string,
 };
+
+export type EffortFile = {
+	effort_id: EffortId,
+	path: string,
+	change: EffortFileChange,
+};
+
+export type EffortFileChange = "created" | "updated" | "deleted";
+
+export type EffortId = string;
 
 export type EnsureAgentPaneRequest = {
 	stream_id: StreamId,
@@ -978,6 +993,17 @@ export type WorkItemActorKind = "user" | "agent" | "system";
  *  `agent-auto` rows get mapped to `None` on read.
  */
 export type WorkItemAuthor = "user" | "agent";
+
+export type WorkItemEffort = {
+	id: EffortId,
+	work_item_id: WorkItemId,
+	thread_id: ThreadId,
+	started_at: Timestamp,
+	ended_at: Timestamp | null,
+	start_snapshot_id: number | null,
+	end_snapshot_id: number | null,
+	summary: string | null,
+};
 
 // Audit-log entry for state changes on a work item.
 export type WorkItemEvent = {

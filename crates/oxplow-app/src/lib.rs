@@ -42,8 +42,8 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentStatusStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
     SqliteHookEventStore, SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore,
-    SqliteThreadStore, SqliteUsageStore, SqliteWikiNoteStore, SqliteWorkItemEventStore,
-    SqliteWorkItemLinkStore, SqliteWorkItemStore, SqliteWorkNoteStore,
+    SqliteThreadStore, SqliteUsageStore, SqliteWikiNoteStore, SqliteWorkItemEffortStore,
+    SqliteWorkItemEventStore, SqliteWorkItemLinkStore, SqliteWorkItemStore, SqliteWorkNoteStore,
 };
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
 
@@ -103,6 +103,7 @@ pub struct Services {
     pub hook_event_store: Arc<SqliteHookEventStore>,
     pub agent_status_store: Arc<SqliteAgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
+    pub effort_store: Arc<SqliteWorkItemEffortStore>,
     pub hook_ingest: HookIngestService,
     pub background_tasks: BackgroundTaskStore,
     pub followups: FollowupStore,
@@ -136,6 +137,7 @@ impl Services {
         let hook_event_store = Arc::new(SqliteHookEventStore::new(db.clone()));
         let agent_status_store = Arc::new(SqliteAgentStatusStore::new(db.clone()));
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
+        let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
@@ -173,6 +175,7 @@ impl Services {
             hook_event_store,
             agent_status_store,
             agent_turn_store,
+            effort_store,
             hook_ingest,
             background_tasks: BackgroundTaskStore::new(),
             followups: FollowupStore::new(),
@@ -211,6 +214,7 @@ impl Services {
         let hook_event_store = Arc::new(SqliteHookEventStore::new(db.clone()));
         let agent_status_store = Arc::new(SqliteAgentStatusStore::new(db.clone()));
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
+        let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
         let threads = ThreadService::new(thread_store.clone());
@@ -245,6 +249,7 @@ impl Services {
             hook_event_store,
             agent_status_store,
             agent_turn_store,
+            effort_store,
             hook_ingest,
             background_tasks: BackgroundTaskStore::new(),
             followups: FollowupStore::new(),

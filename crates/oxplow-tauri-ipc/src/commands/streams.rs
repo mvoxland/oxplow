@@ -138,6 +138,34 @@ pub async fn set_stream_prompt(
 /// `git checkout` inside the worktree.
 #[tauri::command]
 #[specta::specta]
+pub async fn reorder_streams(
+    state: tauri::State<'_, AppState>,
+    order: Vec<StreamId>,
+) -> Result<(), IpcError> {
+    // Streams are ordered by created_at ASC after the partial-primary
+    // ordering. We rewrite created_at to the supplied order's
+    // monotonically-increasing offsets so the natural sort follows.
+    use oxplow_domain::stores::StreamStore;
+    let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
+    let now = oxplow_domain::Timestamp::now();
+    for (idx, id) in order.iter().enumerate() {
+        if let Some(mut s) = store.get(id).await? {
+            // Preserve primary ordering: only worktrees get re-shuffled.
+            if s.kind != oxplow_domain::StreamKind::Primary {
+                s.created_at = oxplow_domain::Timestamp::from_unix_ms(
+                    now.unix_ms() + idx as i64,
+                );
+                s.updated_at = now;
+                store.upsert(&s).await?;
+            }
+        }
+    }
+    state.events.emit(OxplowEvent::StreamsChanged);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn checkout_stream_branch(
     state: tauri::State<'_, AppState>,
     id: StreamId,

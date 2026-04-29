@@ -129,6 +129,18 @@ pub struct MoveWorkItemRequest {
 
 #[tauri::command]
 #[specta::specta]
+pub async fn get_work_item_summaries(
+    state: tauri::State<'_, AppState>,
+    thread_id: Option<ThreadId>,
+) -> Result<Vec<WorkItem>, IpcError> {
+    Ok(match thread_id {
+        Some(t) => state.work_item_store.list_for_thread(&t).await?,
+        None => state.work_item_store.list_backlog().await?,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn move_work_item(
     state: tauri::State<'_, AppState>,
     req: MoveWorkItemRequest,

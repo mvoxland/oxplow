@@ -62,6 +62,17 @@ export function buildLegacyAdapter(): DesktopApi {
       unwrap(await commands.setStreamPrompt({ id, prompt })),
     checkoutStreamBranch: async (id: string, branch: string) =>
       unwrap(await commands.checkoutStreamBranch(id, branch)),
+    reorderStreams: async (order: string[]) =>
+      unwrap(await commands.reorderStreams(order)),
+    // Legacy alias used by some UI code paths.
+    reorderThreads: async (streamId: string, order: string[]) =>
+      unwrap(await commands.reorderThreadQueue({ streamId, order })),
+    reorderThread: async (streamId: string, order: string[]) =>
+      unwrap(await commands.reorderThreadQueue({ streamId, order })),
+    // No corresponding Tauri command — surface a helpful error.
+    createStream: async () => {
+      throw new Error("createStream is replaced by createWorktree under Tauri");
+    },
 
     // -- threads --
     closeThread: async (id: string) => unwrap(await commands.closeThread(id)),
@@ -141,6 +152,8 @@ export function buildLegacyAdapter(): DesktopApi {
       unwrap(await commands.updateWorkItem({ id: itemId, changes: changes as never })),
     deleteBacklogItem: async (itemId: string) =>
       unwrap(await commands.deleteWorkItem(itemId)),
+    getWorkItemSummaries: async (threadId?: string | null) =>
+      unwrap(await commands.getWorkItemSummaries(threadId ?? null)),
 
     // -- work notes --
     addWorkItemNote: async (
@@ -158,6 +171,12 @@ export function buildLegacyAdapter(): DesktopApi {
       itemId?: string,
     ) =>
       unwrap(await commands.listWorkItemEvents(itemId ?? null, null)),
+    listWorkItemEfforts: async (itemId: string) =>
+      unwrap(await commands.listWorkItemEfforts(itemId)),
+    getEffortFiles: async (effortId: string) =>
+      unwrap(await commands.getEffortFiles(effortId)),
+    listEffortsEndingAtSnapshots: async (snapshotIds: number[]) =>
+      unwrap(await commands.listEffortsEndingAtSnapshots(snapshotIds)),
 
     // -- git ops --
     getRepoConflictState: async () => unwrap(await commands.getRepoConflictState()),

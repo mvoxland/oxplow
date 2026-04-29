@@ -37,6 +37,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::streams::rename_stream,
         commands::streams::set_stream_prompt,
         commands::streams::checkout_stream_branch,
+        commands::streams::reorder_streams,
         // threads
         commands::threads::list_threads,
         commands::threads::get_thread,
@@ -63,6 +64,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::work_items::update_work_item,
         commands::work_items::reorder_work_items,
         commands::work_items::move_work_item,
+        commands::work_items::get_work_item_summaries,
         // backlog
         commands::backlog::list_backlog,
         commands::backlog::get_backlog_state,
@@ -153,6 +155,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // agent panes
         commands::agent_panes::ensure_agent_pane,
         commands::agent_panes::teardown_agent_panes,
+        // efforts
+        commands::effort::list_work_item_efforts,
+        commands::effort::get_effort_files,
+        commands::effort::list_efforts_ending_at_snapshots,
         // log
         commands::log::get_git_log,
         commands::log::get_commit_detail,
