@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { DesktopApi, OxplowEvent } from "./api-types.js";
 
 // -- Legacy adapter helpers (now lives here). Inlined
-// here so the legacy compatibility layer lives in a single file.
+// here so the renderer-side compatibility layer lives in a single file.
 
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
@@ -12,7 +12,7 @@ function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error:
 }
 
 function notPorted(name: string): never {
-  throw new Error(`oxplow legacy API method "${name}" is not yet ported to Tauri`);
+  throw new Error(`oxplow desktop API method "${name}" is not yet ported to Tauri`);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +58,7 @@ function adaptBackgroundTask(t: any): any {
   };
 }
 
-function buildLegacyAdapter(): DesktopApi {
+function buildDesktopAdapter(): DesktopApi {
   const adapter: Partial<DesktopApi> = {
     ping: async () => unwrap(await commands.ping()),
     listStreams: async () =>
@@ -413,8 +413,8 @@ export interface ThreadState {
 }
 
 // Work-item types now come from the Tauri bindings. The bindings
-// emit a `deleted_at` field that the legacy interface didn't model;
-// readers either ignore it or filter on it (legacy stores already
+// emit a `deleted_at` field that the earlier UI interface didn't model;
+// readers either ignore it or filter on it (earlier stores already
 // excluded soft-deleted rows in their list queries). New code can
 // read `deleted_at` directly when needed.
 import type {
@@ -1633,19 +1633,19 @@ export function subscribeHookEvents(
   });
 }
 
-// Lazy-built adapter that maps the legacy DesktopApi method shape to
+// Lazy-built adapter that maps the DesktopApi method shape to
 // real Tauri `commands.*` calls. Constructed once on first access so
 // any module that imports this file picks up the same instance.
 let cachedAdapter: DesktopApi | null = null;
 function desktopApi(): DesktopApi {
   if (!cachedAdapter) {
-    cachedAdapter = buildLegacyAdapter();
+    cachedAdapter = buildDesktopAdapter();
   }
   return cachedAdapter;
 }
 
 /**
- * Exposes the legacy adapter for the few files that historically read
+ * Exposes the adapter for the few files that historically read
  * `window.oxplowApi` directly (logger, lsp, TerminalPane, App.tsx).
  * Replaces the global; same shape, just imported. Each call site
  * should eventually migrate off this onto `commands.*` from

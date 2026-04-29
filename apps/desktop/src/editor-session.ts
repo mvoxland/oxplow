@@ -55,7 +55,7 @@ export function createEmptyFileSession(): FileSession {
 
 // All file-session helpers accept any number of arguments. The
 // runtime never actually executes them — they exist to keep the
-// legacy UI typechecking. Each will be ported as the open-file-state
+// UI typechecking. Each will be ported as the open-file-state
 // subsystem is rebuilt.
 //
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -7,10 +7,10 @@
 // New UI code should import from `./tauri-bridge/index.ts` directly,
 // which gives a typed surface backed by real Tauri commands.
 
-// (No bridge imports — the legacy contract is self-contained for typecheck.)
+// (No bridge imports — the api-types module is self-contained for typecheck.)
 
 // ---- Stream / Thread / WorkItem (kept inline for type compatibility
-// with the legacy `api.ts`; new code should reach for the bridge's
+// with the api.ts; new code should reach for the bridge's
 // types instead — they have the same names but with snake-cased fields
 // matching the Rust shape).
 
@@ -206,7 +206,7 @@ export interface CommitDetail {
   sha: string;
   shortSha: string;
   // Author may be a flat string (Rust) or an object with
-  // {name,email,date} (legacy UI shape). Permissive `any` keeps both
+  // {name,email,date} (UI-flavored shape). Permissive `any` keeps both
   // call paths typechecking through the migration.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   author: any;
@@ -498,11 +498,11 @@ export interface CodeQualityFindingRow {
   extra: Record<string, unknown> | null;
 }
 
-// ---- OxplowEvent (legacy event-bus payloads) ----
+// ---- OxplowEvent (UI event-bus payloads) ----
 
 // Permissive OxplowEvent shape — the original was a discriminated
 // union; under Tauri we route events through the bridge with typed
-// payloads, so this exists only for legacy event-bus subscriber call
+// payloads, so this exists only for UI event-bus subscriber call
 // sites. Each subscriber narrows on `type` and treats the rest of
 // the fields as freeform; that compiles cleanly with this shape.
 export interface OxplowEvent {
@@ -512,7 +512,7 @@ export interface OxplowEvent {
 }
 
 
-// ---- DesktopApi (the legacy preload-injected window.oxplowApi
+// ---- DesktopApi (the earlier preload-injected window.oxplowApi
 // shape; runtime is gone, this lives on for typecheck compatibility
 // while UI methods are being migrated to the bridge). ----
 
