@@ -2742,6 +2742,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "git2",
+ "indexmap 2.14.0",
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
@@ -2752,13 +2753,16 @@ dependencies = [
  "oxplow-runtime",
  "oxplow-session",
  "oxplow-tmux",
+ "parking_lot",
  "serde",
+ "serde_json",
  "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2787,6 +2791,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "time",
@@ -4555,6 +4560,7 @@ checksum = "f320c7dd82008b6958f43f6257c95319c407d1c17ade43686e50ea520c28bb26"
 dependencies = [
  "paste",
  "rustc_version",
+ "serde_json",
  "specta-macros",
  "time",
 ]

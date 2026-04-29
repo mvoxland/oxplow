@@ -1,0 +1,669 @@
+//! Analytics-flavored stores: page_visit, usage_event, code_quality_*,
+//! file_snapshot. They all share the same shape — append-mostly, with
+//! recent-window queries — so they live together rather than each
+//! getting its own file.
+
+use async_trait::async_trait;
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
+use specta::Type;
+
+use oxplow_domain::{DomainError, StreamId, Timestamp};
+
+use crate::database::Database;
+
+fn ts_to_string(ts: Timestamp) -> String {
+    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+}
+
+fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
+    serde_json::from_str(&format!("\"{}\"", s))
+        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
+}
+
+// ---------------- Page visits ----------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct PageVisit {
+    pub id: String,
+    pub page_kind: String,
+    pub page_id: String,
+    pub visited_at: Timestamp,
+    pub duration_ms: Option<i64>,
+}
+
+#[derive(Clone)]
+pub struct SqlitePageVisitStore {
+    db: Database,
+}
+
+impl SqlitePageVisitStore {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+}
+
+#[async_trait]
+pub trait PageVisitStore: Send + Sync {
+    async fn record(
+        &self,
+        page_kind: &str,
+        page_id: &str,
+        duration_ms: Option<i64>,
+    ) -> Result<PageVisit, DomainError>;
+    async fn list_recent(&self, limit: usize) -> Result<Vec<PageVisit>, DomainError>;
+    async fn list_top(&self, limit: usize) -> Result<Vec<(String, String, i64)>, DomainError>;
+    async fn forget_page(&self, page_kind: &str, page_id: &str) -> Result<(), DomainError>;
+    async fn count_by_day(&self, days: u32) -> Result<Vec<(String, i64)>, DomainError>;
+}
+
+#[async_trait]
+impl PageVisitStore for SqlitePageVisitStore {
+    async fn record(
+        &self,
+        page_kind: &str,
+        page_id: &str,
+        duration_ms: Option<i64>,
+    ) -> Result<PageVisit, DomainError> {
+        let db = self.db.clone();
+        let page_kind = page_kind.to_string();
+        let page_id = page_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let id = format!("pv-{}", uuid::Uuid::new_v4().simple());
+            let now = Timestamp::now();
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO page_visit (id, page_kind, page_id, visited_at, duration_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![id, page_kind, page_id, ts_to_string(now), duration_ms],
+                )?;
+                Ok(())
+            })?;
+            Ok(PageVisit {
+                id,
+                page_kind,
+                page_id,
+                visited_at: now,
+                duration_ms,
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn list_recent(&self, limit: usize) -> Result<Vec<PageVisit>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, page_kind, page_id, visited_at, duration_ms FROM page_visit
+                     ORDER BY visited_at DESC LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![limit as i64], |row| {
+                    let id: String = row.get(0)?;
+                    let page_kind: String = row.get(1)?;
+                    let page_id: String = row.get(2)?;
+                    let visited_at: String = row.get(3)?;
+                    let duration_ms: Option<i64> = row.get(4)?;
+                    let map_err = |e: DomainError| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    };
+                    Ok(PageVisit {
+                        id,
+                        page_kind,
+                        page_id,
+                        visited_at: string_to_ts(&visited_at).map_err(map_err)?,
+                        duration_ms,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn list_top(&self, limit: usize) -> Result<Vec<(String, String, i64)>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT page_kind, page_id, COUNT(*) AS visits
+                     FROM page_visit
+                     GROUP BY page_kind, page_id
+                     ORDER BY visits DESC
+                     LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![limit as i64], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn forget_page(&self, page_kind: &str, page_id: &str) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let page_kind = page_kind.to_string();
+        let page_id = page_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "DELETE FROM page_visit WHERE page_kind = ?1 AND page_id = ?2",
+                    params![page_kind, page_id],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn count_by_day(&self, days: u32) -> Result<Vec<(String, i64)>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT substr(visited_at, 1, 10) AS day, COUNT(*) AS visits
+                     FROM page_visit
+                     WHERE visited_at >= datetime('now', ?1)
+                     GROUP BY day
+                     ORDER BY day DESC",
+                )?;
+                let cutoff = format!("-{} days", days);
+                let rows = stmt.query_map(params![cutoff], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+}
+
+// ---------------- Usage events ----------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct UsageEvent {
+    pub id: String,
+    pub kind: String,
+    pub payload_json: String,
+    pub occurred_at: Timestamp,
+}
+
+#[derive(Clone)]
+pub struct SqliteUsageStore {
+    db: Database,
+}
+
+impl SqliteUsageStore {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+
+    pub async fn record(
+        &self,
+        kind: &str,
+        payload: serde_json::Value,
+    ) -> Result<UsageEvent, DomainError> {
+        let db = self.db.clone();
+        let kind = kind.to_string();
+        let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+        tokio::task::spawn_blocking(move || {
+            let id = format!("ue-{}", uuid::Uuid::new_v4().simple());
+            let now = Timestamp::now();
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO usage_event (id, kind, payload_json, occurred_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![id, kind, payload_json, ts_to_string(now)],
+                )?;
+                Ok(())
+            })?;
+            Ok(UsageEvent {
+                id,
+                kind,
+                payload_json,
+                occurred_at: now,
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    pub async fn list_recent(&self, limit: usize) -> Result<Vec<UsageEvent>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, kind, payload_json, occurred_at FROM usage_event
+                     ORDER BY occurred_at DESC LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![limit as i64], |row| {
+                    let id: String = row.get(0)?;
+                    let kind: String = row.get(1)?;
+                    let payload_json: String = row.get(2)?;
+                    let occurred_at: String = row.get(3)?;
+                    let map_err = |e: DomainError| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    };
+                    Ok(UsageEvent {
+                        id,
+                        kind,
+                        payload_json,
+                        occurred_at: string_to_ts(&occurred_at).map_err(map_err)?,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+}
+
+// ---------------- Code quality ----------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeQualityScanStatus {
+    Pending,
+    Running,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct CodeQualityScan {
+    pub id: i64,
+    pub tool: String,
+    pub scope: String,
+    pub status: CodeQualityScanStatus,
+    pub started_at: Timestamp,
+    pub ended_at: Option<Timestamp>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct CodeQualityFinding {
+    pub id: i64,
+    pub scan_id: i64,
+    pub path: String,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub kind: String,
+    pub metric_value: f64,
+    pub extra_json: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct SqliteCodeQualityStore {
+    db: Database,
+}
+
+impl SqliteCodeQualityStore {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+
+    pub async fn create_scan(
+        &self,
+        tool: &str,
+        scope: &str,
+    ) -> Result<i64, DomainError> {
+        let db = self.db.clone();
+        let tool = tool.to_string();
+        let scope = scope.to_string();
+        tokio::task::spawn_blocking(move || {
+            let now = Timestamp::now();
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO code_quality_scan (tool, scope, status, started_at)
+                     VALUES (?1, ?2, 'pending', ?3)",
+                    params![tool, scope, ts_to_string(now)],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    pub async fn finish_scan(
+        &self,
+        id: i64,
+        status: CodeQualityScanStatus,
+        error: Option<String>,
+    ) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let status_str = match status {
+            CodeQualityScanStatus::Pending => "pending",
+            CodeQualityScanStatus::Running => "running",
+            CodeQualityScanStatus::Done => "done",
+            CodeQualityScanStatus::Failed => "failed",
+        };
+        tokio::task::spawn_blocking(move || {
+            let now = Timestamp::now();
+            db.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE code_quality_scan SET status = ?2, ended_at = ?3, error = ?4 WHERE id = ?1",
+                    params![id, status_str, ts_to_string(now), error],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    pub async fn append_finding(
+        &self,
+        scan_id: i64,
+        finding: CodeQualityFinding,
+    ) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO code_quality_finding
+                       (scan_id, path, start_line, end_line, kind, metric_value, extra_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        scan_id,
+                        finding.path,
+                        finding.start_line,
+                        finding.end_line,
+                        finding.kind,
+                        finding.metric_value,
+                        finding.extra_json,
+                    ],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    pub async fn list_scans(&self, limit: usize) -> Result<Vec<CodeQualityScan>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, tool, scope, status, started_at, ended_at, error
+                     FROM code_quality_scan ORDER BY started_at DESC LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![limit as i64], |row| {
+                    let id: i64 = row.get(0)?;
+                    let tool: String = row.get(1)?;
+                    let scope: String = row.get(2)?;
+                    let status: String = row.get(3)?;
+                    let started_at: String = row.get(4)?;
+                    let ended_at: Option<String> = row.get(5)?;
+                    let error: Option<String> = row.get(6)?;
+                    let status = match status.as_str() {
+                        "pending" => CodeQualityScanStatus::Pending,
+                        "running" => CodeQualityScanStatus::Running,
+                        "done" => CodeQualityScanStatus::Done,
+                        _ => CodeQualityScanStatus::Failed,
+                    };
+                    let map_err = |e: DomainError| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    };
+                    Ok(CodeQualityScan {
+                        id,
+                        tool,
+                        scope,
+                        status,
+                        started_at: string_to_ts(&started_at).map_err(map_err)?,
+                        ended_at: ended_at.map(|s| string_to_ts(&s)).transpose().map_err(map_err)?,
+                        error,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    pub async fn list_findings(
+        &self,
+        scan_id: i64,
+    ) -> Result<Vec<CodeQualityFinding>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, scan_id, path, start_line, end_line, kind, metric_value, extra_json
+                     FROM code_quality_finding WHERE scan_id = ?1 ORDER BY id ASC",
+                )?;
+                let rows = stmt.query_map(params![scan_id], |row| {
+                    Ok(CodeQualityFinding {
+                        id: row.get(0)?,
+                        scan_id: row.get(1)?,
+                        path: row.get(2)?,
+                        start_line: row.get(3)?,
+                        end_line: row.get(4)?,
+                        kind: row.get(5)?,
+                        metric_value: row.get(6)?,
+                        extra_json: row.get(7)?,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+}
+
+// ---------------- File snapshots ----------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct FileSnapshot {
+    pub id: i64,
+    pub stream_id: Option<StreamId>,
+    pub path: String,
+    pub blob_hash: Option<String>,
+    pub size_bytes: i64,
+    pub captured_at: Timestamp,
+    pub oversize: bool,
+}
+
+#[derive(Clone)]
+pub struct SqliteSnapshotStore {
+    db: Database,
+}
+
+impl SqliteSnapshotStore {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+
+    pub async fn capture(&self, snap: FileSnapshot) -> Result<i64, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO file_snapshot
+                       (stream_id, path, blob_hash, size_bytes, captured_at, oversize)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        snap.stream_id.as_ref().map(|s| s.as_str()),
+                        snap.path,
+                        snap.blob_hash,
+                        snap.size_bytes,
+                        ts_to_string(snap.captured_at),
+                        if snap.oversize { 1 } else { 0 },
+                    ],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    pub async fn list_for_path(&self, path: &str) -> Result<Vec<FileSnapshot>, DomainError> {
+        let db = self.db.clone();
+        let path = path.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize
+                     FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC",
+                )?;
+                let rows = stmt.query_map(params![path], |row| {
+                    let id: i64 = row.get(0)?;
+                    let stream_id: Option<String> = row.get(1)?;
+                    let path: String = row.get(2)?;
+                    let blob_hash: Option<String> = row.get(3)?;
+                    let size_bytes: i64 = row.get(4)?;
+                    let captured_at: String = row.get(5)?;
+                    let oversize: i32 = row.get(6)?;
+                    let map_err = |e: DomainError| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    };
+                    Ok(FileSnapshot {
+                        id,
+                        stream_id: stream_id.map(StreamId::from),
+                        path,
+                        blob_hash,
+                        size_bytes,
+                        captured_at: string_to_ts(&captured_at).map_err(map_err)?,
+                        oversize: oversize != 0,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn page_visit_record_then_recent() {
+        let store = SqlitePageVisitStore::new(Database::in_memory());
+        store.record("note", "abc", Some(1234)).await.unwrap();
+        store.record("workItem", "wi-1", None).await.unwrap();
+        let recent = store.list_recent(10).await.unwrap();
+        assert_eq!(recent.len(), 2);
+        // newest first
+        assert_eq!(recent[0].page_kind, "workItem");
+    }
+
+    #[tokio::test]
+    async fn page_visit_top_groups_correctly() {
+        let store = SqlitePageVisitStore::new(Database::in_memory());
+        store.record("note", "a", None).await.unwrap();
+        store.record("note", "a", None).await.unwrap();
+        store.record("note", "b", None).await.unwrap();
+        let top = store.list_top(10).await.unwrap();
+        assert_eq!(top[0].1, "a");
+        assert_eq!(top[0].2, 2);
+    }
+
+    #[tokio::test]
+    async fn page_visit_forget_clears_only_target() {
+        let store = SqlitePageVisitStore::new(Database::in_memory());
+        store.record("note", "a", None).await.unwrap();
+        store.record("note", "b", None).await.unwrap();
+        store.forget_page("note", "a").await.unwrap();
+        let recent = store.list_recent(10).await.unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].page_id, "b");
+    }
+
+    #[tokio::test]
+    async fn usage_event_round_trip() {
+        let store = SqliteUsageStore::new(Database::in_memory());
+        store
+            .record("agent_turn_started", serde_json::json!({"thread": "b-1"}))
+            .await
+            .unwrap();
+        let recent = store.list_recent(10).await.unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].kind, "agent_turn_started");
+    }
+
+    #[tokio::test]
+    async fn code_quality_scan_lifecycle() {
+        let store = SqliteCodeQualityStore::new(Database::in_memory());
+        let id = store.create_scan("lizard", "workspace").await.unwrap();
+        store
+            .append_finding(
+                id,
+                CodeQualityFinding {
+                    id: 0,
+                    scan_id: id,
+                    path: "src/main.rs".into(),
+                    start_line: 10,
+                    end_line: 50,
+                    kind: "complexity".into(),
+                    metric_value: 14.0,
+                    extra_json: None,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .finish_scan(id, CodeQualityScanStatus::Done, None)
+            .await
+            .unwrap();
+        let scans = store.list_scans(10).await.unwrap();
+        assert_eq!(scans.len(), 1);
+        assert_eq!(scans[0].status, CodeQualityScanStatus::Done);
+        let findings = store.list_findings(id).await.unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].metric_value, 14.0);
+    }
+
+    #[tokio::test]
+    async fn snapshot_capture_then_list() {
+        let store = SqliteSnapshotStore::new(Database::in_memory());
+        store
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: None,
+                path: "src/foo.rs".into(),
+                blob_hash: Some("abc".into()),
+                size_bytes: 42,
+                captured_at: Timestamp::now(),
+                oversize: false,
+            })
+            .await
+            .unwrap();
+        let list = store.list_for_path("src/foo.rs").await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].size_bytes, 42);
+    }
+}

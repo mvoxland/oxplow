@@ -7,8 +7,17 @@
 //! Held inside `Arc<Services>` and registered as Tauri state. Methods
 //! on `Services` are the high-level "use cases" the IPC layer calls.
 
+pub mod background_task;
+pub mod followup;
+
 use std::path::PathBuf;
 use std::sync::Arc;
+
+pub use background_task::{
+    BackgroundTask, BackgroundTaskChange, BackgroundTaskChangeKind, BackgroundTaskKind,
+    BackgroundTaskStatus, BackgroundTaskStore,
+};
+pub use followup::{Followup, FollowupStore};
 
 use thiserror::Error;
 use tracing::info;

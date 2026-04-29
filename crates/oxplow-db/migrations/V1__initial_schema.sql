@@ -131,6 +131,83 @@ CREATE TABLE work_notes (
 CREATE INDEX idx_work_notes_item ON work_notes(work_item_id, created_at);
 CREATE INDEX idx_work_notes_thread ON work_notes(thread_id, created_at);
 
+-- Wiki notes — durable, file-backed knowledge captured by agent
+-- exploration. Body lives at .oxplow/notes/<slug>.md; this table
+-- holds metadata + a search index.
+CREATE TABLE wiki_note (
+    slug TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    body_path TEXT NOT NULL,
+    body_excerpt TEXT NOT NULL DEFAULT '',
+    body_size_bytes INTEGER NOT NULL DEFAULT 0,
+    file_refs_json TEXT NOT NULL DEFAULT '[]',
+    related_notes_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_wiki_note_updated ON wiki_note(updated_at DESC);
+
+-- FTS5 mirror of wiki_note.body for `mcp__oxplow__search_note_bodies`.
+CREATE VIRTUAL TABLE wiki_note_fts USING fts5(slug UNINDEXED, title, body_excerpt);
+
+-- Page-visit / usage telemetry — drives the "recent" rails.
+CREATE TABLE page_visit (
+    id TEXT PRIMARY KEY,
+    page_kind TEXT NOT NULL,
+    page_id TEXT NOT NULL,
+    visited_at TEXT NOT NULL,
+    duration_ms INTEGER
+);
+CREATE INDEX idx_page_visit_time ON page_visit(visited_at DESC);
+CREATE INDEX idx_page_visit_kind_id ON page_visit(page_kind, page_id);
+
+CREATE TABLE usage_event (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX idx_usage_event_time ON usage_event(occurred_at DESC);
+
+-- Code-quality scan + finding tables (lizard / jscpd).
+CREATE TABLE code_quality_scan (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed')),
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    error TEXT
+);
+CREATE INDEX idx_code_quality_scan_started ON code_quality_scan(started_at DESC);
+
+CREATE TABLE code_quality_finding (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id INTEGER NOT NULL REFERENCES code_quality_scan(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    start_line INTEGER NOT NULL,
+    end_line INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    metric_value REAL NOT NULL,
+    extra_json TEXT
+);
+CREATE INDEX idx_code_quality_finding_scan ON code_quality_finding(scan_id, path);
+
+-- File-snapshot store: captures content-addressed blob hashes per
+-- (path, captured_at) tuple. Used for cross-turn diffs and the
+-- snapshots panel.
+CREATE TABLE file_snapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stream_id TEXT REFERENCES streams(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    blob_hash TEXT,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    captured_at TEXT NOT NULL,
+    oversize INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_file_snapshot_stream_path ON file_snapshot(stream_id, path, captured_at DESC);
+CREATE INDEX idx_file_snapshot_path ON file_snapshot(path, captured_at DESC);
+
 CREATE TABLE agent_turn (
     id TEXT PRIMARY KEY,
     thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
