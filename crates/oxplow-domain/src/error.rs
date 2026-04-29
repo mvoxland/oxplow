@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum DomainError {
     #[error("invalid value: {0}")]
     Invalid(String),

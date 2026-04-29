@@ -41,16 +41,22 @@ CREATE TABLE threads (
     id TEXT PRIMARY KEY,
     stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('open', 'closed')),
+    status TEXT NOT NULL CHECK (status IN ('active', 'queued', 'closed')),
     sort_index INTEGER NOT NULL DEFAULT 0,
     pane_target TEXT NOT NULL DEFAULT 'working',
     resume_session_id TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
     summary_updated_at TEXT,
+    closed_at TEXT,
+    custom_prompt TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 CREATE INDEX idx_threads_stream_sort ON threads(stream_id, sort_index);
+-- At most one ACTIVE (writer) thread per stream — mirrors the TS
+-- invariant. Other threads sit in the queued bucket.
+CREATE UNIQUE INDEX idx_threads_one_active_per_stream
+    ON threads(stream_id) WHERE status = 'active';
 
 CREATE TABLE thread_selection (
     stream_id TEXT PRIMARY KEY REFERENCES streams(id) ON DELETE CASCADE,

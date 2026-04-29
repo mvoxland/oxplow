@@ -19,14 +19,16 @@ impl SqliteThreadStore {
 
 fn status_to_str(s: ThreadStatus) -> &'static str {
     match s {
-        ThreadStatus::Open => "open",
+        ThreadStatus::Active => "active",
+        ThreadStatus::Queued => "queued",
         ThreadStatus::Closed => "closed",
     }
 }
 
 fn str_to_status(s: &str) -> Result<ThreadStatus, DomainError> {
     match s {
-        "open" => Ok(ThreadStatus::Open),
+        "active" => Ok(ThreadStatus::Active),
+        "queued" => Ok(ThreadStatus::Queued),
         "closed" => Ok(ThreadStatus::Closed),
         other => Err(DomainError::Invalid(format!("unknown thread status: {other}"))),
     }
@@ -51,15 +53,18 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     let resume_session_id: String = row.get("resume_session_id")?;
     let summary: String = row.get("summary")?;
     let summary_updated_at: Option<String> = row.get("summary_updated_at")?;
+    let closed_at: Option<String> = row.get("closed_at")?;
+    let custom_prompt: Option<String> = row.get("custom_prompt")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
+    let map_err = |e: DomainError| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    };
     Ok(Thread {
         id: ThreadId::from(id),
         stream_id: StreamId::from(stream_id),
         title,
-        status: str_to_status(&status).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-        })?,
+        status: str_to_status(&status).map_err(map_err)?,
         sort_index,
         pane_target,
         resume_session_id,
@@ -67,19 +72,14 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         summary_updated_at: summary_updated_at
             .map(|s| string_to_ts(&s))
             .transpose()
-            .map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    0,
-                    rusqlite::types::Type::Text,
-                    Box::new(e),
-                )
-            })?,
-        created_at: string_to_ts(&created_at).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-        })?,
-        updated_at: string_to_ts(&updated_at).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-        })?,
+            .map_err(map_err)?,
+        closed_at: closed_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(map_err)?,
+        custom_prompt,
+        created_at: string_to_ts(&created_at).map_err(map_err)?,
+        updated_at: string_to_ts(&updated_at).map_err(map_err)?,
     })
 }
 
@@ -126,8 +126,9 @@ impl ThreadStore for SqliteThreadStore {
                 conn.execute(
                     "INSERT INTO threads (
                         id, stream_id, title, status, sort_index, pane_target,
-                        resume_session_id, summary, summary_updated_at, created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                        resume_session_id, summary, summary_updated_at, closed_at,
+                        custom_prompt, created_at, updated_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                      ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         status = excluded.status,
@@ -136,6 +137,8 @@ impl ThreadStore for SqliteThreadStore {
                         resume_session_id = excluded.resume_session_id,
                         summary = excluded.summary,
                         summary_updated_at = excluded.summary_updated_at,
+                        closed_at = excluded.closed_at,
+                        custom_prompt = excluded.custom_prompt,
                         updated_at = excluded.updated_at",
                     params![
                         thread.id.as_str(),
@@ -147,6 +150,8 @@ impl ThreadStore for SqliteThreadStore {
                         thread.resume_session_id,
                         thread.summary,
                         thread.summary_updated_at.map(ts_to_string),
+                        thread.closed_at.map(ts_to_string),
+                        thread.custom_prompt,
                         ts_to_string(thread.created_at),
                         ts_to_string(thread.updated_at),
                     ],
@@ -211,12 +216,14 @@ mod tests {
             id: ThreadId::from("b-1"),
             stream_id,
             title: "explore".into(),
-            status: ThreadStatus::Open,
+            status: ThreadStatus::Active,
             sort_index: 0,
             pane_target: "working".into(),
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
             created_at: ts(),
             updated_at: ts(),
         }
@@ -244,14 +251,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_for_stream_orders_by_sort_index() {
+    async fn at_most_one_active_thread_per_stream() {
         let (store, sid) = make_store().await;
         let mut a = thread(sid.clone());
         a.id = ThreadId::from("b-a");
+        a.status = ThreadStatus::Active;
+        let mut b = thread(sid.clone());
+        b.id = ThreadId::from("b-b");
+        b.status = ThreadStatus::Active;
+        store.upsert(&a).await.unwrap();
+        // Second active thread on the same stream violates the
+        // partial unique index → DB error → DomainError::Invalid.
+        let err = store.upsert(&b).await.unwrap_err();
+        assert!(matches!(err, DomainError::Invalid(_)));
+    }
+
+    #[tokio::test]
+    async fn list_for_stream_orders_by_sort_index() {
+        let (store, sid) = make_store().await;
+        // Only one Active per stream — give the second thread Queued
+        // status so we don't trip the partial unique index.
+        let mut a = thread(sid.clone());
+        a.id = ThreadId::from("b-a");
         a.sort_index = 1;
+        a.status = ThreadStatus::Active;
         let mut b = thread(sid.clone());
         b.id = ThreadId::from("b-b");
         b.sort_index = 0;
+        b.status = ThreadStatus::Queued;
         store.upsert(&a).await.unwrap();
         store.upsert(&b).await.unwrap();
         let list = store.list_for_stream(&sid).await.unwrap();

@@ -87,13 +87,31 @@ export type Thread = {
 	resume_session_id: string,
 	summary: string,
 	summary_updated_at: Timestamp | null,
+	/**
+	 *  Timestamp when the thread was closed (status transitions to
+	 *  `Closed`). `None` for active/queued threads.
+	 */
+	closed_at: Timestamp | null,
+	/**
+	 *  Per-thread custom prompt appended to the agent's system message.
+	 *  `None` when unset; `Some("")` is distinct (empty override).
+	 */
+	custom_prompt: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
 };
 
 export type ThreadId = string;
 
-export type ThreadStatus = "open" | "closed";
+/**
+ *  Thread lifecycle status — mirrors the TS `ThreadState` shape.
+ * 
+ *  `Active` is the writer thread for its stream (only one per stream
+ *  can mutate the worktree at a time). `Queued` is a non-writer
+ *  thread sharing the same worktree in read-only mode. `Closed` is
+ *  terminated; closed threads are excluded from the rail.
+ */
+export type ThreadStatus = "active" | "queued" | "closed";
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;

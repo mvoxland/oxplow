@@ -2895,6 +2895,7 @@ name = "oxplow-pty"
 version = "0.3.0"
 dependencies = [
  "bytes",
+ "libc",
  "oxplow-domain",
  "portable-pty",
  "serde",
@@ -2904,6 +2905,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2947,6 +2949,7 @@ version = "0.3.0"
 dependencies = [
  "oxplow-app",
  "oxplow-domain",
+ "oxplow-session",
  "serde",
  "serde_json",
  "specta",

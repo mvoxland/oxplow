@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
+use oxplow_domain::DomainError;
+use oxplow_session::SessionError;
+
 /// Frontend-facing error envelope.
 ///
 /// All `#[tauri::command]` functions return `Result<T, IpcError>`.
@@ -44,5 +47,61 @@ impl IpcError {
     pub fn with_cause(mut self, cause: impl ToString) -> Self {
         self.cause = Some(cause.to_string());
         self
+    }
+}
+
+impl From<DomainError> for IpcError {
+    fn from(value: DomainError) -> Self {
+        match &value {
+            DomainError::Invalid(msg) => Self {
+                code: "INVALID".into(),
+                message: msg.clone(),
+                cause: None,
+            },
+            DomainError::NotFound => Self::not_found(),
+            DomainError::Invariant(msg) => Self {
+                code: "INVARIANT".into(),
+                message: msg.clone(),
+                cause: None,
+            },
+        }
+    }
+}
+
+impl From<SessionError> for IpcError {
+    fn from(value: SessionError) -> Self {
+        match &value {
+            SessionError::NotARepo(p) => Self {
+                code: "NOT_A_REPO".into(),
+                message: format!("not a git repo: {}", p.display()),
+                cause: None,
+            },
+            SessionError::InWorktree(p) => Self {
+                code: "IN_WORKTREE".into(),
+                message: format!("workspace is a secondary git worktree: {}", p.display()),
+                cause: None,
+            },
+            SessionError::PrimaryExists => Self {
+                code: "PRIMARY_EXISTS".into(),
+                message: "primary stream already exists".into(),
+                cause: None,
+            },
+            SessionError::PrimaryMissing => Self {
+                code: "PRIMARY_MISSING".into(),
+                message: "primary stream missing".into(),
+                cause: None,
+            },
+            SessionError::DuplicateWorktreeSlug(slug, sid) => Self {
+                code: "DUPLICATE_WORKTREE_SLUG".into(),
+                message: format!("worktree slug \"{slug}\" already exists for stream {sid}"),
+                cause: None,
+            },
+            SessionError::Git(e) => Self {
+                code: "GIT".into(),
+                message: e.to_string(),
+                cause: None,
+            },
+            SessionError::Storage(e) => IpcError::from(e.clone()),
+        }
     }
 }

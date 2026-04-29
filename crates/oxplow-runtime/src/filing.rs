@@ -17,7 +17,7 @@
 use serde::Serialize;
 use specta::Type;
 
-use oxplow_domain::{Thread, ThreadStatus};
+use oxplow_domain::Thread;
 
 pub static ALWAYS_WRITE_INTENT_TOOL_NAMES: &[&str] =
     &["Write", "Edit", "MultiEdit", "NotebookEdit"];
@@ -53,7 +53,10 @@ pub fn build_filing_enforcement_pre_tool_deny(
     ctx: FilingEnforcementContext<'_>,
 ) -> Option<FilingEnforcementDeny> {
     let thread = ctx.thread?;
-    if thread.status != ThreadStatus::Open {
+    // Filing enforcement only applies to the writer (active) thread.
+    // Queued threads can't write at all (write-guard runs first);
+    // closed threads can't either.
+    if !thread.status.is_writer() {
         return None;
     }
     if !ALWAYS_WRITE_INTENT_TOOL_NAMES.contains(&ctx.tool_name) {
@@ -96,19 +99,21 @@ pub fn build_filing_enforcement_pre_tool_reason(tool_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::{StreamId, ThreadId, Timestamp};
+    use oxplow_domain::{StreamId, ThreadId, ThreadStatus, Timestamp};
 
     fn open_thread() -> Thread {
         Thread {
             id: ThreadId::from("b-1"),
             stream_id: StreamId::from("s-1"),
             title: "explore".into(),
-            status: ThreadStatus::Open,
+            status: ThreadStatus::Active,
             sort_index: 0,
             pane_target: "working".into(),
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
             created_at: Timestamp::now(),
             updated_at: Timestamp::now(),
         }
