@@ -9,7 +9,7 @@ import {
   type UsageRollup,
   type WikiNoteSummary,
 } from "../../api.js";
-import type { WorkItemStatus } from "../../legacy-ipc-contract.js";
+import type { WorkItemStatus } from "../../tauri-bridge/index.js";
 import { logUi } from "../../logger.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { formatContextMention, type ContextRef } from "../../agent-context-ref.js";
