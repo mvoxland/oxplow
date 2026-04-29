@@ -1,4 +1,3 @@
-// @ts-nocheck — pending Tauri migration; legacy types drifted from the bridge bindings. Each call site needs to be ported to apps/desktop/src/tauri-bridge.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import {
@@ -1905,7 +1904,9 @@ export function App() {
             navigationTarget={editorNavigationTarget?.path === path ? editorNavigationTarget : null}
             onNavigateToLocation={handleNavigateToLocation}
             openFileOrder={currentSession.openOrder}
-            openFiles={currentSession.files}
+            openFiles={Object.fromEntries(
+              (currentSession.files ?? []).map((f) => [f.path, f]),
+            )}
             onRevealCommit={handleRevealCommit}
             onRevealWorkItem={handleRequestEditWorkItem}
             onCompareWithClipboard={handleCompareWithClipboard}
@@ -1980,7 +1981,9 @@ export function App() {
               navigationTarget={editorNavigationTarget?.path === path ? editorNavigationTarget : null}
               onNavigateToLocation={handleNavigateToLocation}
               openFileOrder={currentSession.openOrder}
-              openFiles={currentSession.files}
+              openFiles={Object.fromEntries(
+                (currentSession.files ?? []).map((f) => [f.path, f]),
+              )}
               onRevealCommit={handleRevealCommit}
               onRevealWorkItem={handleRequestEditWorkItem}
               onCompareWithClipboard={handleCompareWithClipboard}
