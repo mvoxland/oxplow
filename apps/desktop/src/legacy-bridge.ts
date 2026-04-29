@@ -148,6 +148,12 @@ export function buildLegacyAdapter(): DesktopApi {
     ) =>
       unwrap(await commands.addWorkNote(itemId, body, author ?? "user")),
     getWorkNotes: async (itemId: string) => unwrap(await commands.listWorkNotes(itemId)),
+    listWorkItemEvents: async (
+      _streamId: string,
+      _threadId: string,
+      itemId?: string,
+    ) =>
+      unwrap(await commands.listWorkItemEvents(itemId ?? null, null)),
 
     // -- git ops --
     getRepoConflictState: async () => unwrap(await commands.getRepoConflictState()),

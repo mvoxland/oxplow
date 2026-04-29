@@ -1,8 +1,8 @@
 //! Work-item / thread notes (the in-app comment thread on a work
 //! item or the thread-scoped capture pad).
 
-use oxplow_domain::stores::WorkNoteStore;
-use oxplow_domain::{NoteId, ThreadId, WorkItemId, WorkNote};
+use oxplow_domain::stores::{WorkItemEventStore, WorkNoteStore};
+use oxplow_domain::{NoteId, ThreadId, WorkItemEvent, WorkItemId, WorkNote};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -60,4 +60,18 @@ pub async fn delete_work_note(
     id: NoteId,
 ) -> Result<(), IpcError> {
     Ok(state.work_note_store.delete(&id).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_work_item_events(
+    state: tauri::State<'_, AppState>,
+    item_id: Option<WorkItemId>,
+    thread_id: Option<ThreadId>,
+) -> Result<Vec<WorkItemEvent>, IpcError> {
+    match (item_id, thread_id) {
+        (Some(i), _) => Ok(state.work_item_event_store.list_for_item(&i).await?),
+        (None, Some(t)) => Ok(state.work_item_event_store.list_for_thread(&t).await?),
+        (None, None) => Ok(vec![]),
+    }
 }
