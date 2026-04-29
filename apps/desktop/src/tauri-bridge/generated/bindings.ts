@@ -132,6 +132,7 @@ export const commands = {
 	listWorkNotes: (workItemId: WorkItemId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_work_notes", { workItemId })),
 	listThreadNotes: (threadId: ThreadId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
+	listWorkItemEvents: (itemId: string | null, threadId: string | null) => typedError<WorkItemEvent[], IpcError>(__TAURI_INVOKE("list_work_item_events", { itemId, threadId })),
 	listWikiNotes: () => typedError<WikiNote[], IpcError>(__TAURI_INVOKE("list_wiki_notes")),
 	getWikiNote: (slug: string) => typedError<{
 	slug: string,
@@ -900,6 +901,18 @@ export type WorkItemActorKind = "user" | "agent" | "system";
  *  `agent-auto` rows get mapped to `None` on read.
  */
 export type WorkItemAuthor = "user" | "agent";
+
+// Audit-log entry for state changes on a work item.
+export type WorkItemEvent = {
+	id: string,
+	thread_id: ThreadId,
+	item_id: WorkItemId | null,
+	event_type: string,
+	actor_kind: WorkItemActorKind,
+	actor_id: string,
+	payload_json: string,
+	created_at: Timestamp,
+};
 
 export type WorkItemId = string;
 

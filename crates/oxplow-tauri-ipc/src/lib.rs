@@ -70,6 +70,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::notes::list_work_notes,
         commands::notes::list_thread_notes,
         commands::notes::delete_work_note,
+        commands::notes::list_work_item_events,
         // wiki
         commands::wiki::list_wiki_notes,
         commands::wiki::get_wiki_note,
