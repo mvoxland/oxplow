@@ -205,6 +205,22 @@ pub struct ResyncNoteParams {
     pub slug: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LspPositionParams {
+    pub stream_id: String,
+    pub language: String,
+    pub uri: String,
+    pub line: u32,
+    pub character: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LspDiagnosticsParams {
+    pub stream_id: String,
+    pub language: String,
+    pub uri: String,
+}
+
 #[tool_router]
 impl OxplowMcp {
     pub fn new(services: Arc<Services>) -> Self {
@@ -873,6 +889,96 @@ impl OxplowMcp {
         json_result(&hits)
     }
 
+    // ---------- LSP ----------
+
+    #[tool(description = "LSP textDocument/definition for a position in a file.")]
+    async fn lsp_definition(
+        &self,
+        params: Parameters<LspPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> = resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let resp = proxy
+            .request(
+                "textDocument/definition",
+                serde_json::json!({
+                    "textDocument": { "uri": p.uri },
+                    "position": { "line": p.line, "character": p.character },
+                }),
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        Ok(CallToolResult::success(vec![Content::text(
+            resp.to_string(),
+        )]))
+    }
+
+    #[tool(description = "LSP textDocument/hover for a position in a file.")]
+    async fn lsp_hover(
+        &self,
+        params: Parameters<LspPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> = resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let resp = proxy
+            .request(
+                "textDocument/hover",
+                serde_json::json!({
+                    "textDocument": { "uri": p.uri },
+                    "position": { "line": p.line, "character": p.character },
+                }),
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        Ok(CallToolResult::success(vec![Content::text(
+            resp.to_string(),
+        )]))
+    }
+
+    #[tool(description = "LSP textDocument/references for a position in a file.")]
+    async fn lsp_references(
+        &self,
+        params: Parameters<LspPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> = resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let resp = proxy
+            .request(
+                "textDocument/references",
+                serde_json::json!({
+                    "textDocument": { "uri": p.uri },
+                    "position": { "line": p.line, "character": p.character },
+                    "context": { "includeDeclaration": true },
+                }),
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        Ok(CallToolResult::success(vec![Content::text(
+            resp.to_string(),
+        )]))
+    }
+
+    #[tool(description = "LSP textDocument/diagnostic — pulls the latest diagnostics for a file.")]
+    async fn lsp_diagnostics(
+        &self,
+        params: Parameters<LspDiagnosticsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> = resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let resp = proxy
+            .request(
+                "textDocument/diagnostic",
+                serde_json::json!({
+                    "textDocument": { "uri": p.uri },
+                }),
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        Ok(CallToolResult::success(vec![Content::text(
+            resp.to_string(),
+        )]))
+    }
+
     #[tool(description = "Re-read a wiki note's body file and refresh the FTS index.")]
     async fn resync_note(
         &self,
@@ -954,6 +1060,32 @@ fn parse_priority(s: &str) -> Result<oxplow_domain::WorkItemPriority, McpError> 
             ))
         }
     })
+}
+
+/// Resolve the per-(stream, language) LspProxy. Helper sitting
+/// outside the `#[tool_router]` impl so the macro doesn't try to
+/// route it as a tool.
+async fn resolve_lsp_proxy(
+    services: &Services,
+    stream_id: &str,
+    language: &str,
+) -> Result<std::sync::Arc<oxplow_app::LspProxy>, McpError> {
+    let stream = services
+        .streams
+        .list_streams()
+        .await
+        .map_err(|e| internal(e.to_string()))?
+        .into_iter()
+        .find(|s| s.id.as_str() == stream_id)
+        .ok_or_else(|| {
+            McpError::invalid_params(format!("stream not found: {stream_id}"), None)
+        })?;
+    let cwd = std::path::PathBuf::from(&stream.worktree_path);
+    services
+        .lsp_sessions
+        .ensure(stream_id, language, cwd)
+        .await
+        .map_err(|e| internal(e.to_string()))
 }
 
 fn parse_link_type(s: &str) -> Result<WorkItemLinkType, McpError> {
