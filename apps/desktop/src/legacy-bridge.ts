@@ -389,6 +389,49 @@ export function buildLegacyAdapter(): DesktopApi {
       }
     },
 
+    // -- legacy UI plumbing — Tauri has native equivalents or
+    // doesn't need these. Stubs so the renderer doesn't crash. --
+    setNativeMenu: async () => {
+      // Tauri menus are configured via the Rust shell, not the
+      // renderer. No-op silently.
+    },
+    onMenuCommand: () => {
+      // No menu-command channel under Tauri yet; return an unsubscribe
+      // that does nothing.
+      return () => {};
+    },
+    updateEditorFocus: async () => {
+      // Editor-focus telemetry was Electron-only.
+    },
+    logUi: async (payload: unknown) => {
+      // Forward to console; the daemon has its own tracing.
+      // eslint-disable-next-line no-console
+      console.log("[ui]", payload);
+    },
+    runCodeQualityScan: async () => {
+      throw new Error(
+        "runCodeQualityScan: subprocess driver (lizard / jscpd) not yet ported",
+      );
+    },
+    openLspClient: async () => {
+      throw new Error("openLspClient: LSP session manager not yet ported");
+    },
+    closeLspClient: async () => {
+      // Tolerate close-of-non-existent — UI calls this in cleanup paths.
+    },
+    sendLspMessage: async () => {
+      throw new Error("sendLspMessage: LSP session manager not yet ported");
+    },
+    onLspEvent: () => () => {},
+    openTerminalSession: async () => {
+      throw new Error("openTerminalSession: PTY bridge not yet wired through Tauri events");
+    },
+    closeTerminalSession: async () => {},
+    sendTerminalMessage: async () => {
+      throw new Error("sendTerminalMessage: PTY bridge not yet wired through Tauri events");
+    },
+    onTerminalEvent: () => () => {},
+
     // -- bridge from oxplow:event channel onto legacy onOxplowEvent --
     onOxplowEvent: (handler: (event: unknown) => void) => {
       let stopped = false;

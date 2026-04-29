@@ -15,10 +15,12 @@ pub mod config_service;
 pub mod events;
 pub mod followup;
 pub mod hook_ingest;
+pub mod lsp_sessions;
 pub mod recovery;
 pub mod work_item_service;
 
 pub use events::{EventBus, OxplowEvent};
+pub use oxplow_lsp::{LspError, LspProxy};
 pub use hook_ingest::{HookEnvelope, HookIngestError, HookIngestService};
 pub use work_item_service::{
     BacklogState, CreateWorkItemInput, UpdateWorkItemChanges, WorkItemService,
@@ -111,6 +113,7 @@ pub struct Services {
     pub pty: oxplow_pty::PtyManager,
     pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
     pub agent_panes: agent_pane::AgentPaneService,
+    pub lsp_sessions: lsp_sessions::LspSessionManager,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
 }
@@ -161,9 +164,13 @@ impl Services {
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
         let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
+        // Lazily-built per-(stream, language) LSP proxies. Spawn cost
+        // is paid on first request, not at boot.
+        let config_arc = Arc::new(RwLock::new(config));
+        let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
 
         Ok(Self {
-            config: Arc::new(RwLock::new(config)),
+            config: config_arc,
             db,
             layout,
             streams,
@@ -189,6 +196,7 @@ impl Services {
             pty,
             tmux,
             agent_panes,
+            lsp_sessions: lsp,
             recovery: recovery_svc,
             events: event_bus,
         })
@@ -242,8 +250,10 @@ impl Services {
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
         let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
+        let config_arc = Arc::new(RwLock::new(config));
+        let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
         Ok(Self {
-            config: Arc::new(RwLock::new(config)),
+            config: config_arc,
             db,
             layout,
             streams,
@@ -269,6 +279,7 @@ impl Services {
             pty,
             tmux,
             agent_panes,
+            lsp_sessions: lsp,
             recovery: recovery_svc,
             events: event_bus,
         })
