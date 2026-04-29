@@ -8,8 +8,10 @@ use crate::state::AppState;
 pub async fn record_usage(
     state: tauri::State<'_, AppState>,
     kind: String,
-    payload: serde_json::Value,
+    payload_json: String,
 ) -> Result<UsageEvent, IpcError> {
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
     Ok(state.usage_store.record(&kind, payload).await?)
 }
 

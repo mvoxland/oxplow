@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import type { TerminalEvent } from "../../electron/ipc-contract.js";
+import type { TerminalEvent } from "../legacy-file-session.js";
 import { logUi } from "../logger.js";
 import {
   shouldHandleTerminalPageKey,

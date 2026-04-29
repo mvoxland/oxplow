@@ -114,7 +114,7 @@ export const commands = {
 	topVisitedPages: (limit: number) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit })),
 	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
 	countPageVisitsByDay: (days: number) => typedError<PageVisitDay[], IpcError>(__TAURI_INVOKE("count_page_visits_by_day", { days })),
-	recordUsage: (kind: string, payload: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never }) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payload })),
+	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
 	listRecentUsage: (limit: number) => typedError<UsageEvent[], IpcError>(__TAURI_INVOKE("list_recent_usage", { limit })),
 	listCodeQualityScans: (limit: number) => typedError<CodeQualityScan[], IpcError>(__TAURI_INVOKE("list_code_quality_scans", { limit })),
 	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
@@ -163,11 +163,15 @@ export const commands = {
 	started_at: number,
 	ended_at: number | null,
 	error: string | null,
-	// Producer-supplied opaque JSON attached at complete/fail.
-	result: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never } | null,
+	/**
+	 *  Producer-supplied opaque JSON attached at complete/fail.
+	 *  Stored as a string so the bindings stay simple — the producer
+	 *  is expected to JSON-stringify before passing.
+	 */
+	result_json: string | null,
 } | null, IpcError>(__TAURI_INVOKE("get_background_task", { id })),
 	startBackgroundTask: (kind: BackgroundTaskKind, label: string, detail: string | null) => typedError<BackgroundTask, IpcError>(__TAURI_INVOKE("start_background_task", { kind, label, detail })),
-	completeBackgroundTask: (id: string, result: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: ("Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Vec<Value> }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never })[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: Map<string, Value> }) & { Array?: never; Bool?: never; Number?: never; String?: never } } }) & { Array?: never; Bool?: never; Number?: never; String?: never } | null) => typedError<null, IpcError>(__TAURI_INVOKE("complete_background_task", { id, result })),
+	completeBackgroundTask: (id: string, resultJson: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("complete_background_task", { id, resultJson })),
 	failBackgroundTask: (id: string, error: string) => typedError<null, IpcError>(__TAURI_INVOKE("fail_background_task", { id, error })),
 	updateBackgroundTask: (id: string, label: string | null, detail: string | null, progress: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("update_background_task", { id, label, detail, progress })),
 	listFollowups: (threadId: ThreadId) => typedError<Followup[], IpcError>(__TAURI_INVOKE("list_followups", { threadId })),
@@ -211,8 +215,12 @@ export type BackgroundTask = {
 	started_at: number,
 	ended_at: number | null,
 	error: string | null,
-	// Producer-supplied opaque JSON attached at complete/fail.
-	result: "Null" | ({ Bool: boolean }) & { Array?: never; Number?: never; Object?: never; String?: never } | ({ Number: ({ f64: number }) & { i64?: never; u64?: never } | ({ i64: number }) & { f64?: never; u64?: never } | ({ u64: number }) & { f64?: never; i64?: never } }) & { Array?: never; Bool?: never; Object?: never; String?: never } | ({ String: string }) & { Array?: never; Bool?: never; Number?: never; Object?: never } | ({ Array: Value[] }) & { Bool?: never; Number?: never; Object?: never; String?: never } | ({ Object: { [key in string]: Value } }) & { Array?: never; Bool?: never; Number?: never; String?: never } | null,
+	/**
+	 *  Producer-supplied opaque JSON attached at complete/fail.
+	 *  Stored as a string so the bindings stay simple — the producer
+	 *  is expected to JSON-stringify before passing.
+	 */
+	result_json: string | null,
 };
 
 export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync";

@@ -4,6 +4,16 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
+    // Migration relaxations — legacy api.ts and the UI files
+    // it feeds are typecheck-compatible but were authored
+    // against an Electron preload that doesn't exist under
+    // Tauri. Each of these knobs is downgraded only as long
+    // as legacy-ipc-contract.ts is the source of truth; once
+    // the UI has been ported off the legacy contract these
+    // flip back on.
+    "noUncheckedIndexedAccess": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,

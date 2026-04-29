@@ -13,9 +13,11 @@
  * exfiltrating via odd transports.
  */
 
-export type ExternalUrlVerdict =
-  | { ok: true; url: string }
-  | { ok: false; reason: ExternalUrlRejectionReason };
+export type ExternalUrlVerdict = {
+  ok: boolean;
+  url?: string;
+  reason?: ExternalUrlRejectionReason;
+};
 
 export type ExternalUrlRejectionReason =
   | "empty"
