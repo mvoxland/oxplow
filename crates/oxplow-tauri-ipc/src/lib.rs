@@ -31,6 +31,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::list_threads,
         commands::list_work_items_for_thread,
         commands::list_backlog,
+        commands::open_external_url,
     ])
 }
 

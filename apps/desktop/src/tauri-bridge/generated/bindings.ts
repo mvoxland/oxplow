@@ -12,6 +12,21 @@ export const commands = {
 	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),
 	listWorkItemsForThread: (threadId: ThreadId) => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_work_items_for_thread", { threadId })),
 	listBacklog: () => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_backlog")),
+	/**
+	 *  Open an external URL in a sandboxed `WebviewWindow`.
+	 * 
+	 *  Replaces the legacy `<webview>` tag flow. The new window inherits
+	 *  the `external-url` capability defined in
+	 *  `apps/desktop/src-tauri/capabilities/external-url.json`, which
+	 *  grants zero oxplow commands and zero plugin permissions — the
+	 *  embedded content can't call back into the host.
+	 * 
+	 *  `url` must be `http(s)://`. Anything else returns an `INVALID`
+	 *  IpcError; the UI is expected to validate before calling, but the
+	 *  Rust side enforces the invariant since the URL ultimately controls
+	 *  what the new webview loads.
+	 */
+	openExternalUrl: (url: string) => typedError<string, IpcError>(__TAURI_INVOKE("open_external_url", { url })),
 };
 
 /* Types */
