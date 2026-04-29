@@ -2851,6 +2851,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-fs-watch",
  "serde",
+ "serde_json",
  "specta",
  "tempfile",
  "thiserror 2.0.18",
