@@ -181,6 +181,8 @@ export const commands = {
 	listExistingWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_existing_worktrees")),
 	listSiblingWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_sibling_worktrees")),
 	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
+	gitBlame: (path: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("git_blame", { path })),
+	getBranchChanges: (baseRef: string) => typedError<BranchChanges, IpcError>(__TAURI_INVOKE("get_branch_changes", { baseRef })),
 	/**
 	 *  Land an envelope from the hook subprocess. Drives the agent_turn /
 	 *  agent_status state machine inside HookIngestService.
@@ -324,6 +326,29 @@ export type BacklogState = {
 	done: WorkItem[],
 };
 
+export type BlameLine = {
+	line: number,
+	sha: string,
+	author: string,
+	author_mail: string,
+	author_time: number,
+	summary: string,
+};
+
+export type BranchChangeEntry = {
+	path: string,
+	original_path: string | null,
+	change: ChangeKind,
+	additions: number,
+	deletions: number,
+};
+
+export type BranchChanges = {
+	base_ref: string,
+	merge_base: string | null,
+	files: BranchChangeEntry[],
+};
+
 export type BranchRef = {
 	kind: BranchRefKind,
 	name: string,
@@ -334,6 +359,8 @@ export type BranchRef = {
 };
 
 export type BranchRefKind = "local" | "remote";
+
+export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
 
 export type CodeQualityFinding = {
 	id: number,

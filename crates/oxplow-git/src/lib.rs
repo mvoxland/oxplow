@@ -5,7 +5,9 @@
 //! falling back to `Command::new("git")` for cases libgit2 doesn't
 //! cover well (e.g. `git worktree add`).
 
+pub mod blame;
 mod branch;
+mod branch_changes;
 mod branch_ops;
 mod conflict;
 pub mod log;
@@ -17,7 +19,9 @@ pub mod sync;
 pub mod workspace;
 mod worktree;
 
+pub use blame::{git_blame, parse_porcelain, BlameLine, BLAME_ZERO_SHA};
 pub use branch::{list_branches, BranchRef, BranchRefKind};
+pub use branch_changes::{list_branch_changes, BranchChangeEntry, BranchChanges, ChangeKind};
 pub use branch_ops::{
     append_to_gitignore, delete_branch, detect_default_branch, get_ahead_behind,
     get_commits_ahead_of, rename_branch, restore_path, AheadBehind, BranchOpError,

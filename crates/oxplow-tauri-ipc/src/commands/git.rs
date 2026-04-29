@@ -1,6 +1,6 @@
 use oxplow_git::{
-    AheadBehind, GitOpResult, GitOperationKind, GitWorktreeEntry, GroupedGitRefs, RemoteBranchEntry,
-    RepoConflictState, TextSearchHit,
+    AheadBehind, BlameLine, BranchChanges, GitOpResult, GitOperationKind, GitWorktreeEntry,
+    GroupedGitRefs, RemoteBranchEntry, RepoConflictState, TextSearchHit,
 };
 use oxplow_domain::stores::StreamStore;
 
@@ -208,6 +208,30 @@ pub async fn list_file_commits(
             .await
             .map_err(|e| IpcError::internal(e.to_string()))?,
     )
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn git_blame(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<Vec<BlameLine>, IpcError> {
+    let project = project_dir(&state);
+    Ok(tokio::task::spawn_blocking(move || oxplow_git::git_blame(&project, &path))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_branch_changes(
+    state: tauri::State<'_, AppState>,
+    base_ref: String,
+) -> Result<BranchChanges, IpcError> {
+    let project = project_dir(&state);
+    Ok(tokio::task::spawn_blocking(move || oxplow_git::list_branch_changes(&project, &base_ref))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?)
 }
 
 #[tauri::command]
