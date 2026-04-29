@@ -1,4 +1,26 @@
 # Git integration
+> **Note (April 2026, post-Tauri rewrite):** the source-path
+> references in this doc still reflect the original Electron/TS
+> structure (`src/electron/`, `src/persistence/`, etc). The codebase
+> has since been ported to Rust crates under `crates/` with the
+> frontend at `apps/desktop/src/`. Use the table below to translate:
+>
+> | Old TS path | New Rust crate |
+> |---|---|
+> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
+> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
+> | `src/git/` | `crates/oxplow-git` |
+> | `src/lsp/` | `crates/oxplow-lsp` |
+> | `src/mcp/` | `crates/oxplow-mcp` |
+> | `src/session/` | `crates/oxplow-session` |
+> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
+> | `src/config/` | `crates/oxplow-config` |
+> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
+> | `src/ui/` | `apps/desktop/src/` |
+>
+> Behaviors and design principles below remain authoritative; only
+> the path references are stale.
+
 
 What this doc covers: the three filesystem watchers that keep git state
 fresh in the UI, the runtime-side git operations, and the rule that
