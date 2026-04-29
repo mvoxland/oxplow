@@ -108,30 +108,12 @@ export interface EffortDetail {
   counts: { created: number; updated: number; deleted: number };
 }
 
-export interface ThreadFollowup {
-  id: string;
-  note: string;
-  createdAt: string;
-}
-
-export interface ThreadWorkState {
-  threadId: string;
-  waiting: WorkItem[];
-  inProgress: WorkItem[];
-  done: WorkItem[];
-  epics: WorkItem[];
-  items: WorkItem[];
-  /** Transient agent follow-up reminders (in-memory on the runtime,
-   *  lost on restart). Surfaced at the top of the To Do section. */
-  followups: ThreadFollowup[];
-}
-
-export interface BacklogState {
-  items: WorkItem[];
-  waiting: WorkItem[];
-  inProgress: WorkItem[];
-  done: WorkItem[];
-}
+// Followup is bindings.Followup; ThreadWorkState is the bundle the
+// Work panel renders. Both are emitted by tauri-specta now.
+import type { Followup as ThreadFollowup, ThreadWorkState as TauriThreadWorkState, BacklogState as TauriBacklogState } from "./tauri-bridge/index.js";
+export type { ThreadFollowup };
+export type ThreadWorkState = TauriThreadWorkState;
+export type BacklogState = TauriBacklogState;
 
 export const BACKLOG_SCOPE = "__backlog__";
 

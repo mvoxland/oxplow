@@ -221,7 +221,7 @@ export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] 
   // which only runs when a group exists. Without a group the empty backlog
   // would fall back to a blank "Backlog is empty." label with no way to
   // create the first task.
-  const items = state ? [...state.waiting, ...state.inProgress, ...state.done] : [];
+  const items = state ? [...state.waiting, ...state.in_progress, ...state.done] : [];
   items.sort((a, b) => a.sort_index - b.sort_index);
   return [{ epic: null, items, epicChildren: new Map() }];
 }
