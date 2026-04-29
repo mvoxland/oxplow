@@ -39,8 +39,10 @@ fn main() {
         .read()
         .map(|c| c.snapshot_max_file_bytes)
         .unwrap_or(5 * 1024 * 1024);
+    let blobs = state.blobs.clone();
     oxplow_app::snapshot_capture::SnapshotCaptureService::new(
         snap_store,
+        blobs,
         project_dir,
         None,
         max_bytes,

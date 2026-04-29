@@ -1,30 +1,31 @@
 //! Periodic file-snapshot capture.
 //!
 //! Subscribes to `oxplow_fs_watch` events for the project worktree
-//! and captures a `file_snapshot` row whenever a file changes. Blob
-//! storage isn't ported yet (see MIGRATION_REVIEW2 §3 / sharp edge
-//! §5), so for now we capture the *metadata* — path, size, sha256
-//! of the bytes — without persisting the bytes themselves. The
-//! `local_blame` overlay and `restore_file_from_snapshot` will be
-//! upgraded once a content-addressed blob store lands.
+//! and captures a `file_snapshot` row whenever a file changes. Bytes
+//! are persisted to a content-addressed blob store under
+//! `<project>/.oxplow/blobs/<aa>/<aaaa...>`, keyed by the SHA-256
+//! hash. The `local_blame` overlay and `restore_file_from_snapshot`
+//! both read through `BlobStore::read` to recover past file content.
 //!
 //! Designed as a long-running task spawned at boot. Runs until the
-//! `CancellationToken` fires (typically on shutdown).
+//! receiver channel closes (typically on shutdown).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
 use oxplow_db::{FileSnapshot, SqliteSnapshotStore};
 use oxplow_domain::{StreamId, Timestamp};
 use oxplow_fs_watch::FsWatcher;
 
+use crate::blob_store::BlobStore;
+
 #[derive(Clone)]
 pub struct SnapshotCaptureService {
     store: Arc<SqliteSnapshotStore>,
+    blobs: BlobStore,
     project_dir: PathBuf,
     stream_id: Option<StreamId>,
     /// Files larger than this skip blob hashing and are flagged
@@ -35,12 +36,14 @@ pub struct SnapshotCaptureService {
 impl SnapshotCaptureService {
     pub fn new(
         store: Arc<SqliteSnapshotStore>,
+        blobs: BlobStore,
         project_dir: PathBuf,
         stream_id: Option<StreamId>,
         max_file_bytes: u64,
     ) -> Self {
         Self {
             store,
+            blobs,
             project_dir,
             stream_id,
             max_file_bytes,
@@ -91,9 +94,10 @@ impl SnapshotCaptureService {
             None
         } else {
             let bytes = std::fs::read(path)?;
-            let mut hasher = Sha256::new();
-            hasher.update(&bytes);
-            Some(format!("{:x}", hasher.finalize()))
+            // Persist the bytes content-addressed; blob_hash is the
+            // SHA-256 hex. local_blame and restore_file_from_snapshot
+            // read through BlobStore::read using this hash.
+            Some(self.blobs.write(&bytes)?)
         };
         let rel = path
             .strip_prefix(&self.project_dir)
@@ -121,13 +125,15 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn capture_path_writes_a_row() {
+    async fn capture_path_writes_a_row_and_blob() {
         let project = tempdir().unwrap();
         let file = project.path().join("a.txt");
         std::fs::write(&file, "hello").unwrap();
         let store = Arc::new(SqliteSnapshotStore::new(Database::in_memory()));
+        let blobs = BlobStore::new(project.path().join(".oxplow/blobs"));
         let svc = SnapshotCaptureService::new(
             store.clone(),
+            blobs.clone(),
             project.path().to_path_buf(),
             None,
             1_000_000,
@@ -135,17 +141,22 @@ mod tests {
         svc.capture_path(&file).await.unwrap();
         let rows = store.list_for_path("a.txt").await.unwrap();
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].blob_hash.as_deref().unwrap().len() == 64);
+        let hash = rows[0].blob_hash.as_deref().unwrap();
+        assert_eq!(hash.len(), 64);
+        // Bytes round-trip through the blob store.
+        assert_eq!(blobs.read(hash).unwrap(), b"hello");
     }
 
     #[tokio::test]
-    async fn oversize_file_skips_hash() {
+    async fn oversize_file_skips_hash_and_blob() {
         let project = tempdir().unwrap();
         let file = project.path().join("big.bin");
         std::fs::write(&file, vec![0u8; 1024]).unwrap();
         let store = Arc::new(SqliteSnapshotStore::new(Database::in_memory()));
+        let blobs = BlobStore::new(project.path().join(".oxplow/blobs"));
         let svc = SnapshotCaptureService::new(
             store.clone(),
+            blobs,
             project.path().to_path_buf(),
             None,
             512, // 512 byte cap → 1KB is oversize

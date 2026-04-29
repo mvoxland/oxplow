@@ -105,11 +105,11 @@ pub async fn get_snapshot_summary(
     })
 }
 
-/// Restore a file's contents from a snapshot. Best-effort: snapshots
-/// only store the blob hash, not the bytes — so the actual restore
-/// requires content-addressed blob storage that the new schema doesn't
-/// model yet. This command currently returns an error if the snapshot
-/// exists but no blob is available.
+/// Restore a file's contents from a snapshot. Reads the bytes from
+/// the content-addressed blob store using the snapshot's `blob_hash`
+/// and writes them back to the snapshot's path inside the workspace.
+/// Errors with NOT_FOUND if the snapshot row is gone or its blob
+/// was pruned.
 #[tauri::command]
 #[specta::specta]
 pub async fn restore_file_from_snapshot(
@@ -121,8 +121,18 @@ pub async fn restore_file_from_snapshot(
         .get(snapshot_id)
         .await?
         .ok_or_else(IpcError::not_found)?;
-    Err(IpcError::internal(format!(
-        "blob restore not yet implemented (snapshot {} hash={:?})",
-        snap.id, snap.blob_hash
-    )))
+    let hash = snap
+        .blob_hash
+        .clone()
+        .ok_or_else(|| IpcError::invalid("snapshot has no blob (oversize or pre-blob-store)"))?;
+    let bytes = state
+        .blobs
+        .read(&hash)
+        .map_err(|e| IpcError::internal(e.to_string()))?;
+    let target = state.layout.project_dir.join(&snap.path);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| IpcError::internal(e.to_string()))?;
+    }
+    std::fs::write(&target, &bytes).map_err(|e| IpcError::internal(e.to_string()))?;
+    Ok(())
 }

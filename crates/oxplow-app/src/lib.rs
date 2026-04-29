@@ -10,6 +10,7 @@
 pub mod agent_command;
 pub mod agent_pane;
 pub mod agent_prompt;
+pub mod blob_store;
 pub mod code_quality_runner;
 pub mod background_task;
 pub mod config_service;
@@ -115,6 +116,7 @@ pub struct Services {
     pub pty: oxplow_pty::PtyManager,
     pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
     pub agent_panes: agent_pane::AgentPaneService,
+    pub blobs: blob_store::BlobStore,
     pub lsp_sessions: lsp_sessions::LspSessionManager,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
@@ -170,6 +172,7 @@ impl Services {
         // is paid on first request, not at boot.
         let config_arc = Arc::new(RwLock::new(config));
         let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
+        let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
 
         Ok(Self {
             config: config_arc,
@@ -198,6 +201,7 @@ impl Services {
             pty,
             tmux,
             agent_panes,
+            blobs,
             lsp_sessions: lsp,
             recovery: recovery_svc,
             events: event_bus,
@@ -254,6 +258,7 @@ impl Services {
         let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
         let config_arc = Arc::new(RwLock::new(config));
         let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
+        let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
         Ok(Self {
             config: config_arc,
             db,
@@ -281,6 +286,7 @@ impl Services {
             pty,
             tmux,
             agent_panes,
+            blobs,
             lsp_sessions: lsp,
             recovery: recovery_svc,
             events: event_bus,
