@@ -48,6 +48,15 @@ pub enum OxplowEvent {
     FollowupsChanged { thread_id: ThreadId },
     /// Background task progress.
     BackgroundTasksChanged,
+    /// A new hook event landed; renderer refreshes the hook log.
+    HookEventsChanged,
+    /// Per-thread per-pane agent status changed.
+    AgentStatusChanged {
+        thread_id: ThreadId,
+        pane_target: String,
+    },
+    /// agent_turn opened or closed.
+    AgentTurnsChanged { thread_id: ThreadId },
 }
 
 /// Cheap-to-clone broadcast hub. Capacity is small — subscribers

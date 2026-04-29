@@ -6,6 +6,7 @@
 //! no IO, no async runtime usage, and no platform-specific code.
 
 pub mod error;
+pub mod hook;
 pub mod ids;
 pub mod stores;
 pub mod stream;
@@ -14,7 +15,8 @@ pub mod time;
 pub mod work_item;
 
 pub use error::DomainError;
-pub use ids::{AgentTurnId, NoteId, StreamId, ThreadId, WorkItemId};
+pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
+pub use ids::{AgentTurnId, EffortId, HookEventId, NoteId, StreamId, ThreadId, WorkItemId};
 pub use stream::{Stream, StreamKind};
 pub use thread::{Thread, ThreadStatus};
 pub use time::Timestamp;

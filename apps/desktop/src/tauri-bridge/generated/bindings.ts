@@ -178,6 +178,16 @@ export const commands = {
 	listFileCommits: (path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { path, limit })),
 	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
 	searchWorkspaceText: (query: string, limit: number | null) => typedError<TextSearchHit[], IpcError>(__TAURI_INVOKE("search_workspace_text", { query, limit })),
+	/**
+	 *  Land an envelope from the hook subprocess. Drives the agent_turn /
+	 *  agent_status state machine inside HookIngestService.
+	 */
+	ingestHookEvent: (envelope: HookEnvelope) => typedError<null, IpcError>(__TAURI_INVOKE("ingest_hook_event", { envelope })),
+	listHookEvents: (threadId: string | null, limit: number | null) => typedError<HookEvent[], IpcError>(__TAURI_INVOKE("list_hook_events", { threadId, limit })),
+	listHookEventsByKind: (kind: HookKind, limit: number | null) => typedError<HookEvent[], IpcError>(__TAURI_INVOKE("list_hook_events_by_kind", { kind, limit })),
+	listAgentStatuses: () => typedError<AgentStatus[], IpcError>(__TAURI_INVOKE("list_agent_statuses")),
+	listOpenAgentTurns: (threadId: ThreadId) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_open_agent_turns", { threadId })),
+	listRecentAgentTurns: (threadId: ThreadId, limit: number | null) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_recent_agent_turns", { threadId, limit })),
 	getGitLog: (limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { limit, all })),
 	getCommitDetail: (sha: string) => typedError<{
 	sha: string,
@@ -244,6 +254,33 @@ export const commands = {
 };
 
 /* Types */
+export type AgentStatus = {
+	thread_id: ThreadId,
+	pane_target: string,
+	state: AgentStatusState,
+	detail: string | null,
+	updated_at: Timestamp,
+};
+
+export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" | "error";
+
+/**
+ *  One open or closed agent turn. Open rows render as live in-progress
+ *  entries in the Work panel; the Stop hook closes the row.
+ */
+export type AgentTurn = {
+	id: AgentTurnId,
+	thread_id: ThreadId,
+	work_item_id: WorkItemId | null,
+	prompt: string,
+	answer: string | null,
+	session_id: string | null,
+	started_at: Timestamp,
+	ended_at: Timestamp | null,
+};
+
+export type AgentTurnId = string;
+
 export type AheadBehind = {
 	ahead: number,
 	behind: number,
@@ -422,6 +459,57 @@ export type GroupedGitRefs = {
 	remotes: RefOption[],
 	tags: RefOption[],
 };
+
+/**
+ *  What the hook subprocess sends us.
+ * 
+ *  The renderer / Claude Code emit JSON envelopes; the daemon receives
+ *  them and lands them here. `payload_json` is the verbatim envelope
+ *  minus the routing fields we hoist into typed columns.
+ */
+export type HookEnvelope = {
+	kind: HookKind,
+	thread_id: ThreadId | null,
+	stream_id: StreamId | null,
+	session_id: string | null,
+	payload_json: string,
+	/**
+	 *  Optional client-supplied prompt body for UserPromptSubmit so
+	 *  the agent_turn row carries the visible prompt text.
+	 */
+	prompt: string | null,
+};
+
+export type HookEvent = {
+	id: HookEventId,
+	thread_id: ThreadId | null,
+	stream_id: StreamId | null,
+	kind: HookKind,
+	session_id: string | null,
+	/**
+	 *  Raw envelope from the hook subprocess, JSON-encoded. The
+	 *  pipeline parses this lazily — the persisted form is verbatim.
+	 */
+	payload_json: string,
+	received_at: Timestamp,
+};
+
+export type HookEventId = string;
+
+/**
+ *  Discriminant for hook events. Matches the kinds Claude Code emits
+ *  plus a few oxplow-internal synthetic kinds (Interrupt, AgentBoot).
+ */
+export type HookKind = 
+// Renderer/agent paste, run-command, etc.
+"user_prompt_submit" | "pre_tool_use" | "post_tool_use" | "stop" | "subagent_stop" | 
+// Synthesized by oxplow when the user hits Ctrl-C / Esc in a pane.
+"interrupt" | 
+/**
+ *  Agent boot sentinel — fires once per session_id when oxplow first
+ *  observes traffic for it.
+ */
+"agent_boot";
 
 /**
  *  Frontend-facing error envelope.

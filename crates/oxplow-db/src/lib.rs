@@ -4,6 +4,7 @@
 //! `rusqlite` connection pool. Migrations live in `migrations/` as
 //! plain SQL and are applied at startup via `refinery`.
 
+pub mod agent_stores;
 pub mod analytics_stores;
 mod database;
 mod stream_store;
@@ -12,6 +13,9 @@ pub mod wiki_note_store;
 mod work_item_store;
 mod work_satellite;
 
+pub use agent_stores::{
+    SqliteAgentStatusStore, SqliteAgentTurnStore, SqliteHookEventStore,
+};
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
     PageVisitStore, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,

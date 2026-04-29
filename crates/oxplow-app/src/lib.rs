@@ -10,9 +10,11 @@
 pub mod background_task;
 pub mod events;
 pub mod followup;
+pub mod hook_ingest;
 pub mod work_item_service;
 
 pub use events::{EventBus, OxplowEvent};
+pub use hook_ingest::{HookEnvelope, HookIngestError, HookIngestService};
 pub use work_item_service::{
     BacklogState, CreateWorkItemInput, UpdateWorkItemChanges, WorkItemService,
     WorkItemServiceError,
@@ -32,7 +34,8 @@ use tracing::info;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
-    Database, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore,
+    Database, SqliteAgentStatusStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
+    SqliteHookEventStore, SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore,
     SqliteThreadStore, SqliteUsageStore, SqliteWikiNoteStore, SqliteWorkItemEventStore,
     SqliteWorkItemLinkStore, SqliteWorkItemStore, SqliteWorkNoteStore,
 };
@@ -91,6 +94,10 @@ pub struct Services {
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
     pub snapshot_store: Arc<SqliteSnapshotStore>,
+    pub hook_event_store: Arc<SqliteHookEventStore>,
+    pub agent_status_store: Arc<SqliteAgentStatusStore>,
+    pub agent_turn_store: Arc<SqliteAgentTurnStore>,
+    pub hook_ingest: HookIngestService,
     pub background_tasks: BackgroundTaskStore,
     pub followups: FollowupStore,
     pub pty: oxplow_pty::PtyManager,
@@ -119,11 +126,21 @@ impl Services {
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
         let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
+        let hook_event_store = Arc::new(SqliteHookEventStore::new(db.clone()));
+        let agent_status_store = Arc::new(SqliteAgentStatusStore::new(db.clone()));
+        let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
         let threads = ThreadService::new(thread_store.clone());
         let work_items = WorkItemService::new(work_item_store.clone());
+        let event_bus = EventBus::new();
+        let hook_ingest = HookIngestService::new(
+            hook_event_store.clone(),
+            agent_status_store.clone(),
+            agent_turn_store.clone(),
+            event_bus.clone(),
+        );
 
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
@@ -145,11 +162,15 @@ impl Services {
             usage_store,
             code_quality_store,
             snapshot_store,
+            hook_event_store,
+            agent_status_store,
+            agent_turn_store,
+            hook_ingest,
             background_tasks: BackgroundTaskStore::new(),
             followups: FollowupStore::new(),
             pty,
             tmux,
-            events: EventBus::new(),
+            events: event_bus,
         })
     }
 
@@ -178,10 +199,20 @@ impl Services {
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
         let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
+        let hook_event_store = Arc::new(SqliteHookEventStore::new(db.clone()));
+        let agent_status_store = Arc::new(SqliteAgentStatusStore::new(db.clone()));
+        let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
         let threads = ThreadService::new(thread_store.clone());
         let work_items = WorkItemService::new(work_item_store.clone());
+        let event_bus = EventBus::new();
+        let hook_ingest = HookIngestService::new(
+            hook_event_store.clone(),
+            agent_status_store.clone(),
+            agent_turn_store.clone(),
+            event_bus.clone(),
+        );
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
         Ok(Self {
@@ -201,11 +232,15 @@ impl Services {
             usage_store,
             code_quality_store,
             snapshot_store,
+            hook_event_store,
+            agent_status_store,
+            agent_turn_store,
+            hook_ingest,
             background_tasks: BackgroundTaskStore::new(),
             followups: FollowupStore::new(),
             pty,
             tmux,
-            events: EventBus::new(),
+            events: event_bus,
         })
     }
 }
