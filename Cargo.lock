@@ -2896,9 +2896,11 @@ dependencies = [
  "portable-pty",
  "serde",
  "specta",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
