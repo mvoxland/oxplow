@@ -50,6 +50,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::threads::reorder_thread_queue,
         commands::threads::get_selected_thread,
         commands::threads::select_thread,
+        commands::threads::get_thread_state,
+        commands::threads::get_thread_work_state,
         // work items
         commands::work_items::list_work_items_for_thread,
         commands::work_items::get_work_item,

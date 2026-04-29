@@ -207,6 +207,89 @@ pub struct SelectThreadRequest {
     pub thread_id: Option<ThreadId>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ThreadState {
+    #[serde(rename = "selectedThreadId")]
+    pub selected_thread_id: Option<ThreadId>,
+    #[serde(rename = "activeThreadId")]
+    pub active_thread_id: Option<ThreadId>,
+    pub threads: Vec<Thread>,
+}
+
+/// Aggregate "what threads exist on this stream and what's selected/active".
+#[tauri::command]
+#[specta::specta]
+pub async fn get_thread_state(
+    state: tauri::State<'_, AppState>,
+    stream_id: StreamId,
+) -> Result<ThreadState, IpcError> {
+    let threads = state.thread_store.list_for_stream(&stream_id).await?;
+    let active = threads
+        .iter()
+        .find(|t| t.status == oxplow_domain::ThreadStatus::Active)
+        .map(|t| t.id.clone());
+    let selected = state.threads.selected(&stream_id).await?;
+    Ok(ThreadState {
+        selected_thread_id: selected.or_else(|| active.clone()),
+        active_thread_id: active,
+        threads,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ThreadWorkState {
+    #[serde(rename = "threadId")]
+    pub thread_id: ThreadId,
+    pub waiting: Vec<oxplow_domain::WorkItem>,
+    #[serde(rename = "inProgress")]
+    pub in_progress: Vec<oxplow_domain::WorkItem>,
+    pub done: Vec<oxplow_domain::WorkItem>,
+    pub epics: Vec<oxplow_domain::WorkItem>,
+    pub items: Vec<oxplow_domain::WorkItem>,
+    pub followups: Vec<oxplow_app::Followup>,
+}
+
+/// Bucketed work-item view for the Work panel.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_thread_work_state(
+    state: tauri::State<'_, AppState>,
+    thread_id: ThreadId,
+) -> Result<ThreadWorkState, IpcError> {
+    use oxplow_domain::stores::WorkItemStore;
+    use oxplow_domain::{WorkItemKind, WorkItemStatus};
+    let rows = state.work_item_store.list_for_thread(&thread_id).await?;
+    let mut waiting = vec![];
+    let mut in_progress = vec![];
+    let mut done = vec![];
+    let mut epics = vec![];
+    let mut items = vec![];
+    for r in rows {
+        if r.kind == WorkItemKind::Epic {
+            epics.push(r);
+            continue;
+        }
+        match r.status {
+            WorkItemStatus::Blocked => waiting.push(r),
+            WorkItemStatus::InProgress => in_progress.push(r),
+            WorkItemStatus::Done | WorkItemStatus::Canceled | WorkItemStatus::Archived => {
+                done.push(r)
+            }
+            WorkItemStatus::Ready => items.push(r),
+        }
+    }
+    let followups = state.followups.list_for_thread(&thread_id);
+    Ok(ThreadWorkState {
+        thread_id,
+        waiting,
+        in_progress,
+        done,
+        epics,
+        items,
+        followups,
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn select_thread(
