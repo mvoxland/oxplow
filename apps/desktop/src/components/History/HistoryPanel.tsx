@@ -1,4 +1,3 @@
-// @ts-nocheck — pending Tauri migration; legacy types drifted from the bridge bindings. Each call site needs to be ported to apps/desktop/src/tauri-bridge.
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitLogCommit, GitLogResult, Stream } from "../../api.js";
@@ -159,7 +158,12 @@ function reachableFromBranch(log: GitLogResult | null, branch: string): Set<stri
   if (!head) return new Set();
   const parentsBySha = new Map<string, string[]>();
   for (const commit of log.commits) {
-    parentsBySha.set(commit.sha, commit.parents.map((p) => p.sha));
+    parentsBySha.set(
+      commit.sha,
+      commit.parents.map((p) =>
+        typeof p === "string" ? p : (p as { sha: string }).sha,
+      ),
+    );
   }
   const reachable = new Set<string>();
   const stack = [head.commit.sha];

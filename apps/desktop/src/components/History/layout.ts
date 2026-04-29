@@ -1,4 +1,3 @@
-// @ts-nocheck — pending Tauri migration; legacy types drifted from the bridge bindings. Each call site needs to be ported to apps/desktop/src/tauri-bridge.
 import type { GitLogCommit } from "../../api.js";
 
 /**
@@ -62,7 +61,14 @@ export function layoutCommits(commits: GitLogCommit[]): GraphLayout {
 
     const parentEdges: GraphRow["parentEdges"] = [];
     for (let pi = 0; pi < commit.parents.length; pi++) {
-      const parentSha = commit.parents[pi]!.sha;
+      // commit.parents is `string[]` in api.ts; legacy code used to
+      // expect an object form with `.sha`. Normalize at this seam so
+      // the rest of the layout stays unchanged.
+      const parentRaw = commit.parents[pi]!;
+      const parentSha =
+        typeof parentRaw === "string"
+          ? parentRaw
+          : (parentRaw as { sha: string }).sha;
       const missing = !shaSet.has(parentSha);
       let pcol = lanes.indexOf(parentSha);
       if (pcol === -1) {
