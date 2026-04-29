@@ -6,6 +6,7 @@
 
 pub mod agent_stores;
 pub mod analytics_stores;
+pub mod effort_store;
 mod database;
 mod stream_store;
 mod thread_store;
@@ -15,6 +16,9 @@ mod work_satellite;
 
 pub use agent_stores::{
     SqliteAgentStatusStore, SqliteAgentTurnStore, SqliteHookEventStore,
+};
+pub use effort_store::{
+    EffortFile, EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffort, WorkItemEffortStore,
 };
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
