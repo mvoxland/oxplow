@@ -126,6 +126,13 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::hooks::list_agent_statuses,
         commands::hooks::list_open_agent_turns,
         commands::hooks::list_recent_agent_turns,
+        // config
+        commands::config::get_config,
+        commands::config::set_agent_prompt_append,
+        commands::config::set_snapshot_retention_days,
+        commands::config::set_snapshot_max_file_bytes,
+        commands::config::set_generated_dirs,
+        commands::config::get_workspace_context,
         // log
         commands::log::get_git_log,
         commands::log::get_commit_detail,

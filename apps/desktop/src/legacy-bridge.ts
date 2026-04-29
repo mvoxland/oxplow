@@ -206,8 +206,7 @@ export function buildLegacyAdapter(): DesktopApi {
       unwrap(await commands.renameWorkspacePath(from, to)),
     deleteWorkspacePath: async (path: string) =>
       unwrap(await commands.deleteWorkspacePath(path)),
-    getWorkspaceContext: async () =>
-      unwrap(await commands.getWorkspaceStatusSummary()),
+    getWorkspaceContext: async () => unwrap(await commands.getWorkspaceContext()),
 
     // -- usage / page-visit --
     recordPageVisit: async (input: { pageKind: string; pageId: string; durationMs?: number | null }) =>
@@ -257,6 +256,17 @@ export function buildLegacyAdapter(): DesktopApi {
       return unwrap(await commands.listHookEvents(null, null));
     },
     listAgentStatuses: async () => unwrap(await commands.listAgentStatuses()),
+
+    // -- config --
+    getConfig: async () => unwrap(await commands.getConfig()),
+    setAgentPromptAppend: async (text: string) =>
+      unwrap(await commands.setAgentPromptAppend(text)),
+    setSnapshotRetentionDays: async (days: number) =>
+      unwrap(await commands.setSnapshotRetentionDays(days)),
+    setSnapshotMaxFileBytes: async (bytes: number) =>
+      unwrap(await commands.setSnapshotMaxFileBytes(bytes)),
+    setGeneratedDirs: async (dirs: string[]) =>
+      unwrap(await commands.setGeneratedDirs(dirs)),
 
     // -- followups --
     removeFollowup: async (id: string) => unwrap(await commands.removeFollowup(id)),
