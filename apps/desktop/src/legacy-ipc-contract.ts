@@ -189,10 +189,15 @@ export interface BranchChanges {
 }
 
 export interface ChangeScopes {
+  /// Legacy "what's staged / unstaged / upstream / branchBase" arrays
+  /// — empty under the new schema; the renderer uses `branchBase` /
+  /// `upstream` / `currentBranch` strings via the new bindings now.
   staged: BranchChangeEntry[];
   unstaged: BranchChangeEntry[];
-  upstream?: BranchChangeEntry[];
-  branchBase?: BranchChangeEntry[];
+  upstream?: string;
+  branchBase?: string;
+  currentBranch?: string;
+  onDefaultBranch?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
 }
@@ -252,8 +257,13 @@ export interface BlameLine {
 export interface GroupedGitRefs {
   local: BranchRef[];
   remote: BranchRef[];
+  /// Per-remote grouping the picker renders. Built from `remote` for
+  /// renderer convenience.
+  remotes?: { remote: string; branches: BranchRef[] }[];
   tags: { name: string; ref: string }[];
-  recent?: BranchRef[];
+  /// Names (not refs) of the most-recently-checked-out local branches.
+  /// Sorted recency-first.
+  recent?: string[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
 }

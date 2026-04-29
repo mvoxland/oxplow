@@ -1,4 +1,3 @@
-// @ts-nocheck — pending Tauri migration; legacy types drifted from the bridge bindings. Each call site needs to be ported to apps/desktop/src/tauri-bridge.
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteGitBranch, gitMergeInto, gitRebaseOnto, listGitRefs, renameGitBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
@@ -264,7 +263,7 @@ export function BranchPicker({
       remotes: grouped.remotes
         .map((g) => ({ remote: g.remote, branches: g.branches.filter((b) => match(b.name)) }))
         .filter((g) => g.branches.length > 0 || match(g.remote)),
-      tags: grouped.tags.filter(match),
+      tags: grouped.tags.filter((t) => match(t.name)),
     };
   }, [grouped, q]);
 
@@ -450,12 +449,12 @@ export function BranchPicker({
                     {groupHeader("tags", "Tags", filtered.tags.length)}
                     {effectiveExpanded.tags ? filtered.tags.map((tag) => (
                       <RowButton
-                        key={`tag:${tag}`}
-                        onClick={() => void pickTag(tag)}
+                        key={`tag:${tag.name}`}
+                        onClick={() => void pickTag(tag.name)}
                         disabled={busy}
                         current={false}
                         icon="🏷"
-                        name={tag}
+                        name={tag.name}
                       />
                     )) : null}
                   </div>
