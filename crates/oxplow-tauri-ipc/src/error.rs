@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
+use oxplow_app::WorkItemServiceError;
 use oxplow_domain::DomainError;
 use oxplow_session::{SessionError, ThreadError};
 
@@ -102,6 +103,15 @@ impl From<SessionError> for IpcError {
                 cause: None,
             },
             SessionError::Storage(e) => IpcError::from(e.clone()),
+        }
+    }
+}
+
+impl From<WorkItemServiceError> for IpcError {
+    fn from(value: WorkItemServiceError) -> Self {
+        match value {
+            WorkItemServiceError::NotFound(_) => IpcError::not_found(),
+            WorkItemServiceError::Storage(e) => IpcError::from(e),
         }
     }
 }

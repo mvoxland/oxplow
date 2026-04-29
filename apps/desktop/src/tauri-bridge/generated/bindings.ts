@@ -116,7 +116,13 @@ export const commands = {
 } | null, IpcError>(__TAURI_INVOKE("get_work_item", { id })),
 	upsertWorkItem: (item: WorkItem) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_work_item", { item })),
 	deleteWorkItem: (id: WorkItemId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_item", { id })),
+	createWorkItem: (req: CreateWorkItemRequest) => typedError<WorkItem, IpcError>(__TAURI_INVOKE("create_work_item", { req })),
+	updateWorkItem: (req: UpdateWorkItemRequest) => typedError<WorkItem, IpcError>(__TAURI_INVOKE("update_work_item", { req })),
+	reorderWorkItems: (req: ReorderWorkItemsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_work_items", { req })),
+	moveWorkItem: (req: MoveWorkItemRequest) => typedError<WorkItem, IpcError>(__TAURI_INVOKE("move_work_item", { req })),
 	listBacklog: () => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_backlog")),
+	// Bucketed backlog view: ready/blocked/in_progress/done.
+	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
 	addWorkNote: (workItemId: WorkItemId, body: string, author: string) => typedError<WorkNote, IpcError>(__TAURI_INVOKE("add_work_note", { workItemId, body, author })),
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<WorkNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	listWorkNotes: (workItemId: WorkItemId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_work_notes", { workItemId })),
@@ -256,6 +262,14 @@ export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync"
 
 export type BackgroundTaskStatus = "running" | "done" | "failed";
 
+// The bucketed view the Backlog page renders.
+export type BacklogState = {
+	items: WorkItem[],
+	waiting: WorkItem[],
+	in_progress: WorkItem[],
+	done: WorkItem[],
+};
+
 export type BranchRef = {
 	kind: BranchRefKind,
 	name: string,
@@ -315,6 +329,24 @@ export type CreateThreadRequest = {
 	paneTarget: string | null,
 };
 
+export type CreateWorkItemInput = {
+	kind: WorkItemKind | null,
+	title: string,
+	description: string | null,
+	acceptance_criteria: string | null,
+	parent_id: WorkItemId | null,
+	status: WorkItemStatus | null,
+	priority: WorkItemPriority | null,
+	category: string | null,
+	tags: string | null,
+	author: WorkItemAuthor | null,
+};
+
+export type CreateWorkItemRequest = {
+	threadId: ThreadId | null,
+	input: CreateWorkItemInput,
+};
+
 export type CreateWorktreeRequest = {
 	slug: string,
 	title: string,
@@ -370,6 +402,12 @@ export type IpcError = {
 	cause: string | null,
 };
 
+export type MoveWorkItemRequest = {
+	id: WorkItemId,
+	// Destination thread, or `None` to move onto the backlog.
+	threadId: ThreadId | null,
+};
+
 export type NoteId = string;
 
 export type PageVisit = {
@@ -398,6 +436,11 @@ export type RenameThreadRequest = {
 export type ReorderThreadQueueRequest = {
 	streamId: StreamId,
 	order: ThreadId[],
+};
+
+export type ReorderWorkItemsRequest = {
+	threadId: ThreadId | null,
+	order: WorkItemId[],
 };
 
 export type RepoConflictState = {
@@ -478,6 +521,29 @@ export type ThreadStatus = "active" | "queued" | "closed";
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
+
+/**
+ *  Partial-patch for `update_work_item`. Each `Option` follows
+ *  "missing -> keep, present -> replace" semantics. `category` and
+ *  `tags` use a wrapping `Option<Option<…>>`-via-helper pattern to
+ *  distinguish "keep" from "clear"; in this struct, `null` clears and
+ *  missing keeps.
+ */
+export type UpdateWorkItemChanges = {
+	title: string | null,
+	description: string | null,
+	acceptance_criteria: string | null,
+	parent_id: WorkItemId | null,
+	status: WorkItemStatus | null,
+	priority: WorkItemPriority | null,
+	category: string | null,
+	tags: string | null,
+};
+
+export type UpdateWorkItemRequest = {
+	id: WorkItemId,
+	changes: UpdateWorkItemChanges,
+};
 
 export type UsageEvent = {
 	id: string,

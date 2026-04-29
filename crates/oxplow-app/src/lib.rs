@@ -10,8 +10,13 @@
 pub mod background_task;
 pub mod events;
 pub mod followup;
+pub mod work_item_service;
 
 pub use events::{EventBus, OxplowEvent};
+pub use work_item_service::{
+    BacklogState, CreateWorkItemInput, UpdateWorkItemChanges, WorkItemService,
+    WorkItemServiceError,
+};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -75,6 +80,7 @@ pub struct Services {
     pub layout: AppLayout,
     pub streams: StreamService,
     pub threads: ThreadService,
+    pub work_items: WorkItemService,
     pub thread_store: Arc<SqliteThreadStore>,
     pub work_item_store: Arc<SqliteWorkItemStore>,
     pub work_note_store: Arc<SqliteWorkNoteStore>,
@@ -117,6 +123,7 @@ impl Services {
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
         let threads = ThreadService::new(thread_store.clone());
+        let work_items = WorkItemService::new(work_item_store.clone());
 
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
@@ -127,6 +134,7 @@ impl Services {
             layout,
             streams,
             threads,
+            work_items,
             thread_store,
             work_item_store,
             work_note_store,
@@ -173,6 +181,7 @@ impl Services {
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
         let threads = ThreadService::new(thread_store.clone());
+        let work_items = WorkItemService::new(work_item_store.clone());
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
         Ok(Self {
@@ -181,6 +190,7 @@ impl Services {
             layout,
             streams,
             threads,
+            work_items,
             thread_store,
             work_item_store,
             work_note_store,
