@@ -77,6 +77,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::wiki::delete_wiki_note,
         commands::wiki::search_wiki_titles,
         commands::wiki::search_wiki_bodies,
+        commands::wiki::read_wiki_note_body,
+        commands::wiki::write_wiki_note_body,
         // page visit
         commands::page_visit::record_page_visit,
         commands::page_visit::list_recent_page_visits,
