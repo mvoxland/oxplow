@@ -4,13 +4,13 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    // Migration relaxations — legacy api.ts and the UI files
-    // it feeds are typecheck-compatible but were authored
-    // against an Electron preload that doesn't exist under
-    // Tauri. Each of these knobs is downgraded only as long
-    // as legacy-ipc-contract.ts is the source of truth; once
-    // the UI has been ported off the legacy contract these
-    // flip back on.
+    // Strict knobs still relaxed. Flipping any of these on surfaces
+    // ~50–250 errors across the legacy UI (mostly possibly-undefined
+    // accesses on optional fields like `session.openOrder`,
+    // `window.oxplowApi`, and various map results). Each is fixable
+    // at its call site but it's a focused per-file pass — defer
+    // until the legacy adapter shrinks further. The migration
+    // banner stays in the comment block above so we don't forget.
     "noUncheckedIndexedAccess": false,
     "noImplicitAny": false,
     "strictNullChecks": false,
