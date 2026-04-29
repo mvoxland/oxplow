@@ -4,4 +4,12 @@
 //! `rusqlite` connection pool. Migrations live in `migrations/` as
 //! plain SQL and are applied at startup via `refinery`.
 
-// Skeleton — full impls land in step 3 of the migration plan.
+mod database;
+mod stream_store;
+mod thread_store;
+mod work_item_store;
+
+pub use database::Database;
+pub use stream_store::SqliteStreamStore;
+pub use thread_store::SqliteThreadStore;
+pub use work_item_store::SqliteWorkItemStore;
