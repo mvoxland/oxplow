@@ -28,7 +28,7 @@ use oxplow_db::{
     SqliteThreadStore, SqliteUsageStore, SqliteWikiNoteStore, SqliteWorkItemEventStore,
     SqliteWorkItemLinkStore, SqliteWorkItemStore, SqliteWorkNoteStore,
 };
-use oxplow_session::{StreamService, WorkspaceLayout};
+use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
 
 #[derive(Debug, Error)]
 pub enum AppInitError {
@@ -71,6 +71,7 @@ pub struct Services {
     pub db: Database,
     pub layout: AppLayout,
     pub streams: StreamService,
+    pub threads: ThreadService,
     pub thread_store: Arc<SqliteThreadStore>,
     pub work_item_store: Arc<SqliteWorkItemStore>,
     pub work_note_store: Arc<SqliteWorkNoteStore>,
@@ -111,6 +112,7 @@ impl Services {
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
+        let threads = ThreadService::new(thread_store.clone());
 
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
@@ -120,6 +122,7 @@ impl Services {
             db,
             layout,
             streams,
+            threads,
             thread_store,
             work_item_store,
             work_note_store,
@@ -164,6 +167,7 @@ impl Services {
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
+        let threads = ThreadService::new(thread_store.clone());
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
         Ok(Self {
@@ -171,6 +175,7 @@ impl Services {
             db,
             layout,
             streams,
+            threads,
             thread_store,
             work_item_store,
             work_note_store,

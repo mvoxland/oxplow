@@ -10,7 +10,7 @@ use specta::Type;
 use ::time::OffsetDateTime;
 
 /// Wall-clock UTC timestamp serialized as RFC 3339 strings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
 #[serde(transparent)]
 pub struct Timestamp(#[serde(with = "::time::serde::rfc3339")] pub OffsetDateTime);
 

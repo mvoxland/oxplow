@@ -60,3 +60,37 @@ pub async fn get_primary_stream(
     let stream_store = oxplow_db::SqliteStreamStore::new(state.db.clone());
     Ok(stream_store.primary().await?)
 }
+
+/// Currently-selected stream (None falls back to primary in the UI).
+#[tauri::command]
+#[specta::specta]
+pub async fn get_current_stream(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<Stream>, IpcError> {
+    Ok(state.streams.current().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn switch_stream(
+    state: tauri::State<'_, AppState>,
+    id: Option<StreamId>,
+) -> Result<(), IpcError> {
+    state.streams.set_current(id.as_ref()).await?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RenameStreamRequest {
+    pub id: StreamId,
+    pub title: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn rename_stream(
+    state: tauri::State<'_, AppState>,
+    req: RenameStreamRequest,
+) -> Result<Stream, IpcError> {
+    Ok(state.streams.rename(&req.id, req.title).await?)
+}
