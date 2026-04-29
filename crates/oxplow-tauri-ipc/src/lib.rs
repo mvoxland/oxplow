@@ -35,6 +35,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::streams::get_current_stream,
         commands::streams::switch_stream,
         commands::streams::rename_stream,
+        commands::streams::set_stream_prompt,
+        commands::streams::checkout_stream_branch,
         // threads
         commands::threads::list_threads,
         commands::threads::get_thread,
@@ -86,6 +88,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::page_visit::top_visited_pages,
         commands::page_visit::forget_page,
         commands::page_visit::count_page_visits_by_day,
+        commands::page_visit::list_frequent_usage,
+        commands::page_visit::list_currently_open_usage,
+        commands::page_visit::list_recently_finished,
+        commands::page_visit::clear_recently_finished,
         // usage
         commands::usage::record_usage,
         commands::usage::list_recent_usage,
@@ -94,6 +100,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::code_quality::list_code_quality_findings,
         // snapshots
         commands::snapshot::list_snapshots,
+        commands::snapshot::list_snapshots_for_stream,
+        commands::snapshot::get_snapshot,
+        commands::snapshot::get_snapshot_pair_diff,
+        commands::snapshot::get_snapshot_summary,
+        commands::snapshot::restore_file_from_snapshot,
         // branch
         commands::branch::list_branches,
         commands::branch::get_default_branch,
