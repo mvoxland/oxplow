@@ -46,4 +46,37 @@ mod tests {
     fn builder_constructs() {
         let _b = specta_builder();
     }
+
+    /// Regenerate the TS bindings file the frontend imports.
+    ///
+    /// Runs as part of `cargo test`; CI must verify `git diff` is
+    /// empty after `cargo test --workspace`. If a Rust command
+    /// signature changes, this test re-emits bindings and the diff
+    /// flags the drift before the PR merges.
+    #[test]
+    fn export_ts_bindings() {
+        // Skip when CARGO_MANIFEST_DIR doesn't resolve; defensive
+        // against unusual cargo setups.
+        let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let workspace_root = std::path::Path::new(&manifest_dir)
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("workspace root");
+        let target = workspace_root
+            .join("apps/desktop/src/tauri-bridge/generated/bindings.ts");
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).expect("create bridge dir");
+        }
+        let builder = specta_builder();
+        builder
+            .export(specta_typescript::Typescript::default(), &target)
+            .expect("export bindings");
+        // Verify the file was written and contains *something*. Drift
+        // detection is the responsibility of a CI git-diff check.
+        let metadata = std::fs::metadata(&target).expect("bindings written");
+        assert!(metadata.len() > 0, "bindings file should not be empty");
+    }
 }

@@ -11,6 +11,7 @@ oxplow-domain = { workspace = true }
 oxplow-app = { workspace = true }
 tauri = { workspace = true }
 tauri-specta = { workspace = true }
+specta-typescript = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }

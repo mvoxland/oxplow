@@ -2949,6 +2949,7 @@ dependencies = [
  "serde",
  "serde_json",
  "specta",
+ "specta-typescript",
  "tauri",
  "tauri-specta",
  "thiserror 2.0.18",
