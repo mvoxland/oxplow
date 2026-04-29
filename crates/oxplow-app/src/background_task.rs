@@ -49,7 +49,9 @@ pub struct BackgroundTask {
     pub ended_at: Option<i64>,
     pub error: Option<String>,
     /// Producer-supplied opaque JSON attached at complete/fail.
-    pub result: Option<serde_json::Value>,
+    /// Stored as a string so the bindings stay simple — the producer
+    /// is expected to JSON-stringify before passing.
+    pub result_json: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -141,7 +143,7 @@ impl BackgroundTaskStore {
             started_at: now,
             ended_at: None,
             error: None,
-            result: None,
+            result_json: None,
         };
         self.state.lock().tasks.insert(id.clone(), task.clone());
         let _ = self.events.send(BackgroundTaskChange {
@@ -172,11 +174,13 @@ impl BackgroundTaskStore {
     }
 
     pub fn complete(&self, id: &str, result: Option<serde_json::Value>) {
-        self.end(id, BackgroundTaskStatus::Done, None, result);
+        let result_json = result.and_then(|v| serde_json::to_string(&v).ok());
+        self.end(id, BackgroundTaskStatus::Done, None, result_json);
     }
 
     pub fn fail(&self, id: &str, error: String, result: Option<serde_json::Value>) {
-        self.end(id, BackgroundTaskStatus::Failed, Some(error), result);
+        let result_json = result.and_then(|v| serde_json::to_string(&v).ok());
+        self.end(id, BackgroundTaskStatus::Failed, Some(error), result_json);
     }
 
     fn end(
@@ -184,7 +188,7 @@ impl BackgroundTaskStore {
         id: &str,
         status: BackgroundTaskStatus,
         error: Option<String>,
-        result: Option<serde_json::Value>,
+        result_json: Option<String>,
     ) {
         let mut state = self.state.lock();
         let Some(task) = state.tasks.get_mut(id) else {
@@ -193,7 +197,7 @@ impl BackgroundTaskStore {
         task.status = status;
         task.ended_at = Some(unix_ms());
         task.error = error;
-        task.result = result;
+        task.result_json = result_json;
         let snapshot = task.clone();
         // Move into the snapshot ring so awaiters can still resolve
         // by id after the grace window ticks the row off the bar.
@@ -277,7 +281,7 @@ mod tests {
         let got = store.get(&task.id).unwrap();
         assert_eq!(got.status, BackgroundTaskStatus::Failed);
         assert_eq!(got.error.as_deref(), Some("boom"));
-        assert_eq!(got.result, Some(serde_json::json!({"code": 1})));
+        assert_eq!(got.result_json.as_deref(), Some("{\"code\":1}"));
     }
 
     #[test]
@@ -332,6 +336,6 @@ mod tests {
         // The running map dropped the task but the snapshot remains.
         let snap = store.get(&task.id).unwrap();
         assert_eq!(snap.status, BackgroundTaskStatus::Done);
-        assert_eq!(snap.result, Some(serde_json::json!({"ok": true})));
+        assert_eq!(snap.result_json.as_deref(), Some("{\"ok\":true}"));
     }
 }

@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
-import type { OpenFileState } from "../../session/file-session.js";
+import type { OpenFileState } from "../legacy-file-session.js";
 import type { LocalBlameEntry, Stream } from "../api.js";
 import { localBlame, readFileAtRef } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";

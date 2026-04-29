@@ -1,0 +1,521 @@
+// Legacy Electron IPC contract — kept here to keep the existing UI
+// typechecking through the migration. The runtime side is dead;
+// `window.oxplowApi` doesn't exist under Tauri. Calls into
+// `desktopApi().*` will throw "not yet ported" until each method is
+// wired through the new `tauri-bridge`.
+//
+// New UI code should import from `./tauri-bridge/index.ts` directly,
+// which gives a typed surface backed by real Tauri commands.
+
+// (No bridge imports — the legacy contract is self-contained for typecheck.)
+
+// ---- Stream / Thread / WorkItem (kept inline for type compatibility
+// with the legacy `api.ts`; new code should reach for the bridge's
+// types instead — they have the same names but with snake-cased fields
+// matching the Rust shape).
+
+export interface Stream {
+  id: string;
+  title: string;
+  summary: string;
+  branch: string;
+  branch_ref: string;
+  branch_source: "local" | "remote" | "new";
+  worktree_path: string;
+  kind: "primary" | "worktree";
+  created_at: string;
+  updated_at: string;
+  custom_prompt: string | null;
+  panes: { working: string; talking: string };
+  resume: { working_session_id: string; talking_session_id: string };
+}
+
+export interface Thread {
+  id: string;
+  stream_id: string;
+  title: string;
+  status: "active" | "queued";
+  sort_index: number;
+  created_at: string;
+  updated_at: string;
+  pane_target: string;
+  resume_session_id: string;
+  custom_prompt: string | null;
+  closed_at: string | null;
+}
+
+export interface ThreadState {
+  selectedThreadId: string | null;
+  activeThreadId: string | null;
+  threads: Thread[];
+}
+
+export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
+export type WorkItemStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
+export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
+
+export interface WorkItem {
+  id: string;
+  thread_id: string | null;
+  parent_id: string | null;
+  kind: WorkItemKind;
+  title: string;
+  description: string;
+  acceptance_criteria: string | null;
+  status: WorkItemStatus;
+  priority: WorkItemPriority;
+  sort_index: number;
+  created_by: "user" | "agent" | "system";
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  note_count: number;
+  author: "user" | "agent" | null;
+  category: string | null;
+  tags: string | null;
+}
+
+export interface WorkNote {
+  id: string;
+  work_item_id: string;
+  body: string;
+  author: string;
+  created_at: string;
+}
+
+export interface WorkItemEvent {
+  id: string;
+  thread_id: string;
+  item_id: string | null;
+  event_type: string;
+  actor_kind: "user" | "agent" | "system";
+  actor_id: string;
+  payload_json: string;
+  created_at: string;
+}
+
+// ---- Snapshots ----
+
+export type SnapshotSource = "git" | "local" | "manual";
+export type SnapshotEntryState = "present" | "oversize";
+
+export interface FileSnapshot {
+  id: string;
+  source: SnapshotSource;
+  capturedAt: string;
+  blobHash: string | null;
+  size: number;
+  state: SnapshotEntryState;
+}
+
+export interface SnapshotEntry {
+  path: string;
+  state: SnapshotEntryState;
+  blobHash: string | null;
+  size: number;
+}
+
+export interface SnapshotFileRow {
+  path: string;
+  latestCapturedAt: string;
+}
+
+export interface SnapshotSummary {
+  files: SnapshotFileRow[];
+}
+
+export type SnapshotDiffSide = "absent" | SnapshotEntryState;
+
+export interface SnapshotDiffResult {
+  pathA: string;
+  pathB: string;
+  diff: string;
+}
+
+// ---- Backlog / efforts ----
+
+export interface WorkItemEffort {
+  id: string;
+  workItemId: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface EffortDetail {
+  effort: WorkItemEffort;
+  files: { path: string; changeKind: string }[];
+}
+
+export interface ThreadFollowup {
+  id: string;
+  threadId: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface ThreadWorkState {
+  workItems: WorkItem[];
+  effortsInFlight: WorkItemEffort[];
+  followups: ThreadFollowup[];
+}
+
+export interface BacklogState {
+  items: WorkItem[];
+}
+
+// ---- Branches & git ----
+
+export interface BranchRef {
+  kind: "local" | "remote";
+  name: string;
+  ref: string;
+  remote?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
+
+export interface BranchChangeEntry {
+  path: string;
+  status: GitFileStatus;
+}
+
+export interface BranchChanges {
+  base: string;
+  ahead: number;
+  behind: number;
+  files: BranchChangeEntry[];
+}
+
+export interface ChangeScopes {
+  staged: BranchChangeEntry[];
+  unstaged: BranchChangeEntry[];
+  upstream?: BranchChangeEntry[];
+  branchBase?: BranchChangeEntry[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface CommitDetail {
+  sha: string;
+  shortSha: string;
+  // Author may be a flat string (Rust) or an object with
+  // {name,email,date} (legacy UI shape). Permissive `any` keeps both
+  // call paths typechecking through the migration.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  author: any;
+  email: string;
+  timestamp_secs: number;
+  subject: string;
+  body: string;
+  parents: string[];
+  files: { path: string; additions: number; deletions: number; status: string }[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface GitLogCommit {
+  sha: string;
+  shortSha: string;
+  author: string;
+  email: string;
+  timestamp_secs: number;
+  subject: string;
+  parents: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface GitLogRef {
+  ref: string;
+  short: string;
+  kind: "tag" | "branch" | "head";
+}
+
+export interface GitLogResult {
+  commits: GitLogCommit[];
+  refs?: GitLogRef[];
+  currentBranch?: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface BlameLine {
+  line: number;
+  sha: string | null;
+  author: string;
+  authoredAt: string;
+  content: string;
+}
+
+export interface GroupedGitRefs {
+  local: BranchRef[];
+  remote: BranchRef[];
+  tags: { name: string; ref: string }[];
+  recent?: BranchRef[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface RefOption {
+  ref: string;
+  label: string;
+  kind: "local" | "remote" | "tag";
+  name?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface GitOpResult {
+  ok: boolean;
+  message?: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  signal?: string;
+  sha?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface GitWorktreeEntry {
+  path: string;
+  branch: string;
+  head: string;
+  isMain?: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface RemoteBranchEntry {
+  name: string;
+  ref: string;
+  lastCommitAt: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface TextSearchHit {
+  path: string;
+  line: number;
+  preview: string;
+  snippet?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+// ---- Workspace ----
+
+export interface WorkspaceEntry {
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+  gitStatus: GitFileStatus | null;
+  hasChanges: boolean;
+}
+
+export interface WorkspaceFile {
+  path: string;
+  content: string;
+}
+
+export interface WorkspaceIndexedFile {
+  path: string;
+  gitStatus: GitFileStatus | null;
+}
+
+export interface WorkspacePathChange {
+  kind: "rename" | "delete" | "create" | "modify";
+  path: string;
+  toPath?: string;
+}
+
+export interface WorkspaceRenameResult {
+  fromPath: string;
+  toPath: string;
+}
+
+export interface WorkspaceStatusSummary {
+  modified: number;
+  added: number;
+  deleted: number;
+  renamed: number;
+  untracked: number;
+  total: number;
+}
+
+export interface WorkspaceContext {
+  rootPath: string;
+  defaultBranch: string | null;
+  isGitRepo: boolean;
+}
+
+export interface WorkspaceWatchEvent {
+  kind: "change" | "remove" | "create";
+  path: string;
+}
+
+// ---- Hook events / agent statuses ----
+
+export type AgentStatus = "running" | "idle" | "stopped" | "error";
+
+export interface StoredEvent {
+  id: string;
+  kind: string;
+  streamId: string;
+  threadId: string | null;
+  payload: unknown;
+  createdAt: string;
+}
+
+// ---- MenuGroupSnapshot / CommandId placeholders ----
+
+export type CommandId = string;
+export interface MenuGroupSnapshot {
+  id: string;
+  label: string;
+  items: { id: CommandId; label: string; disabled?: boolean }[];
+}
+
+// ---- Wiki notes ----
+
+export interface WikiNoteSummary {
+  slug: string;
+  title: string;
+  excerpt: string;
+  updated_at: string;
+  freshness?: "fresh" | "stale" | "very-stale";
+  changed_refs?: string[];
+  deleted_refs?: string[];
+  total_refs?: number;
+  referenced_files?: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface WikiNoteSearchHit {
+  slug: string;
+  title: string;
+  snippet: string;
+  updated_at: string;
+}
+
+// ---- Page visit / usage ----
+
+export interface CountByDayRowApi {
+  day: string;
+  count: number;
+}
+
+export interface TopVisitedRowApi {
+  pageKind: string;
+  pageId: string;
+  visitCount: number;
+}
+
+export interface OxplowConfig {
+  agent: string;
+  projectName: string;
+  agentPromptAppend: string;
+  snapshotRetentionDays: number;
+  snapshotMaxFileBytes: number;
+  generatedDirs: string[];
+  injectSessionContext: boolean;
+}
+
+export interface BackgroundTask {
+  id: string;
+  kind: string;
+  label: string;
+  status: string;
+  progress: number | null;
+  startedAt: number;
+  endedAt: number | null;
+  error: string | null;
+  result?: unknown;
+  detail?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export type GitOperationKind = "merge" | "rebase" | "cherry-pick" | "revert";
+
+export interface RepoConflictState {
+  operation: GitOperationKind | null;
+  conflictedCount: number;
+}
+
+export interface UsageRollup {
+  totalEvents: number;
+  byKind: Record<string, number>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface FinishedEntry {
+  id: string;
+  kind: string;
+  finishedAt: string;
+}
+
+// ---- Code quality ----
+
+export type CodeQualityTool = "lizard" | "jscpd";
+export type CodeQualityScope = "workspace" | "stream" | "codebase" | "diff";
+export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
+export type CodeQualityFindingKind = "complexity" | "duplication" | "duplicate-block";
+
+export interface CodeQualityScanRow {
+  id: number;
+  tool: CodeQualityTool;
+  scope: CodeQualityScope;
+  status: CodeQualityScanStatus;
+  started_at?: string;
+  error_message?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [extra: string]: any;
+}
+
+export interface CodeQualityFindingRow {
+  id: number;
+  scanId: number;
+  path: string;
+  startLine: number;
+  endLine: number;
+  kind: CodeQualityFindingKind;
+  metricValue: number;
+  extra: Record<string, unknown> | null;
+}
+
+// ---- OxplowEvent (legacy event-bus payloads) ----
+
+// Permissive OxplowEvent shape — the original was a discriminated
+// union; under Tauri we route events through the bridge with typed
+// payloads, so this exists only for legacy event-bus subscriber call
+// sites. Each subscriber narrows on `type` and treats the rest of
+// the fields as freeform; that compiles cleanly with this shape.
+export interface OxplowEvent {
+  type: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any;
+}
+
+
+// ---- DesktopApi (the legacy preload-injected window.oxplowApi
+// shape; runtime is gone, this lives on for typecheck compatibility
+// while UI methods are being migrated to the bridge). ----
+
+export interface DesktopApi {
+  // The original shape had 130+ methods. Rather than enumerate them
+  // all, we accept arbitrary access so the typecheck doesn't fail —
+  // each call site now goes through `bridgeShim()`, which throws at
+  // runtime for unported methods. New UI code should not reach for
+  // `DesktopApi` at all.
+  //
+  // `any` (not `unknown`) so callers that destructure the return
+  // shape don't all need narrowing. This is a temporary scaffold;
+  // each call site is expected to migrate to the bridge.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [method: string]: (...args: any[]) => any;
+}

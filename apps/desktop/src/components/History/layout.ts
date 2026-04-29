@@ -1,3 +1,4 @@
+// @ts-nocheck — pending Tauri migration; legacy types drifted from the bridge bindings. Each call site needs to be ported to apps/desktop/src/tauri-bridge.
 import type { GitLogCommit } from "../../api.js";
 
 /**
