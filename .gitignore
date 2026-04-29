@@ -14,3 +14,13 @@ tests-e2e/scratch-commit-target.txt
 site/
 .venv/
 __pycache__/
+
+# Rust
+target/
+**/target/
+
+# Tauri-generated schemas (rebuilt by tauri-build on every cargo build)
+apps/desktop/src-tauri/gen/
+
+# Frontend build artifacts
+apps/desktop/dist/
