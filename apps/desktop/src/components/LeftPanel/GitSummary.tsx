@@ -1,4 +1,4 @@
-import type { WorkspaceStatusSummary } from "../../api.js";
+import type { WorkspaceStatusSummary } from "../../tauri-bridge/index.js";
 import { FileStatusCountsForSummary } from "../FileStatusCounts.js";
 
 export function GitSummary({ summary }: { summary: WorkspaceStatusSummary }) {

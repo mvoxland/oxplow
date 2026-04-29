@@ -166,14 +166,8 @@ export interface WorkspaceIndexedFile {
   gitStatus: GitFileStatus | null;
 }
 
-export interface WorkspaceStatusSummary {
-  modified: number;
-  added: number;
-  deleted: number;
-  renamed: number;
-  untracked: number;
-  total: number;
-}
+import type { WorkspaceStatusSummary } from "./tauri-bridge/index.js";
+export type { WorkspaceStatusSummary };
 
 export interface WorkspaceContext {
   gitEnabled: boolean;
