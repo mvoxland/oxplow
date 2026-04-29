@@ -1,5 +1,514 @@
 //! Config file load + validation for oxplow.
 //!
-//! Replaces the TS `src/config/**` modules. Schema validation is
+//! Replaces the TS `src/config/**` module. Schema validation is
 //! enforced at deserialization; errors carry typed variants so the
 //! UI can surface them precisely.
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use thiserror::Error;
+use tracing::info;
+
+pub const OXPLOW_CONFIG_FILE: &str = "oxplow.yaml";
+
+const DEFAULT_SNAPSHOT_RETENTION_DAYS: u32 = 7;
+const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentKind {
+    Claude,
+    Copilot,
+}
+
+impl Default for AgentKind {
+    fn default() -> Self {
+        AgentKind::Claude
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct LspServerConfig {
+    #[serde(rename = "languageId")]
+    pub language_id: String,
+    pub extensions: Vec<String>,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct OxplowConfig {
+    pub agent: AgentKind,
+    /// Human-readable project name. Defaults to the basename of the
+    /// project dir when not set in oxplow.yaml.
+    #[serde(rename = "projectName")]
+    pub project_name: String,
+    /// Extra language servers registered on top of the built-ins.
+    #[serde(rename = "lspServers")]
+    pub lsp_servers: Vec<LspServerConfig>,
+    /// User-supplied text appended verbatim to every agent's system prompt.
+    #[serde(rename = "agentPromptAppend")]
+    pub agent_prompt_append: String,
+    /// File-snapshot retention window in days. 0 disables pruning.
+    #[serde(rename = "snapshotRetentionDays")]
+    pub snapshot_retention_days: u32,
+    /// Directory names (matched at any path segment) treated as
+    /// generated output and excluded from fs-watch + snapshots.
+    #[serde(rename = "generatedDirs")]
+    pub generated_dirs: Vec<String>,
+    /// Maximum blob size for content-addressed snapshotting; larger
+    /// files get a stat-only entry. Default 5 MiB.
+    #[serde(rename = "snapshotMaxFileBytes")]
+    pub snapshot_max_file_bytes: u64,
+    /// When true, the UserPromptSubmit hook injects a session-context
+    /// block into every agent prompt.
+    #[serde(rename = "injectSessionContext")]
+    pub inject_session_context: bool,
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("config IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("oxplow.yaml parse error: {0}")]
+    Parse(#[from] serde_yaml::Error),
+    #[error("oxplow.yaml validation: {0}")]
+    Invalid(String),
+}
+
+/// Internal raw shape, used to validate before promoting to
+/// `OxplowConfig`. Mirrors the TS `ParsedOxplowConfig` interface.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConfig {
+    #[serde(default)]
+    agent: Option<AgentKind>,
+    #[serde(rename = "projectName", default)]
+    project_name: Option<String>,
+    #[serde(default)]
+    lsp: Option<RawLspBlock>,
+    #[serde(rename = "agentPromptAppend", default)]
+    agent_prompt_append: Option<String>,
+    #[serde(rename = "snapshotRetentionDays", default)]
+    snapshot_retention_days: Option<f64>,
+    #[serde(rename = "generatedDirs", default)]
+    generated_dirs: Option<Vec<String>>,
+    #[serde(rename = "snapshotMaxFileBytes", default)]
+    snapshot_max_file_bytes: Option<f64>,
+    #[serde(rename = "injectSessionContext", default)]
+    inject_session_context: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLspBlock {
+    #[serde(default)]
+    servers: Option<Vec<RawLspServer>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLspServer {
+    #[serde(rename = "languageId")]
+    language_id: String,
+    extensions: Vec<String>,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+}
+
+/// Load `oxplow.yaml` from `project_dir`, falling back to defaults
+/// when the file is absent. The default `project_name` is the
+/// basename of the resolved project directory.
+pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig, ConfigError> {
+    let project_dir = project_dir.as_ref();
+    let config_path = project_dir.join(OXPLOW_CONFIG_FILE);
+    let fallback_name = basename(project_dir);
+
+    if !config_path.exists() {
+        info!(
+            config_path = %config_path.display(),
+            agent = ?AgentKind::default(),
+            "project config not found; using defaults"
+        );
+        return Ok(default_config(fallback_name));
+    }
+
+    let raw = std::fs::read_to_string(&config_path)?;
+    let parsed: RawConfig = serde_yaml::from_str(&raw)?;
+    let config = validate(parsed, &fallback_name)?;
+    info!(
+        config_path = %config_path.display(),
+        agent = ?config.agent,
+        project_name = %config.project_name,
+        lsp_servers = config.lsp_servers.len(),
+        "loaded project config"
+    );
+    Ok(config)
+}
+
+/// Re-serialize an `OxplowConfig` back to `oxplow.yaml`. Comments and
+/// formatting in the user's original file are not preserved — the
+/// schema is small and known.
+pub fn write_project_config(
+    project_dir: impl AsRef<Path>,
+    config: &OxplowConfig,
+) -> Result<(), ConfigError> {
+    let project_dir = project_dir.as_ref();
+    let path = project_dir.join(OXPLOW_CONFIG_FILE);
+    let fallback_name = basename(project_dir);
+
+    let mut doc = serde_yaml::Mapping::new();
+    if config.agent != AgentKind::default() {
+        doc.insert(
+            "agent".into(),
+            serde_yaml::to_value(config.agent).expect("agent serializes"),
+        );
+    }
+    if !config.project_name.is_empty() && config.project_name != fallback_name {
+        doc.insert("projectName".into(), config.project_name.clone().into());
+    }
+    if !config.agent_prompt_append.is_empty() {
+        doc.insert(
+            "agentPromptAppend".into(),
+            config.agent_prompt_append.clone().into(),
+        );
+    }
+    if config.snapshot_retention_days != DEFAULT_SNAPSHOT_RETENTION_DAYS {
+        doc.insert(
+            "snapshotRetentionDays".into(),
+            config.snapshot_retention_days.into(),
+        );
+    }
+    if !config.generated_dirs.is_empty() {
+        doc.insert(
+            "generatedDirs".into(),
+            serde_yaml::to_value(&config.generated_dirs).unwrap(),
+        );
+    }
+    if config.snapshot_max_file_bytes != DEFAULT_SNAPSHOT_MAX_FILE_BYTES {
+        doc.insert(
+            "snapshotMaxFileBytes".into(),
+            config.snapshot_max_file_bytes.into(),
+        );
+    }
+    if config.inject_session_context != DEFAULT_INJECT_SESSION_CONTEXT {
+        doc.insert(
+            "injectSessionContext".into(),
+            config.inject_session_context.into(),
+        );
+    }
+    if !config.lsp_servers.is_empty() {
+        let mut lsp = serde_yaml::Mapping::new();
+        let servers: Vec<_> = config
+            .lsp_servers
+            .iter()
+            .map(|s| {
+                let mut m = serde_yaml::Mapping::new();
+                m.insert("languageId".into(), s.language_id.clone().into());
+                m.insert(
+                    "extensions".into(),
+                    serde_yaml::to_value(&s.extensions).unwrap(),
+                );
+                m.insert("command".into(), s.command.clone().into());
+                if !s.args.is_empty() {
+                    m.insert("args".into(), serde_yaml::to_value(&s.args).unwrap());
+                }
+                serde_yaml::Value::Mapping(m)
+            })
+            .collect();
+        lsp.insert("servers".into(), serde_yaml::Value::Sequence(servers));
+        doc.insert("lsp".into(), serde_yaml::Value::Mapping(lsp));
+    }
+
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
+    std::fs::write(path, yaml)?;
+    Ok(())
+}
+
+fn default_config(project_name: String) -> OxplowConfig {
+    OxplowConfig {
+        agent: AgentKind::default(),
+        project_name,
+        lsp_servers: Vec::new(),
+        agent_prompt_append: String::new(),
+        snapshot_retention_days: DEFAULT_SNAPSHOT_RETENTION_DAYS,
+        generated_dirs: Vec::new(),
+        snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
+        inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
+    }
+}
+
+fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigError> {
+    let agent = raw.agent.unwrap_or_default();
+
+    let project_name = match raw.project_name {
+        Some(name) => {
+            let trimmed = name.trim().to_string();
+            if trimmed.is_empty() {
+                return Err(ConfigError::Invalid(
+                    "projectName must be a non-empty string".into(),
+                ));
+            }
+            trimmed
+        }
+        None => fallback_name.to_string(),
+    };
+
+    let agent_prompt_append = raw.agent_prompt_append.unwrap_or_default();
+
+    let snapshot_retention_days = match raw.snapshot_retention_days {
+        Some(n) if !n.is_finite() || n < 0.0 => {
+            return Err(ConfigError::Invalid(
+                "snapshotRetentionDays must be a non-negative number".into(),
+            ));
+        }
+        Some(n) => n as u32,
+        None => DEFAULT_SNAPSHOT_RETENTION_DAYS,
+    };
+
+    let generated_dirs = match raw.generated_dirs {
+        Some(list) => {
+            let mut out = Vec::with_capacity(list.len());
+            for (i, entry) in list.into_iter().enumerate() {
+                let trimmed = entry.trim().trim_matches('/').to_string();
+                if trimmed.is_empty() {
+                    return Err(ConfigError::Invalid(format!(
+                        "generatedDirs[{i}] must be a non-empty string"
+                    )));
+                }
+                if trimmed.contains('/') {
+                    return Err(ConfigError::Invalid(format!(
+                        "generatedDirs[{i}] must be a single directory name, not a path (got \"{entry}\")"
+                    )));
+                }
+                out.push(trimmed);
+            }
+            out
+        }
+        None => Vec::new(),
+    };
+
+    let snapshot_max_file_bytes = match raw.snapshot_max_file_bytes {
+        Some(n) if !n.is_finite() || n < 1024.0 => {
+            return Err(ConfigError::Invalid(
+                "snapshotMaxFileBytes must be a number >= 1024".into(),
+            ));
+        }
+        Some(n) => n.floor() as u64,
+        None => DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
+    };
+
+    let inject_session_context = raw
+        .inject_session_context
+        .unwrap_or(DEFAULT_INJECT_SESSION_CONTEXT);
+
+    let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
+        Some(servers) => {
+            let mut out = Vec::with_capacity(servers.len());
+            for (i, s) in servers.into_iter().enumerate() {
+                if s.language_id.trim().is_empty() {
+                    return Err(ConfigError::Invalid(format!(
+                        "lsp.servers[{i}].languageId must be a non-empty string"
+                    )));
+                }
+                if s.command.trim().is_empty() {
+                    return Err(ConfigError::Invalid(format!(
+                        "lsp.servers[{i}].command must be a non-empty string"
+                    )));
+                }
+                if s.extensions.is_empty() {
+                    return Err(ConfigError::Invalid(format!(
+                        "lsp.servers[{i}].extensions must be a non-empty array"
+                    )));
+                }
+                let mut exts = Vec::with_capacity(s.extensions.len());
+                for (j, ext) in s.extensions.into_iter().enumerate() {
+                    if !ext.starts_with('.') {
+                        return Err(ConfigError::Invalid(format!(
+                            "lsp.servers[{i}].extensions[{j}] must start with '.'"
+                        )));
+                    }
+                    exts.push(ext.to_lowercase());
+                }
+                out.push(LspServerConfig {
+                    language_id: s.language_id,
+                    extensions: exts,
+                    command: s.command,
+                    args: s.args,
+                });
+            }
+            out
+        }
+        None => Vec::new(),
+    };
+
+    Ok(OxplowConfig {
+        agent,
+        project_name,
+        lsp_servers,
+        agent_prompt_append,
+        snapshot_retention_days,
+        generated_dirs,
+        snapshot_max_file_bytes,
+        inject_session_context,
+    })
+}
+
+fn basename(path: &Path) -> String {
+    let resolved: PathBuf = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    resolved
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "oxplow".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn load_defaults_when_file_absent() {
+        let dir = tempdir().unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.agent, AgentKind::Claude);
+        assert_eq!(cfg.snapshot_retention_days, DEFAULT_SNAPSHOT_RETENTION_DAYS);
+        assert!(cfg.lsp_servers.is_empty());
+        assert!(cfg.inject_session_context);
+    }
+
+    #[test]
+    fn project_name_falls_back_to_basename() {
+        let dir = tempdir().unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        let basename = dir.path().file_name().unwrap().to_string_lossy();
+        assert_eq!(cfg.project_name, basename);
+    }
+
+    #[test]
+    fn loads_explicit_agent_and_project_name() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agent: copilot\nprojectName: explicit-name\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.agent, AgentKind::Copilot);
+        assert_eq!(cfg.project_name, "explicit-name");
+    }
+
+    #[test]
+    fn rejects_invalid_agent() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "agent: emacs\n").unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse(_)));
+    }
+
+    #[test]
+    fn rejects_unknown_keys() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "bogusKey: 1\n").unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse(_)));
+    }
+
+    #[test]
+    fn rejects_empty_project_name() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "projectName: \"   \"\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("projectName")));
+    }
+
+    #[test]
+    fn parses_lsp_servers() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            r#"
+lsp:
+  servers:
+    - languageId: rust
+      extensions: [.rs]
+      command: rust-analyzer
+      args: ["--quiet"]
+"#,
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.lsp_servers.len(), 1);
+        assert_eq!(cfg.lsp_servers[0].language_id, "rust");
+        assert_eq!(cfg.lsp_servers[0].command, "rust-analyzer");
+        assert_eq!(cfg.lsp_servers[0].args, vec!["--quiet"]);
+    }
+
+    #[test]
+    fn rejects_lsp_extensions_without_dot() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            r#"
+lsp:
+  servers:
+    - languageId: rust
+      extensions: [rs]
+      command: rust-analyzer
+"#,
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("must start with '.'")));
+    }
+
+    #[test]
+    fn rejects_generated_dirs_with_path_separator() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "generatedDirs: [foo/bar]\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("single directory")));
+    }
+
+    #[test]
+    fn rejects_lsp_missing_required_fields() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            r#"
+lsp:
+  servers:
+    - languageId: rust
+      command: rust-analyzer
+"#,
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Parse(_)));
+    }
+
+    #[test]
+    fn inject_session_context_round_trips() {
+        let dir = tempdir().unwrap();
+        let cfg = OxplowConfig {
+            inject_session_context: false,
+            ..default_config("test".into())
+        };
+        write_project_config(dir.path(), &cfg).unwrap();
+        let loaded = load_project_config(dir.path()).unwrap();
+        assert!(!loaded.inject_session_context);
+    }
+}
