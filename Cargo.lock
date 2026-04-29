@@ -2955,6 +2955,7 @@ name = "oxplow-tauri-ipc"
 version = "0.3.0"
 dependencies = [
  "oxplow-app",
+ "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
  "oxplow-git",

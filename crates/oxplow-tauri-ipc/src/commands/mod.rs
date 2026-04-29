@@ -10,6 +10,7 @@ pub mod backlog;
 pub mod background;
 pub mod branch;
 pub mod code_quality;
+pub mod config;
 pub mod followup;
 pub mod git;
 pub mod hooks;

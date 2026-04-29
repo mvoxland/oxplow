@@ -193,6 +193,12 @@ export const commands = {
 	listAgentStatuses: () => typedError<AgentStatus[], IpcError>(__TAURI_INVOKE("list_agent_statuses")),
 	listOpenAgentTurns: (threadId: ThreadId) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_open_agent_turns", { threadId })),
 	listRecentAgentTurns: (threadId: ThreadId, limit: number | null) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_recent_agent_turns", { threadId, limit })),
+	getConfig: () => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("get_config")),
+	setAgentPromptAppend: (text: string) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_prompt_append", { text })),
+	setSnapshotRetentionDays: (days: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_retention_days", { days })),
+	setSnapshotMaxFileBytes: (bytes: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_max_file_bytes", { bytes })),
+	setGeneratedDirs: (dirs: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated_dirs", { dirs })),
+	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
 	getGitLog: (limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { limit, all })),
 	getCommitDetail: (sha: string) => typedError<{
 	sha: string,
@@ -259,6 +265,8 @@ export const commands = {
 };
 
 /* Types */
+export type AgentKind = "claude" | "copilot";
+
 export type AgentStatus = {
 	thread_id: ThreadId,
 	pane_target: string,
@@ -564,6 +572,13 @@ export type IpcError = {
 	cause: string | null,
 };
 
+export type LspServerConfig = {
+	languageId: string,
+	extensions: string[],
+	command: string,
+	args?: string[],
+};
+
 export type MoveWorkItemRequest = {
 	id: WorkItemId,
 	// Destination thread, or `None` to move onto the backlog.
@@ -571,6 +586,36 @@ export type MoveWorkItemRequest = {
 };
 
 export type NoteId = string;
+
+export type OxplowConfig = {
+	agent: AgentKind,
+	/**
+	 *  Human-readable project name. Defaults to the basename of the
+	 *  project dir when not set in oxplow.yaml.
+	 */
+	projectName: string,
+	// Extra language servers registered on top of the built-ins.
+	lspServers: LspServerConfig[],
+	// User-supplied text appended verbatim to every agent's system prompt.
+	agentPromptAppend: string,
+	// File-snapshot retention window in days. 0 disables pruning.
+	snapshotRetentionDays: number,
+	/**
+	 *  Directory names (matched at any path segment) treated as
+	 *  generated output and excluded from fs-watch + snapshots.
+	 */
+	generatedDirs: string[],
+	/**
+	 *  Maximum blob size for content-addressed snapshotting; larger
+	 *  files get a stat-only entry. Default 5 MiB.
+	 */
+	snapshotMaxFileBytes: number,
+	/**
+	 *  When true, the UserPromptSubmit hook injects a session-context
+	 *  block into every agent prompt.
+	 */
+	injectSessionContext: boolean,
+};
 
 export type PageVisit = {
 	id: string,
@@ -830,6 +875,12 @@ export type WorkNote = {
 	body: string,
 	author: string,
 	created_at: Timestamp,
+};
+
+export type WorkspaceContext = {
+	project_dir: string,
+	default_branch: string | null,
+	is_git_repo: boolean,
 };
 
 export type WorkspaceEntry = {

@@ -8,6 +8,7 @@
 //! on `Services` are the high-level "use cases" the IPC layer calls.
 
 pub mod background_task;
+pub mod config_service;
 pub mod events;
 pub mod followup;
 pub mod hook_ingest;
@@ -31,6 +32,8 @@ pub use followup::{Followup, FollowupStore};
 
 use thiserror::Error;
 use tracing::info;
+
+use std::sync::RwLock;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
@@ -78,7 +81,7 @@ impl AppLayout {
 ///
 /// Cheap to clone — the inner pieces are `Arc`'d.
 pub struct Services {
-    pub config: OxplowConfig,
+    pub config: Arc<RwLock<OxplowConfig>>,
     pub db: Database,
     pub layout: AppLayout,
     pub streams: StreamService,
@@ -146,7 +149,7 @@ impl Services {
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
 
         Ok(Self {
-            config,
+            config: Arc::new(RwLock::new(config)),
             db,
             layout,
             streams,
@@ -216,7 +219,7 @@ impl Services {
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
         Ok(Self {
-            config,
+            config: Arc::new(RwLock::new(config)),
             db,
             layout,
             streams,
