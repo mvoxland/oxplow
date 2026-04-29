@@ -5,7 +5,7 @@
 //
 // `window.oxplowApi` was the Electron preload's injected facade —
 // it's gone now. Any module that needs the legacy adapter imports
-// `legacyApi()` from `./api.js` instead.
+// `desktopBridge()` from `./api.js` instead.
 
 declare global {
   interface Window {

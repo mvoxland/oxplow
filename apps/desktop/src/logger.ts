@@ -1,4 +1,4 @@
-import { legacyApi } from "./api.js";
+import { desktopBridge } from "./api.js";
 
 export type UiLogLevel = "debug" | "info" | "warn" | "error";
 
@@ -73,7 +73,7 @@ export function getUiClientId(): string {
 
 async function sendUiLog(level: UiLogLevel, message: string, context?: Record<string, unknown>): Promise<void> {
   try {
-    await legacyApi().logUi({
+    await desktopBridge().logUi({
       clientId: getUiClientId(),
       level,
       message,
