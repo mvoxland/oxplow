@@ -60,6 +60,30 @@ function adaptThread(t: any): any {
   };
 }
 
+/// Adapt a bindings-shape BackgroundTask to the legacy api.ts shape:
+/// - started_at / ended_at (RFC3339 strings) → startedAt / endedAt
+///   (epoch ms). Legacy callers do arithmetic on the timestamps.
+/// - result_json (JSON-encoded string) → result (parsed value).
+/// - Pass-through label/detail/error/progress/kind/status/id.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function adaptBackgroundTask(t: any): any {
+  if (!t) return t;
+  let result: unknown = undefined;
+  if (typeof t.result_json === "string" && t.result_json.length > 0) {
+    try {
+      result = JSON.parse(t.result_json);
+    } catch {
+      // ignore; legacy callers tolerate undefined.
+    }
+  }
+  return {
+    ...t,
+    startedAt: t.started_at ? Date.parse(t.started_at) : Date.now(),
+    endedAt: t.ended_at ? Date.parse(t.ended_at) : null,
+    result,
+  };
+}
+
 /**
  * Build the legacy adapter. Returns a frozen object suitable for
  * `window.oxplowApi`. Methods backed by a real Tauri command call
@@ -397,8 +421,10 @@ export function buildLegacyAdapter(): DesktopApi {
       unwrap(await commands.writeWikiNoteBody(slug, body)),
 
     // -- background tasks --
-    listBackgroundTasks: async () => unwrap(await commands.listBackgroundTasks()),
-    getBackgroundTask: async (id: string) => unwrap(await commands.getBackgroundTask(id)),
+    listBackgroundTasks: async () =>
+      (unwrap(await commands.listBackgroundTasks()) as unknown[]).map(adaptBackgroundTask),
+    getBackgroundTask: async (id: string) =>
+      adaptBackgroundTask(unwrap(await commands.getBackgroundTask(id))),
 
     // -- hook events --
     listHookEvents: async (_streamId?: string) => {
