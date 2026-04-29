@@ -1,25 +1,4 @@
 # Usability rules
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 Things I keep forgetting. Read this before adding any UI.
@@ -43,7 +22,7 @@ Things I keep forgetting. Read this before adding any UI.
 - **Edit-X-in-place actions are inline, not modal.** Click the
   displayed value to swap to an input; Enter commits, Escape reverts,
   blur commits unless Escape was pressed. The shared helper is
-  `src/ui/components/InlineEdit.tsx`; `WorkItemDetail`'s
+  `apps/desktop/src/components/InlineEdit.tsx`; `WorkItemDetail`'s
   `EditableField` and `WorkGroupList`'s `InlineItemRow` are older
   hand-rolled equivalents — copy whichever is closest. The cancel
   latch must be a `useRef` (state updates are async; the blur fires
@@ -65,7 +44,7 @@ Things I keep forgetting. Read this before adding any UI.
   `NewWorkItemModal` only backs the edit-double-click flow — do not
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
-  `src/ui/pages/SettingsPage.tsx` — full Page tab, no backdrop.
+  `apps/desktop/src/pages/SettingsPage.tsx` — full Page tab, no backdrop.
 - **Never call `window.prompt()`.** Electron disables it — it returns
   `null` synchronously without showing anything, so any code path
   gated on its return value silently no-ops. Use `InlineEdit` (for
@@ -109,7 +88,7 @@ Things I keep forgetting. Read this before adding any UI.
 ## Destructive actions
 
 - **Per-row destructives use `InlineConfirm`** at
-  `src/ui/components/InlineConfirm.tsx`. First click on the trigger
+  `apps/desktop/src/components/InlineConfirm.tsx`. First click on the trigger
   swaps to a `[Confirm] [Cancel]` pair in the same horizontal real
   estate. The Confirm button auto-focuses; Escape, blur (outside the
   pair), or Cancel reverts. Examples in tree: Restore button on each
@@ -118,7 +97,7 @@ Things I keep forgetting. Read this before adding any UI.
   manage flow.
 - **Non-row-anchored destructives fire immediately and surface an
   Undo toast.** Use `showToast({ message, onUndo })` from
-  `src/ui/components/toastStore.ts`. The toast auto-dismisses after
+  `apps/desktop/src/components/toastStore.ts`. The toast auto-dismisses after
   ~7s and the [Undo] button calls the supplied callback. Mount the
   `<UndoToastStack />` once near the app root (already done in
   `App.tsx`). When the action is genuinely irreversible (delete a
@@ -133,11 +112,11 @@ Things I keep forgetting. Read this before adding any UI.
 ## Per-row actions (was right-click menus)
 
 - **Visible kebab `⋯` button per row, not right-click.** The shared
-  primitive is `src/ui/components/Kebab.tsx` (button + `ContextMenu`
+  primitive is `apps/desktop/src/components/Kebab.tsx` (button + `ContextMenu`
   popover anchored under the button). The popover keeps the same
   `MenuItem[]` payload as the legacy right-click menus — call sites
   swap their handler, the menu items themselves are unchanged.
-- The `ContextMenu` popover at `src/ui/components/ContextMenu.tsx` is
+- The `ContextMenu` popover at `apps/desktop/src/components/ContextMenu.tsx` is
   still in use as the popover renderer; just don't open it from a
   raw `onContextMenu` handler in new code. If you find a surface
   that still does, that's a phase-5c continuation site — wire it
@@ -169,7 +148,7 @@ Things I keep forgetting. Read this before adding any UI.
   back to `itemId` when `itemIds` is absent.
 - **Plan pane: a selection-aware action bar appears at the top of the
   work-group region whenever ≥1 row is marked.** Component:
-  `src/ui/components/Plan/SelectionActionBar.tsx`. Buttons mirror the
+  `apps/desktop/src/components/Plan/SelectionActionBar.tsx`. Buttons mirror the
   marked-set right-click menu — Change status / Change priority /
   Add to agent context / Delete — plus a Clear button. The bar reads
   the existing marked-set state in `PlanPane`; there is no separate
@@ -267,8 +246,8 @@ Things I keep forgetting. Read this before adding any UI.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. Existing MIMEs:
   `WORK_ITEM_DRAG_MIME` (work-item reorder) in
-  `src/ui/components/ThreadRail.tsx`, and `CONTEXT_REF_MIME`
-  ("Add to agent context") in `src/ui/agent-context-dnd.ts`. Add a
+  `apps/desktop/src/components/ThreadRail.tsx`, and `CONTEXT_REF_MIME`
+  ("Add to agent context") in `apps/desktop/src/agent-context-dnd.ts`. Add a
   new MIME rather than overloading an existing one.
 - **Tabs in the three tabbed sections (left dock rail, center pane, bottom
   dock rail) are drag-reorderable.** DockShell rail tabs persist their order
@@ -297,15 +276,15 @@ Things I keep forgetting. Read this before adding any UI.
 
 The agent terminal accepts dropped references AND a "Add to agent
 context" kebab/menu action; both share one path through
-`src/ui/agent-input-bus.ts` (`insertIntoAgent`) and
-`src/ui/agent-context-ref.ts` (`formatContextMention`).
+`apps/desktop/src/agent-input-bus.ts` (`insertIntoAgent`) and
+`apps/desktop/src/agent-context-ref.ts` (`formatContextMention`).
 
 - **Sources** (anything the user might want to reference): drag rows
   or pills from the Files tree, NotesPane, the WikiActivityBar, the
   Backlinks panel on every Page, the rail HUD recent-files / active
   item / up-next sections, and Code-quality file groups. Set the
   payload with `setContextRefDrag(e, ref)` from
-  `src/ui/agent-context-dnd.ts`. Reuse the same helper and the same
+  `apps/desktop/src/agent-context-dnd.ts`. Reuse the same helper and the same
   MIME (`application/x-oxplow-context-ref`) for any new referenceable
   surface — separate from `WORK_ITEM_DRAG_MIME`, which carries the
   reorder payload.
@@ -318,7 +297,7 @@ context" kebab/menu action; both share one path through
   (multi-id), iterates the latter, and pastes a space-separated
   chain of mentions in one drop. Helpers:
   `decodeWorkItemDragRefs` / `dragHasWorkItemRefs` in
-  `src/ui/agent-context-dnd.ts`.
+  `apps/desktop/src/agent-context-dnd.ts`.
 - **Sink**: `TerminalPane` is the only drop target. It writes through
   `term.paste(text)` so the same xterm input pipeline handles both
   direct and tmux transports — do not branch by transport.

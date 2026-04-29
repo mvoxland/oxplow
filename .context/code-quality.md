@@ -1,25 +1,4 @@
 # Code quality scans
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 Deterministic, language-agnostic flagging of complexity hotspots and
@@ -102,17 +81,17 @@ overwriting the other.
 ## Adding a third tool
 
 1. Define a new normalized parser + runner in
-   `src/subprocess/code-quality.ts` (or split it out — the file
+   `crates/oxplow-app/src/code_quality_runner.rs` (or split it out — the file
    stays single-purpose for now).
 2. Extend the `CodeQualityTool` union in
-   `src/persistence/code-quality-store.ts` and
-   `src/electron/ipc-contract.ts` (the union is duplicated
+   `crates/oxplow-db/src/analytics_stores.rs` and
+   `crates/oxplow-tauri-ipc/src/commands/` (the union is duplicated
    intentionally — store and contract have separate type
    identities).
-3. Add a branch in `ElectronRuntime.runCodeQualityScan` that
+3. Add a branch in `Services.runCodeQualityScan` that
    dispatches to the new runner.
 4. Add the tool to the `TOOLS` array in
-   `src/ui/components/CodeQuality/CodeQualityPanel.tsx` so the
+   `apps/desktop/src/components/CodeQuality/CodeQualityPanel.tsx` so the
    "Run" buttons render.
 
 No migration needed; the existing tables don't care which tool

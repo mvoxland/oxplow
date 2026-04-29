@@ -1,25 +1,4 @@
 # Data model
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 What this doc covers: the SQLite tables, their store classes, and the
@@ -29,14 +8,14 @@ read [ipc-and-stores.md](./ipc-and-stores.md).
 ## Storage
 
 All persistence lives in one SQLite file under `.oxplow/state.sqlite`, opened
-through `getStateDatabase()` (`src/persistence/state-db.ts`). Every store is
+through `Database::open` (`crates/oxplow-db/src/database.rs`). Every store is
 a thin class wrapping that connection. Schema changes go through versioned
-migrations (`src/persistence/migrations.ts`) gated by `PRAGMA user_version`
+migrations (`crates/oxplow-db/migrations/V1__initial_schema.sql`) gated by `PRAGMA user_version`
 — migrations are append-only; never edit a prior version.
 
 ## Tables and stores
 
-### `streams` — `StreamStore` (`src/persistence/stream-store.ts`)
+### `streams` — `StreamStore` (`crates/oxplow-db/src/stream_store.rs`)
 
 Top-level workspace context. Exactly one row per user-facing stream tab.
 Each stream owns:
@@ -44,7 +23,7 @@ Each stream owns:
 - a `kind` column (migration v34) — `"primary" | "worktree"`:
   - **primary**: the repo itself. `worktree_path === projectDir`,
     `title === projectBase` (never rewritten), created exactly once at
-    startup by `ElectronRuntime.initialize()` via `StreamStore.findPrimary()`.
+    startup by `Services::boot()` via `StreamStore.findPrimary()`.
     Cannot be deleted (`StreamStore.deleteStream()` throws for `kind === "primary"`).
   - **worktree**: a real git worktree under `.oxplow/worktrees/<branch>/`
     created by `createStream()` via `ensureWorktree()`. Title defaults
@@ -55,7 +34,7 @@ Each stream owns:
   switch branches. Updated by `StreamStore.setStreamBranch(streamId,
   branch, branchRef)`, which emits `stream.changed` (kind:
   `"branch-changed"`). The runtime drives it from two sites:
-  `ElectronRuntime.checkoutStreamBranch(streamId, branch)` (user-triggered
+  `Services.checkoutStreamBranch(streamId, branch)` (user-triggered
   via "Switch branch…" in the StreamRail context menu) and
   `maybeSyncStreamBranch(streamId)` (fired by every `git-refs.changed`
   event so external `git checkout` in a worktree is picked up live).
@@ -84,7 +63,7 @@ Each stream owns:
 Streams never look outside the project root for data; see
 `architecture.md`'s "Workspace isolation rule."
 
-### `threads` — `BatchStore` (`src/persistence/thread-store.ts`)
+### `threads` — `BatchStore` (`crates/oxplow-db/src/thread_store.rs`)
 
 Units of work *within* a stream. Statuses: `active` (writer — may mutate
 the worktree) and `queued` (read-only, agents can run but writes are
@@ -98,7 +77,7 @@ removed in v13 — use the work-item log as the source of truth instead.
 `closed_at` (migration v44, nullable TEXT) — closing a thread is
 orthogonal to its status. A closed thread keeps its `queued` status but
 sits hidden from the rail; it surfaces only on the **Closed Threads**
-page (`src/ui/pages/ClosedThreadsPage.tsx`), which lists each closed
+page (`apps/desktop/src/pages/ClosedThreadsPage.tsx`), which lists each closed
 thread with its work items (read-only) and a Reopen action. Closing is
 allowed only for non-writer threads with no work items in `ready` /
 `blocked` / `in_progress` (`ThreadStore.close()`); promote another
@@ -126,7 +105,7 @@ running an older DB get the columns/tables dropped on first launch with
 the new binary; existing rows are not migrated forward (no surface
 reads them).
 
-### `work_items` — `WorkItemStore` (`src/persistence/work-item-store.ts`)
+### `work_items` — `WorkItemStore` (`crates/oxplow-db/src/work_item_store.rs`)
 
 The actual TODO list. Kinds: `epic`, `task`, `subtask`, `bug`, `note`.
 Statuses: `ready`, `in_progress`, `blocked`, `done`, `canceled`,
@@ -171,7 +150,7 @@ a thread or demoted back — there is no copy across tables. Caps:
 `category` 200 chars, `tags` 500 chars total. Pass `null` through
 `updateWorkItem` / `updateBacklogItem` to clear; omit to keep.
 
-### `work_note` — `WorkItemStore.getWorkNotes()` / `listThreadNotes()` (`src/persistence/work-item-store.ts`)
+### `work_note` — `WorkItemStore.getWorkNotes()` / `listThreadNotes()` (`crates/oxplow-db/src/work_item_store.rs`)
 
 Structured notes, either item-scoped or thread-scoped. Each row has `id`,
 nullable `work_item_id`, nullable `thread_id`, `body`, `author` (free-form
@@ -198,7 +177,7 @@ migration v25 to allow thread-scoped rows (nullable `work_item_id`, new
   `oxplow__get_thread_notes` / `listThreadNotes(threadId, limit)` —
   reverse-chronological, capped at 100.
 
-### `work_item_effort` — `WorkItemEffortStore` (`src/persistence/work-item-effort-store.ts`)
+### `work_item_effort` — `WorkItemEffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 
 An **effort** is one `in_progress → done` (or blocked/canceled) cycle
 of a work item. Columns: `work_item_id`, `started_at`, `ended_at`,
@@ -250,7 +229,7 @@ than it'd be useful. If a future feature wants "show me commits for
 this item," the answer is to scope `git log` by the files
 in `work_item_effort_file`.
 
-### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`src/persistence/snapshot-store.ts`)
+### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Time-ordered, self-contained snapshots. `file_snapshot` columns:
 `id, stream_id, worktree_path, version_hash, source, created_at,
@@ -332,7 +311,7 @@ Cleanup runs at runtime startup and again once every 24 hours via
 
 **Ignoring generated directories.** The fs-watcher and the snapshot
 seeder share one filter: `shouldIgnoreWorkspaceWatchPath` in
-`src/git/workspace-watch.ts`. It covers `.git/`, `.oxplow/logs/`,
+`crates/oxplow-fs-watch/src/lib.rs`. It covers `.git/`, `.oxplow/logs/`,
 `.oxplow/worktrees/`, and a hardcoded list of common build/cache dir
 names (`node_modules`, `dist`, `build`, `target`, `.next`, `.turbo`,
 `.cache`, `.venv`, `__pycache__`, …). Users can extend the list via
@@ -342,7 +321,7 @@ the workspace watcher and the snapshot store. No changes to
 existing snapshots on toggle; newly ignored paths simply stop
 appearing in future dirty sets.
 
-### `wiki_note` — `WikiNoteStore` (`src/persistence/wiki-note-store.ts`)
+### `wiki_note` — `WikiNoteStore` (`crates/oxplow-db/src/wiki_note_store.rs`)
 
 User-curated personal knowledgebase — agent-written writeups, diagrams,
 and explanations that accumulate per project. **Bodies live on disk**
@@ -359,7 +338,7 @@ upsert.
 
 Workflow: the agent writes/edits note files directly with its
 Write/Edit tools (no MCP round-trip for bodies). A dedicated watcher
-(`src/git/notes-watch.ts`) picks up every file event, re-parses the
+(`crates/oxplow-fs-watch/src/lib.rs`) picks up every file event, re-parses the
 file, and upserts metadata + body. **Every write — agent or user —
 re-baselines freshness**, because any write implicitly asserts "this
 is current as of now." There is no agent-vs-user distinction.
@@ -369,11 +348,11 @@ Freshness is a general indicator, not a proof:
   note is flagged `stale`.
 - `captured_refs_json` stores `{path, blobSha, mtimeMs}` for every file
   path mentioned in the note (extracted via `parseNoteRefs` in
-  `src/persistence/wiki-note-refs.ts`). `computeFreshness` rehashes
+  `crates/oxplow-db/src/wiki-note-refs.ts`). `computeFreshness` rehashes
   each referenced file; any mismatch → `stale`; any missing file →
   `very-stale`.
 
-MCP tools (`src/mcp/wiki-note-mcp-tools.ts`) are metadata-only —
+MCP tools (`crates/oxplow-mcp/src/lib.rs`) are metadata-only —
 `list_notes`, `get_note_metadata`, `resync_note`, `search_notes`
 (title), `search_note_bodies` (content + ~200-char snippet),
 `find_notes_for_file` (backlinks via `captured_refs`), `delete_note`.
@@ -382,15 +361,15 @@ file, then optionally calls `resync_note` to pin freshness
 immediately (otherwise the watcher catches up within a ~200ms
 debounce).
 
-UI: `NotesPane` (`src/ui/components/Notes/NotesPane.tsx`) is a
+UI: `NotesPane` (`apps/desktop/src/components/Notes/NotesPane.tsx`) is a
 left-dock `ToolWindow` with a debounced full-text search input and a
 recency-driven TOC ("Recently visited" / "Recently modified" / "All
 notes"); each section caps at 8 rows with a "show all" toggle. The
 freshness dot + relative-timestamp pattern is shared by all rows.
 Selecting a row opens the note as a center tab (`note:<slug>`)
-rendered by `NoteTab` (`src/ui/components/Notes/NoteTab.tsx`), which
+rendered by `NoteTab` (`apps/desktop/src/components/Notes/NoteTab.tsx`), which
 owns the view/edit/delete UI . Markdown rendering is delegated to the shared
-`MarkdownView` (`src/ui/components/Notes/MarkdownView.tsx`) which
+`MarkdownView` (`apps/desktop/src/components/Notes/MarkdownView.tsx`) which
 wraps `react-markdown`
 + `remark-gfm` and post-renders mermaid
 fenced blocks into inline SVG when `renderMermaid` is set. The
@@ -404,7 +383,7 @@ the `wiki_note_fts` FTS5 virtual table (migration v39); insert/update/
 delete triggers keep it in sync, so `WikiNoteStore.searchBodies()`
 returns ranked results with `<mark>…</mark>`-highlighted snippets.
 
-### `wiki_note_thread_update` — `WikiNoteThreadUpdateStore` (`src/persistence/wiki-note-thread-update-store.ts`)
+### `wiki_note_thread_update` — `WikiNoteThreadUpdateStore` (`crates/oxplow-db/src/wiki-note-thread-update-store.ts`)
 
 Per-thread attribution side table for wiki note edits. Notes themselves
 are global (one body per slug, shared across all threads/streams), but
@@ -434,7 +413,7 @@ thread-bound, so guessing would be worse than abstaining.
 when the note is deleted, so removed notes don't linger on the rail
 under their last author.
 
-### `usage_event` — `UsageStore` (`src/persistence/usage-store.ts`)
+### `usage_event` — `UsageStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Generic (kind, key) usage tracking. Append-only event log with columns
 `stream_id (nullable), thread_id (nullable), kind, key, event,
@@ -453,7 +432,7 @@ The store coalesces rapid repeats: if the most recent matching
 a new row. This keeps history clean when a user re-selects the same
 target several times in quick succession.
 
-Current write hookpoints (all in `src/ui/App.tsx`, all pass both
+Current write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
 `streamId` and `threadId`):
 
 - `wiki-note` — `handleOpenNote` records a visit when a note becomes
@@ -468,12 +447,12 @@ Current write hookpoints (all in `src/ui/App.tsx`, all pass both
 UI surfaces consume via `subscribeUsageEvents(listener, { kind })` to
 refresh on cross-window visits without polling.
 
-### `code_quality_scan` + `code_quality_finding` — `CodeQualityStore` (`src/persistence/code-quality-store.ts`)
+### `code_quality_scan` + `code_quality_finding` — `CodeQualityStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Deterministic, language-agnostic findings sourced from external CLIs
 (`lizard` and `jscpd`). Two tables, one store, one runtime method
 (`runCodeQualityScan`). The store doesn't run subprocesses itself —
-the runtime calls `src/subprocess/code-quality.ts` and hands
+the runtime calls `crates/oxplow-app/src/code_quality_runner.rs` and hands
 normalized findings back via `completeScan`.
 
 `code_quality_scan` rows: `id, stream_id, tool ('lizard' | 'jscpd'),
@@ -508,11 +487,11 @@ findings persisted by a codebase scan can also drive a focused
 "changed files only" view without re-running.
 
 The store publishes `code-quality.scanned` events on start /
-complete / fail; `CodeQualityPanel` (`src/ui/components/CodeQuality/`)
+complete / fail; `CodeQualityPanel` (`apps/desktop/src/components/CodeQuality/`)
 subscribes via `subscribeCodeQualityEvents(streamId, fn)` and
 refetches.
 
-### `page_visit` — `PageVisitStore` (`src/persistence/page-visit-store.ts`)
+### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Append-only event log of in-app page navigations. One row per visit
 recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
@@ -601,13 +580,13 @@ un-blocked.
 
 Every store has a `subscribe(listener)` for in-process listeners,
 implemented via the shared `StoreEmitter` helper
-(`src/persistence/store-emitter.ts`). The emitter snapshots its
+(`crates/oxplow-db/src/store-emitter.ts`). The emitter snapshots its
 listener set before iterating so a listener that unsubscribes itself
 during emission doesn't skip subsequent subscribers, and a throwing
 listener is logged-and-skipped rather than killing the whole emit.
 
 The runtime relays each store's changes onto the typed EventBus
-(`src/core/event-bus.ts`) as `*.changed` events:
+(`crates/oxplow-app/src/events.rs`) as `*.changed` events:
 
 - `workspace.changed`, `git-refs.changed`, `workspace-context.changed`
 - `work-item.changed`, `backlog.changed`, `thread.changed`
@@ -616,7 +595,7 @@ The runtime relays each store's changes onto the typed EventBus
 
 UI components subscribe via `subscribeOxplowEvents()` (or scoped helpers
 like `subscribeWorkspaceEvents`, `subscribeGitRefsEvents`) in
-`src/ui/api.ts`. See [ipc-and-stores.md](./ipc-and-stores.md) for how to
+`apps/desktop/src/api.ts`. See [ipc-and-stores.md](./ipc-and-stores.md) for how to
 plumb a new event end-to-end.
 
 ## UI-only state worth naming

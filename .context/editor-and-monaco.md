@@ -1,25 +1,4 @@
 # Editor and Monaco patterns
-> **Note (April 2026, post-Tauri rewrite):** the source-path
-> references in this doc still reflect the original Electron/TS
-> structure (`src/electron/`, `src/persistence/`, etc). The codebase
-> has since been ported to Rust crates under `crates/` with the
-> frontend at `apps/desktop/src/`. Use the table below to translate:
->
-> | Old TS path | New Rust crate |
-> |---|---|
-> | `src/electron/` (runtime, IPC) | `crates/oxplow-runtime`, `crates/oxplow-tauri-ipc` |
-> | `src/persistence/` | `crates/oxplow-db` (sqlite) + `crates/oxplow-domain` (types) |
-> | `src/git/` | `crates/oxplow-git` |
-> | `src/lsp/` | `crates/oxplow-lsp` |
-> | `src/mcp/` | `crates/oxplow-mcp` |
-> | `src/session/` | `crates/oxplow-session` |
-> | `src/terminal/{pty,tmux,fleet}.ts` | `crates/oxplow-pty`, `crates/oxplow-tmux` |
-> | `src/config/` | `crates/oxplow-config` |
-> | `src/core/event-bus.ts` | `crates/oxplow-app::events` |
-> | `src/ui/` | `apps/desktop/src/` |
->
-> Behaviors and design principles below remain authoritative; only
-> the path references are stale.
 
 
 What this doc covers: how `EditorPane` hosts Monaco, the conventions for
@@ -29,9 +8,9 @@ broader "Monaco at the core, custom shell around it" rationale, see
 
 ## Single editor instance, models per file
 
-`src/ui/components/EditorPane.tsx` mounts **one** Monaco editor and
+`apps/desktop/src/components/EditorPane.tsx` mounts **one** Monaco editor and
 swaps `editor.model` whenever `filePath` changes. Models are keyed by
-URI via `streamFileUri(stream, path)` (see `src/ui/lsp.ts`), so opening
+URI via `streamFileUri(stream, path)` (see `apps/desktop/src/lsp.ts`), so opening
 the same file across tabs hits the same model and edit history.
 
 This avoids the cost (and visual flicker) of rebuilding the editor on
@@ -64,7 +43,7 @@ before deleting either binding.
 
 ## Closing a dirty tab prompts before discarding
 
-`handleCloseOpenFile` in `src/ui/App.tsx` checks `draftContent !==
+`handleCloseOpenFile` in `apps/desktop/src/App.tsx` checks `draftContent !==
 savedContent` before calling `closeOpenFile`, and pops a
 `window.confirm` when the tab is dirty. Cancelling the confirm leaves
 the tab and its draft intact. The other call to `closeOpenFile` in
@@ -83,7 +62,7 @@ caught via `editor.onContextMenu`, which:
    (so actions like "Compare with Clipboard" still see the selected
    text). Only collapses the selection when the click lands outside.
 3. Opens the shared `ContextMenu` component
-   (`src/ui/components/ContextMenu.tsx`) at the cursor.
+   (`apps/desktop/src/components/ContextMenu.tsx`) at the cursor.
 
 Menu items live in a per-render `MenuItem[]` array — `Save`, `Find`,
 `Go to Definition`, `Format Document`, `Copy Path`,
@@ -100,7 +79,7 @@ When the user toggles `Annotate with Blame`, `EditorPane` fetches a
 merged per-line attribution via `localBlame(stream.id, filePath)` and
 renders an absolutely-positioned DOM overlay on the left gutter (the
 `BlameOverlay` sub-component). The merge is computed server-side in
-`src/electron/local-blame.ts` (`computeLocalBlame`) — it walks closed
+`crates/oxplow-git/src/blame.rs` (`computeLocalBlame`) — it walks closed
 work-item efforts newest-first (`WorkItemEffortStore.listEffortsForPath`),
 diffs each effort's start/end snapshot content to figure out which lines
 the effort introduced, and falls back to `gitBlame` for any line the
@@ -160,8 +139,8 @@ updated via `editor.deltaDecorations`.
 
 ## Diff editor
 
-`src/ui/components/Diff/DiffPane.tsx` uses Monaco's `createDiffEditor`.
-The `DiffSpec` type (`src/ui/components/Diff/diff-request.ts`) supports
+`apps/desktop/src/components/Diff/DiffPane.tsx` uses Monaco's `createDiffEditor`.
+The `DiffSpec` type (`apps/desktop/src/components/Diff/diff-request.ts`) supports
 two render modes:
 
 - **Git-ref backed.** `leftRef` plus `rightKind: "working" | { ref }`.
@@ -185,7 +164,7 @@ which is the useful action.
 
 ## LSP bridge
 
-`src/ui/lsp.ts` defines `LspClient`, which talks to a per-language LSP
+`apps/desktop/src/lsp.ts` defines `LspClient`, which talks to a per-language LSP
 server through a runtime-managed socket (the runtime spawns the server
 process via `LspSessionManager` and bridges its stdio to a WebSocket).
 `EditorPane` registers Monaco providers (definition, hover, references)
@@ -194,12 +173,12 @@ positions and locations ↔ Monaco editor ranges happens in the editor
 component.
 
 The set of languages eligible for LSP is determined by
-`isLspCandidateLanguage` (`src/ui/editor-language.ts`). The runtime
+`isLspCandidateLanguage` (`apps/desktop/src/editor-language.ts`). The runtime
 loads extra LSP servers from `oxplow.yaml` on startup
 (`config.lspServers` → `registerLanguageServer` per server).
 
 LSP is also exposed to **agents** via `buildLspMcpTools`
-(`src/mcp/lsp-mcp-tools.ts`) so they can run definition/reference queries
+(`crates/oxplow-mcp/src/lib.rs`) so they can run definition/reference queries
 without shelling out.
 
 ## Editor focus tracking
