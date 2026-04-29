@@ -677,10 +677,10 @@ function FollowupRow({
         color: "var(--muted)",
         userSelect: "none",
       }}
-      title={`Follow-up reminder (transient): ${followup.note}`}
+      title={`Follow-up reminder (transient): ${followup.body}`}
     >
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        ↳ follow-up: {followup.note}
+        ↳ follow-up: {followup.body}
       </span>
       {onDismiss ? (
         <button
