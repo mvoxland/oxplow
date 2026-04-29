@@ -75,6 +75,10 @@ export function buildLegacyAdapter(): DesktopApi {
       unwrap(await commands.createThread({ streamId, title, paneTarget: paneTarget ?? null })),
     reorderThreadQueue: async (streamId: string, order: string[]) =>
       unwrap(await commands.reorderThreadQueue({ streamId, order })),
+    getThreadState: async (streamId: string) =>
+      unwrap(await commands.getThreadState(streamId)),
+    getThreadWorkState: async (_streamId: string, threadId: string) =>
+      unwrap(await commands.getThreadWorkState(threadId)),
 
     // -- work items --
     createWorkItem: async (

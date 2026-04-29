@@ -88,6 +88,10 @@ export const commands = {
 	reorderThreadQueue: (req: ReorderThreadQueueRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_thread_queue", { req })),
 	getSelectedThread: (streamId: StreamId) => typedError<string | null, IpcError>(__TAURI_INVOKE("get_selected_thread", { streamId })),
 	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError>(__TAURI_INVOKE("select_thread", { req })),
+	// Aggregate "what threads exist on this stream and what's selected/active".
+	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError>(__TAURI_INVOKE("get_thread_state", { streamId })),
+	// Bucketed work-item view for the Work panel.
+	getThreadWorkState: (threadId: ThreadId) => typedError<ThreadWorkState, IpcError>(__TAURI_INVOKE("get_thread_work_state", { threadId })),
 	listWorkItemsForThread: (threadId: ThreadId) => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_work_items_for_thread", { threadId })),
 	getWorkItem: (id: WorkItemId) => typedError<{
 	id: WorkItemId,
@@ -737,6 +741,12 @@ export type Thread = {
 
 export type ThreadId = string;
 
+export type ThreadState = {
+	selectedThreadId: ThreadId | null,
+	activeThreadId: ThreadId | null,
+	threads: Thread[],
+};
+
 /**
  *  Thread lifecycle status — mirrors the TS `ThreadState` shape.
  * 
@@ -746,6 +756,16 @@ export type ThreadId = string;
  *  terminated; closed threads are excluded from the rail.
  */
 export type ThreadStatus = "active" | "queued" | "closed";
+
+export type ThreadWorkState = {
+	threadId: ThreadId,
+	waiting: WorkItem[],
+	inProgress: WorkItem[],
+	done: WorkItem[],
+	epics: WorkItem[],
+	items: WorkItem[],
+	followups: Followup[],
+};
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
