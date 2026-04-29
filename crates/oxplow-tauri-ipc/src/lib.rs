@@ -117,6 +117,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::git::list_existing_worktrees,
         commands::git::list_sibling_worktrees,
         commands::git::list_adoptable_worktrees,
+        commands::git::git_blame,
+        commands::git::get_branch_changes,
         // hooks / agent lifecycle
         commands::hooks::ingest_hook_event,
         commands::hooks::list_hook_events,
