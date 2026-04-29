@@ -113,6 +113,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::git::list_recent_remote_branches,
         commands::git::list_file_commits,
         commands::git::read_file_at_ref,
+        commands::git::search_workspace_text,
         // log
         commands::log::get_git_log,
         commands::log::get_commit_detail,
