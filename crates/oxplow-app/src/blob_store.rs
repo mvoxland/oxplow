@@ -6,7 +6,7 @@
 //! love huge flat dirs). Writes are idempotent — if the blob
 //! already exists the bytes aren't rewritten.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 use thiserror::Error;
