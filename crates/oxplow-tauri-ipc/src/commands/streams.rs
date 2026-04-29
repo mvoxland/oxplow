@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use oxplow_app::OxplowEvent;
 use oxplow_domain::{Stream, StreamId};
 
 use crate::error::IpcError;
@@ -33,10 +34,12 @@ pub async fn create_worktree(
     state: tauri::State<'_, AppState>,
     req: CreateWorktreeRequest,
 ) -> Result<Stream, IpcError> {
-    Ok(state
+    let stream = state
         .streams
         .create_worktree(&req.slug, req.title, req.branch, req.branch_source)
-        .await?)
+        .await?;
+    state.events.emit(OxplowEvent::StreamsChanged);
+    Ok(stream)
 }
 
 #[tauri::command]
@@ -45,7 +48,9 @@ pub async fn delete_stream(
     state: tauri::State<'_, AppState>,
     id: StreamId,
 ) -> Result<(), IpcError> {
-    Ok(state.streams.delete_stream(&id).await?)
+    state.streams.delete_stream(&id).await?;
+    state.events.emit(OxplowEvent::StreamsChanged);
+    Ok(())
 }
 
 /// Returns the primary stream — the project root. Useful for any UI
@@ -77,6 +82,9 @@ pub async fn switch_stream(
     id: Option<StreamId>,
 ) -> Result<(), IpcError> {
     state.streams.set_current(id.as_ref()).await?;
+    state
+        .events
+        .emit(OxplowEvent::CurrentStreamChanged { stream_id: id });
     Ok(())
 }
 
@@ -92,5 +100,7 @@ pub async fn rename_stream(
     state: tauri::State<'_, AppState>,
     req: RenameStreamRequest,
 ) -> Result<Stream, IpcError> {
-    Ok(state.streams.rename(&req.id, req.title).await?)
+    let s = state.streams.rename(&req.id, req.title).await?;
+    state.events.emit(OxplowEvent::StreamsChanged);
+    Ok(s)
 }

@@ -24,3 +24,4 @@ apps/desktop/src-tauri/gen/
 
 # Frontend build artifacts
 apps/desktop/dist/
+MIGRATION_REVIEW2.md

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use oxplow_app::OxplowEvent;
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{StreamId, Thread, ThreadId};
 
@@ -31,7 +32,12 @@ pub async fn upsert_thread(
     state: tauri::State<'_, AppState>,
     thread: Thread,
 ) -> Result<(), IpcError> {
-    Ok(state.thread_store.upsert(&thread).await?)
+    let stream_id = thread.stream_id.clone();
+    state.thread_store.upsert(&thread).await?;
+    state
+        .events
+        .emit(OxplowEvent::ThreadsChanged { stream_id });
+    Ok(())
 }
 
 #[tauri::command]
@@ -40,7 +46,13 @@ pub async fn delete_thread(
     state: tauri::State<'_, AppState>,
     thread_id: ThreadId,
 ) -> Result<(), IpcError> {
-    Ok(state.thread_store.delete(&thread_id).await?)
+    // Capture stream_id before delete so the event can target it.
+    let stream_id = state.thread_store.get(&thread_id).await?.map(|t| t.stream_id);
+    state.thread_store.delete(&thread_id).await?;
+    if let Some(sid) = stream_id {
+        state.events.emit(OxplowEvent::ThreadsChanged { stream_id: sid });
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -59,10 +71,14 @@ pub async fn create_thread(
     req: CreateThreadRequest,
 ) -> Result<Thread, IpcError> {
     let pane = req.pane_target.unwrap_or_else(|| "working".into());
-    Ok(state
+    let t = state
         .threads
         .create(&req.stream_id, req.title, pane)
-        .await?)
+        .await?;
+    state.events.emit(OxplowEvent::ThreadsChanged {
+        stream_id: req.stream_id,
+    });
+    Ok(t)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -77,7 +93,11 @@ pub async fn rename_thread(
     state: tauri::State<'_, AppState>,
     req: RenameThreadRequest,
 ) -> Result<Thread, IpcError> {
-    Ok(state.threads.rename(&req.id, req.title).await?)
+    let t = state.threads.rename(&req.id, req.title).await?;
+    state.events.emit(OxplowEvent::ThreadsChanged {
+        stream_id: t.stream_id.clone(),
+    });
+    Ok(t)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -92,7 +112,11 @@ pub async fn set_thread_prompt(
     state: tauri::State<'_, AppState>,
     req: SetThreadPromptRequest,
 ) -> Result<Thread, IpcError> {
-    Ok(state.threads.set_prompt(&req.id, req.prompt).await?)
+    let t = state.threads.set_prompt(&req.id, req.prompt).await?;
+    state.events.emit(OxplowEvent::ThreadsChanged {
+        stream_id: t.stream_id.clone(),
+    });
+    Ok(t)
 }
 
 #[tauri::command]
@@ -101,7 +125,11 @@ pub async fn promote_thread(
     state: tauri::State<'_, AppState>,
     id: ThreadId,
 ) -> Result<Thread, IpcError> {
-    Ok(state.threads.promote(&id).await?)
+    let t = state.threads.promote(&id).await?;
+    state.events.emit(OxplowEvent::ThreadsChanged {
+        stream_id: t.stream_id.clone(),
+    });
+    Ok(t)
 }
 
 #[tauri::command]
@@ -110,7 +138,11 @@ pub async fn close_thread(
     state: tauri::State<'_, AppState>,
     id: ThreadId,
 ) -> Result<Thread, IpcError> {
-    Ok(state.threads.close(&id).await?)
+    let t = state.threads.close(&id).await?;
+    state.events.emit(OxplowEvent::ThreadsChanged {
+        stream_id: t.stream_id.clone(),
+    });
+    Ok(t)
 }
 
 #[tauri::command]
@@ -119,7 +151,11 @@ pub async fn reopen_thread(
     state: tauri::State<'_, AppState>,
     id: ThreadId,
 ) -> Result<Thread, IpcError> {
-    Ok(state.threads.reopen(&id).await?)
+    let t = state.threads.reopen(&id).await?;
+    state.events.emit(OxplowEvent::ThreadsChanged {
+        stream_id: t.stream_id.clone(),
+    });
+    Ok(t)
 }
 
 #[tauri::command]
@@ -148,6 +184,9 @@ pub async fn reorder_thread_queue(
         .threads
         .reorder_queue(&req.stream_id, &req.order)
         .await?;
+    state.events.emit(OxplowEvent::ThreadsChanged {
+        stream_id: req.stream_id,
+    });
     Ok(())
 }
 
@@ -178,5 +217,9 @@ pub async fn select_thread(
         .threads
         .select(&req.stream_id, req.thread_id.as_ref())
         .await?;
+    state.events.emit(OxplowEvent::SelectedThreadChanged {
+        stream_id: req.stream_id,
+        thread_id: req.thread_id,
+    });
     Ok(())
 }

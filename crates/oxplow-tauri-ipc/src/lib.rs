@@ -14,6 +14,12 @@ pub use state::AppState;
 
 use tauri_specta::{collect_commands, Builder};
 
+pub use oxplow_app::OxplowEvent;
+
+/// Stable event channel name used by the renderer's `listen` calls.
+/// Payload is `OxplowEvent` JSON.
+pub const OXPLOW_EVENT_CHANNEL: &str = "oxplow:event";
+
 /// Build the tauri-specta `Builder` registering every oxplow command.
 pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
