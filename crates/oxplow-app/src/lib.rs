@@ -23,7 +23,11 @@ use thiserror::Error;
 use tracing::info;
 
 use oxplow_config::OxplowConfig;
-use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore, SqliteWorkItemStore};
+use oxplow_db::{
+    Database, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore,
+    SqliteThreadStore, SqliteUsageStore, SqliteWikiNoteStore, SqliteWorkItemEventStore,
+    SqliteWorkItemLinkStore, SqliteWorkItemStore, SqliteWorkNoteStore,
+};
 use oxplow_session::{StreamService, WorkspaceLayout};
 
 #[derive(Debug, Error)]
@@ -69,6 +73,16 @@ pub struct Services {
     pub streams: StreamService,
     pub thread_store: Arc<SqliteThreadStore>,
     pub work_item_store: Arc<SqliteWorkItemStore>,
+    pub work_note_store: Arc<SqliteWorkNoteStore>,
+    pub work_item_link_store: Arc<SqliteWorkItemLinkStore>,
+    pub work_item_event_store: Arc<SqliteWorkItemEventStore>,
+    pub wiki_note_store: Arc<SqliteWikiNoteStore>,
+    pub page_visit_store: Arc<SqlitePageVisitStore>,
+    pub usage_store: Arc<SqliteUsageStore>,
+    pub code_quality_store: Arc<SqliteCodeQualityStore>,
+    pub snapshot_store: Arc<SqliteSnapshotStore>,
+    pub background_tasks: BackgroundTaskStore,
+    pub followups: FollowupStore,
     pub pty: oxplow_pty::PtyManager,
     pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
 }
@@ -86,6 +100,14 @@ impl Services {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let work_item_store = Arc::new(SqliteWorkItemStore::new(db.clone()));
+        let work_note_store = Arc::new(SqliteWorkNoteStore::new(db.clone()));
+        let work_item_link_store = Arc::new(SqliteWorkItemLinkStore::new(db.clone()));
+        let work_item_event_store = Arc::new(SqliteWorkItemEventStore::new(db.clone()));
+        let wiki_note_store = Arc::new(SqliteWikiNoteStore::new(db.clone()));
+        let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
+        let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
+        let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
+        let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
@@ -100,6 +122,16 @@ impl Services {
             streams,
             thread_store,
             work_item_store,
+            work_note_store,
+            work_item_link_store,
+            work_item_event_store,
+            wiki_note_store,
+            page_visit_store,
+            usage_store,
+            code_quality_store,
+            snapshot_store,
+            background_tasks: BackgroundTaskStore::new(),
+            followups: FollowupStore::new(),
             pty,
             tmux,
         })
@@ -122,6 +154,14 @@ impl Services {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let work_item_store = Arc::new(SqliteWorkItemStore::new(db.clone()));
+        let work_note_store = Arc::new(SqliteWorkNoteStore::new(db.clone()));
+        let work_item_link_store = Arc::new(SqliteWorkItemLinkStore::new(db.clone()));
+        let work_item_event_store = Arc::new(SqliteWorkItemEventStore::new(db.clone()));
+        let wiki_note_store = Arc::new(SqliteWikiNoteStore::new(db.clone()));
+        let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
+        let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
+        let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
+        let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone());
         let pty = oxplow_pty::PtyManager::spawn();
@@ -133,6 +173,16 @@ impl Services {
             streams,
             thread_store,
             work_item_store,
+            work_note_store,
+            work_item_link_store,
+            work_item_event_store,
+            wiki_note_store,
+            page_visit_store,
+            usage_store,
+            code_quality_store,
+            snapshot_store,
+            background_tasks: BackgroundTaskStore::new(),
+            followups: FollowupStore::new(),
             pty,
             tmux,
         })

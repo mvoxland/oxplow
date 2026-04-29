@@ -12,9 +12,12 @@ oxplow-session = { workspace = true }
 oxplow-app = { workspace = true }
 tauri = { workspace = true }
 tauri-specta = { workspace = true }
+tauri-plugin-clipboard-manager = { workspace = true }
 specta-typescript = { workspace = true }
-uuid = { workspace = true }
+oxplow-db = { workspace = true }
+oxplow-git = { workspace = true }
 tokio = { workspace = true }
+uuid = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

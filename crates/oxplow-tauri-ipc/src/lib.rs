@@ -15,23 +15,96 @@ pub use state::AppState;
 use tauri_specta::{collect_commands, Builder};
 
 /// Build the tauri-specta `Builder` registering every oxplow command.
-///
-/// The desktop app's `main.rs` calls this and folds the result into
-/// `tauri::Builder` via `.invoke_handler(specta_builder.invoke_handler())`.
-/// The same builder also exports the TS bindings to
-/// `apps/desktop/src/tauri-bridge/generated/bindings.ts` from the
-/// `export_bindings` test below.
 pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
-        commands::app_version,
-        commands::list_streams,
-        commands::ensure_primary,
-        commands::create_worktree,
-        commands::delete_stream,
-        commands::list_threads,
-        commands::list_work_items_for_thread,
-        commands::list_backlog,
-        commands::open_external_url,
+        // app
+        commands::app::app_version,
+        commands::app::ping,
+        // streams
+        commands::streams::list_streams,
+        commands::streams::ensure_primary,
+        commands::streams::create_worktree,
+        commands::streams::delete_stream,
+        commands::streams::get_primary_stream,
+        // threads
+        commands::threads::list_threads,
+        commands::threads::get_thread,
+        commands::threads::upsert_thread,
+        commands::threads::delete_thread,
+        // work items
+        commands::work_items::list_work_items_for_thread,
+        commands::work_items::get_work_item,
+        commands::work_items::upsert_work_item,
+        commands::work_items::delete_work_item,
+        // backlog
+        commands::backlog::list_backlog,
+        // notes (work item / thread)
+        commands::notes::add_work_note,
+        commands::notes::add_thread_note,
+        commands::notes::list_work_notes,
+        commands::notes::list_thread_notes,
+        commands::notes::delete_work_note,
+        // wiki
+        commands::wiki::list_wiki_notes,
+        commands::wiki::get_wiki_note,
+        commands::wiki::upsert_wiki_note,
+        commands::wiki::delete_wiki_note,
+        commands::wiki::search_wiki_titles,
+        commands::wiki::search_wiki_bodies,
+        // page visit
+        commands::page_visit::record_page_visit,
+        commands::page_visit::list_recent_page_visits,
+        commands::page_visit::top_visited_pages,
+        commands::page_visit::forget_page,
+        commands::page_visit::count_page_visits_by_day,
+        // usage
+        commands::usage::record_usage,
+        commands::usage::list_recent_usage,
+        // code quality
+        commands::code_quality::list_code_quality_scans,
+        commands::code_quality::list_code_quality_findings,
+        // snapshots
+        commands::snapshot::list_snapshots,
+        // branch
+        commands::branch::list_branches,
+        commands::branch::get_default_branch,
+        commands::branch::rename_branch,
+        commands::branch::delete_branch,
+        commands::branch::list_local_branches,
+        // git
+        commands::git::get_repo_conflict_state,
+        commands::git::get_ahead_behind,
+        commands::git::append_to_gitignore,
+        commands::git::restore_path,
+        // log
+        commands::log::get_git_log,
+        commands::log::get_commit_detail,
+        commands::log::get_commits_ahead_of,
+        // workspace
+        commands::workspace::list_workspace_entries,
+        commands::workspace::list_workspace_files,
+        commands::workspace::read_workspace_file,
+        commands::workspace::write_workspace_file,
+        commands::workspace::create_workspace_file,
+        commands::workspace::create_workspace_directory,
+        commands::workspace::rename_workspace_path,
+        commands::workspace::delete_workspace_path,
+        commands::workspace::get_workspace_status_summary,
+        // background tasks
+        commands::background::list_background_tasks,
+        commands::background::get_background_task,
+        commands::background::start_background_task,
+        commands::background::complete_background_task,
+        commands::background::fail_background_task,
+        commands::background::update_background_task,
+        // followups
+        commands::followup::list_followups,
+        commands::followup::add_followup,
+        commands::followup::remove_followup,
+        commands::followup::clear_followups_for_thread,
+        // webview
+        commands::webview::open_external_url,
+        commands::webview::clipboard_read_text,
     ])
 }
 
@@ -39,25 +112,16 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
 mod tests {
     use super::*;
 
-    /// Smoke test: the builder constructs without panicking. The
-    /// command set is exercised by the desktop app's `cargo build`,
-    /// which feeds the same builder into `tauri::Builder` and would
-    /// fail to compile if any command's signature drifts.
+    /// Smoke test: the builder constructs without panicking.
     #[test]
     fn builder_constructs() {
         let _b = specta_builder();
     }
 
     /// Regenerate the TS bindings file the frontend imports.
-    ///
-    /// Runs as part of `cargo test`; CI must verify `git diff` is
-    /// empty after `cargo test --workspace`. If a Rust command
-    /// signature changes, this test re-emits bindings and the diff
-    /// flags the drift before the PR merges.
+    /// CI fails if `git diff` is non-empty after `cargo test`.
     #[test]
     fn export_ts_bindings() {
-        // Skip when CARGO_MANIFEST_DIR doesn't resolve; defensive
-        // against unusual cargo setups.
         let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
             Ok(v) => v,
             Err(_) => return,
@@ -75,8 +139,6 @@ mod tests {
         builder
             .export(specta_typescript::Typescript::default(), &target)
             .expect("export bindings");
-        // Verify the file was written and contains *something*. Drift
-        // detection is the responsibility of a CI git-diff check.
         let metadata = std::fs::metadata(&target).expect("bindings written");
         assert!(metadata.len() > 0, "bindings file should not be empty");
     }

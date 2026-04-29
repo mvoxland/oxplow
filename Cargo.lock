@@ -2954,13 +2954,16 @@ name = "oxplow-tauri-ipc"
 version = "0.3.0"
 dependencies = [
  "oxplow-app",
+ "oxplow-db",
  "oxplow-domain",
+ "oxplow-git",
  "oxplow-session",
  "serde",
  "serde_json",
  "specta",
  "specta-typescript",
  "tauri",
+ "tauri-plugin-clipboard-manager",
  "tauri-specta",
  "thiserror 2.0.18",
  "tokio",
