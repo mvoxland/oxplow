@@ -3,7 +3,7 @@ use specta::Type;
 use thiserror::Error;
 
 use oxplow_domain::DomainError;
-use oxplow_session::SessionError;
+use oxplow_session::{SessionError, ThreadError};
 
 /// Frontend-facing error envelope.
 ///
@@ -102,6 +102,20 @@ impl From<SessionError> for IpcError {
                 cause: None,
             },
             SessionError::Storage(e) => IpcError::from(e.clone()),
+        }
+    }
+}
+
+impl From<ThreadError> for IpcError {
+    fn from(value: ThreadError) -> Self {
+        match value {
+            ThreadError::NotFound(_) => IpcError::not_found(),
+            ThreadError::Closed(id) => Self {
+                code: "THREAD_CLOSED".into(),
+                message: format!("thread is closed: {id}"),
+                cause: None,
+            },
+            ThreadError::Storage(e) => IpcError::from(e),
         }
     }
 }

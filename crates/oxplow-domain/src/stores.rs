@@ -22,6 +22,11 @@ pub trait StreamStore: Send + Sync {
     async fn upsert(&self, stream: &Stream) -> Result<(), DomainError>;
     async fn delete(&self, id: &StreamId) -> Result<(), DomainError>;
     async fn primary(&self) -> Result<Option<Stream>, DomainError>;
+    /// Returns the runtime-state pointer to the currently-selected
+    /// stream id, if any. Survives restarts; null until set.
+    async fn current_id(&self) -> Result<Option<StreamId>, DomainError>;
+    /// Sets (or clears) the current-stream pointer.
+    async fn set_current(&self, id: Option<&StreamId>) -> Result<(), DomainError>;
 }
 
 #[async_trait]
@@ -30,6 +35,16 @@ pub trait ThreadStore: Send + Sync {
     async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError>;
     async fn upsert(&self, thread: &Thread) -> Result<(), DomainError>;
     async fn delete(&self, id: &ThreadId) -> Result<(), DomainError>;
+    /// Per-stream selected-thread pointer. None means nothing selected.
+    async fn selected_for_stream(
+        &self,
+        stream: &StreamId,
+    ) -> Result<Option<ThreadId>, DomainError>;
+    async fn set_selected_for_stream(
+        &self,
+        stream: &StreamId,
+        thread: Option<&ThreadId>,
+    ) -> Result<(), DomainError>;
 }
 
 #[async_trait]

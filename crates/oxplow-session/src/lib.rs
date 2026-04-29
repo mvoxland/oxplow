@@ -7,6 +7,9 @@
 //! Composes `oxplow-git` (for actual `git worktree add`) and the
 //! `StreamStore` trait from `oxplow-domain` for persistence.
 
+pub mod thread_service;
+pub use thread_service::{ThreadError, ThreadService};
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -190,6 +193,89 @@ impl StreamService {
     /// List all streams ordered with primary first.
     pub async fn list_streams(&self) -> Result<Vec<Stream>, SessionError> {
         Ok(self.streams.list().await?)
+    }
+
+    /// Get the runtime-state-pinned current stream (None if nothing
+    /// has been selected yet — caller typically falls back to primary).
+    pub async fn current(&self) -> Result<Option<Stream>, SessionError> {
+        match self.streams.current_id().await? {
+            None => Ok(None),
+            Some(id) => Ok(self.streams.get(&id).await?),
+        }
+    }
+
+    /// Set the current stream pointer. `None` clears the pointer.
+    pub async fn set_current(&self, id: Option<&StreamId>) -> Result<(), SessionError> {
+        if let Some(id) = id {
+            // Validate the target exists before writing the pointer.
+            self.streams
+                .get(id)
+                .await?
+                .ok_or(SessionError::Storage(DomainError::NotFound))?;
+        }
+        self.streams.set_current(id).await?;
+        Ok(())
+    }
+
+    pub async fn rename(
+        &self,
+        id: &StreamId,
+        title: impl Into<String>,
+    ) -> Result<Stream, SessionError> {
+        let mut s = self
+            .streams
+            .get(id)
+            .await?
+            .ok_or(SessionError::Storage(DomainError::NotFound))?;
+        s.title = title.into();
+        s.updated_at = Timestamp::now();
+        self.streams.upsert(&s).await?;
+        Ok(s)
+    }
+
+    /// Set per-stream pane targets. Either field can be empty to clear.
+    pub async fn set_panes(
+        &self,
+        id: &StreamId,
+        working: Option<String>,
+        talking: Option<String>,
+    ) -> Result<Stream, SessionError> {
+        let mut s = self
+            .streams
+            .get(id)
+            .await?
+            .ok_or(SessionError::Storage(DomainError::NotFound))?;
+        if let Some(w) = working {
+            s.working_pane = w;
+        }
+        if let Some(t) = talking {
+            s.talking_pane = t;
+        }
+        s.updated_at = Timestamp::now();
+        self.streams.upsert(&s).await?;
+        Ok(s)
+    }
+
+    /// Update the stream's recorded branch + branch_ref to reflect a
+    /// successful checkout. Doesn't itself run the checkout — the
+    /// caller (typically the git-ops layer) does that and then asks
+    /// us to record the new state.
+    pub async fn record_branch_checkout(
+        &self,
+        id: &StreamId,
+        branch: impl Into<String>,
+    ) -> Result<Stream, SessionError> {
+        let mut s = self
+            .streams
+            .get(id)
+            .await?
+            .ok_or(SessionError::Storage(DomainError::NotFound))?;
+        let branch = branch.into();
+        s.branch = branch.clone();
+        s.branch_ref = format!("refs/heads/{branch}");
+        s.updated_at = Timestamp::now();
+        self.streams.upsert(&s).await?;
+        Ok(s)
     }
 
     /// Delete a stream. The primary cannot be deleted — that's the

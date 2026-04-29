@@ -32,6 +32,25 @@ export const commands = {
 	created_at: Timestamp,
 	updated_at: Timestamp,
 } | null, IpcError>(__TAURI_INVOKE("get_primary_stream")),
+	// Currently-selected stream (None falls back to primary in the UI).
+	getCurrentStream: () => typedError<{
+	id: StreamId,
+	kind: StreamKind,
+	title: string,
+	summary: string,
+	branch: string,
+	branch_ref: string,
+	branch_source: string,
+	worktree_path: string,
+	working_pane: string,
+	talking_pane: string,
+	working_session_id: string,
+	talking_session_id: string,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+} | null, IpcError>(__TAURI_INVOKE("get_current_stream")),
+	switchStream: (id: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("switch_stream", { id })),
+	renameStream: (req: RenameStreamRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("rename_stream", { req })),
 	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),
 	getThread: (threadId: ThreadId) => typedError<{
 	id: ThreadId,
@@ -59,6 +78,16 @@ export const commands = {
 } | null, IpcError>(__TAURI_INVOKE("get_thread", { threadId })),
 	upsertThread: (thread: Thread) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_thread", { thread })),
 	deleteThread: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_thread", { threadId })),
+	createThread: (req: CreateThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("create_thread", { req })),
+	renameThread: (req: RenameThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("rename_thread", { req })),
+	setThreadPrompt: (req: SetThreadPromptRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("set_thread_prompt", { req })),
+	promoteThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("promote_thread", { id })),
+	closeThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("close_thread", { id })),
+	reopenThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("reopen_thread", { id })),
+	listClosedThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_closed_threads", { streamId })),
+	reorderThreadQueue: (req: ReorderThreadQueueRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_thread_queue", { req })),
+	getSelectedThread: (streamId: StreamId) => typedError<string | null, IpcError>(__TAURI_INVOKE("get_selected_thread", { streamId })),
+	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError>(__TAURI_INVOKE("select_thread", { req })),
 	listWorkItemsForThread: (threadId: ThreadId) => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_work_items_for_thread", { threadId })),
 	getWorkItem: (id: WorkItemId) => typedError<{
 	id: WorkItemId,
@@ -280,6 +309,12 @@ export type CommitDetailFile = {
 	status: string,
 };
 
+export type CreateThreadRequest = {
+	streamId: StreamId,
+	title: string,
+	paneTarget: string | null,
+};
+
 export type CreateWorktreeRequest = {
 	slug: string,
 	title: string,
@@ -350,11 +385,36 @@ export type PageVisitDay = {
 	count: number,
 };
 
+export type RenameStreamRequest = {
+	id: StreamId,
+	title: string,
+};
+
+export type RenameThreadRequest = {
+	id: ThreadId,
+	title: string,
+};
+
+export type ReorderThreadQueueRequest = {
+	streamId: StreamId,
+	order: ThreadId[],
+};
+
 export type RepoConflictState = {
 	// Active long-running git op, or `None` when the worktree is clean.
 	operation: GitOperationKind | null,
 	// Number of paths reported as unmerged by `git status --porcelain`.
 	conflicted_count: number,
+};
+
+export type SelectThreadRequest = {
+	streamId: StreamId,
+	threadId: ThreadId | null,
+};
+
+export type SetThreadPromptRequest = {
+	id: ThreadId,
+	prompt: string | null,
 };
 
 export type Stream = {

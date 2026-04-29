@@ -175,6 +175,41 @@ impl StreamStore for SqliteStreamStore {
         .unwrap()
     }
 
+    async fn current_id(&self) -> Result<Option<StreamId>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt =
+                    conn.prepare("SELECT current_stream_id FROM runtime_state WHERE id = 1")?;
+                let mut rows = stmt.query_map([], |r| r.get::<_, Option<String>>(0))?;
+                match rows.next() {
+                    Some(Ok(Some(s))) => Ok(Some(StreamId::from(s))),
+                    Some(Ok(None)) => Ok(None),
+                    Some(Err(e)) => Err(e),
+                    None => Ok(None),
+                }
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn set_current(&self, id: Option<&StreamId>) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id = id.cloned();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE runtime_state SET current_stream_id = ?1 WHERE id = 1",
+                    params![id.as_ref().map(|s| s.as_str())],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     async fn primary(&self) -> Result<Option<Stream>, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
@@ -264,6 +299,28 @@ mod tests {
         store.upsert(&primary()).await.unwrap();
         let got = store.primary().await.unwrap().unwrap();
         assert_eq!(got.kind, StreamKind::Primary);
+    }
+
+    #[tokio::test]
+    async fn current_stream_pointer_round_trips() {
+        let store = SqliteStreamStore::new(Database::in_memory());
+        let s = primary();
+        store.upsert(&s).await.unwrap();
+        assert_eq!(store.current_id().await.unwrap(), None);
+        store.set_current(Some(&s.id)).await.unwrap();
+        assert_eq!(store.current_id().await.unwrap(), Some(s.id.clone()));
+        store.set_current(None).await.unwrap();
+        assert_eq!(store.current_id().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn deleting_stream_clears_current_pointer() {
+        let store = SqliteStreamStore::new(Database::in_memory());
+        let s = primary();
+        store.upsert(&s).await.unwrap();
+        store.set_current(Some(&s.id)).await.unwrap();
+        store.delete(&s.id).await.unwrap();
+        assert_eq!(store.current_id().await.unwrap(), None);
     }
 
     #[tokio::test]

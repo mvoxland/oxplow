@@ -175,6 +175,54 @@ impl ThreadStore for SqliteThreadStore {
         .await
         .unwrap()
     }
+
+    async fn selected_for_stream(
+        &self,
+        stream: &StreamId,
+    ) -> Result<Option<ThreadId>, DomainError> {
+        let db = self.db.clone();
+        let stream = stream.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT selected_thread_id FROM thread_selection WHERE stream_id = ?1",
+                )?;
+                let mut rows = stmt
+                    .query_map(params![stream.as_str()], |r| r.get::<_, Option<String>>(0))?;
+                match rows.next() {
+                    Some(Ok(Some(s))) => Ok(Some(ThreadId::from(s))),
+                    Some(Ok(None)) => Ok(None),
+                    Some(Err(e)) => Err(e),
+                    None => Ok(None),
+                }
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn set_selected_for_stream(
+        &self,
+        stream: &StreamId,
+        thread: Option<&ThreadId>,
+    ) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let stream = stream.clone();
+        let thread = thread.cloned();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO thread_selection (stream_id, selected_thread_id)
+                     VALUES (?1, ?2)
+                     ON CONFLICT(stream_id) DO UPDATE SET selected_thread_id = excluded.selected_thread_id",
+                    params![stream.as_str(), thread.as_ref().map(|t| t.as_str())],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -284,6 +332,24 @@ mod tests {
         let list = store.list_for_stream(&sid).await.unwrap();
         assert_eq!(list[0].id, b.id);
         assert_eq!(list[1].id, a.id);
+    }
+
+    #[tokio::test]
+    async fn selected_thread_round_trips_per_stream() {
+        let (store, sid) = make_store().await;
+        let t = thread(sid.clone());
+        store.upsert(&t).await.unwrap();
+        assert_eq!(store.selected_for_stream(&sid).await.unwrap(), None);
+        store
+            .set_selected_for_stream(&sid, Some(&t.id))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.selected_for_stream(&sid).await.unwrap(),
+            Some(t.id.clone())
+        );
+        store.set_selected_for_stream(&sid, None).await.unwrap();
+        assert_eq!(store.selected_for_stream(&sid).await.unwrap(), None);
     }
 
     #[tokio::test]
