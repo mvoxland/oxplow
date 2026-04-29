@@ -1,0 +1,42 @@
+//! Store traits.
+//!
+//! Service crates depend on these traits, never on concrete impls.
+//! `oxplow-db` implements them against rusqlite; tests can supply
+//! in-memory fakes. The traits are async even though the SQLite impl
+//! is sync — this matches Tauri's tokio-multi-thread runtime where DB
+//! calls go through `spawn_blocking`. From the caller's POV the
+//! await point is the same regardless of impl.
+
+use async_trait::async_trait;
+
+use crate::ids::{StreamId, ThreadId, WorkItemId};
+use crate::stream::Stream;
+use crate::thread::Thread;
+use crate::work_item::WorkItem;
+use crate::DomainError;
+
+#[async_trait]
+pub trait StreamStore: Send + Sync {
+    async fn list(&self) -> Result<Vec<Stream>, DomainError>;
+    async fn get(&self, id: &StreamId) -> Result<Option<Stream>, DomainError>;
+    async fn upsert(&self, stream: &Stream) -> Result<(), DomainError>;
+    async fn delete(&self, id: &StreamId) -> Result<(), DomainError>;
+    async fn primary(&self) -> Result<Option<Stream>, DomainError>;
+}
+
+#[async_trait]
+pub trait ThreadStore: Send + Sync {
+    async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<Thread>, DomainError>;
+    async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError>;
+    async fn upsert(&self, thread: &Thread) -> Result<(), DomainError>;
+    async fn delete(&self, id: &ThreadId) -> Result<(), DomainError>;
+}
+
+#[async_trait]
+pub trait WorkItemStore: Send + Sync {
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkItem>, DomainError>;
+    async fn list_backlog(&self) -> Result<Vec<WorkItem>, DomainError>;
+    async fn get(&self, id: &WorkItemId) -> Result<Option<WorkItem>, DomainError>;
+    async fn upsert(&self, item: &WorkItem) -> Result<(), DomainError>;
+    async fn soft_delete(&self, id: &WorkItemId) -> Result<(), DomainError>;
+}
