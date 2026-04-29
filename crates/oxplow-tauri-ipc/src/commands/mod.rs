@@ -5,6 +5,7 @@
 //! list in `lib.rs`. The TS bindings regenerate on the next
 //! `cargo test`.
 
+pub mod agent_panes;
 pub mod app;
 pub mod backlog;
 pub mod background;

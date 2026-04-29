@@ -205,6 +205,8 @@ export const commands = {
 	setSnapshotMaxFileBytes: (bytes: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_max_file_bytes", { bytes })),
 	setGeneratedDirs: (dirs: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated_dirs", { dirs })),
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
+	ensureAgentPane: (req: EnsureAgentPaneRequest) => typedError<EnsureAgentPaneResponse, IpcError>(__TAURI_INVOKE("ensure_agent_pane", { req })),
+	teardownAgentPanes: (streamId: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("teardown_agent_panes", { streamId })),
 	getGitLog: (limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { limit, all })),
 	getCommitDetail: (sha: string) => typedError<{
 	sha: string,
@@ -449,6 +451,22 @@ export type CreateWorktreeRequest = {
 	branchSource: string,
 };
 
+export type EnsureAgentPaneRequest = {
+	stream_id: StreamId,
+	pane: PaneKindArg,
+	/**
+	 *  Optionally force a specific thread to drive the system prompt;
+	 *  otherwise the stream's currently-selected thread is used.
+	 */
+	thread_id: ThreadId | null,
+};
+
+export type EnsureAgentPaneResponse = {
+	session: string,
+	target: string,
+	created: boolean,
+};
+
 export type FileSnapshot = {
 	id: number,
 	stream_id: StreamId | null,
@@ -635,6 +653,8 @@ export type PageVisitDay = {
 	day: string,
 	count: number,
 };
+
+export type PaneKindArg = "working" | "talking";
 
 export type RefKind = "local" | "remote" | "tag" | "head";
 

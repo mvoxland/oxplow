@@ -8,6 +8,7 @@
 //! on `Services` are the high-level "use cases" the IPC layer calls.
 
 pub mod agent_command;
+pub mod agent_pane;
 pub mod agent_prompt;
 pub mod background_task;
 pub mod config_service;
@@ -107,6 +108,7 @@ pub struct Services {
     pub followups: FollowupStore,
     pub pty: oxplow_pty::PtyManager,
     pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
+    pub agent_panes: agent_pane::AgentPaneService,
     pub events: EventBus,
 }
 
@@ -149,6 +151,7 @@ impl Services {
 
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
+        let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
 
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
@@ -175,6 +178,7 @@ impl Services {
             followups: FollowupStore::new(),
             pty,
             tmux,
+            agent_panes,
             events: event_bus,
         })
     }
@@ -220,6 +224,7 @@ impl Services {
         );
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
+        let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
             db,
@@ -245,6 +250,7 @@ impl Services {
             followups: FollowupStore::new(),
             pty,
             tmux,
+            agent_panes,
             events: event_bus,
         })
     }

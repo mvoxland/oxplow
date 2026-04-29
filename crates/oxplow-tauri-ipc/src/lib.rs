@@ -137,6 +137,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::config::set_snapshot_max_file_bytes,
         commands::config::set_generated_dirs,
         commands::config::get_workspace_context,
+        // agent panes
+        commands::agent_panes::ensure_agent_pane,
+        commands::agent_panes::teardown_agent_panes,
         // log
         commands::log::get_git_log,
         commands::log::get_commit_detail,
