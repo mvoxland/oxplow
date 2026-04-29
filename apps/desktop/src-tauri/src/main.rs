@@ -17,6 +17,17 @@ fn main() {
     let state: AppState = Arc::new(services);
     let event_bus = state.events.clone();
 
+    // Run daemon recovery — close any agent_turn rows that the
+    // previous boot left open, reset agent_status rows from
+    // Running/AwaitingUser to Stopped. Synchronous so the renderer
+    // doesn't see stale state.
+    let recovery = state.recovery.clone();
+    tauri::async_runtime::block_on(async move {
+        if let Err(e) = recovery.run().await {
+            tracing::warn!(error = %e, "daemon recovery failed");
+        }
+    });
+
     let specta = specta_builder();
 
     tauri::Builder::default()
