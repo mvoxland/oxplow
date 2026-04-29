@@ -1,3 +1,21 @@
-//! Runtime services: stop-hook pipeline, write guard, filing
-//! enforcement, agent_turn lifecycle. Pure logic on top of store
+//! Runtime services: write guard, filing enforcement, and the
+//! agent-turn lifecycle hook surface. Pure logic on top of store
 //! traits — no IO, no Tauri awareness.
+//!
+//! This crate is callable from both `oxplow-tauri-ipc` (when a
+//! command needs to render a guard decision into an HTTP-ish reply)
+//! and from `oxplow-mcp` (when an MCP tool needs to honor the same
+//! rules). Do not put DB calls, file IO, or HTTP here — wrap those at
+//! the `oxplow-app` layer.
+
+pub mod filing;
+pub mod write_guard;
+
+pub use filing::{
+    build_filing_enforcement_pre_tool_deny, build_filing_enforcement_pre_tool_reason,
+    is_plan_mode_plan_file, FilingEnforcementContext, FilingEnforcementDeny,
+    ALWAYS_WRITE_INTENT_TOOL_NAMES,
+};
+pub use write_guard::{
+    build_write_guard_response, WriteGuardContext, WriteGuardDeny, WORKTREE_MUTATING_TOOLS,
+};
