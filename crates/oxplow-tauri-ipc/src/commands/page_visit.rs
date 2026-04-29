@@ -74,6 +74,65 @@ pub struct PageVisitDay {
 
 #[tauri::command]
 #[specta::specta]
+pub async fn list_frequent_usage(
+    state: tauri::State<'_, AppState>,
+    limit: u32,
+) -> Result<Vec<PageVisit>, IpcError> {
+    Ok(state.page_visit_store.list_frequent(limit as usize).await?)
+}
+
+/// Pages currently kept open in editor tabs (best-effort: derived from
+/// recent visits whose duration_ms is null — i.e. the open-event hasn't
+/// been closed yet). The renderer already filters to its own tab list.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_currently_open_usage(
+    state: tauri::State<'_, AppState>,
+    limit: u32,
+) -> Result<Vec<PageVisit>, IpcError> {
+    let recent = state.page_visit_store.list_recent(limit as usize * 4).await?;
+    Ok(recent
+        .into_iter()
+        .filter(|v| v.duration_ms.is_none())
+        .take(limit as usize)
+        .collect())
+}
+
+/// Pages whose latest visit has a duration_ms set (i.e. the editor
+/// closed them). Drives the "recently finished" rail.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_recently_finished(
+    state: tauri::State<'_, AppState>,
+    limit: u32,
+) -> Result<Vec<PageVisit>, IpcError> {
+    let recent = state.page_visit_store.list_recent(limit as usize * 4).await?;
+    Ok(recent
+        .into_iter()
+        .filter(|v| v.duration_ms.is_some())
+        .take(limit as usize)
+        .collect())
+}
+
+/// Drop the duration_ms-bearing rows so they stop appearing in
+/// "recently finished".
+#[tauri::command]
+#[specta::specta]
+pub async fn clear_recently_finished(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), IpcError> {
+    let recent = state.page_visit_store.list_recent(10_000).await?;
+    for v in recent.into_iter().filter(|v| v.duration_ms.is_some()) {
+        state
+            .page_visit_store
+            .forget_page(&v.page_kind, &v.page_id)
+            .await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn count_page_visits_by_day(
     state: tauri::State<'_, AppState>,
     days: u32,

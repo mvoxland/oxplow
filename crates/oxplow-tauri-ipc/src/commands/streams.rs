@@ -104,3 +104,68 @@ pub async fn rename_stream(
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(s)
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SetStreamPromptRequest {
+    pub id: StreamId,
+    pub prompt: Option<String>,
+}
+
+/// Per-stream custom prompt — appended to every agent system prompt
+/// when this stream is active. `None` (or empty) clears it.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_stream_prompt(
+    state: tauri::State<'_, AppState>,
+    req: SetStreamPromptRequest,
+) -> Result<Stream, IpcError> {
+    use oxplow_domain::stores::StreamStore;
+    let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
+    let mut s = store
+        .get(&req.id)
+        .await?
+        .ok_or_else(IpcError::not_found)?;
+    // Stream doesn't yet have a custom_prompt column on the new schema;
+    // route it through the summary slot (which is unused otherwise).
+    s.summary = req.prompt.unwrap_or_default();
+    s.updated_at = oxplow_domain::Timestamp::now();
+    store.upsert(&s).await?;
+    state.events.emit(OxplowEvent::StreamsChanged);
+    Ok(s)
+}
+
+/// Switch the worktree's HEAD branch. Updates the stream row and runs
+/// `git checkout` inside the worktree.
+#[tauri::command]
+#[specta::specta]
+pub async fn checkout_stream_branch(
+    state: tauri::State<'_, AppState>,
+    id: StreamId,
+    branch: String,
+) -> Result<Stream, IpcError> {
+    use oxplow_domain::stores::StreamStore;
+    let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
+    let stream = store
+        .get(&id)
+        .await?
+        .ok_or_else(IpcError::not_found)?;
+    let path = std::path::PathBuf::from(&stream.worktree_path);
+    let branch_for_blocking = branch.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("git")
+            .args(["checkout", &branch_for_blocking])
+            .current_dir(&path)
+            .output()
+    })
+    .await
+    .map_err(|e| IpcError::internal(e.to_string()))?
+    .map_err(|e| IpcError::internal(e.to_string()))?;
+    if !result.status.success() {
+        return Err(IpcError::internal(
+            String::from_utf8_lossy(&result.stderr).into_owned(),
+        ));
+    }
+    let updated = state.streams.record_branch_checkout(&id, branch).await?;
+    state.events.emit(OxplowEvent::StreamsChanged);
+    Ok(updated)
+}

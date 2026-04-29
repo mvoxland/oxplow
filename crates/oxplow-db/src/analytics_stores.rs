@@ -55,6 +55,9 @@ pub trait PageVisitStore: Send + Sync {
     async fn list_top(&self, limit: usize) -> Result<Vec<(String, String, i64)>, DomainError>;
     async fn forget_page(&self, page_kind: &str, page_id: &str) -> Result<(), DomainError>;
     async fn count_by_day(&self, days: u32) -> Result<Vec<(String, i64)>, DomainError>;
+    /// Distinct (page_kind, page_id) tuples ordered by most recent visit
+    /// — drives the "frequent" rail.
+    async fn list_frequent(&self, limit: usize) -> Result<Vec<PageVisit>, DomainError>;
 }
 
 #[async_trait]
@@ -163,6 +166,53 @@ impl PageVisitStore for SqlitePageVisitStore {
                     params![page_kind, page_id],
                 )?;
                 Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn list_frequent(&self, limit: usize) -> Result<Vec<PageVisit>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                // Most-recent visit per page, ordered by visit count desc.
+                let mut stmt = conn.prepare(
+                    "SELECT id, page_kind, page_id, visited_at, duration_ms
+                     FROM page_visit pv
+                     WHERE id = (
+                         SELECT id FROM page_visit pv2
+                         WHERE pv2.page_kind = pv.page_kind AND pv2.page_id = pv.page_id
+                         ORDER BY visited_at DESC LIMIT 1
+                     )
+                     ORDER BY (
+                         SELECT COUNT(*) FROM page_visit pv3
+                         WHERE pv3.page_kind = pv.page_kind AND pv3.page_id = pv.page_id
+                     ) DESC
+                     LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![limit as i64], |row| {
+                    let id: String = row.get(0)?;
+                    let page_kind: String = row.get(1)?;
+                    let page_id: String = row.get(2)?;
+                    let visited_at: String = row.get(3)?;
+                    let duration_ms: Option<i64> = row.get(4)?;
+                    let map_err = |e: DomainError| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    };
+                    Ok(PageVisit {
+                        id,
+                        page_kind,
+                        page_id,
+                        visited_at: string_to_ts(&visited_at).map_err(map_err)?,
+                        duration_ms,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
         .await
@@ -479,6 +529,28 @@ impl SqliteCodeQualityStore {
 
 // ---------------- File snapshots ----------------
 
+fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
+    let id: i64 = row.get(0)?;
+    let stream_id: Option<String> = row.get(1)?;
+    let path: String = row.get(2)?;
+    let blob_hash: Option<String> = row.get(3)?;
+    let size_bytes: i64 = row.get(4)?;
+    let captured_at: String = row.get(5)?;
+    let oversize: i32 = row.get(6)?;
+    let map_err = |e: DomainError| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    };
+    Ok(FileSnapshot {
+        id,
+        stream_id: stream_id.map(StreamId::from),
+        path,
+        blob_hash,
+        size_bytes,
+        captured_at: string_to_ts(&captured_at).map_err(map_err)?,
+        oversize: oversize != 0,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FileSnapshot {
     pub id: i64,
@@ -524,6 +596,45 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
+    pub async fn get(&self, id: i64) -> Result<Option<FileSnapshot>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize
+                     FROM file_snapshot WHERE id = ?1",
+                )?;
+                let mut rows = stmt.query_map(params![id], row_to_snapshot)?;
+                Ok(rows.next().transpose()?)
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    pub async fn list_for_stream(
+        &self,
+        stream_id: &str,
+        limit: usize,
+    ) -> Result<Vec<FileSnapshot>, DomainError> {
+        let db = self.db.clone();
+        let stream_id = stream_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize
+                     FROM file_snapshot WHERE stream_id = ?1
+                     ORDER BY captured_at DESC LIMIT ?2",
+                )?;
+                let rows =
+                    stmt.query_map(params![stream_id, limit as i64], row_to_snapshot)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     pub async fn list_for_path(&self, path: &str) -> Result<Vec<FileSnapshot>, DomainError> {
         let db = self.db.clone();
         let path = path.to_string();
@@ -533,31 +644,7 @@ impl SqliteSnapshotStore {
                     "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize
                      FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC",
                 )?;
-                let rows = stmt.query_map(params![path], |row| {
-                    let id: i64 = row.get(0)?;
-                    let stream_id: Option<String> = row.get(1)?;
-                    let path: String = row.get(2)?;
-                    let blob_hash: Option<String> = row.get(3)?;
-                    let size_bytes: i64 = row.get(4)?;
-                    let captured_at: String = row.get(5)?;
-                    let oversize: i32 = row.get(6)?;
-                    let map_err = |e: DomainError| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            0,
-                            rusqlite::types::Type::Text,
-                            Box::new(e),
-                        )
-                    };
-                    Ok(FileSnapshot {
-                        id,
-                        stream_id: stream_id.map(StreamId::from),
-                        path,
-                        blob_hash,
-                        size_bytes,
-                        captured_at: string_to_ts(&captured_at).map_err(map_err)?,
-                        oversize: oversize != 0,
-                    })
-                })?;
+                let rows = stmt.query_map(params![path], row_to_snapshot)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })

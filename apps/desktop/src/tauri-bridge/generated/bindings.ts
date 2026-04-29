@@ -51,6 +51,16 @@ export const commands = {
 } | null, IpcError>(__TAURI_INVOKE("get_current_stream")),
 	switchStream: (id: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("switch_stream", { id })),
 	renameStream: (req: RenameStreamRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("rename_stream", { req })),
+	/**
+	 *  Per-stream custom prompt — appended to every agent system prompt
+	 *  when this stream is active. `None` (or empty) clears it.
+	 */
+	setStreamPrompt: (req: SetStreamPromptRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("set_stream_prompt", { req })),
+	/**
+	 *  Switch the worktree's HEAD branch. Updates the stream row and runs
+	 *  `git checkout` inside the worktree.
+	 */
+	checkoutStreamBranch: (id: StreamId, branch: string) => typedError<Stream, IpcError>(__TAURI_INVOKE("checkout_stream_branch", { id, branch })),
 	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),
 	getThread: (threadId: ThreadId) => typedError<{
 	id: ThreadId,
@@ -156,11 +166,56 @@ export const commands = {
 	topVisitedPages: (limit: number) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit })),
 	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
 	countPageVisitsByDay: (days: number) => typedError<PageVisitDay[], IpcError>(__TAURI_INVOKE("count_page_visits_by_day", { days })),
+	listFrequentUsage: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_frequent_usage", { limit })),
+	/**
+	 *  Pages currently kept open in editor tabs (best-effort: derived from
+	 *  recent visits whose duration_ms is null — i.e. the open-event hasn't
+	 *  been closed yet). The renderer already filters to its own tab list.
+	 */
+	listCurrentlyOpenUsage: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_currently_open_usage", { limit })),
+	/**
+	 *  Pages whose latest visit has a duration_ms set (i.e. the editor
+	 *  closed them). Drives the "recently finished" rail.
+	 */
+	listRecentlyFinished: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recently_finished", { limit })),
+	/**
+	 *  Drop the duration_ms-bearing rows so they stop appearing in
+	 *  "recently finished".
+	 */
+	clearRecentlyFinished: () => typedError<null, IpcError>(__TAURI_INVOKE("clear_recently_finished")),
 	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
 	listRecentUsage: (limit: number) => typedError<UsageEvent[], IpcError>(__TAURI_INVOKE("list_recent_usage", { limit })),
 	listCodeQualityScans: (limit: number) => typedError<CodeQualityScan[], IpcError>(__TAURI_INVOKE("list_code_quality_scans", { limit })),
 	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
+	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
+	getSnapshot: (id: number) => typedError<{
+	id: number,
+	stream_id: StreamId | null,
+	path: string,
+	blob_hash: string | null,
+	size_bytes: number,
+	captured_at: Timestamp,
+	oversize: boolean,
+} | null, IpcError>(__TAURI_INVOKE("get_snapshot", { id })),
+	/**
+	 *  Compare two captures of the same path. The renderer surfaces this
+	 *  in the snapshots panel as "what changed between then and now".
+	 */
+	getSnapshotPairDiff: (beforeId: number | null, afterId: number | null) => typedError<SnapshotPairDiff, IpcError>(__TAURI_INVOKE("get_snapshot_pair_diff", { beforeId, afterId })),
+	/**
+	 *  Most recent N captures for a stream, with a total count. Used by
+	 *  the snapshots-panel header.
+	 */
+	getSnapshotSummary: (streamId: string | null, limit: number | null) => typedError<SnapshotSummary, IpcError>(__TAURI_INVOKE("get_snapshot_summary", { streamId, limit })),
+	/**
+	 *  Restore a file's contents from a snapshot. Best-effort: snapshots
+	 *  only store the blob hash, not the bytes — so the actual restore
+	 *  requires content-addressed blob storage that the new schema doesn't
+	 *  model yet. This command currently returns an error if the snapshot
+	 *  exists but no blob is available.
+	 */
+	restoreFileFromSnapshot: (snapshotId: number) => typedError<null, IpcError>(__TAURI_INVOKE("restore_file_from_snapshot", { snapshotId })),
 	listBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_branches")),
 	getDefaultBranch: () => typedError<string | null, IpcError>(__TAURI_INVOKE("get_default_branch")),
 	renameBranch: (from: string, to: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_branch", { from, to })),
@@ -713,9 +768,31 @@ export type SelectThreadRequest = {
 	threadId: ThreadId | null,
 };
 
+export type SetStreamPromptRequest = {
+	id: StreamId,
+	prompt: string | null,
+};
+
 export type SetThreadPromptRequest = {
 	id: ThreadId,
 	prompt: string | null,
+};
+
+export type SnapshotPairDiff = {
+	before: FileSnapshot | null,
+	after: FileSnapshot | null,
+	/**
+	 *  True when the two captures hash differently (i.e. content
+	 *  changed between them). Always false when either side is None.
+	 */
+	changed: boolean,
+};
+
+export type SnapshotSummary = {
+	stream_id: StreamId | null,
+	// Most recent capture per path; capped at `limit` (default 200).
+	latest: FileSnapshot[],
+	total_captured: number,
 };
 
 export type Stream = {

@@ -58,6 +58,10 @@ export function buildLegacyAdapter(): DesktopApi {
     },
     renameStream: async (id: string, title: string) =>
       unwrap(await commands.renameStream({ id, title })),
+    setStreamPrompt: async (id: string, prompt: string | null) =>
+      unwrap(await commands.setStreamPrompt({ id, prompt })),
+    checkoutStreamBranch: async (id: string, branch: string) =>
+      unwrap(await commands.checkoutStreamBranch(id, branch)),
 
     // -- threads --
     closeThread: async (id: string) => unwrap(await commands.closeThread(id)),
@@ -238,6 +242,14 @@ export function buildLegacyAdapter(): DesktopApi {
       ),
     listRecentUsage: async (limit?: number) =>
       unwrap(await commands.listRecentUsage(limit ?? 50)),
+    listFrequentUsage: async (limit?: number) =>
+      unwrap(await commands.listFrequentUsage(limit ?? 50)),
+    listCurrentlyOpenUsage: async (limit?: number) =>
+      unwrap(await commands.listCurrentlyOpenUsage(limit ?? 50)),
+    listRecentlyFinished: async (limit?: number) =>
+      unwrap(await commands.listRecentlyFinished(limit ?? 50)),
+    clearRecentlyFinished: async () =>
+      unwrap(await commands.clearRecentlyFinished()),
 
     // -- code quality --
     listCodeQualityScans: async (limit?: number) =>
@@ -248,6 +260,16 @@ export function buildLegacyAdapter(): DesktopApi {
     // -- snapshots --
     listSnapshots: async (path?: string) =>
       unwrap(await commands.listSnapshots(path ?? "")),
+    getSnapshotPairDiff: async (beforeId?: number, afterId?: number) =>
+      unwrap(
+        await commands.getSnapshotPairDiff(beforeId ?? null, afterId ?? null),
+      ),
+    getSnapshotSummary: async (streamId?: string, limit?: number) =>
+      unwrap(
+        await commands.getSnapshotSummary(streamId ?? null, limit ?? null),
+      ),
+    restoreFileFromSnapshot: async (snapshotId: number) =>
+      unwrap(await commands.restoreFileFromSnapshot(snapshotId)),
 
     // -- wiki notes --
     listWikiNotes: async () => unwrap(await commands.listWikiNotes()),
