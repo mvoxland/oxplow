@@ -1,6 +1,6 @@
 use oxplow_git::{
-    AheadBehind, BlameLine, BranchChanges, GitOpResult, GitOperationKind, GitWorktreeEntry,
-    GroupedGitRefs, RemoteBranchEntry, RepoConflictState, TextSearchHit,
+    AheadBehind, BlameLine, BranchChanges, ChangeScopes, GitOpResult, GitOperationKind,
+    GitWorktreeEntry, GroupedGitRefs, RemoteBranchEntry, RepoConflictState, TextSearchHit,
 };
 use oxplow_domain::stores::StreamStore;
 
@@ -218,6 +218,17 @@ pub async fn git_blame(
 ) -> Result<Vec<BlameLine>, IpcError> {
     let project = project_dir(&state);
     Ok(tokio::task::spawn_blocking(move || oxplow_git::git_blame(&project, &path))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_change_scopes(
+    state: tauri::State<'_, AppState>,
+) -> Result<ChangeScopes, IpcError> {
+    let path = project_dir(&state);
+    Ok(tokio::task::spawn_blocking(move || oxplow_git::get_change_scopes(&path))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?)
 }

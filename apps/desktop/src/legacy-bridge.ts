@@ -189,6 +189,7 @@ export function buildLegacyAdapter(): DesktopApi {
       unwrap(await commands.searchWorkspaceText(query, limit ?? null)),
     getBranchChanges: async (baseRef: string) =>
       unwrap(await commands.getBranchChanges(baseRef)),
+    getChangeScopes: async () => unwrap(await commands.getChangeScopes()),
     listAdoptableWorktrees: async () => unwrap(await commands.listAdoptableWorktrees()),
     listSiblingWorktrees: async () => unwrap(await commands.listSiblingWorktrees()),
     getCommitDetail: async (sha: string) => unwrap(await commands.getCommitDetail(sha)),

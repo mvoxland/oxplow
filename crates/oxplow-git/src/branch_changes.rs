@@ -11,6 +11,83 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+/// "Where am I?" branch context the UI shows above the diff/log views.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ChangeScopes {
+    pub current_branch: Option<String>,
+    pub branch_base: Option<String>,
+    pub upstream: Option<String>,
+    pub on_default_branch: bool,
+}
+
+pub fn get_change_scopes(repo: &Path) -> ChangeScopes {
+    let current_branch = crate::repo::detect_current_branch(repo);
+    let branch_base = detect_base_branch(repo);
+    let upstream = detect_upstream_ref(repo);
+    let base_name = branch_base.as_deref().and_then(|b| b.strip_prefix("origin/").or(Some(b)));
+    let on_default_branch = match (&current_branch, base_name) {
+        (Some(cur), Some(base)) => cur == base,
+        _ => false,
+    };
+    ChangeScopes {
+        current_branch,
+        branch_base,
+        upstream,
+        on_default_branch,
+    }
+}
+
+fn detect_base_branch(repo: &Path) -> Option<String> {
+    if !crate::repo::is_git_repo(repo) {
+        return None;
+    }
+    for candidate in ["origin/main", "main", "origin/master", "master"] {
+        if ref_exists(repo, candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+    let out = Command::new("git")
+        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+        .current_dir(repo)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+fn detect_upstream_ref(repo: &Path) -> Option<String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+        .current_dir(repo)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+fn ref_exists(repo: &Path, r#ref: &str) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--verify", "--quiet", r#ref])
+        .current_dir(repo)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeKind {
