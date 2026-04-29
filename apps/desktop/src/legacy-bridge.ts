@@ -246,7 +246,11 @@ export function buildLegacyAdapter(): DesktopApi {
     listWikiNotes: async () => unwrap(await commands.listWikiNotes()),
     deleteWikiNote: async (slug: string) => unwrap(await commands.deleteWikiNote(slug)),
     searchWikiNotes: async (query: string, limit?: number) =>
-      unwrap(await commands.searchWikiTitles(query, limit ?? null)),
+      unwrap(await commands.searchWikiTitles(query, limit ?? 50)),
+    readWikiNoteBody: async (slug: string) =>
+      unwrap(await commands.readWikiNoteBody(slug)),
+    writeWikiNoteBody: async (slug: string, body: string) =>
+      unwrap(await commands.writeWikiNoteBody(slug, body)),
 
     // -- background tasks --
     listBackgroundTasks: async () => unwrap(await commands.listBackgroundTasks()),
