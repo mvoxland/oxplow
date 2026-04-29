@@ -206,6 +206,8 @@ export function buildLegacyAdapter(): DesktopApi {
     gitCommitAll: async (message: string) => unwrap(await commands.gitCommitAll(message)),
     gitAddPath: async (path: string) => unwrap(await commands.gitAddPath(path)),
     gitBlame: async (path: string) => unwrap(await commands.gitBlame(path)),
+    localBlame: async (path: string, diskText: string) =>
+      unwrap(await commands.localBlame(path, diskText)),
     listAllRefs: async () => unwrap(await commands.listAllRefs()),
     listGitRefs: async () => unwrap(await commands.listAllRefs()),
     listFileCommits: async (path: string, limit?: number) =>
