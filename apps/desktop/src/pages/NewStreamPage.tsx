@@ -1,4 +1,3 @@
-// @ts-nocheck — pending Tauri migration; legacy types drifted from the bridge bindings. Each call site needs to be ported to apps/desktop/src/tauri-bridge.
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -162,7 +161,10 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
       worktreePath,
     });
     if (!validation.ok) {
-      setFormError(validation.message);
+      // Discriminated-union narrowing on a boolean tag is finicky
+      // under strictNullChecks: false; cast at the seam rather than
+      // litter the page with `as` everywhere.
+      setFormError((validation as { ok: false; message: string }).message);
       return;
     }
     setCreating(true);
