@@ -8,7 +8,10 @@
 //! on `Services` are the high-level "use cases" the IPC layer calls.
 
 pub mod background_task;
+pub mod events;
 pub mod followup;
+
+pub use events::{EventBus, OxplowEvent};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -86,6 +89,7 @@ pub struct Services {
     pub followups: FollowupStore,
     pub pty: oxplow_pty::PtyManager,
     pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
+    pub events: EventBus,
 }
 
 impl Services {
@@ -137,6 +141,7 @@ impl Services {
             followups: FollowupStore::new(),
             pty,
             tmux,
+            events: EventBus::new(),
         })
     }
 
@@ -190,6 +195,7 @@ impl Services {
             followups: FollowupStore::new(),
             pty,
             tmux,
+            events: EventBus::new(),
         })
     }
 }

@@ -1,3 +1,4 @@
+use oxplow_app::OxplowEvent;
 use oxplow_domain::stores::WorkItemStore;
 use oxplow_domain::{ThreadId, WorkItem, WorkItemId};
 
@@ -28,7 +29,12 @@ pub async fn upsert_work_item(
     state: tauri::State<'_, AppState>,
     item: WorkItem,
 ) -> Result<(), IpcError> {
-    Ok(state.work_item_store.upsert(&item).await?)
+    let thread_id = item.thread_id.clone();
+    state.work_item_store.upsert(&item).await?;
+    state
+        .events
+        .emit(OxplowEvent::WorkItemsChanged { thread_id });
+    Ok(())
 }
 
 #[tauri::command]
@@ -37,5 +43,10 @@ pub async fn delete_work_item(
     state: tauri::State<'_, AppState>,
     id: WorkItemId,
 ) -> Result<(), IpcError> {
-    Ok(state.work_item_store.soft_delete(&id).await?)
+    let thread_id = state.work_item_store.get(&id).await?.and_then(|i| i.thread_id);
+    state.work_item_store.soft_delete(&id).await?;
+    state
+        .events
+        .emit(OxplowEvent::WorkItemsChanged { thread_id });
+    Ok(())
 }
