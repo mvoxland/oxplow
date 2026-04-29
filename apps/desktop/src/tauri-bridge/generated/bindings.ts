@@ -217,11 +217,11 @@ export const commands = {
 	 */
 	getSnapshotSummary: (streamId: string | null, limit: number | null) => typedError<SnapshotSummary, IpcError>(__TAURI_INVOKE("get_snapshot_summary", { streamId, limit })),
 	/**
-	 *  Restore a file's contents from a snapshot. Best-effort: snapshots
-	 *  only store the blob hash, not the bytes — so the actual restore
-	 *  requires content-addressed blob storage that the new schema doesn't
-	 *  model yet. This command currently returns an error if the snapshot
-	 *  exists but no blob is available.
+	 *  Restore a file's contents from a snapshot. Reads the bytes from
+	 *  the content-addressed blob store using the snapshot's `blob_hash`
+	 *  and writes them back to the snapshot's path inside the workspace.
+	 *  Errors with NOT_FOUND if the snapshot row is gone or its blob
+	 *  was pruned.
 	 */
 	restoreFileFromSnapshot: (snapshotId: number) => typedError<null, IpcError>(__TAURI_INVOKE("restore_file_from_snapshot", { snapshotId })),
 	listBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_branches")),
