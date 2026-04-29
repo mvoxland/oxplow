@@ -17,9 +17,15 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use oxplow_app::Services;
-use oxplow_domain::stores::{ThreadStore, WorkItemStore, WorkNoteStore};
-use oxplow_domain::{NoteId, ThreadId, WorkItem, WorkItemId};
+use oxplow_app::{CreateWorkItemInput, Services, UpdateWorkItemChanges};
+use oxplow_domain::stores::{
+    AgentStatusStore, HookEventStore, ThreadStore, WorkItemEventStore, WorkItemLinkStore,
+    WorkItemStore, WorkNoteStore,
+};
+use oxplow_domain::{
+    NoteId, ThreadId, WorkItem, WorkItemActorKind, WorkItemId, WorkItemKind, WorkItemLinkType,
+    WorkItemStatus,
+};
 
 #[derive(Clone)]
 pub struct OxplowMcp {
@@ -101,6 +107,79 @@ pub struct FollowupIdParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubsystemDocParams {
     pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CreateWorkItemMcpParams {
+    /// Optional thread to attach the new item to. Omit to create on
+    /// the project-wide backlog.
+    pub thread_id: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+    pub kind: Option<String>,
+    pub priority: Option<String>,
+    pub category: Option<String>,
+    pub tags: Option<String>,
+    pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateWorkItemMcpParams {
+    pub id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<String>,
+    pub priority: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CompleteTaskParams {
+    pub id: String,
+    /// Summary note appended to the work item before marking done.
+    pub summary: String,
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LinkWorkItemsParams {
+    pub thread_id: String,
+    pub from_id: String,
+    pub to_id: String,
+    /// One of: blocks, relates_to, discovered_from, duplicates,
+    /// supersedes, replies_to.
+    pub link_type: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TransitionWorkItemsParams {
+    pub ids: Vec<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AwaitUserParams {
+    pub thread_id: String,
+    pub question: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GetThreadContextParams {
+    pub thread_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FileEpicWithChildrenParams {
+    pub thread_id: Option<String>,
+    pub epic_title: String,
+    pub epic_description: Option<String>,
+    pub children: Vec<EpicChildSpec>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EpicChildSpec {
+    pub title: String,
+    pub description: Option<String>,
+    pub kind: Option<String>,
 }
 
 #[tool_router]
@@ -414,6 +493,345 @@ impl OxplowMcp {
             body.to_string(),
         )]))
     }
+
+    // ---------- work item orchestration ----------
+
+    #[tool(description = "Create a new work item. Allocates id + sort_index, fires creation event.")]
+    async fn create_work_item(
+        &self,
+        params: Parameters<CreateWorkItemMcpParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let thread = p.thread_id.map(ThreadId::from);
+        let kind = match p.kind.as_deref() {
+            Some(k) => Some(parse_kind(k)?),
+            None => None,
+        };
+        let priority = match p.priority.as_deref() {
+            Some(s) => Some(parse_priority(s)?),
+            None => None,
+        };
+        let item = self
+            .services
+            .work_items
+            .create(
+                thread,
+                CreateWorkItemInput {
+                    kind,
+                    title: p.title,
+                    description: p.description,
+                    acceptance_criteria: None,
+                    parent_id: p.parent_id.map(WorkItemId::from),
+                    status: None,
+                    priority,
+                    category: p.category,
+                    tags: p.tags,
+                    author: Some(oxplow_domain::WorkItemAuthor::Agent),
+                },
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        json_result(&item)
+    }
+
+    #[tool(description = "Update fields on an existing work item (partial-patch).")]
+    async fn update_work_item(
+        &self,
+        params: Parameters<UpdateWorkItemMcpParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let id = WorkItemId::from(p.id);
+        let status = match p.status.as_deref() {
+            Some(s) => Some(parse_status(s)?),
+            None => None,
+        };
+        let priority = match p.priority.as_deref() {
+            Some(s) => Some(parse_priority(s)?),
+            None => None,
+        };
+        let updated = self
+            .services
+            .work_items
+            .update(
+                &id,
+                UpdateWorkItemChanges {
+                    title: p.title,
+                    description: p.description,
+                    acceptance_criteria: None,
+                    parent_id: None,
+                    status,
+                    priority,
+                    category: None,
+                    tags: None,
+                },
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        json_result(&updated)
+    }
+
+    #[tool(description = "Append a summary note to a work item then mark it `done`.")]
+    async fn complete_task(
+        &self,
+        params: Parameters<CompleteTaskParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let id = WorkItemId::from(p.id);
+        let author = p.author.unwrap_or_else(|| "agent".to_string());
+        self.services
+            .work_note_store
+            .add_for_item(&id, &p.summary, &author)
+            .await
+            .map_err(internal)?;
+        let item = self
+            .services
+            .work_items
+            .update(
+                &id,
+                UpdateWorkItemChanges {
+                    status: Some(WorkItemStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        json_result(&item)
+    }
+
+    #[tool(description = "Create a typed link between two work items.")]
+    async fn link_work_items(
+        &self,
+        params: Parameters<LinkWorkItemsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let link_type = parse_link_type(&p.link_type)?;
+        let link = self
+            .services
+            .work_item_link_store
+            .create(
+                &ThreadId::from(p.thread_id),
+                &WorkItemId::from(p.from_id),
+                &WorkItemId::from(p.to_id),
+                link_type,
+            )
+            .await
+            .map_err(internal)?;
+        json_result(&link)
+    }
+
+    #[tool(description = "Transition a batch of work items to the same status.")]
+    async fn transition_work_items(
+        &self,
+        params: Parameters<TransitionWorkItemsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let target = parse_status(&p.status)?;
+        let mut updated = Vec::with_capacity(p.ids.len());
+        for id in p.ids {
+            let id = WorkItemId::from(id);
+            let row = self
+                .services
+                .work_items
+                .update(
+                    &id,
+                    UpdateWorkItemChanges {
+                        status: Some(target),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+            updated.push(row);
+        }
+        json_result(&updated)
+    }
+
+    #[tool(description = "Signal that the agent is awaiting user input. Persists a hook event so Stop suppression kicks in.")]
+    async fn await_user(
+        &self,
+        params: Parameters<AwaitUserParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let payload = serde_json::json!({
+            "await_user": true,
+            "question": p.question,
+        })
+        .to_string();
+        let event = oxplow_domain::HookEvent {
+            id: oxplow_domain::HookEventId::new(),
+            thread_id: Some(ThreadId::from(p.thread_id.clone())),
+            stream_id: None,
+            kind: oxplow_domain::HookKind::Stop,
+            session_id: None,
+            payload_json: payload,
+            received_at: oxplow_domain::Timestamp::now(),
+        };
+        self.services
+            .hook_event_store
+            .append(&event)
+            .await
+            .map_err(internal)?;
+        // Flip the agent_status to AwaitingUser directly so the
+        // renderer reflects the state without needing a Stop hook.
+        self.services
+            .agent_status_store
+            .upsert(
+                &ThreadId::from(p.thread_id),
+                "working",
+                oxplow_domain::AgentStatusState::AwaitingUser,
+                Some("await_user".into()),
+            )
+            .await
+            .map_err(internal)?;
+        Ok(CallToolResult::success(vec![Content::text("awaiting")]))
+    }
+
+    #[tool(description = "Bundle of thread state, work items, and recent activity.")]
+    async fn get_thread_context(
+        &self,
+        params: Parameters<GetThreadContextParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let id = ThreadId::from(params.0.thread_id);
+        let thread = self.services.thread_store.get(&id).await.map_err(internal)?;
+        let items = self
+            .services
+            .work_item_store
+            .list_for_thread(&id)
+            .await
+            .map_err(internal)?;
+        let events = self
+            .services
+            .work_item_event_store
+            .list_for_thread(&id)
+            .await
+            .map_err(internal)?;
+        let bundle = serde_json::json!({
+            "thread": thread,
+            "items": items,
+            "events": events,
+        });
+        Ok(CallToolResult::success(vec![Content::text(
+            bundle.to_string(),
+        )]))
+    }
+
+    #[tool(description = "Atomic: create an epic plus a list of children attached to it.")]
+    async fn file_epic_with_children(
+        &self,
+        params: Parameters<FileEpicWithChildrenParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let thread = p.thread_id.map(ThreadId::from);
+        let epic = self
+            .services
+            .work_items
+            .create(
+                thread.clone(),
+                CreateWorkItemInput {
+                    kind: Some(WorkItemKind::Epic),
+                    title: p.epic_title,
+                    description: p.epic_description,
+                    author: Some(oxplow_domain::WorkItemAuthor::Agent),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        let mut children_out = Vec::with_capacity(p.children.len());
+        for child in p.children {
+            let kind = match child.kind.as_deref() {
+                Some(k) => Some(parse_kind(k)?),
+                None => Some(WorkItemKind::Task),
+            };
+            let row = self
+                .services
+                .work_items
+                .create(
+                    thread.clone(),
+                    CreateWorkItemInput {
+                        kind,
+                        title: child.title,
+                        description: child.description,
+                        parent_id: Some(epic.id.clone()),
+                        author: Some(oxplow_domain::WorkItemAuthor::Agent),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+            children_out.push(row);
+        }
+        let bundle = serde_json::json!({ "epic": epic, "children": children_out });
+        Ok(CallToolResult::success(vec![Content::text(
+            bundle.to_string(),
+        )]))
+    }
+}
+
+fn parse_kind(s: &str) -> Result<WorkItemKind, McpError> {
+    Ok(match s {
+        "epic" => WorkItemKind::Epic,
+        "task" => WorkItemKind::Task,
+        "subtask" => WorkItemKind::Subtask,
+        "bug" => WorkItemKind::Bug,
+        "note" => WorkItemKind::Note,
+        other => {
+            return Err(McpError::invalid_params(
+                format!("unknown work item kind: {other}"),
+                None,
+            ))
+        }
+    })
+}
+
+fn parse_status(s: &str) -> Result<WorkItemStatus, McpError> {
+    Ok(match s {
+        "ready" => WorkItemStatus::Ready,
+        "in_progress" => WorkItemStatus::InProgress,
+        "blocked" => WorkItemStatus::Blocked,
+        "done" => WorkItemStatus::Done,
+        "canceled" => WorkItemStatus::Canceled,
+        "archived" => WorkItemStatus::Archived,
+        other => {
+            return Err(McpError::invalid_params(
+                format!("unknown work item status: {other}"),
+                None,
+            ))
+        }
+    })
+}
+
+fn parse_priority(s: &str) -> Result<oxplow_domain::WorkItemPriority, McpError> {
+    use oxplow_domain::WorkItemPriority as P;
+    Ok(match s {
+        "low" => P::Low,
+        "medium" => P::Medium,
+        "high" => P::High,
+        "urgent" => P::Urgent,
+        other => {
+            return Err(McpError::invalid_params(
+                format!("unknown priority: {other}"),
+                None,
+            ))
+        }
+    })
+}
+
+fn parse_link_type(s: &str) -> Result<WorkItemLinkType, McpError> {
+    Ok(match s {
+        "blocks" => WorkItemLinkType::Blocks,
+        "relates_to" => WorkItemLinkType::RelatesTo,
+        "discovered_from" => WorkItemLinkType::DiscoveredFrom,
+        "duplicates" => WorkItemLinkType::Duplicates,
+        "supersedes" => WorkItemLinkType::Supersedes,
+        "replies_to" => WorkItemLinkType::RepliesTo,
+        other => {
+            return Err(McpError::invalid_params(
+                format!("unknown link type: {other}"),
+                None,
+            ))
+        }
+    })
 }
 
 #[tool_handler]
