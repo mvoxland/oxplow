@@ -15,6 +15,7 @@ pub mod config_service;
 pub mod events;
 pub mod followup;
 pub mod hook_ingest;
+pub mod recovery;
 pub mod work_item_service;
 
 pub use events::{EventBus, OxplowEvent};
@@ -110,6 +111,7 @@ pub struct Services {
     pub pty: oxplow_pty::PtyManager,
     pub tmux: Arc<dyn oxplow_tmux::TmuxRunner>,
     pub agent_panes: agent_pane::AgentPaneService,
+    pub recovery: recovery::RecoveryService,
     pub events: EventBus,
 }
 
@@ -150,6 +152,11 @@ impl Services {
             agent_turn_store.clone(),
             event_bus.clone(),
         );
+        let recovery_svc = recovery::RecoveryService::new(
+            agent_turn_store.clone(),
+            agent_status_store.clone(),
+            event_bus.clone(),
+        );
 
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
@@ -182,6 +189,7 @@ impl Services {
             pty,
             tmux,
             agent_panes,
+            recovery: recovery_svc,
             events: event_bus,
         })
     }
@@ -226,6 +234,11 @@ impl Services {
             agent_turn_store.clone(),
             event_bus.clone(),
         );
+        let recovery_svc = recovery::RecoveryService::new(
+            agent_turn_store.clone(),
+            agent_status_store.clone(),
+            event_bus.clone(),
+        );
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
         let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
@@ -256,6 +269,7 @@ impl Services {
             pty,
             tmux,
             agent_panes,
+            recovery: recovery_svc,
             events: event_bus,
         })
     }
