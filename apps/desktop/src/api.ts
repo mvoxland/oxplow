@@ -1574,7 +1574,20 @@ export interface AgentStatusEntry {
 }
 
 export async function listAgentStatuses(_streamId?: string): Promise<AgentStatusEntry[]> {
-  return unwrap(await commands.listAgentStatuses()) as unknown as AgentStatusEntry[];
+  // The Rust binding returns the raw `AgentStatus` row
+  // ({ thread_id, pane_target, state: "idle"|"running"|... }). The
+  // renderer only cares about a 2-state working/waiting indicator, so
+  // collapse the AgentStatusState enum here. "running" → working;
+  // every other state (idle / awaiting_user / stopped / error) → waiting.
+  // Without this transform the consumer reads `entry.threadId` and
+  // `entry.status` off raw rows that have neither field, so the dot
+  // never leaves its waiting fallback.
+  const rows = unwrap(await commands.listAgentStatuses());
+  return rows.map((row) => ({
+    streamId: "",
+    threadId: row.thread_id,
+    status: row.state === "running" ? "working" : "waiting",
+  }));
 }
 
 export type FinishedEntry =
