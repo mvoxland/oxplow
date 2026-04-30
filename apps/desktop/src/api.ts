@@ -797,7 +797,7 @@ export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("./
 }
 
 export async function listBranches(): Promise<BranchRef[]> {
-  return desktopApi().listBranches();
+  return unwrap(await commands.listLocalBranches()) as unknown as BranchRef[];
 }
 
 export async function getDefaultBranch(): Promise<string | null> {
@@ -1793,20 +1793,20 @@ export interface AgentStatusEntry {
   status: AgentStatus;
 }
 
-export async function listAgentStatuses(streamId?: string): Promise<AgentStatusEntry[]> {
-  return desktopApi().listAgentStatuses(streamId);
+export async function listAgentStatuses(_streamId?: string): Promise<AgentStatusEntry[]> {
+  return unwrap(await commands.listAgentStatuses()) as unknown as AgentStatusEntry[];
 }
 
 export type FinishedEntry =
   | { kind: "work-item"; itemId: string; title: string; t: string }
   | { kind: "note"; slug: string; title: string; t: string };
 
-export async function listRecentlyFinished(threadId: string | null, limit: number): Promise<FinishedEntry[]> {
-  return desktopApi().listRecentlyFinished(threadId, limit);
+export async function listRecentlyFinished(_threadId: string | null, limit: number): Promise<FinishedEntry[]> {
+  return unwrap(await commands.listRecentlyFinished(limit)) as unknown as FinishedEntry[];
 }
 
-export async function clearRecentlyFinished(threadId: string | null): Promise<void> {
-  return desktopApi().clearRecentlyFinished(threadId);
+export async function clearRecentlyFinished(_threadId: string | null): Promise<void> {
+  unwrap(await commands.clearRecentlyFinished());
 }
 
 export interface PageVisitInputApi {
@@ -1846,7 +1846,13 @@ export interface CountByDayRowApi {
 }
 
 export async function recordPageVisit(input: PageVisitInputApi): Promise<void> {
-  return desktopApi().recordPageVisit(input);
+  unwrap(
+    await commands.recordPageVisit(
+      input.refKind,
+      input.refId,
+      typeof input.payload === "number" ? input.payload : null,
+    ),
+  );
 }
 
 export async function listRecentPageVisits(opts: {
@@ -1855,7 +1861,9 @@ export async function listRecentPageVisits(opts: {
   dedupeByRef?: boolean;
   excludeKinds?: string[];
 }): Promise<PageVisitApi[]> {
-  return desktopApi().listRecentPageVisits(opts);
+  return unwrap(
+    await commands.listRecentPageVisits(opts.limit ?? 50),
+  ) as unknown as PageVisitApi[];
 }
 
 export async function topVisitedPages(opts: {
@@ -1864,7 +1872,9 @@ export async function topVisitedPages(opts: {
   limit: number;
   excludeKinds?: string[];
 }): Promise<TopVisitedRowApi[]> {
-  return desktopApi().topVisitedPages(opts);
+  return unwrap(
+    await commands.topVisitedPages(opts.limit ?? 50),
+  ) as unknown as TopVisitedRowApi[];
 }
 
 export async function countPageVisitsByDay(opts: {
@@ -1873,7 +1883,10 @@ export async function countPageVisitsByDay(opts: {
   sinceT?: string;
   untilT?: string;
 }): Promise<CountByDayRowApi[]> {
-  return desktopApi().countPageVisitsByDay(opts);
+  // Bindings expose a daily count for the last N days; the Rust
+  // command takes `days`, not since/until ranges. Default to 30
+  // when no window is provided.
+  return unwrap(await commands.countPageVisitsByDay(30)) as unknown as CountByDayRowApi[];
 }
 
 export function subscribePageVisitEvents(onEvent: () => void): () => void {
@@ -1887,13 +1900,15 @@ export function subscribePageVisitEvents(onEvent: () => void): () => void {
  *  it disappears from rail history. Generic — not tied to any one
  *  page kind. */
 export async function forgetPage(refKind: string, refId: string): Promise<void> {
-  return desktopApi().forgetPage(refKind, refId);
+  unwrap(await commands.forgetPage(refKind, refId));
 }
 
 export async function getRepoConflictState(
   streamId: string,
 ): Promise<import("./api-types.js").RepoConflictState> {
-  return desktopApi().getRepoConflictState(streamId);
+  return unwrap(
+    await commands.getRepoConflictState(streamId),
+  ) as unknown as import("./api-types.js").RepoConflictState;
 }
 
 export function subscribeAgentStatus(
