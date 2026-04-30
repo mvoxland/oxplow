@@ -94,8 +94,8 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", background: "var(--bg-3)", borderBottom: "1px solid var(--border-strong)" }}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 0, padding: "0 10px", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", background: "var(--surface-rail)", borderBottom: "1px solid var(--border-subtle)" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 0, padding: "0 12px", overflow: "hidden" }}>
         <div className="oxplow-rail-scroll" style={{ display: "flex", gap: 2, overflowX: "auto", flex: 1, minWidth: 0, alignItems: "flex-end" }}>
           {orderedStreams.map((candidate) => {
             const active = candidate.id === stream?.id;
@@ -188,14 +188,15 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                 }}
                 style={{
                   ...tabStyle,
-                  background: active ? "var(--bg-2)" : "transparent",
-                  color: active ? "var(--fg)" : "var(--muted)",
-                  fontWeight: active ? 600 : 400,
+                  background: active ? "var(--surface-tab-active)" : "transparent",
+                  color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                  fontWeight: active ? 600 : 500,
                   borderBottom: active
                     ? "2px solid var(--accent)"
                     : "2px solid transparent",
                   borderLeft: isStreamDragTarget ? "2px solid var(--accent)" : undefined,
                   boxShadow: isDragOver && !isStreamDragTarget ? "inset 0 0 0 2px var(--accent)" : undefined,
+                  transition: "background 120ms ease, color 120ms ease",
                 }}
                 title={showBranchInTitle ? `${candidate.title} (${candidate.branch})` : candidate.title}
               >
@@ -256,7 +257,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           <button type="button"
             onClick={() => onOpenNewStreamPage?.()}
             title={gitEnabled ? "Create a new stream" : "Disabled: this workspace root does not contain its own .git directory"}
-            style={{ ...buttonStyle, opacity: gitEnabled && onOpenNewStreamPage ? 1 : 0.6, cursor: gitEnabled && onOpenNewStreamPage ? "pointer" : "not-allowed" }}
+            style={{ ...primaryButtonStyle, opacity: gitEnabled && onOpenNewStreamPage ? 1 : 0.5, cursor: gitEnabled && onOpenNewStreamPage ? "pointer" : "not-allowed" }}
             disabled={!gitEnabled || !onOpenNewStreamPage}
           >
             + New stream
@@ -311,13 +312,26 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
 }
 
 const buttonStyle: CSSProperties = {
-  background: "var(--bg-2)",
-  color: "var(--fg)",
-  border: "1px solid var(--border)",
+  background: "var(--surface-card)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
   padding: "6px 12px",
-  borderRadius: 4,
+  borderRadius: 6,
   cursor: "pointer",
   fontFamily: "inherit",
+  fontSize: 12,
+};
+
+const primaryButtonStyle: CSSProperties = {
+  background: "var(--button-primary-bg)",
+  color: "var(--button-primary-fg)",
+  border: "1px solid transparent",
+  padding: "6px 12px",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 500,
 };
 
 const tabStyle: CSSProperties = {

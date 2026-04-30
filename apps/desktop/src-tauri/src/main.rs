@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use oxplow_app::{AppLayout, Services};
-use oxplow_domain::stores::ThreadStore;
 use oxplow_tauri_ipc::{specta_builder, AppState, OXPLOW_EVENT_CHANNEL};
 use tauri::Emitter;
 
@@ -43,38 +42,15 @@ fn main() {
         }
     });
 
-    // Ensure the project's primary stream exists. The renderer's
-    // bootstrap path expects it to be present and errors out with
-    // "no primary stream available" otherwise.
+    // Ensure the project's primary stream (and its default thread)
+    // exist. `StreamService::ensure_primary` itself seeds the
+    // auto-generated thread, so a single call covers both invariants
+    // — every stream owns ≥1 thread.
     let streams = state.streams.clone();
-    let threads = state.threads.clone();
-    let thread_store = state.thread_store.clone();
     boot_runtime.block_on(async move {
-        let stream = match streams.ensure_primary().await {
-            Ok(s) => {
-                tracing::info!(stream_id = %s.id, "primary stream ready");
-                Some(s)
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "ensure_primary failed at boot");
-                None
-            }
-        };
-        // Seed a default thread for the primary stream when the project
-        // is brand new. The renderer expects every stream to have at
-        // least one thread; otherwise the UI shows "No threads yet."
-        if let Some(stream) = stream {
-            match thread_store.list_for_stream(&stream.id).await {
-                Ok(existing) if existing.is_empty() => {
-                    if let Err(e) = threads.create(&stream.id, "main", "working").await {
-                        tracing::warn!(error = %e, "default thread create failed");
-                    } else {
-                        tracing::info!(stream_id = %stream.id, "default thread seeded");
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "list_for_stream failed at boot"),
-            }
+        match streams.ensure_primary().await {
+            Ok(s) => tracing::info!(stream_id = %s.id, "primary stream ready"),
+            Err(e) => tracing::warn!(error = %e, "ensure_primary failed at boot"),
         }
     });
 

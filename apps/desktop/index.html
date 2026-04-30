@@ -11,24 +11,27 @@
          ============================================================ */
 
       :root {
-        --surface-app: #14161a;
-        --surface-card: #1c1f24;
-        --surface-rail: #181b20;
-        --surface-tab-active: #1f2228;
-        --surface-tab-inactive: #0e1014;
-        --surface-elevated: #232730;
+        /* Unified cool blue-grey dark palette. Three surface tiers
+           (app < rail/card < elevated) plus a slightly lifted active-tab
+           tier. No warm hues anywhere on chrome. */
+        --surface-app: #0f1115;
+        --surface-card: #161a20;
+        --surface-rail: #13161b;
+        --surface-tab-active: #1c2027;
+        --surface-tab-inactive: transparent;
+        --surface-elevated: #20242c;
         --surface-overlay: rgba(0, 0, 0, 0.55);
 
-        --border-subtle: #2a2e36;
-        --border-strong: #3a3f49;
+        --border-subtle: #232831;
+        --border-strong: #333944;
 
-        --text-primary: #e6e8ec;
-        --text-secondary: #9aa1ad;
-        --text-muted: #6c727c;
+        --text-primary: #e8eaef;
+        --text-secondary: #9097a3;
+        --text-muted: #5f6571;
 
-        --accent: #5b8cf5;
-        --accent-hover: #7aa2f7;
-        --accent-soft-bg: #1f2a44;
+        --accent: #6b9cf6;
+        --accent-hover: #8db2f8;
+        --accent-soft-bg: #1c2a48;
         --accent-on-accent: #ffffff;
 
         --status-running: #5b8cf5;
@@ -51,23 +54,34 @@
         --diff-remove-bg: #3a1f25;
         --diff-remove-fg: #fda4af;
 
-        /* Legacy aliases — original dark hex values for components not yet
-           migrated to semantic tokens. */
-        --bg: #0e0e0e;
-        --bg-1: #1a1815;
-        --bg-2: #342921;
-        --bg-3: #2a313f;
-        --bg-tab-inactive: #3a3a3d;
-        --bg-detail: #242424;
-        --fg: #e6e6e6;
-        --muted: #8d8a85;
-        --border: #2f2b26;
-        --border-strong: #3c3832;
-        /* --accent: redefined as semantic above */
+        /* Legacy aliases — now mapped onto the unified semantic tier so
+           components that haven't migrated still pick up the cool palette
+           instead of the original warm-brown values. */
+        --bg: var(--surface-app);
+        --bg-1: var(--surface-card);
+        --bg-2: var(--surface-tab-active);
+        --bg-3: var(--surface-rail);
+        --bg-tab-inactive: var(--surface-tab-inactive);
+        --bg-detail: var(--surface-elevated);
+        --fg: var(--text-primary);
+        --muted: var(--text-secondary);
+        --border: var(--border-subtle);
+        /* --border-strong / --accent: semantic above */
         --priority-urgent: #e06c75;
         --priority-high: #e5a06a;
         --priority-medium: #8d8a85;
         --priority-low: #6b6864;
+
+        /* Primary action button — used for the *one* primary CTA per
+           region (+ New stream, + New thread, Save, etc.). Secondary
+           buttons stay neutral against --surface-card. */
+        --button-primary-bg: var(--accent);
+        --button-primary-bg-hover: var(--accent-hover);
+        --button-primary-fg: var(--accent-on-accent);
+        --button-secondary-bg: transparent;
+        --button-secondary-bg-hover: rgba(255, 255, 255, 0.04);
+        --button-secondary-fg: var(--text-secondary);
+        --button-secondary-fg-hover: var(--text-primary);
 
         --blame-local-fresh: rgba(229, 160, 106, 0.55);
         --blame-local-recent: rgba(229, 160, 106, 0.40);

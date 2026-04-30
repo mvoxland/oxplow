@@ -63,11 +63,60 @@ impl WorkspaceLayout {
 pub struct StreamService {
     layout: WorkspaceLayout,
     streams: Arc<dyn StreamStore>,
+    threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
 }
 
+/// Default title applied to the auto-generated thread that every
+/// new stream gets. The model invariant "every stream has ≥1 thread"
+/// is enforced by `StreamService` itself — every stream-creation path
+/// calls `seed_default_thread` after upserting the stream.
+const DEFAULT_THREAD_TITLE: &str = "Thread";
+
 impl StreamService {
-    pub fn new(layout: WorkspaceLayout, streams: Arc<dyn StreamStore>) -> Self {
-        Self { layout, streams }
+    pub fn new(
+        layout: WorkspaceLayout,
+        streams: Arc<dyn StreamStore>,
+        threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
+    ) -> Self {
+        Self { layout, streams, threads }
+    }
+
+    /// Insert the auto-created `"Thread"` row that every fresh stream
+    /// owns. Idempotent: skips when threads already exist for the
+    /// stream (e.g. worktree adoption may resolve to a previously
+    /// seeded stream). Failure is logged but doesn't fail the stream
+    /// creation — a thread-less stream is still navigable, just
+    /// awkwardly empty.
+    async fn seed_default_thread(&self, stream_id: &StreamId) {
+        let existing = match self.threads.list_for_stream(stream_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(stream_id = %stream_id, error = %e, "list_for_stream failed during seed");
+                return;
+            }
+        };
+        if !existing.is_empty() {
+            return;
+        }
+        let now = Timestamp::now();
+        let thread = oxplow_domain::Thread {
+            id: oxplow_domain::ThreadId::new(),
+            stream_id: stream_id.clone(),
+            title: DEFAULT_THREAD_TITLE.into(),
+            status: oxplow_domain::ThreadStatus::Active,
+            sort_index: 0,
+            pane_target: "working".into(),
+            resume_session_id: String::new(),
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: now,
+            updated_at: now,
+        };
+        if let Err(e) = self.threads.upsert(&thread).await {
+            tracing::warn!(stream_id = %stream_id, error = %e, "default thread create failed");
+        }
     }
 
     /// Validate the workspace before doing anything else: it must be
@@ -115,6 +164,7 @@ impl StreamService {
             updated_at: now,
         };
         self.streams.upsert(&stream).await?;
+        self.seed_default_thread(&stream.id).await;
         info!(stream_id = %stream.id, "primary stream created");
         Ok(stream)
     }
@@ -186,6 +236,7 @@ impl StreamService {
             updated_at: now,
         };
         self.streams.upsert(&stream).await?;
+        self.seed_default_thread(&stream.id).await;
         info!(stream_id = %stream.id, slug, "worktree stream created");
         Ok(stream)
     }
@@ -245,6 +296,7 @@ impl StreamService {
             updated_at: now,
         };
         self.streams.upsert(&stream).await?;
+        self.seed_default_thread(&stream.id).await;
         info!(stream_id = %stream.id, path = %worktree_path.display(), "adopted existing worktree");
         Ok(stream)
     }
@@ -373,7 +425,7 @@ impl StreamService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_db::{Database, SqliteStreamStore};
+    use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
     use std::process::Command;
     use tempfile::tempdir;
 
@@ -398,8 +450,9 @@ mod tests {
         init_repo(project.path());
         let layout = WorkspaceLayout::for_project(project.path());
         let db = Database::in_memory();
-        let streams = Arc::new(SqliteStreamStore::new(db));
-        let service = StreamService::new(layout, streams);
+        let streams = Arc::new(SqliteStreamStore::new(db.clone()));
+        let threads = Arc::new(SqliteThreadStore::new(db));
+        let service = StreamService::new(layout, streams, threads);
         (service, project)
     }
 
@@ -414,8 +467,9 @@ mod tests {
         let project = tempdir().unwrap();
         let layout = WorkspaceLayout::for_project(project.path());
         let db = Database::in_memory();
-        let streams = Arc::new(SqliteStreamStore::new(db));
-        let svc = StreamService::new(layout, streams);
+        let streams = Arc::new(SqliteStreamStore::new(db.clone()));
+        let threads = Arc::new(SqliteThreadStore::new(db));
+        let svc = StreamService::new(layout, streams, threads);
         let err = svc.validate_workspace().unwrap_err();
         assert!(matches!(err, SessionError::NotARepo(_)));
     }

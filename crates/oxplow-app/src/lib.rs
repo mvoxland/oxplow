@@ -159,7 +159,7 @@ impl Services {
         let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
-        let streams = StreamService::new(workspace_layout, stream_store.clone());
+        let streams = StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
         let threads = ThreadService::new(thread_store.clone());
         let work_items = WorkItemService::new(work_item_store.clone());
         let event_bus = EventBus::new();
@@ -253,7 +253,7 @@ impl Services {
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
-        let streams = StreamService::new(workspace_layout, stream_store.clone());
+        let streams = StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
         let threads = ThreadService::new(thread_store.clone());
         let work_items = WorkItemService::new(work_item_store.clone());
         let event_bus = EventBus::new();
