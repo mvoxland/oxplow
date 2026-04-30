@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "external-url",
-  "description": "Empty capability for external-URL webview windows. No oxplow commands, no plugin access — these webviews behave like sandboxed browser tabs. The label pattern matches windows opened via `open_external_url` (label = ext-url-<random>).",
-  "windows": ["ext-url-*"],
+  "description": "Empty capability for external-URL webview windows. No oxplow commands, no plugin access — these webviews behave like sandboxed browser tabs. The label pattern matches the webview opened via `open_external_url` (label = ext-url-<random>); per Tauri 2 best practice we target the webview label, not the parent window — the two share the same label when built via WebviewWindowBuilder, so this is more precise without losing scope.",
+  "webviews": ["ext-url-*"],
   "permissions": []
 }
