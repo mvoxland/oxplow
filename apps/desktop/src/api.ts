@@ -1284,20 +1284,20 @@ export type WikiNoteSummary = import("./api-types.js").WikiNoteSummary;
 export type WikiNoteSearchHit = import("./api-types.js").WikiNoteSearchHit;
 export type UsageRollup = import("./api-types.js").UsageRollup;
 
-export async function listWikiNotes(streamId: string): Promise<WikiNoteSummary[]> {
-  return desktopApi().listWikiNotes(streamId);
+export async function listWikiNotes(_streamId: string): Promise<WikiNoteSummary[]> {
+  return unwrap(await commands.listWikiNotes()) as unknown as WikiNoteSummary[];
 }
 
-export async function readWikiNoteBody(streamId: string, slug: string): Promise<string> {
-  return desktopApi().readWikiNoteBody(streamId, slug);
+export async function readWikiNoteBody(_streamId: string, slug: string): Promise<string> {
+  return unwrap(await commands.readWikiNoteBody(slug));
 }
 
-export async function writeWikiNoteBody(streamId: string, slug: string, body: string): Promise<void> {
-  return desktopApi().writeWikiNoteBody(streamId, slug, body);
+export async function writeWikiNoteBody(_streamId: string, slug: string, body: string): Promise<void> {
+  unwrap(await commands.writeWikiNoteBody(slug, body));
 }
 
-export async function deleteWikiNote(streamId: string, slug: string): Promise<void> {
-  return desktopApi().deleteWikiNote(streamId, slug);
+export async function deleteWikiNote(_streamId: string, slug: string): Promise<void> {
+  unwrap(await commands.deleteWikiNote(slug));
 }
 
 export function subscribeWikiNoteEvents(onEvent: () => void): () => void {
