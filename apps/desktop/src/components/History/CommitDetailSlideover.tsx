@@ -118,11 +118,11 @@ export function CommitDetailBody({
         <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--text-primary)" }}>{detail.sha}</span>
         <span>Author</span>
         <span>
-          {detail.author.name}
-          {detail.author.email ? ` <${detail.author.email}>` : ""}
+          {detail.author}
+          {detail.email ? ` <${detail.email}>` : ""}
         </span>
         <span>Date</span>
-        <span>{formatAbsolute(detail.author.date)}</span>
+        <span>{formatAbsolute(new Date(detail.timestamp_secs * 1000).toISOString())}</span>
         {detail.parents.length > 0 ? (
           <>
             <span>Parents</span>

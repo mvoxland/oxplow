@@ -171,7 +171,7 @@ export function gitCommitBacklinks(payload: unknown, ctx: AppBacklinkContext): B
 }
 
 function commitSubject(c: GitLogCommit): string {
-  return c.commit.message.split("\n", 1)[0] ?? "";
+  return c.subject.split("\n", 1)[0] ?? "";
 }
 
 function dedupe(entries: BacklinkEntry[]): BacklinkEntry[] {

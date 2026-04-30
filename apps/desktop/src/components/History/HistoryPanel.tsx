@@ -75,7 +75,7 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
   const authors = useMemo(() => {
     if (!log) return [] as string[];
     const set = new Set<string>();
-    for (const commit of log.commits) set.add(commit.commit.author.name);
+    for (const commit of log.commits) set.add(commit.author);
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [log]);
 
@@ -92,12 +92,12 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
     if (!queryLower && !author) return null;
     const out = new Set<string>();
     for (const commit of visibleCommits) {
-      if (author && commit.commit.author.name !== author) continue;
+      if (author && commit.author !== author) continue;
       if (!queryLower) { out.add(commit.sha); continue; }
       const hit = commit.sha.toLowerCase().includes(queryLower)
-        || commit.commit.message.toLowerCase().includes(queryLower)
-        || commit.commit.author.name.toLowerCase().includes(queryLower)
-        || commit.commit.author.email.toLowerCase().includes(queryLower);
+        || commit.subject.toLowerCase().includes(queryLower)
+        || commit.author.toLowerCase().includes(queryLower)
+        || commit.email.toLowerCase().includes(queryLower);
       if (hit) out.add(commit.sha);
     }
     return out;

@@ -213,32 +213,24 @@ export interface ChangeScopes {
 
 export interface CommitDetail {
   sha: string;
-  shortSha: string;
-  // Author may be a flat string (Rust) or an object with
-  // {name,email,date} (UI-flavored shape). Permissive `any` keeps both
-  // call paths typechecking through the migration.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  author: any;
+  short_sha: string;
+  author: string;
   email: string;
   timestamp_secs: number;
   subject: string;
   body: string;
   parents: string[];
   files: { path: string; additions: number; deletions: number; status: string }[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
 }
 
 export interface GitLogCommit {
   sha: string;
-  shortSha: string;
+  short_sha: string;
   author: string;
   email: string;
   timestamp_secs: number;
   subject: string;
   parents: string[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
 }
 
 export interface GitLogRef {
