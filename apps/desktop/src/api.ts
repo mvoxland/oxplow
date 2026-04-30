@@ -145,8 +145,12 @@ function buildBridge() {
       cols: number,
       rows: number,
       transportMode: string,
-    ): Promise<string> =>
-      unwrap(await commands.openTerminalSession(paneTarget, cols, rows, transportMode)),
+    ): Promise<{ sessionId: string; replayB64: string }> => {
+      const result = unwrap(
+        await commands.openTerminalSession(paneTarget, cols, rows, transportMode),
+      );
+      return { sessionId: result.sessionId, replayB64: result.replayB64 };
+    },
     closeTerminalSession: async (sessionId: string): Promise<void> => {
       try {
         unwrap(await commands.closeTerminalSession(sessionId));
@@ -1047,7 +1051,7 @@ export async function deleteWikiNote(_streamId: string, slug: string): Promise<v
 
 export function subscribeWikiNoteEvents(onEvent: () => void): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.type === "wiki-note.changed") onEvent();
+    if (event.kind === "wikiNotesChanged") onEvent();
   });
 }
 
@@ -1134,14 +1138,15 @@ export async function listCodeQualityScans(input: {
 }
 
 export function subscribeCodeQualityEvents(
-  streamId: string,
-  fn: (event: { scanId: number; tool: CodeQualityTool; scope: CodeQualityScope; status: CodeQualityScanStatus }) => void,
+  _streamId: string,
+  _fn: (event: { scanId: number; tool: CodeQualityTool; scope: CodeQualityScope; status: CodeQualityScanStatus }) => void,
 ): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.type !== "code-quality.scanned") return;
-    if (event.streamId !== streamId) return;
-    fn({ scanId: event.scanId, tool: event.tool, scope: event.scope, status: event.status });
-  });
+  // No backend `OxplowEvent` variant for code-quality scans yet — the
+  // Tauri rewrite collapsed this to a coarser bus that doesn't carry
+  // scan progress. Subscriber is a no-op until the backend re-emits;
+  // callers should still tolerate "no live updates" and refetch on
+  // their own cadence.
+  return () => {};
 }
 
 export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
@@ -1175,14 +1180,13 @@ export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
  * Notes-pane consumer only refetches on wiki-note visits.
  */
 export function subscribeUsageEvents(
-  onEvent: (e: { kind: string; key: string; streamId: string | null; threadId: string | null }) => void,
-  filter?: { kind?: string },
+  _onEvent: (e: { kind: string; key: string; streamId: string | null; threadId: string | null }) => void,
+  _filter?: { kind?: string },
 ): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.type !== "usage.recorded") return;
-    if (filter?.kind && event.kind !== filter.kind) return;
-    onEvent({ kind: event.kind, key: event.key, streamId: event.streamId, threadId: event.threadId });
-  });
+  // No backend `OxplowEvent` variant for usage events under Tauri.
+  // No-op until the backend re-emits; consumers should fall back to
+  // polling/refetching.
+  return () => {};
 }
 
 export async function reorderThreadQueue(
@@ -1220,7 +1224,7 @@ export function subscribeBackgroundTaskEvents(
   onChange: () => void,
 ): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.type === "background-task.changed") onChange();
+    if (event.kind === "backgroundTasksChanged") onChange();
   });
 }
 
@@ -1233,10 +1237,25 @@ export function subscribeBackgroundTask(
   taskId: string,
   onChange: (kind: "started" | "updated" | "ended") => void,
 ): () => void {
+  // The backend `BackgroundTasksChanged` event is coarse — no taskId
+  // or kind in the payload. Refetch the row on each tick and decide
+  // "updated" vs "ended" from its terminal status; emit "ended" once
+  // and stop, otherwise "updated". The "started" edge is whatever
+  // first observation the caller sees.
+  let ended = false;
   return subscribeOxplowEvents((event) => {
-    if (event.type === "background-task.changed" && event.id === taskId) {
-      onChange(event.kind);
-    }
+    if (event.kind !== "backgroundTasksChanged") return;
+    if (ended) return;
+    void getBackgroundTask(taskId).then((task) => {
+      if (!task) return;
+      const terminal = task.status === "done" || task.status === "failed";
+      if (terminal) {
+        ended = true;
+        onChange("ended");
+      } else {
+        onChange("updated");
+      }
+    });
   });
 }
 
@@ -1390,20 +1409,12 @@ export interface FileSnapshotCreatedEventPayload {
 }
 
 export function subscribeSnapshotEvents(
-  streamId: string,
-  fn: (payload: FileSnapshotCreatedEventPayload) => void,
+  _streamId: string,
+  _fn: (payload: FileSnapshotCreatedEventPayload) => void,
 ): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.type !== "file-snapshot.created") return;
-    if (event.streamId !== streamId) return;
-    fn({
-      streamId: event.streamId,
-      snapshotId: event.snapshotId,
-      kind: event.kind,
-      effortId: event.effortId,
-      threadId: event.threadId,
-    });
-  });
+  // No backend `OxplowEvent` variant for file-snapshot.created under
+  // Tauri. No-op until the backend re-emits.
+  return () => {};
 }
 
 export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
@@ -1483,40 +1494,29 @@ export function subscribeOxplowEvents(
 }
 
 export function subscribeWorkspaceContext(
-  onEvent: (next: WorkspaceContext) => void,
+  _onEvent: (next: WorkspaceContext) => void,
 ): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.type !== "workspace-context.changed") return;
-    onEvent({ gitEnabled: event.gitEnabled });
-  });
+  // No backend `OxplowEvent` variant for workspace-context under
+  // Tauri. No-op until the backend re-emits.
+  return () => {};
 }
 
 export function subscribeWorkspaceEvents(
-  streamId: string,
-  onEvent: (event: WorkspaceWatchEvent) => void,
+  _streamId: string,
+  _onEvent: (event: WorkspaceWatchEvent) => void,
 ): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.type === "workspace.changed" && event.streamId === streamId) {
-      onEvent({
-        id: event.id,
-        streamId: event.streamId,
-        kind: event.kind,
-        path: event.path,
-        t: event.t,
-      });
-    }
-  });
+  // No backend `OxplowEvent` variant for workspace fs-watch events
+  // under Tauri. No-op until the backend re-emits.
+  return () => {};
 }
 
 export function subscribeGitRefsEvents(
-  streamId: string,
-  onEvent: () => void,
+  _streamId: string,
+  _onEvent: () => void,
 ): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.type === "git-refs.changed" && event.streamId === streamId) {
-      onEvent();
-    }
-  });
+  // No backend `OxplowEvent` variant for git-refs changes under Tauri.
+  // No-op until the backend re-emits.
+  return () => {};
 }
 
 export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
@@ -1689,10 +1689,10 @@ export async function countPageVisitsByDay(opts: {
   return unwrap(await commands.countPageVisitsByDay(30)) as unknown as CountByDayRowApi[];
 }
 
-export function subscribePageVisitEvents(onEvent: () => void): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.type === "page-visit.changed") onEvent();
-  });
+export function subscribePageVisitEvents(_onEvent: () => void): () => void {
+  // No backend `OxplowEvent` variant for page-visit changes under
+  // Tauri. No-op until the backend re-emits.
+  return () => {};
 }
 
 /** Drop every visit row for a given page reference. Used when a page
@@ -1715,10 +1715,20 @@ export function subscribeAgentStatus(
   streamId: string | "all",
   onEvent: (entry: AgentStatusEntry) => void,
 ): () => void {
+  // The backend `AgentStatusChanged` event payload carries only
+  // { threadId, paneTarget } — not the new state — so we refetch the
+  // current status snapshot and forward the matching entry. The event
+  // kind is camelCase (`agentStatusChanged`), matching OxplowEventKind.
   return subscribeOxplowEvents((event) => {
-    if (event.type !== "agent-status.changed") return;
-    if (streamId !== "all" && event.streamId !== streamId) return;
-    onEvent({ streamId: event.streamId, threadId: event.threadId, status: event.status });
+    if (event.kind !== "agentStatusChanged") return;
+    const threadId = event.threadId as string | undefined;
+    if (!threadId) return;
+    void listAgentStatuses().then((entries) => {
+      const match = entries.find((e) => e.threadId === threadId);
+      if (!match) return;
+      if (streamId !== "all" && match.streamId !== streamId) return;
+      onEvent(match);
+    });
   });
 }
 
@@ -1728,25 +1738,36 @@ export interface BacklogChangeEvent {
 }
 
 export function subscribeBacklogEvents(onEvent: (event: BacklogChangeEvent) => void): () => void {
+  // Backlog == work items not attached to a thread. The backend
+  // collapses both onto `WorkItemsChanged { threadId? }`; threadId is
+  // null for backlog rows. The bus event no longer carries kind/itemId
+  // so we synthesize a coarse "updated" — receivers refetch.
   return subscribeOxplowEvents((event) => {
-    if (event.type !== "backlog.changed") return;
-    onEvent({ kind: event.kind, itemId: event.itemId });
+    if (event.kind !== "workItemsChanged") return;
+    if (event.threadId != null) return;
+    onEvent({ kind: "updated", itemId: null });
   });
 }
 
 export function subscribeWorkItemEvents(
-  streamId: string | "all",
+  _streamId: string | "all",
   onEvent: (event: WorkItemChangeEvent) => void,
 ): () => void {
+  // The backend `WorkItemsChanged` payload only carries `threadId`
+  // (no streamId / itemId / kind), so we can't honour the streamId
+  // filter or report which item changed. Fire a coarse "updated"
+  // for every thread-scoped work-item change — receivers refetch.
+  // The streamId filter parameter is preserved for API compatibility
+  // but is currently a no-op.
   return subscribeOxplowEvents((event) => {
-    if (event.type !== "work-item.changed") return;
-    if (!event.streamId || !event.threadId) return;
-    if (streamId !== "all" && event.streamId !== streamId) return;
+    if (event.kind !== "workItemsChanged") return;
+    const threadId = event.threadId as string | undefined | null;
+    if (!threadId) return;
     onEvent({
-      streamId: event.streamId,
-      threadId: event.threadId,
-      kind: event.kind,
-      itemId: event.itemId,
+      streamId: "",
+      threadId,
+      kind: "updated",
+      itemId: null,
     });
   });
 }
@@ -1801,10 +1822,21 @@ export function subscribeHookEvents(
   streamId: string | "all",
   onEvent: (event: StoredEvent) => void,
 ): () => void {
+  // Backend `HookEventsChanged` is a coarse "something landed" ping —
+  // no payload. Refetch the latest hook event and forward it; this
+  // misses bursts but matches the renderer's "refetch on signal" model.
+  let lastSeenId = -1;
   return subscribeOxplowEvents((event) => {
-    if (event.type !== "hook.recorded") return;
-    if (streamId !== "all" && event.streamId !== streamId) return;
-    onEvent(event.event as StoredEvent);
+    if (event.kind !== "hookEventsChanged") return;
+    void listHookEvents().then((events) => {
+      if (events.length === 0) return;
+      // Events are returned newest-first by listHookEvents.
+      const next = events[0];
+      if (typeof next.id === "number" && next.id <= lastSeenId) return;
+      if (typeof next.id === "number") lastSeenId = next.id;
+      if (streamId !== "all" && next.streamId !== streamId) return;
+      onEvent(next);
+    });
   });
 }
 

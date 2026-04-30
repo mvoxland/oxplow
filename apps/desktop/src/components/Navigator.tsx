@@ -37,11 +37,11 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  * strip and the overlay so items don't move when switching modes.
  *
  * Visual hierarchy:
- *   - Stream rows: 16px letter, weight 600, with a subtle underline
- *     (border-bottom) so they read as section headers for the threads
- *     beneath them.
- *   - Thread rows: 16px letter, weight 400, slightly indented in the
- *     overlay; in the strip they share the same column.
+ *   - Stream rows: two-letter glyph, weight 700, with a subtle
+ *     underline (border-bottom) so they read as section headers for the
+ *     threads beneath them.
+ *   - Thread rows: two-letter glyph, weight 600, slightly indented in
+ *     the overlay; in the strip they share the same column.
  *   - The active stream's writer thread renders its letter inside an
  *     accent-soft-bg pill with an accent border. Activity dot is
  *     overlaid in the top-right corner of the icon cell — same
@@ -824,14 +824,24 @@ function InlineNewThread({
 function firstLetter(s: string): string {
   const trimmed = s.trim();
   if (!trimmed) return "?";
+  // Two-letter glyph: prefer the initials of the first two
+  // whitespace-separated words ("Git Dashboard" → "GD"); fall back to
+  // the first two characters of a single word ("oxplow" → "Ox").
+  const parts = trimmed.split(/\s+/);
+  if (parts.length >= 2 && parts[1].length > 0) {
+    return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+  }
+  if (trimmed.length >= 2) {
+    return (trimmed.charAt(0).toUpperCase() + trimmed.charAt(1).toLowerCase());
+  }
   return trimmed.charAt(0).toUpperCase();
 }
 
-// Glyph sizing. The letter is bumped above body text (20px vs 14px)
-// so the strip reads as a real navigation indicator rather than a
-// tooltip-targeted dot. Strip width and row height grow proportionally
-// so the icon cell sits comfortably with breathing room on both sides.
-const LETTER_FONT = 20;
+// Glyph sizing. The two-letter glyph runs a touch above body text
+// (15px vs 14px) so the strip still reads as a real navigation
+// indicator. Strip width and row height stay proportional so the icon
+// cell sits comfortably with breathing room on both sides.
+const LETTER_FONT = 15;
 const ICON_BOX = 30;
 const STRIP_WIDTH = 40;
 const STRIP_PADDING_Y = 6;
