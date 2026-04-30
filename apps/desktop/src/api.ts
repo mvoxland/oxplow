@@ -801,19 +801,27 @@ export async function listBranches(): Promise<BranchRef[]> {
 }
 
 export async function getDefaultBranch(): Promise<string | null> {
-  return desktopApi().getDefaultBranch();
+  return unwrap(await commands.getDefaultBranch());
 }
 
 export async function listGitRefs(): Promise<import("./api-types.js").GroupedGitRefs> {
   return desktopApi().listGitRefs();
 }
 
-export async function renameGitBranch(from: string, to: string): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  return desktopApi().renameGitBranch(from, to);
+export async function renameGitBranch(
+  from: string,
+  to: string,
+): Promise<import("./tauri-bridge/index.js").GitOpResult> {
+  unwrap(await commands.renameBranch(from, to));
+  return synthOk();
 }
 
-export async function deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  return desktopApi().deleteGitBranch(branch, options);
+export async function deleteGitBranch(
+  branch: string,
+  options?: { force?: boolean },
+): Promise<import("./tauri-bridge/index.js").GitOpResult> {
+  unwrap(await commands.deleteBranch(branch, options?.force ?? false));
+  return synthOk();
 }
 
 /**
@@ -864,16 +872,20 @@ export async function createStream(input:
   return desktopApi().createStream(input);
 }
 
-export async function listAdoptableWorktrees(): Promise<import("./tauri-bridge/index.js").GitWorktreeEntry[]> {
-  return desktopApi().listAdoptableWorktrees();
+export async function listAdoptableWorktrees(): Promise<
+  import("./tauri-bridge/index.js").GitWorktreeEntry[]
+> {
+  return unwrap(await commands.listAdoptableWorktrees());
 }
 
-export async function listSiblingWorktrees(streamId: string): Promise<import("./tauri-bridge/index.js").GitWorktreeEntry[]> {
-  return desktopApi().listSiblingWorktrees(streamId);
+export async function listSiblingWorktrees(
+  _streamId: string,
+): Promise<import("./tauri-bridge/index.js").GitWorktreeEntry[]> {
+  return unwrap(await commands.listSiblingWorktrees());
 }
 
 export async function checkoutStreamBranch(streamId: string, branch: string): Promise<Stream> {
-  return desktopApi().checkoutStreamBranch(streamId, branch);
+  return unwrap(await commands.checkoutStreamBranch(streamId, branch));
 }
 
 export async function getThreadState(streamId: string): Promise<ThreadState> {
@@ -893,39 +905,45 @@ export async function reorderThreads(streamId: string, orderedThreadIds: string[
 }
 
 export async function reorderStreams(orderedStreamIds: string[]): Promise<void> {
-  return desktopApi().reorderStreams(orderedStreamIds);
+  unwrap(await commands.reorderStreams(orderedStreamIds));
 }
 
 export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {
   return desktopApi().selectThread(streamId, threadId);
 }
 
-export async function promoteThread(streamId: string, threadId: string): Promise<ThreadState> {
-  return desktopApi().promoteThread(streamId, threadId);
+export async function promoteThread(_streamId: string, threadId: string): Promise<ThreadState> {
+  return desktopApi().promoteThread(_streamId, threadId);
 }
 
-export async function closeThread(streamId: string, threadId: string): Promise<ThreadState> {
-  return desktopApi().closeThread(streamId, threadId);
+export async function closeThread(_streamId: string, threadId: string): Promise<ThreadState> {
+  return desktopApi().closeThread(_streamId, threadId);
 }
 
-export async function reopenThread(streamId: string, threadId: string): Promise<ThreadState> {
-  return desktopApi().reopenThread(streamId, threadId);
+export async function reopenThread(_streamId: string, threadId: string): Promise<ThreadState> {
+  return desktopApi().reopenThread(_streamId, threadId);
 }
 
 export async function listClosedThreads(streamId: string): Promise<Thread[]> {
-  return desktopApi().listClosedThreads(streamId);
+  return unwrap(await commands.listClosedThreads(streamId));
 }
 
-export async function renameThread(streamId: string, threadId: string, title: string): Promise<Thread> {
-  return desktopApi().renameThread(streamId, threadId, title);
+export async function renameThread(_streamId: string, threadId: string, title: string): Promise<Thread> {
+  return unwrap(await commands.renameThread({ id: threadId, title }));
 }
 
 export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
-  return desktopApi().setStreamPrompt(streamId, prompt);
+  unwrap(await commands.setStreamPrompt({ id: streamId, prompt }));
+  return listStreams();
 }
 
-export async function setThreadPrompt(streamId: string, threadId: string, prompt: string | null): Promise<Thread[]> {
-  return desktopApi().setThreadPrompt(streamId, threadId, prompt);
+export async function setThreadPrompt(
+  _streamId: string,
+  threadId: string,
+  prompt: string | null,
+): Promise<Thread[]> {
+  unwrap(await commands.setThreadPrompt({ id: threadId, prompt }));
+  return [];
 }
 
 export async function getThreadWorkState(streamId: string, threadId: string): Promise<ThreadWorkState> {
