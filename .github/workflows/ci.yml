@@ -110,12 +110,15 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      # Surfaces line/region coverage per crate so the worst gaps
-      # (oxplow-mcp / oxplow-tauri-ipc / oxplow-pty / oxplow-tmux at
-      # last audit) stay visible. No coverage floor yet — track the
-      # numbers first, gate later.
-      - name: Coverage report
-        run: cargo llvm-cov --workspace --summary-only
+      # Surfaces line/region coverage per crate. Workspace floor is
+      # set to 65% lines — current baseline ~70%. The thinnest
+      # crates (oxplow-mcp, oxplow-tauri-ipc command adapters) drag
+      # the average; the floor lets the average drop a few points
+      # before it fails so a single uncovered new file doesn't break
+      # CI but a regression sweep does. Raise the floor as crate
+      # coverage improves.
+      - name: Coverage report (with floor)
+        run: cargo llvm-cov --workspace --summary-only --fail-under-lines 65
 
       - name: LCOV report
         run: cargo llvm-cov report --lcov --output-path lcov.info
