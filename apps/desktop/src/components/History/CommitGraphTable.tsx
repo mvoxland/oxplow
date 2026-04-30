@@ -188,7 +188,7 @@ function CommitRow({
   }
 
   const nodeColor = BRANCH_COLORS[row.column % BRANCH_COLORS.length]!;
-  const date = formatTimestamp(row.commit.commit.author.date);
+  const date = formatTimestamp(row.commit.timestamp_secs);
 
   return (
     <div
@@ -232,7 +232,7 @@ function CommitRow({
       </svg>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, paddingRight: 8 }}>
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-          {row.commit.commit.message}
+          {row.commit.subject}
         </span>
         {branchHeads.map((name) => (
           <RefBadge key={`b-${name}`} label={name} tone={name === currentBranch ? "current" : "branch"} />
@@ -241,7 +241,7 @@ function CommitRow({
           <RefBadge key={`t-${name}`} label={name} tone="tag" />
         ))}
         <span style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11 }}>
-          {row.commit.commit.author.name}
+          {row.commit.author}
         </span>
         {stats ? (
           <span
@@ -266,7 +266,7 @@ function CommitRow({
         ) : null}
         <span
           style={{ color: "var(--muted)", flexShrink: 0, fontSize: 11, minWidth: 132, textAlign: "right" }}
-          title={`${row.commit.commit.author.date}\n${row.commit.sha}`}
+          title={`${row.commit.timestamp_secs}\n${row.commit.sha}`}
         >
           {date}
         </span>
@@ -315,10 +315,15 @@ function RefBadge({ label, tone }: { label: string; tone: "branch" | "current" |
  * computed on the dedicated commit/history page the row links to,
  * not in this row.
  */
-export function formatTimestamp(input: string): string {
-  if (!input) return "";
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) return input;
+export function formatTimestamp(input: string | number): string {
+  if (!input && input !== 0) return "";
+  // Bindings ship timestamps as Unix seconds; the legacy code path
+  // passed an ISO string. Accept both.
+  const date =
+    typeof input === "number"
+      ? new Date(input * 1000)
+      : new Date(input);
+  if (Number.isNaN(date.getTime())) return String(input);
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");

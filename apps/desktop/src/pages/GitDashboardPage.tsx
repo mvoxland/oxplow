@@ -42,7 +42,7 @@ interface DashboardData {
     branch: string | null;
     headSha: string | null;
     headSubject: string | null;
-    headDate: string | null;
+    headDate: number | null;
     upstream: string | null;
     aheadUpstream: number;
     behindUpstream: number;
@@ -155,8 +155,8 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         branchHeader: {
           branch,
           headSha: headCommit?.sha ?? null,
-          headSubject: headCommit?.commit.message ?? null,
-          headDate: headCommit?.commit.author.date ?? null,
+          headSubject: headCommit?.subject ?? null,
+          headDate: headCommit?.timestamp_secs ?? null,
           upstream: upstreamRef,
           aheadUpstream,
           behindUpstream,

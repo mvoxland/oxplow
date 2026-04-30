@@ -1020,9 +1020,9 @@ function FileHistoryModal({
               {commit.sha.slice(0, 7)}
             </span>
             <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-              {commit.commit.message}
+              {commit.subject}
             </span>
-            <span style={{ color: "var(--muted)", fontSize: 11 }}>{commit.commit.author.name}</span>
+            <span style={{ color: "var(--muted)", fontSize: 11 }}>{commit.author}</span>
           </button>
         ))
       )}
