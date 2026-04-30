@@ -1183,9 +1183,9 @@ export async function gitFetch(
 export async function gitCommitAll(
   streamId: string,
   message: string,
-  options?: { includeUntracked?: boolean; paths?: string[] },
+  _options?: { includeUntracked?: boolean; paths?: string[] },
 ): Promise<import("./tauri-bridge/index.js").GitOpResult & { sha?: string }> {
-  return desktopApi().gitCommitAll(streamId, message, options);
+  return unwrap(await commands.gitCommitAll(streamId, message));
 }
 
 export async function getAheadBehind(
@@ -1193,7 +1193,8 @@ export async function getAheadBehind(
   base: string,
   head?: string,
 ): Promise<{ ahead: number; behind: number }> {
-  return desktopApi().getAheadBehind(streamId, base, head);
+  const ab = unwrap(await commands.getAheadBehind(streamId, base, head ?? "HEAD"));
+  return { ahead: ab.ahead, behind: ab.behind };
 }
 
 export async function getCommitsAheadOf(
@@ -1202,14 +1203,16 @@ export async function getCommitsAheadOf(
   head: string,
   limit?: number,
 ): Promise<import("./tauri-bridge/index.js").GitLogCommit[]> {
-  return desktopApi().getCommitsAheadOf(streamId, base, head, limit);
+  return unwrap(
+    await commands.getCommitsAheadOf(streamId, base, head, limit ?? 200),
+  );
 }
 
 export async function listRecentRemoteBranches(
-  streamId: string,
+  _streamId: string,
   limit?: number,
 ): Promise<import("./tauri-bridge/index.js").RemoteBranchEntry[]> {
-  return desktopApi().listRecentRemoteBranches(streamId, limit);
+  return unwrap(await commands.listRecentRemoteBranches(limit ?? null));
 }
 
 export async function gitPushCurrentTo(
@@ -1243,14 +1246,14 @@ export async function listFileCommits(
   path: string,
   limit?: number,
 ): Promise<import("./tauri-bridge/index.js").GitLogCommit[]> {
-  return desktopApi().listFileCommits(streamId, path, limit);
+  return unwrap(await commands.listFileCommits(streamId, path, limit ?? null));
 }
 
 export async function gitBlame(
   streamId: string,
   path: string,
 ): Promise<import("./tauri-bridge/index.js").BlameLine[]> {
-  return desktopApi().gitBlame(streamId, path);
+  return unwrap(await commands.gitBlame(streamId, path));
 }
 
 /// Renderer-side LocalBlameEntry: the bindings shape plus an
