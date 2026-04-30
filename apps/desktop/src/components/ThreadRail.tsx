@@ -1,11 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  AgentStatus,
-  Thread,
-  ThreadWorkState,
-} from "../api.js";
-import { AgentStatusDot } from "./AgentStatusDot.js";
+import type { Thread, ThreadWorkState } from "../api.js";
+import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
 
@@ -13,7 +9,7 @@ interface Props {
   threads: Thread[];
   activeThreadId: string | null;
   selectedThreadId: string | null;
-  agentStatuses: Record<string, AgentStatus>;
+  agentStatuses: Record<string, AgentStatusDotState>;
   threadWorkStates: Record<string, ThreadWorkState>;
   onSelectThread(threadId: string): void | Promise<void>;
   onCreateThread(title: string): Promise<void>;
@@ -236,7 +232,7 @@ function ThreadChip({
   thread: Thread;
   isActive: boolean;
   isSelected: boolean;
-  agentStatus: AgentStatus;
+  agentStatus: AgentStatusDotState;
   workState: ThreadWorkState | undefined;
   hasQueued: boolean;
   onSelect(): void;
@@ -481,7 +477,7 @@ function HoverCard({
 }: {
   thread: Thread;
   isActive: boolean;
-  agentStatus: AgentStatus;
+  agentStatus: AgentStatusDotState;
   workState: ThreadWorkState | undefined;
   hasQueued: boolean;
   onPromote(): void;
