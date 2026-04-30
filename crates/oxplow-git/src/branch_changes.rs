@@ -11,13 +11,22 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-/// "Where am I?" branch context the UI shows above the diff/log views.
+/// "Where am I?" branch context the UI shows above the diff/log
+/// views, plus the live working-tree changeset split by staging
+/// state so the renderer can show a unified files-changed list
+/// without making a second IPC call.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ChangeScopes {
     pub current_branch: Option<String>,
     pub branch_base: Option<String>,
     pub upstream: Option<String>,
     pub on_default_branch: bool,
+    /// Files in the index (staged for commit). Empty when nothing is
+    /// staged.
+    pub staged: Vec<BranchChangeEntry>,
+    /// Files modified or untracked in the working tree relative to
+    /// the index. Empty in a clean tree.
+    pub unstaged: Vec<BranchChangeEntry>,
 }
 
 pub fn get_change_scopes(repo: &Path) -> ChangeScopes {
@@ -29,11 +38,84 @@ pub fn get_change_scopes(repo: &Path) -> ChangeScopes {
         (Some(cur), Some(base)) => cur == base,
         _ => false,
     };
+    let (staged, unstaged) = collect_working_tree_changes(repo);
     ChangeScopes {
         current_branch,
         branch_base,
         upstream,
         on_default_branch,
+        staged,
+        unstaged,
+    }
+}
+
+/// Parse `git status --porcelain=v1 --untracked-files=all` into two
+/// lists. The first column is index status, the second is worktree
+/// status; either non-space puts the file in the matching bucket.
+fn collect_working_tree_changes(
+    repo: &Path,
+) -> (Vec<BranchChangeEntry>, Vec<BranchChangeEntry>) {
+    if !crate::repo::is_git_repo(repo) {
+        return (Vec::new(), Vec::new());
+    }
+    let raw = match run_capturing(
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+        repo,
+    ) {
+        Some(s) => s,
+        None => return (Vec::new(), Vec::new()),
+    };
+    let mut staged = Vec::new();
+    let mut unstaged = Vec::new();
+    for line in raw.lines() {
+        if line.len() < 4 {
+            continue;
+        }
+        let bytes = line.as_bytes();
+        let index_code = bytes[0] as char;
+        let worktree_code = bytes[1] as char;
+        let rest = &line[3..];
+        // Renames in porcelain v1 read "R<sp><sp>old -> new"; we
+        // record the new path and stash the old as original_path.
+        let (path, original_path) = if let Some(idx) = rest.find(" -> ") {
+            (rest[idx + 4..].to_string(), Some(rest[..idx].to_string()))
+        } else {
+            (rest.to_string(), None)
+        };
+        if index_code != ' ' && index_code != '?' {
+            staged.push(BranchChangeEntry {
+                path: path.clone(),
+                original_path: original_path.clone(),
+                change: classify(index_code),
+                additions: 0,
+                deletions: 0,
+            });
+        }
+        if worktree_code != ' ' {
+            unstaged.push(BranchChangeEntry {
+                path,
+                original_path,
+                change: if worktree_code == '?' {
+                    ChangeKind::Untracked
+                } else {
+                    classify(worktree_code)
+                },
+                additions: 0,
+                deletions: 0,
+            });
+        }
+    }
+    (staged, unstaged)
+}
+
+fn classify(code: char) -> ChangeKind {
+    match code {
+        'A' => ChangeKind::Added,
+        'D' => ChangeKind::Deleted,
+        'R' => ChangeKind::Renamed,
+        'C' => ChangeKind::Copied,
+        '?' => ChangeKind::Untracked,
+        _ => ChangeKind::Modified,
     }
 }
 
@@ -313,5 +395,43 @@ mod tests {
             .files
             .iter()
             .any(|f| f.path == "u.txt" && f.change == ChangeKind::Untracked));
+    }
+
+    #[test]
+    fn change_scopes_buckets_staged_and_unstaged() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        commit(dir.path(), "init");
+        // Stage one file, modify another in the worktree, leave a
+        // third untracked.
+        std::fs::write(dir.path().join("staged.txt"), "stage").unwrap();
+        Cmd::new("git")
+            .args(["add", "staged.txt"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::fs::write(dir.path().join("a.txt"), "a-modified").unwrap();
+        std::fs::write(dir.path().join("untracked.txt"), "u").unwrap();
+
+        let scopes = get_change_scopes(dir.path());
+        assert!(
+            scopes.staged.iter().any(|e| e.path == "staged.txt"),
+            "staged.txt should appear in `staged`, got {:?}",
+            scopes.staged
+        );
+        assert!(
+            scopes.unstaged.iter().any(|e| e.path == "a.txt"),
+            "a.txt modification should appear in `unstaged`, got {:?}",
+            scopes.unstaged
+        );
+        assert!(
+            scopes
+                .unstaged
+                .iter()
+                .any(|e| e.path == "untracked.txt" && e.change == ChangeKind::Untracked),
+            "untracked.txt should appear in `unstaged` as Untracked, got {:?}",
+            scopes.unstaged
+        );
     }
 }
