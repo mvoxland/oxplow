@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
-import type { Stream, Thread, WorkItem } from "../api.js";
+import type { Stream, Thread, WorkItem } from "../tauri-bridge/index.js";
 import {
   getThreadWorkState,
   listClosedThreads,

@@ -1,4 +1,4 @@
-import type { Stream } from "../api.js";
+import type { Stream } from "../tauri-bridge/index.js";
 import { Page } from "../tabs/Page.js";
 import { ProjectPanel } from "../components/Panels/ProjectPanel.js";
 import type { DiffRequest } from "../components/Diff/diff-request.js";

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Stream } from "../api.js";
+import type { Stream } from "../tauri-bridge/index.js";
 import { listWorkspaceEntries } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";

@@ -1,6 +1,6 @@
 import { Page } from "../tabs/Page.js";
 import { DiffPane, type DiffSpec } from "../components/Diff/DiffPane.js";
-import type { Stream } from "../api.js";
+import type { Stream } from "../tauri-bridge/index.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 
 export interface DiffPageProps {
