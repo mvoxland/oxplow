@@ -120,7 +120,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       const headCommit = log.commits[0] ?? null;
       // Find an upstream ref via the remote branches list (best-effort).
       const upstreamRef = branch
-        ? remoteBranches.find((r) => r.branch === branch)?.shortName ?? null
+        ? remoteBranches.find((r) => r.branch === branch)?.short_name ?? null
         : null;
       let aheadUpstream = 0;
       let behindUpstream = 0;
@@ -257,19 +257,18 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         removePending(label);
       }
       const result = task?.result as GitOpResult | undefined;
-      if (!result || !result.ok) {
+      if (!result || !result.success) {
         const errorId = recordOpError({
           label,
           command,
           stderr: result?.stderr ?? task?.error ?? "",
           stdout: result?.stdout ?? "",
-          exitCode: result?.exitCode ?? null,
-          args: result?.args,
-          durationMs: result?.durationMs,
-          signal: result?.signal ?? null,
+          exitCode: result?.status ?? null,
+          args: undefined,
+          durationMs: undefined,
+          signal: null,
           blankFailure:
-            result?.blankFailure ??
-            (!result || (!result.stderr && !result.stdout && result.exitCode == null)),
+            !result || (!result.stderr && !result.stdout && result.status == null),
         });
         onOpenPage(opErrorRef(errorId), { newTab: true });
       } else {
@@ -290,7 +289,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
         removePending(label);
       }
       const result = task?.result as GitOpResult | undefined;
-      if (!result || !result.ok) {
+      if (!result || !result.success) {
         window.alert(`${label} failed:\n${result?.stderr || task?.error || "git error"}`);
       } else {
         void refresh();
@@ -663,7 +662,7 @@ function StreamsCard({
                   <AheadBehindBadge
                     ahead={row.ahead}
                     behind={row.behind}
-                    context={row.worktree.isMain || row.worktree.branch === mainBranchOf(rows) ? "its upstream" : "the main repo branch"}
+                    context={row.worktree.is_main || row.worktree.branch === mainBranchOf(rows) ? "its upstream" : "the main repo branch"}
                   />
                   {row.worktree.branch ? (
                     <MergeRebaseSplitButton
@@ -968,7 +967,7 @@ function PairwiseDiffPane({
 const EMPTY_REF_MAP: Map<string, string[]> = new Map();
 
 function mainBranchOf(rows: StreamWorktreeRow[]): string | null {
-  return rows.find((r) => r.worktree.isMain)?.worktree.branch ?? null;
+  return rows.find((r) => r.worktree.is_main)?.worktree.branch ?? null;
 }
 
 function RemoteBranchesCard({
@@ -990,8 +989,8 @@ function RemoteBranchesCard({
     let cancelled = false;
     void Promise.all(
       rows.map(async (row) => {
-        const res = await getAheadBehind(streamId, row.shortName);
-        return [row.shortName, res] as const;
+        const res = await getAheadBehind(streamId, row.short_name);
+        return [row.short_name, res] as const;
       }),
     ).then((entries) => {
       if (cancelled) return;
@@ -1011,12 +1010,12 @@ function RemoteBranchesCard({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {rows.map((row) => {
-            const pullLabel = `Pull ${row.shortName} into current`;
-            const pushLabel = `Push current → ${row.shortName}`;
-            const c = counts[row.shortName];
+            const pullLabel = `Pull ${row.short_name} into current`;
+            const pushLabel = `Push current → ${row.short_name}`;
+            const c = counts[row.short_name];
             return (
               <div
-                key={row.shortName}
+                key={row.short_name}
                 data-testid="git-dashboard-remote-row"
                 style={{
                   display: "flex",
@@ -1027,15 +1026,15 @@ function RemoteBranchesCard({
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500 }}>{row.shortName}</div>
+                  <div style={{ fontWeight: 500 }}>{row.short_name}</div>
                   <div style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {row.lastCommitSubject} · {row.lastCommitAuthor} · {formatDate(row.lastCommitDate)}
+                    {row.last_commit_subject} · {row.last_commit_at} · {formatDate(row.last_commit_at)}
                   </div>
                 </div>
                 <AheadBehindBadge
                   ahead={c?.ahead ?? 0}
                   behind={c?.behind ?? 0}
-                  context={row.shortName}
+                  context={row.short_name}
                 />
                 <button
                   type="button"
@@ -1043,7 +1042,7 @@ function RemoteBranchesCard({
                   disabled={isPending(pullLabel) || (c?.behind ?? 0) === 0}
                   title={
                     (c?.behind ?? 0) === 0
-                      ? `${row.shortName} has no commits not already in current — nothing to pull.`
+                      ? `${row.short_name} has no commits not already in current — nothing to pull.`
                       : undefined
                   }
                   style={smallButton}
@@ -1056,7 +1055,7 @@ function RemoteBranchesCard({
                   disabled={isPending(pushLabel) || (c?.ahead ?? 0) === 0}
                   title={
                     (c?.ahead ?? 0) === 0
-                      ? `Current has no commits not already in ${row.shortName} — nothing to push.`
+                      ? `Current has no commits not already in ${row.short_name} — nothing to push.`
                       : undefined
                   }
                   style={smallButton}

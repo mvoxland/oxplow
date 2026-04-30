@@ -1092,10 +1092,10 @@ function PushPullDialog({
     const task = await awaitDone;
     setRunning(false);
     const result = (task?.result as GitOpResult | undefined) ?? {
-      ok: task?.status === "done",
+      success: task?.status === "done",
       stdout: "",
       stderr: task?.error ?? "",
-      exitCode: null,
+      status: null,
     };
     onComplete(result);
   };
@@ -1253,12 +1253,12 @@ function CommitDialog({
 }
 
 function GitOpResultModal({ title, result, onClose }: { title: string; result: GitOpResult; onClose(): void }) {
-  const colour = result.ok ? "#86efac" : "#f87171";
+  const colour = result.success ? "#86efac" : "#f87171";
   return (
     <Slideover open onClose={onClose} title={title} testId="git-op-result-slideover">
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ color: colour, fontSize: 12, fontWeight: 600 }}>
-          {result.ok ? "Success" : `Failed (exit ${result.exitCode ?? "?"})`}
+          {result.success ? "Success" : `Failed (exit ${result.status ?? "?"})`}
         </div>
         {result.stdout ? (
           <pre style={modalPreStyle}>{result.stdout}</pre>
