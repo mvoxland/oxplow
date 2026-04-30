@@ -249,10 +249,11 @@ export interface GitLogResult {
 
 export interface BlameLine {
   line: number;
-  sha: string | null;
+  sha: string;
   author: string;
-  authoredAt: string;
-  content: string;
+  author_mail: string;
+  author_time: number;
+  summary: string;
 }
 
 export interface GroupedGitRefs {

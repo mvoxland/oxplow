@@ -797,12 +797,12 @@ function BlameOverlay({
             );
           }
           if (entry.source === "git" && entry.git) {
-            const ageDays = Math.max(0, (nowSec - entry.git.authorTime) / 86400);
+            const ageDays = Math.max(0, (nowSec - entry.git.author_time) / 86400);
             const bg = blameGitColor(ageDays);
-            const date = formatBlameDate(entry.git.authorTime);
+            const date = formatBlameDate(entry.git.author_time);
             const author = truncateAuthor(entry.git.author);
             const sha = entry.git.sha;
-            const authorMail = entry.git.authorMail;
+            const authorMail = entry.git.author_mail;
             return (
               <div
                 key={entry.line}
