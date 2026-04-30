@@ -188,7 +188,7 @@ export function ThreadRail({
             }}
           />
         ) : (
-          <button type="button" data-testid="thread-rail-new" style={smallBtn} onClick={() => setShowCreate(true)} title="Create thread">
+          <button type="button" data-testid="thread-rail-new" style={primaryBtn} onClick={() => setShowCreate(true)} title="Create thread">
             + New thread
           </button>
         )}
@@ -664,23 +664,36 @@ const railStyle: CSSProperties = {
   alignItems: "stretch",
   gap: 0,
   paddingLeft: 0,
-  paddingRight: 8,
+  paddingRight: 12,
   paddingTop: 6,
-  background: "var(--bg-2)",
-  borderBottom: "1px solid var(--border)",
+  background: "var(--surface-app)",
+  borderBottom: "1px solid var(--border-subtle)",
   flexWrap: "wrap",
   minHeight: 32,
 };
 
 const smallBtn: CSSProperties = {
-  border: "1px solid var(--border)",
-  background: "var(--bg)",
-  color: "inherit",
+  border: "1px solid var(--border-subtle)",
+  background: "transparent",
+  color: "var(--text-secondary)",
   borderRadius: 6,
-  padding: "3px 8px",
+  padding: "3px 10px",
   cursor: "pointer",
   fontFamily: "inherit",
   fontSize: 11,
+  transition: "background 120ms ease, color 120ms ease",
+};
+
+const primaryBtn: CSSProperties = {
+  border: "1px solid transparent",
+  background: "var(--button-primary-bg)",
+  color: "var(--button-primary-fg)",
+  borderRadius: 6,
+  padding: "3px 10px",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 500,
 };
 
 const hoverCardStyle: CSSProperties = {

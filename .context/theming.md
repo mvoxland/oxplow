@@ -22,39 +22,51 @@ only — never inline hex.**
 
 ### Surfaces (background tiers)
 
-| Variable                | Value     | Used for                                   |
-|-------------------------|-----------|--------------------------------------------|
-| `--surface-app`         | `#14161a` | App background, page bodies                |
-| `--surface-card`        | `#1c1f24` | Cards, inner content surfaces              |
-| `--surface-rail`        | `#181b20` | Left HUD rail                              |
-| `--surface-tab-active`  | `#1f2228` | Currently-focused tab body                 |
-| `--surface-tab-inactive`| `#0e1014` | Tab strip and unselected tabs              |
-| `--surface-elevated`    | `#232730` | Popovers, slideovers, kebab menus          |
-| `--surface-overlay`     | rgba dim  | Backdrops behind slideovers / overlays     |
+Cool blue-grey, three tonal tiers. `--surface-tab-inactive` is
+`transparent` so the tab strip blends into whatever surface it sits
+on — it's the active tab that lifts forward, not the strip that
+sinks.
+
+| Variable                | Value         | Used for                                   |
+|-------------------------|---------------|--------------------------------------------|
+| `--surface-app`         | `#0f1115`     | App background, page bodies                |
+| `--surface-card`        | `#161a20`     | Cards, inner content surfaces              |
+| `--surface-rail`        | `#13161b`     | Left HUD rail, stream-tab strip            |
+| `--surface-tab-active`  | `#1c2027`     | Currently-focused tab body                 |
+| `--surface-tab-inactive`| `transparent` | Inactive tabs (let the strip show through) |
+| `--surface-elevated`    | `#20242c`     | Popovers, slideovers, kebab menus          |
+| `--surface-overlay`     | rgba dim      | Backdrops behind slideovers / overlays     |
 
 ### Borders
 
 | Variable          | Value     | Used for                              |
 |-------------------|-----------|---------------------------------------|
-| `--border-subtle` | `#2a2e36` | List dividers, card edges             |
-| `--border-strong` | `#3a3f49` | Focus / hover outlines, tab frames    |
+| `--border-subtle` | `#232831` | List dividers, card edges             |
+| `--border-strong` | `#333944` | Focus / hover outlines, tab frames    |
 
 ### Text
 
 | Variable           | Value     | Used for                       |
 |--------------------|-----------|--------------------------------|
-| `--text-primary`   | `#e6e8ec` | Default body text              |
-| `--text-secondary` | `#9aa1ad` | Captions, metadata             |
-| `--text-muted`     | `#6c727c` | Placeholders, disabled         |
+| `--text-primary`   | `#e8eaef` | Default body text              |
+| `--text-secondary` | `#9097a3` | Captions, metadata             |
+| `--text-muted`     | `#5f6571` | Placeholders, disabled         |
 
 ### Accent (primary action)
 
 | Variable             | Value     | Used for                       |
 |----------------------|-----------|--------------------------------|
-| `--accent`           | `#5b8cf5` | Primary buttons, focus rings   |
-| `--accent-hover`     | `#7aa2f7` | Hover variant                  |
-| `--accent-soft-bg`   | `#1f2a44` | Active-pill / soft-button bg   |
+| `--accent`           | `#6b9cf6` | Primary buttons, focus rings   |
+| `--accent-hover`     | `#8db2f8` | Hover variant                  |
+| `--accent-soft-bg`   | `#1c2a48` | Active-pill / soft-button bg   |
 | `--accent-on-accent` | `#ffffff` | Foreground on accent surfaces  |
+
+### Buttons
+
+`--button-primary-bg` / `-fg` / `-bg-hover` for the *one* primary CTA
+per region (e.g. `+ New stream`, `+ New thread`, Save). Secondary
+buttons use `--button-secondary-*` (transparent background, neutral
+text, lifts to a 4%-white wash on hover).
 
 ### Status (semantic — work item / agent state)
 
@@ -86,9 +98,12 @@ plus `--blame-uncommitted` and `--blame-{local,git}-border`.
 Components written before the semantic-token migration still reference
 `--bg`, `--bg-1`, `--bg-2`, `--bg-3`, `--bg-tab-inactive`, `--bg-detail`,
 `--fg`, `--muted`, `--border`, `--priority-{urgent,high,medium,low}`.
-**New components must use semantic tokens directly**, not the legacy
-aliases. Aliases will be removed during the visual-polish phase as
-each component is migrated.
+The aliases now resolve to the unified semantic tier (e.g.
+`--bg-2 → var(--surface-tab-active)`), so unmigrated components pick
+up the cool palette automatically — no more warm-brown rails. **New
+components must use semantic tokens directly**, not the legacy
+aliases. Aliases will be removed entirely once every reference has
+migrated.
 
 ## Density
 

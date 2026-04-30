@@ -77,14 +77,13 @@ import {
 import { buildMenuGroupSnapshots, buildMenuGroups } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
-import { StreamRail } from "./components/StreamRail.js";
+import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { showToast } from "./components/toastStore.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
-import { ThreadRail } from "./components/ThreadRail.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { DiffPage } from "./pages/DiffPage.js";
 import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
@@ -322,7 +321,17 @@ export function App() {
     try {
       logUi("info", "switching stream", { streamId: id });
       const next = await switchStream(id);
-      const nextThreadState = threadStates[next.id] ?? await getThreadState(next.id);
+      let nextThreadState = threadStates[next.id] ?? await getThreadState(next.id);
+      // Invariant: a stream must always have a selected thread. If the
+      // switched-to stream has no remembered selection, auto-pick the
+      // active thread (or the first thread by sort order) and persist
+      // that choice so subsequent switches remember it.
+      if (!nextThreadState.selectedThreadId && nextThreadState.threads.length > 0) {
+        const fallback =
+          nextThreadState.threads.find((t) => t.id === nextThreadState.activeThreadId)
+          ?? nextThreadState.threads[0];
+        nextThreadState = await selectThread(next.id, fallback.id);
+      }
       const nextThread = nextThreadState.threads.find((thread) => thread.id === nextThreadState.selectedThreadId);
       if (nextThread && !threadWorkStates[nextThread.id]) {
         const nextWork = await getThreadWorkState(next.id, nextThread.id);
@@ -849,6 +858,7 @@ export function App() {
   // Reset terminal transport to direct whenever the active pane target
   // changes — matches the old TerminalPane's internal useEffect.
   useEffect(() => { setAgentTransportMode("direct"); }, [selectedThread?.pane_target]);
+
   const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
   const opErrors = useMemo(
     () => opErrorsAll.filter((e) => e.threadId === null || e.threadId === selectedThreadId),
@@ -2492,47 +2502,32 @@ export function App() {
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         {!isElectron && !isMac ? <Menubar groups={menuGroups} /> : null}
-        <StreamRail
-          stream={stream}
-          streams={streams}
-          streamStatuses={streamStatuses}
-          streamActiveThreadIds={streamActiveThreadIds}
-          gitEnabled={workspaceContext.gitEnabled}
-          onSwitch={handleSwitch}
-          onRenameStream={(id, title) => handleRenameStreamById(id, title)}
-          onRequestCreateThread={stream ? () => setThreadCreateRequest((n) => n + 1) : undefined}
-          onOpenStreamSettings={(targetStreamId) => handleOpenPage(streamSettingsRef(targetStreamId))}
-          onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
-          onDropWorkItemOnStream={(targetStreamId, itemId, fromThreadId) => void handleDropWorkItemOnStream(targetStreamId, itemId, fromThreadId)}
-          onReorderStreams={handleReorderStreams}
-          createRequest={streamCreateRequest}
-        />
-        {stream ? (
-          <ThreadRail
-            threads={currentThreadState.threads}
-            activeThreadId={currentThreadState.activeThreadId}
-            selectedThreadId={currentThreadState.selectedThreadId}
-            agentStatuses={agentStatuses}
-            threadWorkStates={threadWorkStates}
-            onSelectThread={handleSelectThread}
-            onCreateThread={handleCreateThread}
-            onPromoteThread={handlePromoteThread}
-            onCloseThread={handleCloseThread}
-            onOpenClosedThreads={() => handleOpenPage(closedThreadsRef())}
-            onMoveWorkItem={handleMoveWorkItemToThread}
-            onMoveBacklogItemToThread={handleMoveBacklogItemToThread}
-            onRenameThread={handleRenameThreadById}
-            onReorderThreads={handleReorderThreads}
-            onRequestCreateStream={() => setStreamCreateRequest((n) => n + 1)}
-            onOpenThreadSettings={(targetThreadId) => handleOpenPage(threadSettingsRef(targetThreadId))}
-            createRequest={threadCreateRequest}
-          />
-        ) : null}
         {error ? (
           <div style={{ padding: "2px 12px", background: "var(--bg-2)", color: "#ff6b6b", fontSize: 11, minHeight: 22, borderBottom: "1px solid var(--border)" }}>{error}</div>
         ) : null}
       </div>
       <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
+        <Navigator
+          streams={streams}
+          currentStreamId={stream?.id ?? null}
+          threadStates={threadStates}
+          streamStatuses={streamStatuses}
+          agentStatuses={agentStatuses}
+          onSwitchStream={handleSwitch}
+          onSelectThread={handleSelectThread}
+          onCreateThread={async (streamId, title) => {
+            if (streamId !== stream?.id) await handleSwitch(streamId);
+            await handleCreateThread(title);
+          }}
+          onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
+          onRenameStream={handleRenameStreamById}
+          onRenameThread={handleRenameThreadById}
+          onPromoteThread={handlePromoteThread}
+          onCloseThread={handleCloseThread}
+          onOpenStreamSettings={(streamId) => handleOpenPage(streamSettingsRef(streamId))}
+          onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
+          gitEnabled={workspaceContext.gitEnabled}
+        />
         <RailHud
           threadId={selectedThread?.id ?? null}
           threadWork={selectedThreadWork}
@@ -2594,7 +2589,7 @@ export function App() {
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-end",
+          justifyContent: "space-between",
           gap: 8,
           padding: "4px 10px",
           borderTop: "1px solid var(--border)",
@@ -2603,6 +2598,26 @@ export function App() {
           minHeight: 26,
         }}
       >
+        {(() => {
+          const parts = [stream?.title, selectedThread?.title].filter(Boolean) as string[];
+          const text = parts.join(" : ");
+          return (
+            <span
+              data-testid="status-bar-context"
+              title={text}
+              style={{
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                minWidth: 0,
+              }}
+            >
+              {text}
+            </span>
+          );
+        })()}
         <StatusBar stream={stream} gitEnabled={workspaceContext.gitEnabled} />
       </div>
       <QuickOpenOverlay
