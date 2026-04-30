@@ -61,373 +61,19 @@ function adaptBackgroundTask(t: any): any {
   };
 }
 
-function buildDesktopAdapter(): DesktopApi {
-  const adapter: DesktopApi = {
-    ping: async () => unwrap(await commands.ping()),
-    listStreams: async () =>
-      (unwrap(await commands.listStreams()) as unknown[])/* bindings shape */,
-    getCurrentStream: async () => {
-      const cur = unwrap(await commands.getCurrentStream());
-      if (cur) return cur;
-      const primary = unwrap(await commands.getPrimaryStream());
-      if (!primary) throw new Error("no primary stream available");
-      return primary;
-    },
-    switchStream: async (id: string) => {
-      unwrap(await commands.switchStream(id));
-      return unwrap(await commands.getCurrentStream());
-    },
-    renameCurrentStream: async (title: string) => {
-      const cur = unwrap(await commands.getCurrentStream());
-      if (!cur) throw new Error("no current stream to rename");
-      return unwrap(await commands.renameStream({ id: cur.id, title }));
-    },
-    renameStream: async (id: string, title: string) =>
-      unwrap(await commands.renameStream({ id, title })),
-    setStreamPrompt: async (id: string, prompt: string | null) =>
-      unwrap(await commands.setStreamPrompt({ id, prompt })),
-    checkoutStreamBranch: async (id: string, branch: string) =>
-      unwrap(await commands.checkoutStreamBranch(id, branch)),
-    reorderStreams: async (order: string[]) => unwrap(await commands.reorderStreams(order)),
-    reorderThreads: async (streamId: string, order: string[]) =>
-      unwrap(await commands.reorderThreadQueue({ streamId, order })),
-    reorderThread: async (streamId: string, order: string[]) =>
-      unwrap(await commands.reorderThreadQueue({ streamId, order })),
-    createStream: async (input: {
-      title: string;
-      summary?: string;
-      source: "existing" | "new" | "worktree";
-      ref?: string;
-      branch?: string;
-      startPointRef?: string;
-      worktreePath?: string;
-    }) => {
-      const slug = slugifyTitle(input.title);
-      switch (input.source) {
-        case "existing": {
-          if (!input.ref) throw new Error("createStream: missing ref for existing source");
-          return unwrap(
-            await commands.createWorktree({
-              slug,
-              title: input.title,
-              branch: input.ref,
-              branchSource: input.ref,
-            }),
-          );
-        }
-        case "new": {
-          if (!input.branch) throw new Error("createStream: missing branch for new source");
-          return unwrap(
-            await commands.createWorktree({
-              slug,
-              title: input.title,
-              branch: input.branch,
-              branchSource: input.startPointRef ?? input.branch,
-            }),
-          );
-        }
-        case "worktree":
-          throw new Error(
-            "Adopting an existing worktree on disk is not yet ported to Tauri",
-          );
-      }
-    },
-    closeThread: async (id: string) => unwrap(await commands.closeThread(id)),
-    reopenThread: async (id: string) => unwrap(await commands.reopenThread(id)),
-    promoteThread: async (id: string) => unwrap(await commands.promoteThread(id)),
-    renameThread: async (id: string, title: string) =>
-      unwrap(await commands.renameThread({ id, title })),
-    setThreadPrompt: async (id: string, prompt: string | null) =>
-      unwrap(await commands.setThreadPrompt({ id, prompt })),
-    listClosedThreads: async (streamId: string) =>
-      (unwrap(await commands.listClosedThreads(streamId)) as unknown[])/* bindings shape */,
-    selectThread: async (streamId: string, threadId: string | null) =>
-      unwrap(await commands.selectThread({ streamId, threadId })),
-    createThread: async (streamId: string, title: string, paneTarget?: string) =>
-      unwrap(await commands.createThread({ streamId, title, paneTarget: paneTarget ?? null })),
-    reorderThreadQueue: async (streamId: string, order: string[]) =>
-      unwrap(await commands.reorderThreadQueue({ streamId, order })),
-    getThreadState: async (streamId: string) => {
-      const raw = unwrap(await commands.getThreadState(streamId)) as {
-        threads: unknown[];
-        [k: string]: unknown;
-      };
-      return { ...raw, threads: raw.threads/* bindings shape */ };
-    },
-    getThreadWorkState: async (_streamId: string, threadId: string) =>
-      unwrap(await commands.getThreadWorkState(threadId)),
-    createWorkItem: async (
-      _streamId: string,
-      threadId: string,
-      input: Record<string, unknown>,
-    ) =>
-      unwrap(await commands.createWorkItem({ threadId, input: input as never })),
-    updateWorkItem: async (
-      _streamId: string,
-      _threadId: string,
-      itemId: string,
-      changes: Record<string, unknown>,
-    ) => unwrap(await commands.updateWorkItem({ id: itemId, changes: changes as never })),
-    deleteWorkItem: async (_streamId: string, _threadId: string, itemId: string) =>
-      unwrap(await commands.deleteWorkItem(itemId)),
-    moveWorkItemToBacklog: async (_streamId: string, _fromThreadId: string, itemId: string) =>
-      unwrap(await commands.moveWorkItem({ id: itemId, threadId: null })),
-    moveWorkItemToThread: async (
-      _streamId: string,
-      _fromThreadId: string,
-      itemId: string,
-      toThreadId: string,
-    ) => unwrap(await commands.moveWorkItem({ id: itemId, threadId: toThreadId })),
-    moveBacklogItemToThread: async (_streamId: string, itemId: string, toThreadId: string) =>
-      unwrap(await commands.moveWorkItem({ id: itemId, threadId: toThreadId })),
-    reorderWorkItems: async (
-      _streamId: string,
-      threadId: string,
-      orderedItemIds: string[],
-    ) => unwrap(await commands.reorderWorkItems({ threadId, order: orderedItemIds })),
-    reorderBacklog: async (orderedItemIds: string[]) =>
-      unwrap(await commands.reorderWorkItems({ threadId: null, order: orderedItemIds })),
-    getBacklogState: async () => unwrap(await commands.getBacklogState()),
-    createBacklogItem: async (input: Record<string, unknown>) =>
-      unwrap(await commands.createWorkItem({ threadId: null, input: input as never })),
-    updateBacklogItem: async (itemId: string, changes: Record<string, unknown>) =>
-      unwrap(await commands.updateWorkItem({ id: itemId, changes: changes as never })),
-    deleteBacklogItem: async (itemId: string) =>
-      unwrap(await commands.deleteWorkItem(itemId)),
-    getWorkItemSummaries: async (threadId?: string | null) =>
-      unwrap(await commands.getWorkItemSummaries(threadId ?? null)),
-    addWorkItemNote: async (
-      _streamId: string,
-      _threadId: string,
-      itemId: string,
-      body: string,
-      author?: string,
-    ) => unwrap(await commands.addWorkNote(itemId, body, author ?? "user")),
-    getWorkNotes: async (itemId: string) => unwrap(await commands.listWorkNotes(itemId)),
-    listWorkItemEvents: async (
-      _streamId: string,
-      _threadId: string,
-      itemId?: string,
-    ) => unwrap(await commands.listWorkItemEvents(itemId ?? null, null)),
-    listWorkItemEfforts: async (itemId: string) =>
-      unwrap(await commands.listWorkItemEfforts(itemId)),
-    getEffortFiles: async (effortId: string) =>
-      unwrap(await commands.getEffortFiles(effortId)),
-    listEffortsEndingAtSnapshots: async (snapshotIds: number[]) =>
-      unwrap(await commands.listEffortsEndingAtSnapshots(snapshotIds)),
-    getRepoConflictState: async (streamId?: string | null) =>
-      unwrap(await commands.getRepoConflictState(streamId ?? null)),
-    getAheadBehind: async (
-      streamId: string | null | undefined,
-      base: string,
-      head: string,
-    ) => unwrap(await commands.getAheadBehind(streamId ?? null, base, head)),
-    getCommitsAheadOf: async (
-      streamId: string | null | undefined,
-      base: string,
-      head: string,
-      limit?: number,
-    ) =>
-      unwrap(
-        await commands.getCommitsAheadOf(streamId ?? null, base, head, limit ?? 200),
-      ),
-    getDefaultBranch: async () => unwrap(await commands.getDefaultBranch()),
-    listBranches: async () => unwrap(await commands.listLocalBranches()),
-    renameGitBranch: async (from: string, to: string) =>
-      unwrap(await commands.renameBranch(from, to)),
-    deleteGitBranch: async (branch: string, force?: boolean) =>
-      unwrap(await commands.deleteBranch(branch, force ?? false)),
-    gitAppendToGitignore: async (streamId: string | null | undefined, entry: string) => {
-      unwrap(await commands.appendToGitignore(streamId ?? null, entry));
-      return synthOk();
-    },
-    gitRestorePath: async (streamId: string | null | undefined, path: string) => {
-      unwrap(await commands.restorePath(streamId ?? null, path));
-      return synthOk();
-    },
-    gitFetch: async (streamId: string | null | undefined, remote?: string | null) =>
-      unwrap(await commands.gitFetch(streamId ?? null, remote ?? null)),
-    gitPull: async (streamId: string | null | undefined) =>
-      unwrap(await commands.gitPull(streamId ?? null)),
-    gitPullRemoteIntoCurrent: async (
-      streamId: string | null | undefined,
-      remote: string,
-      branch: string,
-    ) =>
-      unwrap(
-        await commands.gitPullRemoteIntoCurrent(streamId ?? null, remote, branch),
-      ),
-    gitPush: async (streamId: string | null | undefined) =>
-      unwrap(await commands.gitPush(streamId ?? null)),
-    gitPushCurrentTo: async (
-      streamId: string | null | undefined,
-      remote: string,
-      branch: string,
-    ) => unwrap(await commands.gitPushCurrentTo(streamId ?? null, remote, branch)),
-    gitMergeInto: async (streamId: string | null | undefined, source: string) =>
-      unwrap(await commands.gitMergeInto(streamId ?? null, source)),
-    gitRebaseOnto: async (streamId: string | null | undefined, onto: string) =>
-      unwrap(await commands.gitRebaseOnto(streamId ?? null, onto)),
-    gitCommitAll: async (streamId: string | null | undefined, message: string) =>
-      unwrap(await commands.gitCommitAll(streamId ?? null, message)),
-    gitAddPath: async (streamId: string | null | undefined, path: string) => {
-      unwrap(await commands.gitAddPath(streamId ?? null, path));
-      return synthOk();
-    },
-    gitBlame: async (streamId: string | null | undefined, path: string) =>
-      unwrap(await commands.gitBlame(streamId ?? null, path)),
-    localBlame: async (
-      streamId: string | null | undefined,
-      path: string,
-      diskText: string,
-    ) => unwrap(await commands.localBlame(streamId ?? null, path, diskText)),
-    listAllRefs: async () => unwrap(await commands.listAllRefs()),
-    listGitRefs: async () => {
-      const raw = unwrap(await commands.listAllRefs());
-      const localBranches = raw.locals.map((r) => ({
-        kind: "local" as const,
-        name: r.label,
-        ref: r.ref,
-      }));
-      const byRemote = new Map<string, Array<{ kind: "remote"; name: string; ref: string; remote: string }>>();
-      for (const r of raw.remotes) {
-        const slash = r.label.indexOf("/");
-        const remote = slash >= 0 ? r.label.slice(0, slash) : "origin";
-        const name = slash >= 0 ? r.label.slice(slash + 1) : r.label;
-        if (!byRemote.has(remote)) byRemote.set(remote, []);
-        byRemote.get(remote)!.push({ kind: "remote", name, ref: r.ref, remote });
-      }
-      return {
-        local: localBranches,
-        remote: Array.from(byRemote.values()).flat(),
-        remotes: Array.from(byRemote.entries()).map(([remote, branches]) => ({
-          remote,
-          branches,
-        })),
-        tags: raw.tags.map((t) => ({ name: t.label, ref: t.ref })),
-        recent: localBranches.slice(0, 5).map((b) => b.name),
-      };
-    },
-    listFileCommits: async (
-      streamId: string | null | undefined,
-      path: string,
-      limit?: number,
-    ) =>
-      unwrap(await commands.listFileCommits(streamId ?? null, path, limit ?? null)),
-    listRecentRemoteBranches: async (limit?: number) =>
-      unwrap(await commands.listRecentRemoteBranches(limit ?? null)),
-    readFileAtRef: async (ref: string, path: string) =>
-      unwrap(await commands.readFileAtRef(ref, path)),
-    searchWorkspaceText: async (
-      streamId: string | null | undefined,
-      query: string,
-      limit?: number,
-    ) => unwrap(await commands.searchWorkspaceText(streamId ?? null, query, limit ?? null)),
-    getBranchChanges: async (streamId: string | null | undefined, baseRef: string) =>
-      unwrap(await commands.getBranchChanges(streamId ?? null, baseRef)),
-    getChangeScopes: async (streamId?: string | null) => {
-      const raw = unwrap(await commands.getChangeScopes(streamId ?? null));
-      return {
-        staged: raw.staged,
-        unstaged: raw.unstaged,
-        currentBranch: raw.current_branch ?? undefined,
-        branchBase: raw.branch_base ?? undefined,
-        upstream: raw.upstream ?? undefined,
-        onDefaultBranch: raw.on_default_branch,
-      };
-    },
-    listAdoptableWorktrees: async () => unwrap(await commands.listAdoptableWorktrees()),
-    listSiblingWorktrees: async () => unwrap(await commands.listSiblingWorktrees()),
-    getCommitDetail: async (streamId: string | null | undefined, sha: string) =>
-      unwrap(await commands.getCommitDetail(streamId ?? null, sha)),
-    getGitLog: async (
-      streamId?: string | null,
-      options?: { limit?: number; all?: boolean },
-    ) =>
-      unwrap(
-        await commands.getGitLog(streamId ?? null, options?.limit ?? null, options?.all ?? false),
-      ),
-    listWorkspaceEntries: async (dir: string) =>
-      unwrap(await commands.listWorkspaceEntries(dir)),
-    listWorkspaceFiles: async () => unwrap(await commands.listWorkspaceFiles()),
-    readWorkspaceFile: async (path: string) => unwrap(await commands.readWorkspaceFile(path)),
-    writeWorkspaceFile: async (path: string, content: string) =>
-      unwrap(await commands.writeWorkspaceFile(path, content)),
-    createWorkspaceFile: async (path: string, content: string) =>
-      unwrap(await commands.createWorkspaceFile(path, content)),
-    createWorkspaceDirectory: async (path: string) =>
-      unwrap(await commands.createWorkspaceDirectory(path)),
-    renameWorkspacePath: async (from: string, to: string) =>
-      unwrap(await commands.renameWorkspacePath(from, to)),
-    deleteWorkspacePath: async (path: string) =>
-      unwrap(await commands.deleteWorkspacePath(path)),
-    getWorkspaceContext: async () => unwrap(await commands.getWorkspaceContext()),
-    recordPageVisit: async (input: { pageKind: string; pageId: string; durationMs?: number | null }) =>
-      unwrap(await commands.recordPageVisit(input.pageKind, input.pageId, input.durationMs ?? null)),
-    listRecentPageVisits: async (opts?: { limit?: number }) =>
-      unwrap(await commands.listRecentPageVisits(opts?.limit ?? 50)),
-    topVisitedPages: async (opts?: { limit?: number }) =>
-      unwrap(await commands.topVisitedPages(opts?.limit ?? 50)),
-    forgetPage: async (kind: string, id: string) =>
-      unwrap(await commands.forgetPage(kind, id)),
-    countPageVisitsByDay: async (opts?: { days?: number }) =>
-      unwrap(await commands.countPageVisitsByDay(opts?.days ?? 30)),
-    recordUsage: async (input: { kind: string; payload?: unknown }) =>
-      unwrap(await commands.recordUsage(input.kind, JSON.stringify(input.payload ?? {}))),
-    listRecentUsage: async (limit?: number) =>
-      unwrap(await commands.listRecentUsage(limit ?? 50)),
-    listFrequentUsage: async (limit?: number) =>
-      unwrap(await commands.listFrequentUsage(limit ?? 50)),
-    listCurrentlyOpenUsage: async (limit?: number) =>
-      unwrap(await commands.listCurrentlyOpenUsage(limit ?? 50)),
-    listRecentlyFinished: async (limit?: number) =>
-      unwrap(await commands.listRecentlyFinished(limit ?? 50)),
-    clearRecentlyFinished: async () => unwrap(await commands.clearRecentlyFinished()),
-    listCodeQualityScans: async (limit?: number) =>
-      unwrap(await commands.listCodeQualityScans(limit ?? 50)),
-    listCodeQualityFindings: async (scanId: number) =>
-      unwrap(await commands.listCodeQualityFindings(scanId)),
-    listSnapshots: async (path?: string) =>
-      unwrap(await commands.listSnapshots(path ?? "")),
-    getSnapshotPairDiff: async (beforeId?: number, afterId?: number) =>
-      unwrap(await commands.getSnapshotPairDiff(beforeId ?? null, afterId ?? null)),
-    getSnapshotSummary: async (streamId?: string, limit?: number) =>
-      unwrap(await commands.getSnapshotSummary(streamId ?? null, limit ?? null)),
-    restoreFileFromSnapshot: async (snapshotId: number) =>
-      unwrap(await commands.restoreFileFromSnapshot(snapshotId)),
-    listWikiNotes: async () => unwrap(await commands.listWikiNotes()),
-    deleteWikiNote: async (slug: string) => unwrap(await commands.deleteWikiNote(slug)),
-    searchWikiNotes: async (query: string, limit?: number) =>
-      unwrap(await commands.searchWikiTitles(query, limit ?? 50)),
-    readWikiNoteBody: async (slug: string) => unwrap(await commands.readWikiNoteBody(slug)),
-    writeWikiNoteBody: async (slug: string, body: string) =>
-      unwrap(await commands.writeWikiNoteBody(slug, body)),
-    listBackgroundTasks: async () =>
-      (unwrap(await commands.listBackgroundTasks()) as unknown[]).map(adaptBackgroundTask),
-    getBackgroundTask: async (id: string) =>
-      adaptBackgroundTask(unwrap(await commands.getBackgroundTask(id))),
-    listHookEvents: async (_streamId?: string) =>
-      unwrap(await commands.listHookEvents(null, null)),
-    listAgentStatuses: async () => unwrap(await commands.listAgentStatuses()),
-    getConfig: async () => unwrap(await commands.getConfig()),
-    setAgentPromptAppend: async (text: string) =>
-      unwrap(await commands.setAgentPromptAppend(text)),
-    setSnapshotRetentionDays: async (days: number) =>
-      unwrap(await commands.setSnapshotRetentionDays(days)),
-    setSnapshotMaxFileBytes: async (bytes: number) =>
-      unwrap(await commands.setSnapshotMaxFileBytes(bytes)),
-    setGeneratedDirs: async (dirs: string[]) =>
-      unwrap(await commands.setGeneratedDirs(dirs)),
-    removeFollowup: async (id: string) => unwrap(await commands.removeFollowup(id)),
-    openExternalUrl: async (url: string) => {
-      try {
-        unwrap(await commands.openExternalUrl(url));
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, reason: e instanceof Error ? e.message : String(e) };
-      }
-    },
-    setNativeMenu: async (groups: unknown) => {
+/// Desktop bridge facade: a small object that exposes the few
+/// runtime IPC methods consumers reach for via
+/// `desktopBridge().X(...)` (menu / lsp / terminal / external-url
+/// / logUi / oxplow event subscription). The pre-migration
+/// adapter exposed every Tauri command this way; today every
+/// other call site is a top-level wrapper that hits the
+/// `commands.X` surface directly, so this object is intentionally
+/// narrow.
+function buildBridge() {
+  return {
+    setNativeMenu: async (
+      groups: import("./api-types.js").MenuGroupSnapshot[],
+    ): Promise<void> => {
       try {
         unwrap(await commands.setNativeMenu(groups as never));
       } catch {
@@ -435,7 +81,7 @@ function buildDesktopAdapter(): DesktopApi {
         // platform doesn't support a particular accelerator).
       }
     },
-    onMenuCommand: (handler: (commandId: string) => void) => {
+    onMenuCommand: (handler: (commandId: string) => void): (() => void) => {
       let stopped = false;
       const unlistenPromise = listen("menu:command", (e) => {
         if (stopped) return;
@@ -447,14 +93,16 @@ function buildDesktopAdapter(): DesktopApi {
         void unlistenPromise.then((u) => u());
       };
     },
-    updateEditorFocus: async () => {},
+    updateEditorFocus: async (_payload: unknown): Promise<void> => {
+      // No-op: the daemon doesn't consume editor focus today.
+    },
     logUi: async (entry: {
       clientId?: string;
       level: string;
       message: string;
       context?: unknown;
       timestamp?: string;
-    }) => {
+    }): Promise<void> => {
       try {
         unwrap(
           await commands.logUi({
@@ -469,24 +117,21 @@ function buildDesktopAdapter(): DesktopApi {
         // Don't let a logging failure surface to callers.
       }
     },
-    runCodeQualityScan: async (
-      tool: string,
-      scope?: string,
-      files?: string[],
-    ) =>
-      unwrap(await commands.runCodeQualityScan(tool, scope ?? "workspace", files ?? null)),
-    openLspClient: async (streamId: string, languageId: string) =>
+    openLspClient: async (streamId: string, languageId: string): Promise<string> =>
       unwrap(await commands.openLspClient(streamId, languageId)),
-    closeLspClient: async (clientId: string) => {
+    closeLspClient: async (clientId: string): Promise<void> => {
       try {
         unwrap(await commands.closeLspClient(clientId));
       } catch {
         // Idempotent: already-closed clients return INVALID; treat as no-op.
       }
     },
-    sendLspMessage: async (clientId: string, payload: string) =>
-      unwrap(await commands.sendLspMessage(clientId, payload)),
-    onLspEvent: (handler: (event: { clientId: string; message: string }) => void) => {
+    sendLspMessage: async (clientId: string, payload: string): Promise<void> => {
+      unwrap(await commands.sendLspMessage(clientId, payload));
+    },
+    onLspEvent: (
+      handler: (event: { clientId: string; message: string }) => void,
+    ): (() => void) => {
       let stopped = false;
       const unlistenPromise = listen("lsp:event", (e) => {
         if (stopped) return;
@@ -502,18 +147,21 @@ function buildDesktopAdapter(): DesktopApi {
       cols: number,
       rows: number,
       transportMode: string,
-    ) =>
+    ): Promise<string> =>
       unwrap(await commands.openTerminalSession(paneTarget, cols, rows, transportMode)),
-    closeTerminalSession: async (sessionId: string) => {
+    closeTerminalSession: async (sessionId: string): Promise<void> => {
       try {
         unwrap(await commands.closeTerminalSession(sessionId));
       } catch {
         // Idempotent close.
       }
     },
-    sendTerminalMessage: async (sessionId: string, message: string) =>
-      unwrap(await commands.sendTerminalMessage(sessionId, message)),
-    onTerminalEvent: (handler: (event: { sessionId: string; message: string }) => void) => {
+    sendTerminalMessage: async (sessionId: string, message: string): Promise<void> => {
+      unwrap(await commands.sendTerminalMessage(sessionId, message));
+    },
+    onTerminalEvent: (
+      handler: (event: { sessionId: string; message: string }) => void,
+    ): (() => void) => {
       let stopped = false;
       const unlistenPromise = listen("terminal:event", (e) => {
         if (stopped) return;
@@ -524,24 +172,26 @@ function buildDesktopAdapter(): DesktopApi {
         void unlistenPromise.then((u) => u());
       };
     },
-    onOxplowEvent: (handler: (event: unknown) => void) => {
-      let stopped = false;
-      const unlistenPromise = listen("oxplow:event", (e) => {
-        if (stopped) return;
-        handler(e.payload);
-      });
-      return () => {
-        stopped = true;
-        unlistenPromise.then((u) => u());
-      };
+    openExternalUrl: async (
+      url: string,
+    ): Promise<{ ok: boolean; reason?: string }> => {
+      try {
+        unwrap(await commands.openExternalUrl(url));
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+      }
     },
+    /// `clipboardReadText` is read by `TerminalPane`'s legacy
+    /// Electron-paste path; on Tauri the native clipboard shim is
+    /// preferred so this can return null and the caller falls back.
+    clipboardReadText: async (): Promise<string> =>
+      unwrap(await commands.clipboardReadText()),
   };
-
-  // The whole DesktopApi surface is filled in above; no Proxy or
-  // throw-stub wrapper. Missing methods are a TypeScript error,
-  // not a runtime crash on first call.
-  return adapter;
 }
+
+export type DesktopBridge = ReturnType<typeof buildBridge>;
+let cachedBridge: DesktopBridge | null = null;
 
 export type { OxplowEvent } from "./api-types.js";
 // Use the tauri-specta-generated shapes directly for the
@@ -2108,26 +1758,16 @@ export function subscribeHookEvents(
   });
 }
 
-// Lazy-built adapter that maps the DesktopApi method shape to
-// real Tauri `commands.*` calls. Constructed once on first access so
-// any module that imports this file picks up the same instance.
-let cachedAdapter: DesktopApi | null = null;
-function desktopApi(): DesktopApi {
-  if (!cachedAdapter) {
-    cachedAdapter = buildDesktopAdapter();
-  }
-  return cachedAdapter;
-}
-
 /**
- * Exposes the adapter for the few files that historically read
- * `window.oxplowApi` directly (logger, lsp, TerminalPane, App.tsx).
- * Replaces the global; same shape, just imported. Each call site
- * should eventually migrate off this onto `commands.*` from
- * `tauri-bridge`, at which point this export can go away.
+ * Bridge facade exposing the runtime IPC methods that need
+ * lifecycle wrapping (menu / lsp / terminal / external-url /
+ * logUi). Lazily built on first access; every caller shares
+ * the same instance. Read-only RPC stays on the top-level
+ * wrapper functions in this file.
  */
-export function desktopBridge(): DesktopApi {
-  return desktopApi();
+export function desktopBridge(): DesktopBridge {
+  if (!cachedBridge) cachedBridge = buildBridge();
+  return cachedBridge;
 }
 
 /**
