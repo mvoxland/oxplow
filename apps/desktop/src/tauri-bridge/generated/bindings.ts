@@ -495,12 +495,27 @@ export type BranchRefKind = "local" | "remote";
 
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
 
-// "Where am I?" branch context the UI shows above the diff/log views.
+/**
+ *  "Where am I?" branch context the UI shows above the diff/log
+ *  views, plus the live working-tree changeset split by staging
+ *  state so the renderer can show a unified files-changed list
+ *  without making a second IPC call.
+ */
 export type ChangeScopes = {
 	current_branch: string | null,
 	branch_base: string | null,
 	upstream: string | null,
 	on_default_branch: boolean,
+	/**
+	 *  Files in the index (staged for commit). Empty when nothing is
+	 *  staged.
+	 */
+	staged: BranchChangeEntry[],
+	/**
+	 *  Files modified or untracked in the working tree relative to
+	 *  the index. Empty in a clean tree.
+	 */
+	unstaged: BranchChangeEntry[],
 };
 
 export type CodeQualityFinding = {

@@ -15,6 +15,20 @@ function notPorted(name: string): never {
   throw new Error(`oxplow desktop API method "${name}" is not yet ported to Tauri`);
 }
 
+/// Pure slug derivation: lowercase ASCII alphanumerics, runs of any
+/// other character collapse to a single hyphen, leading/trailing
+/// hyphens trimmed. Worktree slug is fixed at creation and never
+/// changes, so the formatting needs to be conservative.
+function slugifyTitle(title: string): string {
+  const base = title
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return base.length > 0 ? base : `stream-${Date.now()}`;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function adaptStream(s: any): any {
   if (!s) return s;
@@ -90,8 +104,48 @@ function buildDesktopAdapter(): DesktopApi {
       unwrap(await commands.reorderThreadQueue({ streamId, order })),
     reorderThread: async (streamId: string, order: string[]) =>
       unwrap(await commands.reorderThreadQueue({ streamId, order })),
-    createStream: async () => {
-      throw new Error("createStream is replaced by createWorktree under Tauri");
+    createStream: async (input: {
+      title: string;
+      summary?: string;
+      source: "existing" | "new" | "worktree";
+      ref?: string;
+      branch?: string;
+      startPointRef?: string;
+      worktreePath?: string;
+    }) => {
+      const slug = slugifyTitle(input.title);
+      switch (input.source) {
+        case "existing": {
+          if (!input.ref) throw new Error("createStream: missing ref for existing source");
+          return adaptStream(
+            unwrap(
+              await commands.createWorktree({
+                slug,
+                title: input.title,
+                branch: input.ref,
+                branchSource: input.ref,
+              }),
+            ),
+          );
+        }
+        case "new": {
+          if (!input.branch) throw new Error("createStream: missing branch for new source");
+          return adaptStream(
+            unwrap(
+              await commands.createWorktree({
+                slug,
+                title: input.title,
+                branch: input.branch,
+                branchSource: input.startPointRef ?? input.branch,
+              }),
+            ),
+          );
+        }
+        case "worktree":
+          throw new Error(
+            "Adopting an existing worktree on disk is not yet ported to Tauri",
+          );
+      }
     },
     closeThread: async (id: string) => adaptThread(unwrap(await commands.closeThread(id))),
     reopenThread: async (id: string) => adaptThread(unwrap(await commands.reopenThread(id))),
@@ -285,8 +339,8 @@ function buildDesktopAdapter(): DesktopApi {
     getChangeScopes: async (streamId?: string | null) => {
       const raw = unwrap(await commands.getChangeScopes(streamId ?? null));
       return {
-        staged: [] as never[],
-        unstaged: [] as never[],
+        staged: raw.staged,
+        unstaged: raw.unstaged,
         currentBranch: raw.current_branch ?? undefined,
         branchBase: raw.branch_base ?? undefined,
         upstream: raw.upstream ?? undefined,
