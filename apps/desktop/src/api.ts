@@ -1037,7 +1037,8 @@ export async function createWorkItem(
     priority?: WorkItemPriority;
   },
 ): Promise<ThreadWorkState> {
-  return desktopApi().createWorkItem(streamId, threadId, input);
+  unwrap(await commands.createWorkItem({ threadId, input: input as never }));
+  return getThreadWorkState(streamId, threadId);
 }
 
 export async function updateWorkItem(
@@ -1055,7 +1056,8 @@ export async function updateWorkItem(
     tags?: string | null;
   },
 ): Promise<ThreadWorkState> {
-  return desktopApi().updateWorkItem(streamId, threadId, itemId, changes);
+  unwrap(await commands.updateWorkItem({ id: itemId, changes: changes as never }));
+  return getThreadWorkState(streamId, threadId);
 }
 
 export async function deleteWorkItem(
@@ -1063,7 +1065,8 @@ export async function deleteWorkItem(
   threadId: string,
   itemId: string,
 ): Promise<ThreadWorkState> {
-  return desktopApi().deleteWorkItem(streamId, threadId, itemId);
+  unwrap(await commands.deleteWorkItem(itemId));
+  return getThreadWorkState(streamId, threadId);
 }
 
 export async function reorderWorkItems(
@@ -1071,7 +1074,8 @@ export async function reorderWorkItems(
   threadId: string,
   orderedItemIds: string[],
 ): Promise<ThreadWorkState> {
-  return desktopApi().reorderWorkItems(streamId, threadId, orderedItemIds);
+  unwrap(await commands.reorderWorkItems({ threadId, order: orderedItemIds }));
+  return getThreadWorkState(streamId, threadId);
 }
 
 export async function moveWorkItemToThread(
@@ -1079,13 +1083,18 @@ export async function moveWorkItemToThread(
   fromThreadId: string,
   itemId: string,
   toThreadId: string,
-  toStreamId?: string,
+  _toStreamId?: string,
 ): Promise<{ from: ThreadWorkState; to: ThreadWorkState }> {
-  return desktopApi().moveWorkItemToThread(streamId, fromThreadId, itemId, toThreadId, toStreamId);
+  unwrap(await commands.moveWorkItem({ id: itemId, threadId: toThreadId }));
+  const [from, to] = await Promise.all([
+    getThreadWorkState(streamId, fromThreadId),
+    getThreadWorkState(streamId, toThreadId),
+  ]);
+  return { from, to };
 }
 
 export async function getBacklogState(): Promise<BacklogState> {
-  return desktopApi().getBacklogState();
+  return unwrap(await commands.getBacklogState()) as unknown as BacklogState;
 }
 
 export async function createBacklogItem(input: {
@@ -1098,7 +1107,8 @@ export async function createBacklogItem(input: {
   category?: string | null;
   tags?: string | null;
 }): Promise<BacklogState> {
-  return desktopApi().createBacklogItem(input);
+  unwrap(await commands.createWorkItem({ threadId: null, input: input as never }));
+  return getBacklogState();
 }
 
 export async function updateBacklogItem(
@@ -1113,15 +1123,18 @@ export async function updateBacklogItem(
     tags?: string | null;
   },
 ): Promise<BacklogState> {
-  return desktopApi().updateBacklogItem(itemId, changes);
+  unwrap(await commands.updateWorkItem({ id: itemId, changes: changes as never }));
+  return getBacklogState();
 }
 
 export async function deleteBacklogItem(itemId: string): Promise<BacklogState> {
-  return desktopApi().deleteBacklogItem(itemId);
+  unwrap(await commands.deleteWorkItem(itemId));
+  return getBacklogState();
 }
 
 export async function reorderBacklog(orderedItemIds: string[]): Promise<BacklogState> {
-  return desktopApi().reorderBacklog(orderedItemIds);
+  unwrap(await commands.reorderWorkItems({ threadId: null, order: orderedItemIds }));
+  return getBacklogState();
 }
 
 export async function moveWorkItemToBacklog(
@@ -1129,7 +1142,12 @@ export async function moveWorkItemToBacklog(
   fromThreadId: string,
   itemId: string,
 ): Promise<{ from: ThreadWorkState; backlog: BacklogState }> {
-  return desktopApi().moveWorkItemToBacklog(streamId, fromThreadId, itemId);
+  unwrap(await commands.moveWorkItem({ id: itemId, threadId: null }));
+  const [from, backlog] = await Promise.all([
+    getThreadWorkState(streamId, fromThreadId),
+    getBacklogState(),
+  ]);
+  return { from, backlog };
 }
 
 export async function moveBacklogItemToThread(
@@ -1137,14 +1155,22 @@ export async function moveBacklogItemToThread(
   itemId: string,
   toThreadId: string,
 ): Promise<{ backlog: BacklogState; to: ThreadWorkState }> {
-  return desktopApi().moveBacklogItemToThread(streamId, itemId, toThreadId);
+  unwrap(await commands.moveWorkItem({ id: itemId, threadId: toThreadId }));
+  const [backlog, to] = await Promise.all([
+    getBacklogState(),
+    getThreadWorkState(streamId, toThreadId),
+  ]);
+  return { backlog, to };
 }
 
 export async function getGitLog(
   streamId: string,
   options?: { limit?: number; all?: boolean },
 ): Promise<import("./api-types.js").GitLogResult> {
-  return desktopApi().getGitLog(streamId, options);
+  const raw = unwrap(
+    await commands.getGitLog(streamId, options?.limit ?? null, options?.all ?? false),
+  );
+  return raw as unknown as import("./api-types.js").GitLogResult;
 }
 
 export async function getCommitDetail(
