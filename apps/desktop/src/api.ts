@@ -384,8 +384,26 @@ function buildDesktopAdapter(): DesktopApi {
         return { ok: false, reason: e instanceof Error ? e.message : String(e) };
       }
     },
-    setNativeMenu: async () => {},
-    onMenuCommand: () => () => {},
+    setNativeMenu: async (groups: unknown) => {
+      try {
+        unwrap(await commands.setNativeMenu(groups as never));
+      } catch {
+        // Don't break the UI if menu installation fails (e.g.
+        // platform doesn't support a particular accelerator).
+      }
+    },
+    onMenuCommand: (handler: (commandId: string) => void) => {
+      let stopped = false;
+      const unlistenPromise = listen("menu:command", (e) => {
+        if (stopped) return;
+        const payload = e.payload as { id?: string } | null;
+        if (payload?.id) handler(payload.id);
+      });
+      return () => {
+        stopped = true;
+        void unlistenPromise.then((u) => u());
+      };
+    },
     updateEditorFocus: async () => {},
     logUi: async (entry: {
       clientId?: string;

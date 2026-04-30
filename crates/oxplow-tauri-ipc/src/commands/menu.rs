@@ -1,0 +1,100 @@
+//! Native menu wiring.
+//!
+//! The renderer builds a `Vec<MenuGroupSnapshot>` from its
+//! `commands.ts` state machine and pushes it through
+//! `set_native_menu`. We translate it into a `tauri::menu::Menu`
+//! with one submenu per group and one menu item per command, then
+//! install it as the app menu. Menu activations forward to the
+//! renderer over the `menu:command` event channel as the original
+//! command id (e.g. `"file.save"`); the renderer's
+//! `subscribeMenuCommand` listener fires the matching handler.
+//!
+//! Only the macOS native menu bar is exercised today — on Windows
+//! and Linux Tauri renders the same items as a window menu.
+//! Accelerators come over verbatim from the snapshot; Tauri parses
+//! `Ctrl/Cmd+S`-style strings via its own accelerator codec.
+
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Wry};
+
+use crate::error::IpcError;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct MenuItemSnapshot {
+    pub id: String,
+    pub label: String,
+    pub shortcut: Option<String>,
+    pub enabled: bool,
+    pub checked: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct MenuGroupSnapshot {
+    pub id: String,
+    pub label: String,
+    pub items: Vec<MenuItemSnapshot>,
+}
+
+/// Replace the app's native menu with the supplied snapshot. Each
+/// activation fires `menu:command` with `{ id: "<command-id>" }` to
+/// the renderer.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_native_menu(
+    app: AppHandle,
+    groups: Vec<MenuGroupSnapshot>,
+) -> Result<(), IpcError> {
+    let menu = build_menu(&app, &groups)
+        .map_err(|e| IpcError::internal(format!("menu build: {e}")))?;
+    app.set_menu(menu)
+        .map_err(|e| IpcError::internal(format!("set menu: {e}")))?;
+    Ok(())
+}
+
+fn build_menu(app: &AppHandle, groups: &[MenuGroupSnapshot]) -> tauri::Result<Menu<Wry>> {
+    let mut menu = MenuBuilder::new(app);
+    for group in groups {
+        let mut submenu = SubmenuBuilder::new(app, &group.label);
+        for item in &group.items {
+            let mut builder = MenuItemBuilder::with_id(item.id.clone(), &item.label)
+                .enabled(item.enabled);
+            if let Some(shortcut) = item.shortcut.as_deref().filter(|s| !s.is_empty()) {
+                let normalized = normalize_accelerator(shortcut);
+                builder = builder.accelerator(normalized);
+            }
+            let menu_item = builder.build(app)?;
+            submenu = submenu.item(&menu_item);
+        }
+        let built = submenu.build()?;
+        menu = menu.item(&built);
+    }
+    menu.build()
+}
+
+/// The renderer ships accelerators in human-readable form
+/// (`"Ctrl/Cmd+S"`, `"Ctrl/Cmd+Shift+N"`). Tauri's accelerator
+/// codec accepts `CmdOrCtrl+S` for the same intent — translate.
+fn normalize_accelerator(s: &str) -> String {
+    s.replace("Ctrl/Cmd", "CmdOrCtrl")
+        .replace("Cmd/Ctrl", "CmdOrCtrl")
+}
+
+/// Install the menu-event forwarder. Called once at app startup
+/// from `main.rs`. Each menu activation re-emits as a Tauri event
+/// the renderer subscribes to.
+pub fn install_menu_handler(app: &AppHandle) {
+    let handle = app.clone();
+    app.on_menu_event(move |_app, event| {
+        let id = event.id().0.clone();
+        if let Err(err) = handle.emit("menu:command", MenuCommandEvent { id }) {
+            tracing::warn!(?err, "failed to emit menu:command");
+        }
+    });
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MenuCommandEvent {
+    id: String,
+}

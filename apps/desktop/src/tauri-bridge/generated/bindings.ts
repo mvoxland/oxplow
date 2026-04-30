@@ -381,6 +381,12 @@ export const commands = {
 	sendTerminalMessage: (sessionId: string, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("send_terminal_message", { sessionId, message })),
 	// Tear down the PTY and forwarder backing `session_id`. Idempotent.
 	closeTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_terminal_session", { sessionId })),
+	/**
+	 *  Replace the app's native menu with the supplied snapshot. Each
+	 *  activation fires `menu:command` with `{ id: "<command-id>" }` to
+	 *  the renderer.
+	 */
+	setNativeMenu: (groups: MenuGroupSnapshot[]) => typedError<null, IpcError>(__TAURI_INVOKE("set_native_menu", { groups })),
 };
 
 /* Types */
@@ -750,6 +756,20 @@ export type LspServerConfig = {
 	extensions: string[],
 	command: string,
 	args?: string[],
+};
+
+export type MenuGroupSnapshot = {
+	id: string,
+	label: string,
+	items: MenuItemSnapshot[],
+};
+
+export type MenuItemSnapshot = {
+	id: string,
+	label: string,
+	shortcut: string | null,
+	enabled: boolean,
+	checked: boolean | null,
 };
 
 export type MoveWorkItemRequest = {

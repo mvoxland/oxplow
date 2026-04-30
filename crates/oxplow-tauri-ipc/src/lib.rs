@@ -199,6 +199,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::terminal::open_terminal_session,
         commands::terminal::send_terminal_message,
         commands::terminal::close_terminal_session,
+        // menu
+        commands::menu::set_native_menu,
     ])
 }
 

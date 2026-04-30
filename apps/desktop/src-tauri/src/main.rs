@@ -64,6 +64,7 @@ fn main() {
             spawn_event_bridge(app.handle().clone(), event_bus.clone());
             spawn_lsp_event_bridge(app.handle().clone(), lsp_clients.clone());
             spawn_terminal_event_bridge(app.handle().clone(), terminal_sessions.clone());
+            oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
             Ok(())
         })
         .manage(state)
