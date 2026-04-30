@@ -1,10 +1,11 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import { listen } from "@tauri-apps/api/event";
-import type { DesktopApi, OxplowEvent } from "./api-types.js";
+import type { OxplowEvent } from "./api-types.js";
 
-// -- Legacy adapter helpers (now lives here). Inlined
-// here so the renderer-side compatibility layer lives in a single file.
-
+/// Convert the tauri-specta {status, data|error} envelope into a
+/// plain promise return. Errors arrive as IpcError objects with
+/// message/code; we surface message first so consumers can show
+/// the daemon's failure reason verbatim.
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
   const err = result.error as { message?: string; code?: string } | undefined;
@@ -34,14 +35,11 @@ function slugifyTitle(title: string): string {
   return base.length > 0 ? base : `stream-${Date.now()}`;
 }
 
-// adaptStream / adaptThread were dropped in the api.ts migration:
-// - Stream's synthesized `panes` / `resume` objects had zero
-//   readers (renderer code only reads working_pane / talking_pane
-//   directly).
-// - Thread's "closed" → "queued" status coercion was wrong; the
-//   rail only ever lists active+queued threads, and closed ones
-//   come from a separate listClosedThreads fetch.
-
+/// Map the bindings BackgroundTask shape to the renderer's
+/// flavor: dates as epoch-ms numbers (camelCase) and `result`
+/// pre-parsed from the JSON-encoded `result_json`. Stays in
+/// place because the renderer's task-list views still read
+/// startedAt / endedAt / result directly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function adaptBackgroundTask(t: any): any {
   if (!t) return t;
