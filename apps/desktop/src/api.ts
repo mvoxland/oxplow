@@ -895,7 +895,8 @@ export async function gitRebaseOnto(streamId: string, onto: string): Promise<Git
 }
 
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
-  return desktopApi().getWorkspaceContext();
+  const ctx = unwrap(await commands.getWorkspaceContext());
+  return { gitEnabled: ctx.is_git_repo };
 }
 
 export async function createStream(input:
@@ -903,7 +904,29 @@ export async function createStream(input:
   | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string }
   | { title: string; summary?: string; source: "worktree"; worktreePath: string },
 ): Promise<Stream> {
-  return desktopApi().createStream(input);
+  const slug = slugifyTitle(input.title);
+  switch (input.source) {
+    case "existing":
+      return unwrap(
+        await commands.createWorktree({
+          slug,
+          title: input.title,
+          branch: input.ref,
+          branchSource: input.ref,
+        }),
+      );
+    case "new":
+      return unwrap(
+        await commands.createWorktree({
+          slug,
+          title: input.title,
+          branch: input.branch,
+          branchSource: input.startPointRef ?? input.branch,
+        }),
+      );
+    case "worktree":
+      throw new Error("Adopting an existing worktree on disk is not yet ported to Tauri");
+  }
 }
 
 export async function listAdoptableWorktrees(): Promise<
@@ -923,19 +946,32 @@ export async function checkoutStreamBranch(streamId: string, branch: string): Pr
 }
 
 export async function getThreadState(streamId: string): Promise<ThreadState> {
-  return desktopApi().getThreadState(streamId);
+  return unwrap(await commands.getThreadState(streamId)) as unknown as ThreadState;
 }
 
 export async function createThread(streamId: string, title: string): Promise<ThreadState> {
-  return desktopApi().createThread(streamId, title);
+  unwrap(
+    await commands.createThread({ streamId, title, paneTarget: null }),
+  );
+  return getThreadState(streamId);
 }
 
-export async function reorderThread(streamId: string, threadId: string, targetIndex: number): Promise<ThreadState> {
-  return desktopApi().reorderThread(streamId, threadId, targetIndex);
+export async function reorderThread(
+  streamId: string,
+  _threadId: string,
+  _targetIndex: number,
+): Promise<ThreadState> {
+  // Legacy "single move" call: the renderer now sends a full
+  // ordered list to reorderThreads. This helper stays for source
+  // compat but just refetches; callers who need to actually
+  // reorder should use reorderThreads.
+  return getThreadState(streamId);
 }
 
 export async function reorderThreads(streamId: string, orderedThreadIds: string[]): Promise<void> {
-  return desktopApi().reorderThreads(streamId, orderedThreadIds);
+  unwrap(
+    await commands.reorderThreadQueue({ streamId, order: orderedThreadIds }),
+  );
 }
 
 export async function reorderStreams(orderedStreamIds: string[]): Promise<void> {
@@ -943,19 +979,23 @@ export async function reorderStreams(orderedStreamIds: string[]): Promise<void> 
 }
 
 export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {
-  return desktopApi().selectThread(streamId, threadId);
+  unwrap(await commands.selectThread({ streamId, threadId }));
+  return getThreadState(streamId);
 }
 
-export async function promoteThread(_streamId: string, threadId: string): Promise<ThreadState> {
-  return desktopApi().promoteThread(_streamId, threadId);
+export async function promoteThread(streamId: string, threadId: string): Promise<ThreadState> {
+  unwrap(await commands.promoteThread(threadId));
+  return getThreadState(streamId);
 }
 
-export async function closeThread(_streamId: string, threadId: string): Promise<ThreadState> {
-  return desktopApi().closeThread(_streamId, threadId);
+export async function closeThread(streamId: string, threadId: string): Promise<ThreadState> {
+  unwrap(await commands.closeThread(threadId));
+  return getThreadState(streamId);
 }
 
-export async function reopenThread(_streamId: string, threadId: string): Promise<ThreadState> {
-  return desktopApi().reopenThread(_streamId, threadId);
+export async function reopenThread(streamId: string, threadId: string): Promise<ThreadState> {
+  unwrap(await commands.reopenThread(threadId));
+  return getThreadState(streamId);
 }
 
 export async function listClosedThreads(streamId: string): Promise<Thread[]> {
@@ -980,8 +1020,8 @@ export async function setThreadPrompt(
   return [];
 }
 
-export async function getThreadWorkState(streamId: string, threadId: string): Promise<ThreadWorkState> {
-  return desktopApi().getThreadWorkState(streamId, threadId);
+export async function getThreadWorkState(_streamId: string, threadId: string): Promise<ThreadWorkState> {
+  return unwrap(await commands.getThreadWorkState(threadId)) as unknown as ThreadWorkState;
 }
 
 export async function createWorkItem(
