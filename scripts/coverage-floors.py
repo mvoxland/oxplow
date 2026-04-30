@@ -36,7 +36,7 @@ FLOORS = {
     # the current baseline and should be raised as integration tests
     # land. See task #78 for the harness that will move these up.
     "oxplow-mcp": 25.0,
-    "oxplow-tauri-ipc": 5.0,
+    "oxplow-tauri-ipc": 12.0,
 }
 
 CRATE_RE = re.compile(r"/crates/([^/]+)/")
