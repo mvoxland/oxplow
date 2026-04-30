@@ -1200,23 +1200,21 @@ export async function gitBlame(
   return desktopApi().gitBlame(streamId, path);
 }
 
-// Legacy LocalBlameEntry shape — wider than the bindings type so the
-// editor's blame margin can attach work-item attribution and parsed
-// git metadata. The runtime adapter currently only fills in fields
-// the bindings provide; the optional `workItem` overlay arrives once
-// the snapshot blob store lands.
+/// Renderer-side LocalBlameEntry: the bindings shape plus an
+/// optional `workItem` overlay the editor's blame margin paints
+/// when a snapshot/work-item attribution exists. The runtime
+/// today only populates {line, source, git}; `workItem` arrives
+/// once the snapshot blob store grows attribution lookup. Until
+/// then the editor's local-blame branch is dormant but typesafe.
 export interface LocalBlameEntry {
   line: number;
-  capturedAt: string;
-  path: string;
-  preview: string;
-  kind: "local" | "git";
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  git?: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  workItem?: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
+  source: string;
+  git: import("./tauri-bridge/index.js").BlameLine | null;
+  workItem?: {
+    id: string;
+    title: string;
+    endedAt: string;
+  };
 }
 
 export async function localBlame(
