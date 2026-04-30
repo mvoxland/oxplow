@@ -1,74 +1,49 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { classifyExternalUrl, describeRejection } from "../external-url-allowlist.js";
-
-// React's built-in `webview` JSX intrinsic carries the Electron-style
-// attributes we need (partition, webpreferences, src). We only set the
-// attributes that lock the guest down further; `allowpopups`,
-// `disablewebsecurity`, `nodeintegration`, `plugins` are deliberately
-// left at default-off.
+import { desktopBridge } from "../api.js";
 
 export interface ExternalUrlPageProps {
   url: string;
-  /** Right-click "Open in browser" handler — wired by the host. */
+  /** "Open in browser" handler — wired by the host. */
   onOpenInBrowser?: (url: string) => void;
 }
 
-const PARTITION = "persist:external";
-
 /**
- * Renders an external http(s) page inside a sandboxed Electron <webview>.
+ * Tauri 2 doesn't embed a browser-tag inside a webview. External URL
+ * tabs open the link in a sandboxed `WebviewWindow` (capability
+ * `external-url`, see `apps/desktop/src-tauri/capabilities/`) and
+ * this React page becomes a status / re-open panel.
  *
- * Security stance (also enforced redundantly by main process; see
- * .context/agent-model.md "External URL tabs"):
- *
- * - `contextIsolation=yes,sandbox=yes` in webpreferences forces the
- *   guest into a sandbox process with an isolated context — no Node,
- *   no preload exposure of app APIs.
- * - `partition="persist:external"` keeps cookies/storage isolated from
- *   the app session so authenticated app endpoints can't leak to
- *   embedded sites.
- * - URL is gated through `classifyExternalUrl` before mount — anything
- *   non-http(s) renders a refusal instead of attaching the webview.
- * - No `allowpopups` — popups are denied; window.open targets that
- *   should open route through the main process's setWindowOpenHandler
- *   which goes through the same allowlist.
+ * Security stance preserved by the new model:
+ * - The URL is gated through `classifyExternalUrl` before any open
+ *   call; non-http(s) renders a refusal in this page.
+ * - The opened window inherits zero oxplow commands and zero plugin
+ *   permissions — it's effectively a browser tab.
+ * - Cookies/storage isolation is provided by Tauri's per-window
+ *   webview context, replacing the Electron `partition` mechanism.
  */
 export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) {
   const verdict = classifyExternalUrl(url);
-  const webviewRef = useRef<HTMLElement | null>(null);
-  const [pageTitle, setPageTitle] = useState<string>(verdict.ok ? verdict.url : "External link");
-  const [loading, setLoading] = useState<boolean>(verdict.ok);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
 
+  async function openInWindow() {
+    if (!verdict.ok) return;
+    setOpening(true);
+    setOpenError(null);
+    const result = await desktopBridge().openExternalUrl(verdict.url);
+    setOpening(false);
+    if (!result.ok) {
+      setOpenError(result.reason ?? "Failed to open link");
+    }
+  }
+
+  // Auto-open once on mount when the URL is allowed.
   useEffect(() => {
-    const el = webviewRef.current;
-    if (!el || !verdict.ok) return;
-    const onTitle = (event: Event) => {
-      const next = (event as unknown as { title?: string }).title;
-      if (typeof next === "string" && next.length > 0) setPageTitle(next);
-    };
-    const onStart = () => { setLoading(true); setLoadError(null); };
-    const onStop = () => { setLoading(false); };
-    const onFail = (event: Event) => {
-      const detail = event as unknown as { errorDescription?: string; errorCode?: number; isMainFrame?: boolean };
-      // Sub-frame failures are common (analytics blocked, etc.) and not
-      // worth surfacing — only flag main-frame load failures.
-      if (detail.isMainFrame === false) return;
-      setLoading(false);
-      setLoadError(detail.errorDescription ?? "Failed to load");
-    };
-    el.addEventListener("page-title-updated", onTitle);
-    el.addEventListener("did-start-loading", onStart);
-    el.addEventListener("did-stop-loading", onStop);
-    el.addEventListener("did-fail-load", onFail);
-    return () => {
-      el.removeEventListener("page-title-updated", onTitle);
-      el.removeEventListener("did-start-loading", onStart);
-      el.removeEventListener("did-stop-loading", onStop);
-      el.removeEventListener("did-fail-load", onFail);
-    };
-  }, [verdict.ok]);
+    if (verdict.ok) void openInWindow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
 
   if (!verdict.ok) {
     const reason = describeRejection(verdict.reason);
@@ -100,9 +75,8 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
   }
 
   const safeUrl = verdict.url;
-  const chips = [
-    { label: loading ? "loading…" : new URL(safeUrl).host },
-  ];
+  const host = new URL(safeUrl).host;
+  const chips = [{ label: opening ? "opening…" : host }];
   const actions = onOpenInBrowser ? (
     <button
       type="button"
@@ -123,9 +97,40 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
   ) : null;
 
   return (
-    <Page testId="page-external-url" title={pageTitle} kind="external-url" chips={chips} actions={actions}>
-      <div style={{ position: "relative", height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
-        {loadError ? (
+    <Page testId="page-external-url" title={host} kind="external-url" chips={chips} actions={actions}>
+      <div
+        data-testid="page-external-url-status"
+        style={{
+          padding: "16px 20px",
+          maxWidth: 720,
+          color: "var(--text-secondary)",
+          fontSize: 13,
+        }}
+      >
+        <div style={{ marginBottom: 8, color: "var(--text-primary)" }}>
+          Opened in a separate sandboxed window.
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          External pages run outside the app's webview so they can't reach oxplow's
+          IPC surface. Cookies and storage are isolated per host.
+        </div>
+        <pre
+          style={{
+            background: "var(--surface-app)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 6,
+            padding: "8px 10px",
+            fontSize: 12,
+            color: "var(--text-primary)",
+            margin: 0,
+            marginBottom: 12,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {safeUrl}
+        </pre>
+        {openError ? (
           <div
             data-testid="page-external-url-error"
             style={{
@@ -133,20 +138,30 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
               background: "var(--severity-critical-soft, var(--surface-app))",
               color: "var(--severity-critical)",
               fontSize: 12,
-              borderBottom: "1px solid var(--border-subtle)",
+              borderRadius: 6,
+              marginBottom: 12,
             }}
           >
-            {loadError}
+            {openError}
           </div>
         ) : null}
-        <webview
-          ref={(el: HTMLElement | null) => { webviewRef.current = el; }}
-          src={safeUrl}
-          partition={PARTITION}
-          webpreferences="contextIsolation=yes,sandbox=yes,nodeIntegration=no"
-          data-testid="page-external-url-webview"
-          style={{ flex: 1, minHeight: 0, width: "100%", border: 0, background: "white" }}
-        />
+        <button
+          type="button"
+          data-testid="page-external-url-reopen"
+          onClick={() => void openInWindow()}
+          disabled={opening}
+          style={{
+            padding: "4px 10px",
+            background: "var(--surface-tab-inactive)",
+            color: "var(--text-primary)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 6,
+            cursor: opening ? "default" : "pointer",
+            fontSize: 12,
+          }}
+        >
+          {opening ? "Opening…" : "Open again"}
+        </button>
       </div>
     </Page>
   );

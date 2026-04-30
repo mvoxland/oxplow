@@ -1,12 +1,11 @@
 # External URL tabs
 
-
 What this doc covers: the security model for the in-app `external-url`
 tab — when external links open inside oxplow instead of the OS browser,
-how the embedded webview is sandboxed, and where each invariant is
-enforced. Read this before changing anything that loosens the lockdown
-(adding webPreferences, allowing more schemes, exposing IPC to the
-guest, etc.).
+how the spawned webview window is sandboxed, and where each invariant
+is enforced. Read this before changing anything that loosens the
+lockdown (adding new schemes, broadening the capability, exposing
+extra plugins, etc.).
 
 ## Why open external links in-app at all
 
@@ -18,23 +17,38 @@ try to talk to app-internal endpoints, exfiltrate cookies/auth, or
 escape the sandbox into the host renderer. Defense in depth keeps the
 trade safe.
 
+## How it works under Tauri 2
+
+Tauri 2 doesn't render an Electron-style `<webview>` tag inside the
+host renderer. Each external URL opens as its own
+`tauri::WebviewWindowBuilder` window that runs **outside** the
+oxplow webview entirely. The new window inherits the `external-url`
+capability (defined in
+`apps/desktop/src-tauri/capabilities/external-url.json`), which
+explicitly grants **zero oxplow commands and zero plugin permissions**
+— it behaves like a sandboxed browser tab.
+
+`apps/desktop/src/pages/ExternalUrlPage.tsx` is no longer a webview
+host. It calls `desktopBridge().openExternalUrl(url)` (which dispatches
+to `commands::webview::open_external_url` in the Rust shell), then
+renders a small status panel with a "re-open" button. The actual page
+content lives in the spawned window, isolated from the main webview.
+
 ## Security stance
 
 | Layer | Where | What it enforces |
 |---|---|---|
-| Scheme allowlist (renderer) | `apps/desktop/src/external-url-allowlist.ts` | Only http(s) URLs get a tab. Everything else (file:, javascript:, data:, blob:, app:, custom protocols) returns a structured rejection that surfaces a refusal in `ExternalUrlPage` instead of attaching the webview. |
-| Scheme allowlist (main) | `oxplow:openExternalUrl` IPC in `apps/desktop/src-tauri/src/main.rs` | Re-validates before calling `shell.openExternal`. The renderer can't smuggle a non-http(s) URL into the OS browser through this IPC. |
-| Per-tag webPreferences | `apps/desktop/src/pages/ExternalUrlPage.tsx` | `<webview webpreferences="contextIsolation=yes,sandbox=yes,nodeIntegration=no">` plus `partition="persist:external"`. First line of defense. |
-| `will-attach-webview` (main) | `crates/oxplow-app/src/external-content-lockdown.ts` | Hard-strips `preload`, forces `sandbox=true`/`contextIsolation=true`/`webSecurity=true`/`allowRunningInsecureContent=false`/`experimentalFeatures=false`/`nodeIntegration*=false`, and pins `params.partition` to `persist:external` regardless of what the JSX requested. Non-http(s) `params.src` is rewritten to `about:blank` at the boundary. |
-| Guest hardening | `applyGuestContentsHardening` (same file) | On `did-attach-webview`: `setWindowOpenHandler` denies popups (http(s) intents fall through to `shell.openExternal`); `will-navigate` and `will-redirect` block non-http(s); permission requests + checks deny by default; `devtools-opened` is auto-closed in packaged builds. |
-| Host renderer pin | `web-contents-created` `will-navigate` listener | The host frame can't be navigated away from `file://` (bundled index.html) or localhost. Anything else is blocked, with http(s) routed to the OS browser instead of taking over the app. |
-| Session policy | `configureExternalSession()` | On `persist:external`: strips Authorization / Cookie / Proxy-Authorization on outbound requests (`sanitizeOutboundHeaders`), pins `Referrer-Policy: strict-origin-when-cross-origin`, blocks any request aimed at app-internal origins (`isInternalUrl`), and injects `Content-Security-Policy: frame-ancestors 'none';` when the upstream sent no CSP. |
+| Scheme allowlist (renderer) | `apps/desktop/src/external-url-allowlist.ts` | Only http(s) URLs reach the bridge call. Anything else (file:, javascript:, data:, blob:, custom protocols) returns a structured rejection that surfaces a refusal in `ExternalUrlPage` instead of opening a window. |
+| Scheme allowlist (Rust) | `crates/oxplow-tauri-ipc/src/commands/webview.rs` (`open_external_url`) | Re-validates `http://` / `https://` prefix before constructing the `WebviewWindowBuilder`. The renderer can't smuggle a non-http(s) URL through the IPC. |
+| Capability scope | `apps/desktop/src-tauri/capabilities/external-url.json` | `permissions: []` — no `core:default`, no plugin defaults, no oxplow commands. The window glob `ext-url-*` matches the label format `open_external_url` assigns. |
+| Capability listing | `apps/desktop/src-tauri/tauri.conf.json` `app.security.capabilities` | Capabilities are listed explicitly so a stray file in `capabilities/` cannot widen the surface — the directory's auto-enable behavior is bypassed. |
+| Window labelling | `format!("ext-url-{uuid}")` | The label namespace is fixed; the capability glob (`ext-url-*`) only matches windows the IPC command itself created. |
+| OS-browser fallback | `tauri-plugin-shell` capability `shell:allow-open` | Only the URL-open intent is granted; arbitrary `shell:execute` is restricted to the tmux/git/typescript-language-server allowlist in `main-window.json`. |
 
-The intent is **defense in depth**: the renderer-side attribute set is
-the first gate, but the main-process `will-attach-webview` hook is the
-authoritative gate — even if a future renderer change accidentally
-loosens the JSX attributes, the main process re-applies the policy
-before the guest webContents starts.
+The intent is **isolation by separation**: the external page never
+shares a webview process or capability set with the oxplow renderer,
+so even a full sandbox escape inside the external window cannot reach
+oxplow's IPC surface.
 
 ## Modules
 
@@ -42,10 +56,9 @@ before the guest webContents starts.
 |---|---|
 | `apps/desktop/src/external-url-allowlist.ts` | Pure: `classifyExternalUrl(url)` → `{ ok, url } \| { ok: false, reason }`, `isAllowedExternalUrl`, `describeRejection`. Default policy: http(s) only. Tested in `external-url-allowlist.test.ts`. |
 | `apps/desktop/src/tabs/pageRefs.ts` | `externalUrlRef(url)` — must be called only after passing through the allowlist. |
-| `apps/desktop/src/pages/ExternalUrlPage.tsx` | The `<webview>`-rendering page. Loading / error states, "Open in browser" header action, page-title-updated wiring. |
-| `crates/oxplow-app/src/external-content-policy.ts` | Pure: `isInternalUrl`, `sanitizeOutboundHeaders`, `withInjectedCsp`, `EXTERNAL_PARTITION`. Tested in `external-content-policy.test.ts`. |
-| `crates/oxplow-app/src/external-content-lockdown.ts` | Wires the pure policy into Electron: `web-contents-created` / `will-attach-webview` / `did-attach-webview` / `webRequest` hooks on the external partition. Registered once from `main.ts` after `app.whenReady()`. |
-| `apps/desktop/src-tauri/src/main.rs` (`oxplow:openExternalUrl`) | IPC for routing http(s) URLs to `shell.openExternal`, allowlist-gated. |
+| `apps/desktop/src/pages/ExternalUrlPage.tsx` | Status / re-open panel; auto-invokes `desktopBridge().openExternalUrl(url)` on mount. No `<webview>` element. |
+| `crates/oxplow-tauri-ipc/src/commands/webview.rs` | `open_external_url(url)` Tauri command. Validates scheme, generates `ext-url-<uuid>` label, builds the new `WebviewWindow`. |
+| `apps/desktop/src-tauri/capabilities/external-url.json` | Empty-permission capability; matches `ext-url-*` window labels. |
 
 ## Adding a new scheme to the allowlist
 
@@ -54,18 +67,14 @@ allowlist is intentionally narrow. If a feature needs a new scheme:
 
 1. Update `ALLOWED_SCHEMES` in `apps/desktop/src/external-url-allowlist.ts` and
    add tests covering the new scheme + a representative reject case.
-2. Decide whether the new scheme should also be allowed by the host's
-   `will-navigate` host-frame guard in `external-content-lockdown.ts` —
-   in most cases the answer is no.
-3. Audit `INTERNAL_HOST_PATTERNS` to see whether the new scheme could
-   slip past the internal-origin block.
-4. Update this doc.
+2. Update the same scheme check in `commands/webview.rs::open_external_url`.
+3. Update this doc.
 
-## Adding a new origin block
+## Loosening the capability
 
-The internal-origin blocklist (`INTERNAL_HOST_PATTERNS` in
-`external-content-policy.ts`) is over-specified on purpose: easier to
-add a new pattern than to debug a leak through an over-broad rule. If
-the renderer starts binding a new dev port or custom scheme, add it to
-the list and to the test file. Don't expand to wildcards (`*.local`,
-`172.*.*.*`) — they'll bite legitimate external content.
+The `external-url` capability is the load-bearing isolation layer. If
+a feature truly needs to expose something to external pages, prefer
+adding a *new* capability with a different window-label namespace
+(e.g. `trusted-embed-*`) rather than editing the existing one. Keep
+the empty-permission `ext-url-*` capability around so anonymous
+external links never gain new privileges.

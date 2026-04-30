@@ -15,13 +15,14 @@ touches roughly seven files. They sit in this order:
    never edit a prior entry. `runMigrations` runs them inside a
    transaction and updates `PRAGMA user_version`.
 
-2. **Store class** — `crates/oxplow-db/src/<thing>-store.ts`. Wraps the SQLite
-   connection (`getStateDatabase(projectDir)`). Exposes typed read/write
-   methods, fires `subscribe()` listeners via the shared `StoreEmitter`
-   (`crates/oxplow-db/src/store-emitter.ts`) on changes, validates inputs
-   (kinds, statuses, length limits) before writing. Don't reimplement
-   the subscribe/emit pattern — instantiate `StoreEmitter<YourChange>`
-   in the constructor and delegate.
+2. **Store class** — `crates/oxplow-db/src/<thing>_store.rs`. Wraps a
+   `Database` handle (`Database::open(...)`). Exposes typed read/write
+   methods on the relevant `*Store` trait from `oxplow-domain`,
+   validates inputs (kinds, statuses, length limits) before writing.
+   Cross-store change fan-out goes through the shared `EventBus`
+   (`crates/oxplow-app/src/events.rs`); stores call `events.emit(...)`
+   with the matching `OxplowEvent` variant rather than maintaining
+   their own subscriber list.
 
 3. **Runtime method** — `crates/oxplow-app/src/lib.rs`. Adds a method to
    `Services` that resolves stream/thread as needed and delegates
@@ -134,16 +135,20 @@ statements inside a single `db.transaction()` block. Don't inline SQL.
 
 ## Tests
 
-Each store has a colocated `bun:test` file
-(`crates/oxplow-db/src/<thing>-store.test.ts`). Tests use `mkdtempSync` to
-spin up a fresh project dir and exercise the public store API. Cross-
-store / Stop-hook / MCP behavior goes in
-`crates/oxplow-app/src/runtime.test.ts`. Run with `bun test <path>`.
+Each store has Rust unit tests inline at the bottom of its source
+file (`crates/oxplow-db/src/<thing>_store.rs`, `#[cfg(test)] mod
+tests`). Tests use `Database::in_memory()` for an in-process SQLite
+or a `tempfile::tempdir()` for file-backed cases. Cross-store /
+Stop-hook / MCP behavior lives in `crates/oxplow-app/src/lib.rs`'s
+`#[cfg(test)] mod tests` and the integration tests under
+`crates/oxplow-app/tests/`. Run with `cargo test -p <crate>` or
+`cargo test --workspace`.
 
-Don't mock the DB — every store test hits a real SQLite file. Migrations
-are tested in `crates/oxplow-db/src/migrations.test.ts`; if you add a new
-migration, add a test that runs it from a clean state and asserts the
-expected schema.
+Don't mock the DB — every store test hits a real SQLite handle.
+Migrations are tested alongside `Database::open` in
+`crates/oxplow-db/src/database.rs`; if you add a new migration,
+add a test that runs it from a clean state and asserts the expected
+schema.
 
 ## Snapshot store
 
@@ -248,7 +253,7 @@ UI). Active producers:
   parallel with the existing `code-quality.scanned` event flow. The
   scan-status strip in CodeQualityPanel keeps its panel-local spinner;
   the bottom-bar row is the global indicator. Indeterminate.
-- **LSP cold start** — `LspSessionManager` (`crates/oxplow-lsp/src/lsp.ts`) takes
+- **LSP cold start** — `LspSessionManager` (`crates/oxplow-app/src/lsp_sessions.rs` over `crates/oxplow-lsp/src/proxy.rs`) takes
   optional `onInitializeStart` / `onInitializeEnd` hooks. The runtime
   wires them to `start`/`complete`. Indeterminate.
 - **Notes wiki resync** — `NotesWatcher.start` (`crates/oxplow-fs-watch/src/lib.rs`)

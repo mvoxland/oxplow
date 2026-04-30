@@ -1905,9 +1905,7 @@ export function App() {
             navigationTarget={editorNavigationTarget?.path === path ? editorNavigationTarget : null}
             onNavigateToLocation={handleNavigateToLocation}
             openFileOrder={currentSession.openOrder}
-            openFiles={Object.fromEntries(
-              (currentSession.files ?? []).map((f) => [f.path, f]),
-            )}
+            openFiles={currentSession.files}
             onRevealCommit={handleRevealCommit}
             onRevealWorkItem={handleRequestEditWorkItem}
             onCompareWithClipboard={handleCompareWithClipboard}
@@ -1982,9 +1980,7 @@ export function App() {
               navigationTarget={editorNavigationTarget?.path === path ? editorNavigationTarget : null}
               onNavigateToLocation={handleNavigateToLocation}
               openFileOrder={currentSession.openOrder}
-              openFiles={Object.fromEntries(
-                (currentSession.files ?? []).map((f) => [f.path, f]),
-              )}
+              openFiles={currentSession.files}
               onRevealCommit={handleRevealCommit}
               onRevealWorkItem={handleRequestEditWorkItem}
               onCompareWithClipboard={handleCompareWithClipboard}

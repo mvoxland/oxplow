@@ -22,3 +22,34 @@ pub async fn app_version() -> Result<AppVersion, IpcError> {
 pub async fn ping() -> Result<&'static str, IpcError> {
     Ok("pong")
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct UiLogEntry {
+    #[serde(rename = "clientId")]
+    pub client_id: Option<String>,
+    pub level: String,
+    pub message: String,
+    /// JSON-encoded structured context (the renderer stringifies its
+    /// own object so the boundary is plain `Option<String>`).
+    pub context: Option<String>,
+    pub timestamp: Option<String>,
+}
+
+/// Forward a UI-side log line into the daemon's tracing pipeline.
+/// The renderer's logger.ts installs `console.log/warn/error`
+/// proxies that call this; without it those logs never leave the
+/// renderer's devtools.
+#[tauri::command]
+#[specta::specta]
+pub async fn log_ui(entry: UiLogEntry) -> Result<(), IpcError> {
+    let context = entry.context.clone().unwrap_or_default();
+    let level = entry.level.to_lowercase();
+    let client = entry.client_id.as_deref().unwrap_or("?");
+    match level.as_str() {
+        "error" => tracing::error!(target: "ui", client, %context, "{}", entry.message),
+        "warn" => tracing::warn!(target: "ui", client, %context, "{}", entry.message),
+        "debug" => tracing::debug!(target: "ui", client, %context, "{}", entry.message),
+        _ => tracing::info!(target: "ui", client, %context, "{}", entry.message),
+    }
+    Ok(())
+}

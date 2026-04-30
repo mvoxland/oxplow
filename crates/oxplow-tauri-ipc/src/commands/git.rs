@@ -12,6 +12,31 @@ fn project_dir(state: &tauri::State<'_, AppState>) -> std::path::PathBuf {
     state.layout.project_dir.clone()
 }
 
+/// Resolve the working directory a git op should run against. When
+/// `stream_id` is provided and matches a registered stream, the
+/// stream's worktree path wins. Otherwise we fall back to the
+/// project root, matching the pre-per-stream behavior. Worktree
+/// paths recorded as relative are resolved against the project dir.
+async fn resolve_repo_dir(
+    state: &tauri::State<'_, AppState>,
+    stream_id: Option<&str>,
+) -> std::path::PathBuf {
+    let Some(id) = stream_id else {
+        return project_dir(state);
+    };
+    let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
+    if let Ok(streams) = store.list().await {
+        if let Some(s) = streams.into_iter().find(|s| s.id.as_str() == id) {
+            let raw = std::path::PathBuf::from(&s.worktree_path);
+            if raw.is_absolute() {
+                return raw;
+            }
+            return state.layout.project_dir.join(raw);
+        }
+    }
+    project_dir(state)
+}
+
 async fn run_blocking_io<R>(
     f: impl FnOnce() -> std::io::Result<R> + Send + 'static,
 ) -> Result<R, IpcError>
@@ -54,9 +79,10 @@ pub async fn get_ahead_behind(
 #[specta::specta]
 pub async fn append_to_gitignore(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     entry: String,
 ) -> Result<(), IpcError> {
-    let path = state.layout.project_dir.clone();
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     tokio::task::spawn_blocking(move || oxplow_git::append_to_gitignore(&path, &entry))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?
@@ -68,9 +94,10 @@ pub async fn append_to_gitignore(
 #[specta::specta]
 pub async fn restore_path(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     path: String,
 ) -> Result<(), IpcError> {
-    let project = state.layout.project_dir.clone();
+    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
     tokio::task::spawn_blocking(move || oxplow_git::restore_path(&project, &path))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?
@@ -87,16 +114,20 @@ pub fn _capture_git_operation_kind() -> GitOperationKind {
 #[specta::specta]
 pub async fn git_fetch(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     remote: Option<String>,
 ) -> Result<GitOpResult, IpcError> {
-    let path = project_dir(&state);
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::fetch(&path, remote.as_deref())).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn git_pull(state: tauri::State<'_, AppState>) -> Result<GitOpResult, IpcError> {
-    let path = project_dir(&state);
+pub async fn git_pull(
+    state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
+) -> Result<GitOpResult, IpcError> {
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::pull(&path)).await
 }
 
@@ -104,17 +135,21 @@ pub async fn git_pull(state: tauri::State<'_, AppState>) -> Result<GitOpResult, 
 #[specta::specta]
 pub async fn git_pull_remote_into_current(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     remote: String,
     branch: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = project_dir(&state);
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::pull_remote_into_current(&path, &remote, &branch)).await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn git_push(state: tauri::State<'_, AppState>) -> Result<GitOpResult, IpcError> {
-    let path = project_dir(&state);
+pub async fn git_push(
+    state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
+) -> Result<GitOpResult, IpcError> {
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::push(&path)).await
 }
 
@@ -122,10 +157,11 @@ pub async fn git_push(state: tauri::State<'_, AppState>) -> Result<GitOpResult, 
 #[specta::specta]
 pub async fn git_push_current_to(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     remote: String,
     branch: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = project_dir(&state);
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::push_current_to(&path, &remote, &branch)).await
 }
 
@@ -133,9 +169,10 @@ pub async fn git_push_current_to(
 #[specta::specta]
 pub async fn git_merge_into(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     source: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = project_dir(&state);
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::merge(&path, &source)).await
 }
 
@@ -143,9 +180,10 @@ pub async fn git_merge_into(
 #[specta::specta]
 pub async fn git_rebase_onto(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     onto: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = project_dir(&state);
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::rebase(&path, &onto)).await
 }
 
@@ -153,9 +191,10 @@ pub async fn git_rebase_onto(
 #[specta::specta]
 pub async fn git_commit_all(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     message: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = project_dir(&state);
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::commit_all(&path, &message)).await
 }
 
@@ -163,9 +202,10 @@ pub async fn git_commit_all(
 #[specta::specta]
 pub async fn git_add_path(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     path: String,
 ) -> Result<GitOpResult, IpcError> {
-    let project = project_dir(&state);
+    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
     run_blocking_io(move || oxplow_git::add_path(&project, &path)).await
 }
 
@@ -242,8 +282,9 @@ pub async fn local_blame(
 #[specta::specta]
 pub async fn get_change_scopes(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
 ) -> Result<ChangeScopes, IpcError> {
-    let path = project_dir(&state);
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     Ok(tokio::task::spawn_blocking(move || oxplow_git::get_change_scopes(&path))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?)

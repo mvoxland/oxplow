@@ -189,21 +189,37 @@ function buildDesktopAdapter(): DesktopApi {
       unwrap(await commands.renameBranch(from, to)),
     deleteGitBranch: async (branch: string, force?: boolean) =>
       unwrap(await commands.deleteBranch(branch, force ?? false)),
-    gitAppendToGitignore: async (entry: string) =>
-      unwrap(await commands.appendToGitignore(entry)),
-    gitRestorePath: async (path: string) => unwrap(await commands.restorePath(path)),
-    gitFetch: async (remote?: string | null) =>
-      unwrap(await commands.gitFetch(remote ?? null)),
-    gitPull: async () => unwrap(await commands.gitPull()),
-    gitPullRemoteIntoCurrent: async (remote: string, branch: string) =>
-      unwrap(await commands.gitPullRemoteIntoCurrent(remote, branch)),
-    gitPush: async () => unwrap(await commands.gitPush()),
-    gitPushCurrentTo: async (remote: string, branch: string) =>
-      unwrap(await commands.gitPushCurrentTo(remote, branch)),
-    gitMergeInto: async (source: string) => unwrap(await commands.gitMergeInto(source)),
-    gitRebaseOnto: async (onto: string) => unwrap(await commands.gitRebaseOnto(onto)),
-    gitCommitAll: async (message: string) => unwrap(await commands.gitCommitAll(message)),
-    gitAddPath: async (path: string) => unwrap(await commands.gitAddPath(path)),
+    gitAppendToGitignore: async (streamId: string | null | undefined, entry: string) =>
+      unwrap(await commands.appendToGitignore(streamId ?? null, entry)),
+    gitRestorePath: async (streamId: string | null | undefined, path: string) =>
+      unwrap(await commands.restorePath(streamId ?? null, path)),
+    gitFetch: async (streamId: string | null | undefined, remote?: string | null) =>
+      unwrap(await commands.gitFetch(streamId ?? null, remote ?? null)),
+    gitPull: async (streamId: string | null | undefined) =>
+      unwrap(await commands.gitPull(streamId ?? null)),
+    gitPullRemoteIntoCurrent: async (
+      streamId: string | null | undefined,
+      remote: string,
+      branch: string,
+    ) =>
+      unwrap(
+        await commands.gitPullRemoteIntoCurrent(streamId ?? null, remote, branch),
+      ),
+    gitPush: async (streamId: string | null | undefined) =>
+      unwrap(await commands.gitPush(streamId ?? null)),
+    gitPushCurrentTo: async (
+      streamId: string | null | undefined,
+      remote: string,
+      branch: string,
+    ) => unwrap(await commands.gitPushCurrentTo(streamId ?? null, remote, branch)),
+    gitMergeInto: async (streamId: string | null | undefined, source: string) =>
+      unwrap(await commands.gitMergeInto(streamId ?? null, source)),
+    gitRebaseOnto: async (streamId: string | null | undefined, onto: string) =>
+      unwrap(await commands.gitRebaseOnto(streamId ?? null, onto)),
+    gitCommitAll: async (streamId: string | null | undefined, message: string) =>
+      unwrap(await commands.gitCommitAll(streamId ?? null, message)),
+    gitAddPath: async (streamId: string | null | undefined, path: string) =>
+      unwrap(await commands.gitAddPath(streamId ?? null, path)),
     gitBlame: async (path: string) => unwrap(await commands.gitBlame(path)),
     localBlame: async (path: string, diskText: string) =>
       unwrap(await commands.localBlame(path, diskText)),
@@ -244,8 +260,8 @@ function buildDesktopAdapter(): DesktopApi {
       unwrap(await commands.searchWorkspaceText(query, limit ?? null)),
     getBranchChanges: async (baseRef: string) =>
       unwrap(await commands.getBranchChanges(baseRef)),
-    getChangeScopes: async () => {
-      const raw = unwrap(await commands.getChangeScopes());
+    getChangeScopes: async (streamId?: string | null) => {
+      const raw = unwrap(await commands.getChangeScopes(streamId ?? null));
       return {
         staged: [] as never[],
         unstaged: [] as never[],
@@ -343,9 +359,26 @@ function buildDesktopAdapter(): DesktopApi {
     setNativeMenu: async () => {},
     onMenuCommand: () => () => {},
     updateEditorFocus: async () => {},
-    logUi: async (payload: unknown) => {
-      // eslint-disable-next-line no-console
-      console.log("[ui]", payload);
+    logUi: async (entry: {
+      clientId?: string;
+      level: string;
+      message: string;
+      context?: unknown;
+      timestamp?: string;
+    }) => {
+      try {
+        unwrap(
+          await commands.logUi({
+            clientId: entry.clientId ?? null,
+            level: entry.level,
+            message: entry.message,
+            context: entry.context !== undefined ? JSON.stringify(entry.context) : null,
+            timestamp: entry.timestamp ?? null,
+          }),
+        );
+      } catch {
+        // Don't let a logging failure surface to callers.
+      }
     },
     runCodeQualityScan: async (
       tool: string,
@@ -353,22 +386,55 @@ function buildDesktopAdapter(): DesktopApi {
       files?: string[],
     ) =>
       unwrap(await commands.runCodeQualityScan(tool, scope ?? "workspace", files ?? null)),
-    openLspClient: async () => {
-      throw new Error("openLspClient: LSP session manager not yet ported");
+    openLspClient: async (streamId: string, languageId: string) =>
+      unwrap(await commands.openLspClient(streamId, languageId)),
+    closeLspClient: async (clientId: string) => {
+      try {
+        unwrap(await commands.closeLspClient(clientId));
+      } catch {
+        // Idempotent: already-closed clients return INVALID; treat as no-op.
+      }
     },
-    closeLspClient: async () => {},
-    sendLspMessage: async () => {
-      throw new Error("sendLspMessage: LSP session manager not yet ported");
+    sendLspMessage: async (clientId: string, payload: string) =>
+      unwrap(await commands.sendLspMessage(clientId, payload)),
+    onLspEvent: (handler: (event: { clientId: string; message: string }) => void) => {
+      let stopped = false;
+      const unlistenPromise = listen("lsp:event", (e) => {
+        if (stopped) return;
+        handler(e.payload as { clientId: string; message: string });
+      });
+      return () => {
+        stopped = true;
+        void unlistenPromise.then((u) => u());
+      };
     },
-    onLspEvent: () => () => {},
-    openTerminalSession: async () => {
-      throw new Error("openTerminalSession: PTY bridge not yet wired through Tauri events");
+    openTerminalSession: async (
+      paneTarget: string,
+      cols: number,
+      rows: number,
+      transportMode: string,
+    ) =>
+      unwrap(await commands.openTerminalSession(paneTarget, cols, rows, transportMode)),
+    closeTerminalSession: async (sessionId: string) => {
+      try {
+        unwrap(await commands.closeTerminalSession(sessionId));
+      } catch {
+        // Idempotent close.
+      }
     },
-    closeTerminalSession: async () => {},
-    sendTerminalMessage: async () => {
-      throw new Error("sendTerminalMessage: PTY bridge not yet wired through Tauri events");
+    sendTerminalMessage: async (sessionId: string, message: string) =>
+      unwrap(await commands.sendTerminalMessage(sessionId, message)),
+    onTerminalEvent: (handler: (event: { sessionId: string; message: string }) => void) => {
+      let stopped = false;
+      const unlistenPromise = listen("terminal:event", (e) => {
+        if (stopped) return;
+        handler(e.payload as { sessionId: string; message: string });
+      });
+      return () => {
+        stopped = true;
+        void unlistenPromise.then((u) => u());
+      };
     },
-    onTerminalEvent: () => () => {},
     onOxplowEvent: (handler: (event: unknown) => void) => {
       let stopped = false;
       const unlistenPromise = listen("oxplow:event", (e) => {

@@ -76,6 +76,20 @@ pub trait TmuxRunner: Send + Sync {
     async fn list_windows(&self, session: &Session) -> Vec<String>;
     async fn capture_pane_history(&self, target: &WindowTarget, line_count: u32) -> String;
     async fn refresh_clients(&self);
+    /// Page through the scrollback (`up` for older lines, `down` for newer).
+    /// Enters copy-mode if not already in it. No-op if tmux fails.
+    async fn copy_mode_page(&self, target: &WindowTarget, direction: ScrollDirection);
+    /// Scroll by `lines` (positive = older, negative = newer).
+    async fn copy_mode_scroll(&self, target: &WindowTarget, lines: i32);
+    /// Leave copy-mode and snap to the live tail.
+    async fn exit_copy_mode(&self, target: &WindowTarget);
+}
+
+/// Direction for `copy_mode_page`.
+#[derive(Debug, Clone, Copy)]
+pub enum ScrollDirection {
+    Up,
+    Down,
 }
 
 #[derive(Default)]
@@ -279,6 +293,50 @@ impl TmuxRunner for SystemTmux {
 
     async fn refresh_clients(&self) {
         let _ = Self::run(&["refresh-client"]).await;
+    }
+
+    async fn copy_mode_page(&self, target: &WindowTarget, direction: ScrollDirection) {
+        // Enter copy-mode (idempotent) then page.
+        let _ = Self::run_quiet(&["copy-mode", "-t", target.as_str()]).await;
+        let key = match direction {
+            ScrollDirection::Up => "PageUp",
+            ScrollDirection::Down => "PageDown",
+        };
+        let _ = Self::run_quiet(&["send-keys", "-t", target.as_str(), "-X", "-N", "1", key]).await;
+    }
+
+    async fn copy_mode_scroll(&self, target: &WindowTarget, lines: i32) {
+        let _ = Self::run_quiet(&["copy-mode", "-t", target.as_str()]).await;
+        if lines == 0 {
+            return;
+        }
+        let (cmd, count) = if lines > 0 {
+            ("scroll-up", lines)
+        } else {
+            ("scroll-down", -lines)
+        };
+        let count_s = count.to_string();
+        let _ = Self::run_quiet(&[
+            "send-keys",
+            "-t",
+            target.as_str(),
+            "-X",
+            "-N",
+            &count_s,
+            cmd,
+        ])
+        .await;
+    }
+
+    async fn exit_copy_mode(&self, target: &WindowTarget) {
+        let _ = Self::run_quiet(&[
+            "send-keys",
+            "-t",
+            target.as_str(),
+            "-X",
+            "cancel",
+        ])
+        .await;
     }
 }
 

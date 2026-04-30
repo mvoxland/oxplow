@@ -7,6 +7,13 @@ export const commands = {
 	appVersion: () => typedError<AppVersion, IpcError>(__TAURI_INVOKE("app_version")),
 	// Liveness check the UI uses to verify the daemon is reachable.
 	ping: () => typedError<string, IpcError>(__TAURI_INVOKE("ping")),
+	/**
+	 *  Forward a UI-side log line into the daemon's tracing pipeline.
+	 *  The renderer's logger.ts installs `console.log/warn/error`
+	 *  proxies that call this; without it those logs never leave the
+	 *  renderer's devtools.
+	 */
+	logUi: (entry: UiLogEntry) => typedError<null, IpcError>(__TAURI_INVOKE("log_ui", { entry })),
 	listStreams: () => typedError<Stream[], IpcError>(__TAURI_INVOKE("list_streams")),
 	ensurePrimary: () => typedError<Stream, IpcError>(__TAURI_INVOKE("ensure_primary")),
 	createWorktree: (req: CreateWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("create_worktree", { req })),
@@ -232,17 +239,17 @@ export const commands = {
 	listLocalBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_local_branches")),
 	getRepoConflictState: () => typedError<RepoConflictState, IpcError>(__TAURI_INVOKE("get_repo_conflict_state")),
 	getAheadBehind: (base: string, head: string) => typedError<AheadBehind, IpcError>(__TAURI_INVOKE("get_ahead_behind", { base, head })),
-	appendToGitignore: (entry: string) => typedError<null, IpcError>(__TAURI_INVOKE("append_to_gitignore", { entry })),
-	restorePath: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("restore_path", { path })),
-	gitFetch: (remote: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_fetch", { remote })),
-	gitPull: () => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull")),
-	gitPullRemoteIntoCurrent: (remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull_remote_into_current", { remote, branch })),
-	gitPush: () => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push")),
-	gitPushCurrentTo: (remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push_current_to", { remote, branch })),
-	gitMergeInto: (source: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_merge_into", { source })),
-	gitRebaseOnto: (onto: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_rebase_onto", { onto })),
-	gitCommitAll: (message: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_commit_all", { message })),
-	gitAddPath: (path: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_add_path", { path })),
+	appendToGitignore: (streamId: string | null, entry: string) => typedError<null, IpcError>(__TAURI_INVOKE("append_to_gitignore", { streamId, entry })),
+	restorePath: (streamId: string | null, path: string) => typedError<null, IpcError>(__TAURI_INVOKE("restore_path", { streamId, path })),
+	gitFetch: (streamId: string | null, remote: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_fetch", { streamId, remote })),
+	gitPull: (streamId: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull", { streamId })),
+	gitPullRemoteIntoCurrent: (streamId: string | null, remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull_remote_into_current", { streamId, remote, branch })),
+	gitPush: (streamId: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push", { streamId })),
+	gitPushCurrentTo: (streamId: string | null, remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push_current_to", { streamId, remote, branch })),
+	gitMergeInto: (streamId: string | null, source: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_merge_into", { streamId, source })),
+	gitRebaseOnto: (streamId: string | null, onto: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_rebase_onto", { streamId, onto })),
+	gitCommitAll: (streamId: string | null, message: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_commit_all", { streamId, message })),
+	gitAddPath: (streamId: string | null, path: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_add_path", { streamId, path })),
 	listAllRefs: () => typedError<GroupedGitRefs, IpcError>(__TAURI_INVOKE("list_all_refs")),
 	listRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError>(__TAURI_INVOKE("list_recent_remote_branches", { limit })),
 	listFileCommits: (path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { path, limit })),
@@ -254,7 +261,7 @@ export const commands = {
 	gitBlame: (path: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("git_blame", { path })),
 	localBlame: (path: string, diskText: string) => typedError<LocalBlameEntry[], IpcError>(__TAURI_INVOKE("local_blame", { path, diskText })),
 	getBranchChanges: (baseRef: string) => typedError<BranchChanges, IpcError>(__TAURI_INVOKE("get_branch_changes", { baseRef })),
-	getChangeScopes: () => typedError<ChangeScopes, IpcError>(__TAURI_INVOKE("get_change_scopes")),
+	getChangeScopes: (streamId: string | null) => typedError<ChangeScopes, IpcError>(__TAURI_INVOKE("get_change_scopes", { streamId })),
 	/**
 	 *  Land an envelope from the hook subprocess. Drives the agent_turn /
 	 *  agent_status state machine inside HookIngestService.
@@ -339,6 +346,41 @@ export const commands = {
 	 *  have to grant the renderer the broader clipboard plugin permission.
 	 */
 	clipboardReadText: () => typedError<string, IpcError>(__TAURI_INVOKE("clipboard_read_text")),
+	/**
+	 *  Spawn a new language-server child for `(stream_id, language_id)`.
+	 *  Returns an opaque `client_id` the renderer uses to address
+	 *  subsequent send/close commands. The cwd is resolved from the
+	 *  stream's worktree path; if the stream isn't found we fall back to
+	 *  the project dir.
+	 */
+	openLspClient: (streamId: string, languageId: string) => typedError<string, IpcError>(__TAURI_INVOKE("open_lsp_client", { streamId, languageId })),
+	/**
+	 *  Forward a raw JSON-RPC frame body (no headers) from the renderer
+	 *  to the language server addressed by `client_id`.
+	 */
+	sendLspMessage: (clientId: string, payload: string) => typedError<null, IpcError>(__TAURI_INVOKE("send_lsp_message", { clientId, payload })),
+	/**
+	 *  Tear down the language server backing `client_id`. Idempotent on
+	 *  already-closed clients (returns `INVALID` rather than panicking).
+	 */
+	closeLspClient: (clientId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_lsp_client", { clientId })),
+	/**
+	 *  Spawn `tmux attach-session -t <pane_target>` and return a handle
+	 *  the renderer addresses by `session_id`. `transport_mode` is
+	 *  accepted for protocol compatibility (the original Electron build
+	 *  used the same value to choose direct vs tmux flows) but oxplow's
+	 *  model always runs through tmux today, so the parameter is recorded
+	 *  for future use but does not branch.
+	 */
+	openTerminalSession: (paneTarget: string, cols: number, rows: number, transportMode: string) => typedError<string, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows, transportMode })),
+	/**
+	 *  Forward a JSON-encoded protocol message from the renderer to the
+	 *  session backing `session_id`. See
+	 *  `oxplow_app::terminal_sessions` for the message shapes.
+	 */
+	sendTerminalMessage: (sessionId: string, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("send_terminal_message", { sessionId, message })),
+	// Tear down the PTY and forwarder backing `session_id`. Idempotent.
+	closeTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_terminal_session", { sessionId })),
 };
 
 /* Types */
@@ -920,6 +962,18 @@ export type ThreadWorkState = {
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
+
+export type UiLogEntry = {
+	clientId: string | null,
+	level: string,
+	message: string,
+	/**
+	 *  JSON-encoded structured context (the renderer stringifies its
+	 *  own object so the boundary is plain `Option<String>`).
+	 */
+	context: string | null,
+	timestamp: string | null,
+};
 
 /**
  *  Partial-patch for `update_work_item`. Each `Option` follows

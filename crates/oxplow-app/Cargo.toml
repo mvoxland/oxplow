@@ -19,6 +19,10 @@ oxplow-pty = { workspace = true }
 oxplow-lsp = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tokio-stream = "0.1"
+futures = "0.3"
+bytes = "1"
+base64 = "0.22"
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }

@@ -66,8 +66,10 @@ test — CI fails if `git diff` of that file is non-empty after the
 test run.
 
 Frontend tests still use `bun test` (run from `apps/desktop/`).
-End-to-end Playwright tests live under `tests-e2e/` and aren't wired
-into the default `test` script.
+The original Electron-era Playwright suite lives under
+`tests-e2e.electron-archive/` and **does not** work against the
+Tauri build; see that directory's README for the path forward.
+There is no current Tauri e2e harness.
 
 ## Build installers
 

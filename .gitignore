@@ -7,9 +7,9 @@ public/dist/
 *.iml
 .oxplow
 .playwright-mcp
-tests-e2e/screenshots/
-tests-e2e/scratch-edit-target.txt
-tests-e2e/scratch-commit-target.txt
+tests-e2e.electron-archive/screenshots/
+tests-e2e.electron-archive/scratch-edit-target.txt
+tests-e2e.electron-archive/scratch-commit-target.txt
 .self-ralph/
 site/
 .venv/
@@ -25,3 +25,5 @@ apps/desktop/src-tauri/gen/
 # Frontend build artifacts
 apps/desktop/dist/
 MIGRATION_REVIEW2.md
+MIGRATION_REVIEW3.md
+MIGRATION_TRACKING.md

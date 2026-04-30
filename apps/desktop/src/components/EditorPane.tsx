@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { OpenFileState } from "../editor-session.js";
 import type { LocalBlameEntry, Stream } from "../api.js";
-import { localBlame, readFileAtRef } from "../api.js";
+import { desktopBridge, localBlame, readFileAtRef } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
 import { logUi } from "../logger.js";
@@ -198,9 +198,7 @@ export function EditorPane({
         return { path, dirty: entry.draftContent !== entry.savedContent };
       })
       .filter((entry): entry is { path: string; dirty: boolean } => !!entry);
-    const api = (window as any).oxplowApi as { updateEditorFocus?: (payload: unknown) => unknown } | undefined;
-    if (!api?.updateEditorFocus) return;
-    void api.updateEditorFocus({
+    void desktopBridge().updateEditorFocus({
       streamId: currentStream.id,
       activeFile: currentPath,
       caret,
