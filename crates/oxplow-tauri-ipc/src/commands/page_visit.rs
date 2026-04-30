@@ -1,3 +1,4 @@
+use oxplow_app::OxplowEvent;
 use oxplow_db::analytics_stores::PageVisitStore as _;
 use oxplow_db::PageVisit;
 use serde::{Deserialize, Serialize};
@@ -21,10 +22,12 @@ pub async fn record_page_visit(
     page_id: String,
     duration_ms: Option<i64>,
 ) -> Result<PageVisit, IpcError> {
-    Ok(state
+    let visit = state
         .page_visit_store
         .record(&page_kind, &page_id, duration_ms)
-        .await?)
+        .await?;
+    state.events.emit(OxplowEvent::PageVisitChanged);
+    Ok(visit)
 }
 
 #[tauri::command]
@@ -60,10 +63,12 @@ pub async fn forget_page(
     page_kind: String,
     page_id: String,
 ) -> Result<(), IpcError> {
-    Ok(state
+    state
         .page_visit_store
         .forget_page(&page_kind, &page_id)
-        .await?)
+        .await?;
+    state.events.emit(OxplowEvent::PageVisitChanged);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -122,11 +127,16 @@ pub async fn clear_recently_finished(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), IpcError> {
     let recent = state.page_visit_store.list_recent(10_000).await?;
+    let mut changed = false;
     for v in recent.into_iter().filter(|v| v.duration_ms.is_some()) {
         state
             .page_visit_store
             .forget_page(&v.page_kind, &v.page_id)
             .await?;
+        changed = true;
+    }
+    if changed {
+        state.events.emit(OxplowEvent::PageVisitChanged);
     }
     Ok(())
 }

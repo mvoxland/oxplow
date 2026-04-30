@@ -69,11 +69,31 @@ fn main() {
     oxplow_app::snapshot_capture::SnapshotCaptureService::new(
         snap_store,
         blobs,
-        project_dir,
+        project_dir.clone(),
         None,
         max_bytes,
     )
+    .with_events(event_bus.clone())
     .spawn();
+
+    // Per-stream fs + .git/refs watchers — bridges file changes onto
+    // the EventBus so the renderer's QuickOpen, project panel, history,
+    // git dashboard, etc. refresh without polling. Held in a registry
+    // for the life of the daemon; dropping it cancels every watcher.
+    let stream_store = state.stream_store.clone();
+    let watch_bus = event_bus.clone();
+    let watch_project_dir = project_dir.clone();
+    let watch_registry = boot_runtime.block_on(async move {
+        oxplow_app::workspace_watch::WorkspaceWatchRegistry::spawn(
+            stream_store,
+            watch_bus,
+            watch_project_dir,
+        )
+        .await
+    });
+    // Leak the registry for the life of the process — its watchers
+    // need to outlive setup() and there's no shutdown hook today.
+    Box::leak(Box::new(watch_registry));
 
     let specta = specta_builder();
 

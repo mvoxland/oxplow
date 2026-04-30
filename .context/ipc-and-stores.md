@@ -61,13 +61,23 @@ work.
 `crates/oxplow-app/src/events.rs` defines the typed `OxplowEvent` discriminated
 union. To add an event:
 
-1. Add a new interface (`type: "thing.changed"; …`).
-2. Add it to the `OxplowEvent` union.
-3. Publish from `crates/oxplow-app/src/lib.rs` (or the relevant
-   service file) by sending on the broadcast channel that backs
-   `Services::events()`. The Tauri shell forwards every event to the
-   renderer via `app_handle.emit("oxplow:event", ...)`.
-4. Consume in the UI via `subscribeOxplowEvents((e) => { if (e.type === ...) ... })`.
+1. Add a variant to the `OxplowEvent` enum. The wire format uses
+   `#[serde(tag = "kind", rename_all = "camelCase")]`, so a Rust
+   variant `FooChanged { stream_id }` lands on the wire as
+   `{ kind: "fooChanged", streamId }`.
+2. Mirror the new kind in `apps/desktop/src/tauri-bridge/index.ts`
+   under `OxplowEventKind`.
+3. Publish from the relevant service or command by calling
+   `state.events.emit(OxplowEvent::FooChanged { … })`. The Tauri shell
+   forwards every emit to the renderer via
+   `app_handle.emit("oxplow:event", ...)`.
+4. Consume in the UI via
+   `subscribeOxplowEvents((e) => { if (e.kind === "fooChanged") … })`.
+
+**Camelcase trap:** the wire shape is camelCase (`event.kind`,
+`event.streamId`, …). A subscriber that filters on `event.type ===
+"foo.changed"` will silently never fire — the agent-status dot bug
+came from exactly this mismatch. Keep `OxplowEventKind` in sync.
 
 ## Git dashboard / cross-worktree IPC
 

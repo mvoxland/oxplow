@@ -32,7 +32,14 @@ export type OxplowEventKind =
   | "backgroundTasksChanged"
   | "hookEventsChanged"
   | "agentStatusChanged"
-  | "agentTurnsChanged";
+  | "agentTurnsChanged"
+  | "pageVisitChanged"
+  | "usageRecorded"
+  | "fileSnapshotCreated"
+  | "codeQualityScanned"
+  | "workspaceContextChanged"
+  | "workspaceChanged"
+  | "gitRefsChanged";
 
 /// Subscribe to all oxplow events on the cross-store bus. Returns an
 /// unlisten callback. Each event is the raw `OxplowEvent` payload —
