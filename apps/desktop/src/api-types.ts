@@ -14,40 +14,16 @@
 // types instead — they have the same names but with snake-cased fields
 // matching the Rust shape).
 
-export interface Stream {
-  id: string;
-  title: string;
-  summary: string;
-  branch: string;
-  branch_ref: string;
-  branch_source: "local" | "remote" | "new";
-  worktree_path: string;
-  kind: "primary" | "worktree";
-  created_at: string;
-  updated_at: string;
-  custom_prompt: string | null;
-  panes: { working: string; talking: string };
-  resume: { working_session_id: string; talking_session_id: string };
-}
-
-export interface Thread {
-  id: string;
-  stream_id: string;
-  title: string;
-  status: "active" | "queued";
-  sort_index: number;
-  created_at: string;
-  updated_at: string;
-  pane_target: string;
-  resume_session_id: string;
-  custom_prompt: string | null;
-  closed_at: string | null;
-}
+// Stream and Thread types moved to bindings — api.ts re-exports
+// them directly from tauri-bridge/generated/bindings now. The
+// legacy nested `panes` / `resume` sub-objects on Stream and the
+// "active" | "queued" status restriction on Thread (which masked
+// the bindings "closed" variant) are gone.
 
 export interface ThreadState {
   selectedThreadId: string | null;
   activeThreadId: string | null;
-  threads: Thread[];
+  threads: import("./tauri-bridge/index.js").Thread[];
 }
 
 export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";

@@ -38,29 +38,13 @@ function slugifyTitle(title: string): string {
   return base.length > 0 ? base : `stream-${Date.now()}`;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function adaptStream(s: any): any {
-  if (!s) return s;
-  return {
-    ...s,
-    custom_prompt: s.custom_prompt ?? null,
-    panes: { working: s.working_pane ?? "", talking: s.talking_pane ?? "" },
-    resume: {
-      working_session_id: s.working_session_id ?? "",
-      talking_session_id: s.talking_session_id ?? "",
-    },
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function adaptThread(t: any): any {
-  if (!t) return t;
-  return {
-    ...t,
-    status: t.status === "closed" ? "queued" : t.status,
-    closed_at: t.closed_at ?? null,
-  };
-}
+// adaptStream / adaptThread were dropped in the api.ts migration:
+// - Stream's synthesized `panes` / `resume` objects had zero
+//   readers (renderer code only reads working_pane / talking_pane
+//   directly).
+// - Thread's "closed" → "queued" status coercion was wrong; the
+//   rail only ever lists active+queued threads, and closed ones
+//   come from a separate listClosedThreads fetch.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function adaptBackgroundTask(t: any): any {
@@ -85,25 +69,25 @@ function buildDesktopAdapter(): DesktopApi {
   const adapter: Partial<DesktopApi> = {
     ping: async () => unwrap(await commands.ping()),
     listStreams: async () =>
-      (unwrap(await commands.listStreams()) as unknown[]).map(adaptStream),
+      (unwrap(await commands.listStreams()) as unknown[])/* bindings shape */,
     getCurrentStream: async () => {
       const cur = unwrap(await commands.getCurrentStream());
-      if (cur) return adaptStream(cur);
+      if (cur) return cur;
       const primary = unwrap(await commands.getPrimaryStream());
       if (!primary) throw new Error("no primary stream available");
-      return adaptStream(primary);
+      return primary;
     },
     switchStream: async (id: string) => {
       unwrap(await commands.switchStream(id));
-      return adaptStream(unwrap(await commands.getCurrentStream()));
+      return unwrap(await commands.getCurrentStream());
     },
     renameCurrentStream: async (title: string) => {
       const cur = unwrap(await commands.getCurrentStream());
       if (!cur) throw new Error("no current stream to rename");
-      return adaptStream(unwrap(await commands.renameStream({ id: cur.id, title })));
+      return unwrap(await commands.renameStream({ id: cur.id, title }));
     },
     renameStream: async (id: string, title: string) =>
-      adaptStream(unwrap(await commands.renameStream({ id, title }))),
+      unwrap(await commands.renameStream({ id, title })),
     setStreamPrompt: async (id: string, prompt: string | null) =>
       unwrap(await commands.setStreamPrompt({ id, prompt })),
     checkoutStreamBranch: async (id: string, branch: string) =>
@@ -126,28 +110,24 @@ function buildDesktopAdapter(): DesktopApi {
       switch (input.source) {
         case "existing": {
           if (!input.ref) throw new Error("createStream: missing ref for existing source");
-          return adaptStream(
-            unwrap(
-              await commands.createWorktree({
-                slug,
-                title: input.title,
-                branch: input.ref,
-                branchSource: input.ref,
-              }),
-            ),
+          return unwrap(
+            await commands.createWorktree({
+              slug,
+              title: input.title,
+              branch: input.ref,
+              branchSource: input.ref,
+            }),
           );
         }
         case "new": {
           if (!input.branch) throw new Error("createStream: missing branch for new source");
-          return adaptStream(
-            unwrap(
-              await commands.createWorktree({
-                slug,
-                title: input.title,
-                branch: input.branch,
-                branchSource: input.startPointRef ?? input.branch,
-              }),
-            ),
+          return unwrap(
+            await commands.createWorktree({
+              slug,
+              title: input.title,
+              branch: input.branch,
+              branchSource: input.startPointRef ?? input.branch,
+            }),
           );
         }
         case "worktree":
@@ -156,21 +136,19 @@ function buildDesktopAdapter(): DesktopApi {
           );
       }
     },
-    closeThread: async (id: string) => adaptThread(unwrap(await commands.closeThread(id))),
-    reopenThread: async (id: string) => adaptThread(unwrap(await commands.reopenThread(id))),
-    promoteThread: async (id: string) => adaptThread(unwrap(await commands.promoteThread(id))),
+    closeThread: async (id: string) => unwrap(await commands.closeThread(id)),
+    reopenThread: async (id: string) => unwrap(await commands.reopenThread(id)),
+    promoteThread: async (id: string) => unwrap(await commands.promoteThread(id)),
     renameThread: async (id: string, title: string) =>
-      adaptThread(unwrap(await commands.renameThread({ id, title }))),
+      unwrap(await commands.renameThread({ id, title })),
     setThreadPrompt: async (id: string, prompt: string | null) =>
-      adaptThread(unwrap(await commands.setThreadPrompt({ id, prompt }))),
+      unwrap(await commands.setThreadPrompt({ id, prompt })),
     listClosedThreads: async (streamId: string) =>
-      (unwrap(await commands.listClosedThreads(streamId)) as unknown[]).map(adaptThread),
+      (unwrap(await commands.listClosedThreads(streamId)) as unknown[])/* bindings shape */,
     selectThread: async (streamId: string, threadId: string | null) =>
       unwrap(await commands.selectThread({ streamId, threadId })),
     createThread: async (streamId: string, title: string, paneTarget?: string) =>
-      adaptThread(
-        unwrap(await commands.createThread({ streamId, title, paneTarget: paneTarget ?? null })),
-      ),
+      unwrap(await commands.createThread({ streamId, title, paneTarget: paneTarget ?? null })),
     reorderThreadQueue: async (streamId: string, order: string[]) =>
       unwrap(await commands.reorderThreadQueue({ streamId, order })),
     getThreadState: async (streamId: string) => {
@@ -178,7 +156,7 @@ function buildDesktopAdapter(): DesktopApi {
         threads: unknown[];
         [k: string]: unknown;
       };
-      return { ...raw, threads: raw.threads.map(adaptThread) };
+      return { ...raw, threads: raw.threads/* bindings shape */ };
     },
     getThreadWorkState: async (_streamId: string, threadId: string) =>
       unwrap(await commands.getThreadWorkState(threadId)),
@@ -615,12 +593,9 @@ export type {
   BranchChanges,
 } from "./api-types.js";
 
-// Stream / Thread types re-exported from the Tauri bindings. The
-// adapter at the bottom of this file augments runtime values with
-// nested `panes` / `resume` sub-objects so any UI code that reads
-// those keeps working even though the type itself doesn't model them
-// explicitly. New code should reach for the flat fields
-// (`working_pane` / `talking_pane` / `*_session_id`) directly.
+// Stream / Thread come straight from the Tauri bindings — the
+// renderer reads the flat shape (working_pane / talking_pane /
+// custom_prompt) directly; no synthesis happens at the boundary.
 import type { Stream, Thread } from "./tauri-bridge/index.js";
 export type { Stream, Thread };
 
