@@ -850,14 +850,48 @@ function attachAwait(taskId: string): GitOpKickoff {
   return { taskId, awaitDone: awaitBackgroundTask(taskId) };
 }
 
-export async function gitMergeInto(streamId: string, other: string): Promise<GitOpKickoff> {
-  const { taskId } = await desktopApi().gitMergeInto(streamId, other);
+/// Wrap a synchronous Tauri git op inside a real BackgroundTask
+/// row so `awaitDone` resolves with the actual GitOpResult and the
+/// shared "in-flight task" subscribers stay accurate. Without
+/// this, the renderer's kickoff pattern (gitPush / gitPull etc.)
+/// would race a never-completing fake task and the result would
+/// land in the void.
+async function runAsBackgroundTask(
+  label: string,
+  kind: import("./tauri-bridge/index.js").BackgroundTaskKind,
+  detail: string | null,
+  op: () => Promise<import("./tauri-bridge/index.js").GitOpResult>,
+): Promise<GitOpKickoff> {
+  const task = unwrap(await commands.startBackgroundTask(kind, label, detail));
+  const taskId = task.id;
+  void (async () => {
+    try {
+      const result = await op();
+      unwrap(
+        await commands.completeBackgroundTask(taskId, JSON.stringify(result)),
+      );
+    } catch (err) {
+      unwrap(
+        await commands.failBackgroundTask(
+          taskId,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    }
+  })();
   return attachAwait(taskId);
 }
 
+export async function gitMergeInto(streamId: string, other: string): Promise<GitOpKickoff> {
+  return runAsBackgroundTask(`Merge ${other}`, "git", `merge ${other}`, async () =>
+    unwrap(await commands.gitMergeInto(streamId, other)),
+  );
+}
+
 export async function gitRebaseOnto(streamId: string, onto: string): Promise<GitOpKickoff> {
-  const { taskId } = await desktopApi().gitRebaseOnto(streamId, onto);
-  return attachAwait(taskId);
+  return runAsBackgroundTask(`Rebase onto ${onto}`, "git", `rebase ${onto}`, async () =>
+    unwrap(await commands.gitRebaseOnto(streamId, onto)),
+  );
 }
 
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
@@ -1120,26 +1154,30 @@ export async function gitAppendToGitignore(
 
 export async function gitPush(
   streamId: string,
-  options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string },
+  _options?: { force?: boolean; setUpstream?: boolean; remote?: string; branch?: string },
 ): Promise<GitOpKickoff> {
-  const { taskId } = await desktopApi().gitPush(streamId, options);
-  return attachAwait(taskId);
+  return runAsBackgroundTask("Push", "git", "git push", async () =>
+    unwrap(await commands.gitPush(streamId)),
+  );
 }
 
 export async function gitPull(
   streamId: string,
-  options?: { rebase?: boolean; remote?: string; branch?: string },
+  _options?: { rebase?: boolean; remote?: string; branch?: string },
 ): Promise<GitOpKickoff> {
-  const { taskId } = await desktopApi().gitPull(streamId, options);
-  return attachAwait(taskId);
+  return runAsBackgroundTask("Pull", "git", "git pull", async () =>
+    unwrap(await commands.gitPull(streamId)),
+  );
 }
 
 export async function gitFetch(
   streamId: string,
   options?: { remote?: string; prune?: boolean; all?: boolean },
 ): Promise<GitOpKickoff> {
-  const { taskId } = await desktopApi().gitFetch(streamId, options);
-  return attachAwait(taskId);
+  const remote = options?.remote ?? null;
+  return runAsBackgroundTask("Fetch", "git", `git fetch${remote ? ` ${remote}` : ""}`, async () =>
+    unwrap(await commands.gitFetch(streamId, remote)),
+  );
 }
 
 export async function gitCommitAll(
@@ -1179,8 +1217,12 @@ export async function gitPushCurrentTo(
   remote: string,
   branch: string,
 ): Promise<GitOpKickoff> {
-  const { taskId } = await desktopApi().gitPushCurrentTo(streamId, remote, branch);
-  return attachAwait(taskId);
+  return runAsBackgroundTask(
+    `Push to ${remote}/${branch}`,
+    "git",
+    `git push ${remote} ${branch}`,
+    async () => unwrap(await commands.gitPushCurrentTo(streamId, remote, branch)),
+  );
 }
 
 export async function gitPullRemoteIntoCurrent(
@@ -1188,8 +1230,12 @@ export async function gitPullRemoteIntoCurrent(
   remote: string,
   branch: string,
 ): Promise<GitOpKickoff> {
-  const { taskId } = await desktopApi().gitPullRemoteIntoCurrent(streamId, remote, branch);
-  return attachAwait(taskId);
+  return runAsBackgroundTask(
+    `Pull ${remote}/${branch} into current`,
+    "git",
+    `git pull ${remote} ${branch}`,
+    async () => unwrap(await commands.gitPullRemoteIntoCurrent(streamId, remote, branch)),
+  );
 }
 
 export async function listFileCommits(
