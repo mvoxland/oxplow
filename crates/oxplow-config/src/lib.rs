@@ -151,9 +151,23 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     Ok(config)
 }
 
-/// Re-serialize an `OxplowConfig` back to `oxplow.yaml`. Comments and
-/// formatting in the user's original file are not preserved — the
-/// schema is small and known.
+/// Re-serialize an `OxplowConfig` back to `oxplow.yaml`.
+///
+/// **Comment preservation:** none of the maintained Rust YAML
+/// crates (serde_yaml, yaml-rust2, saphyr) round-trip comments,
+/// so YAML comments and exact whitespace in the user's original
+/// file ARE LOST on write. What we do preserve:
+///
+/// - Any top-level keys the user added that aren't in oxplow's
+///   schema (read here, copied through, written back). This
+///   matters when a third tool shares `oxplow.yaml`.
+/// - The minimal-default behavior — keys whose value matches the
+///   default are omitted entirely, so a hand-edited file stays
+///   minimal across writes.
+///
+/// If you maintain heavy comments in `oxplow.yaml`, prefer
+/// editing the file by hand; oxplow only writes through the
+/// settings UI's explicit save actions.
 pub fn write_project_config(
     project_dir: impl AsRef<Path>,
     config: &OxplowConfig,
@@ -161,6 +175,38 @@ pub fn write_project_config(
     let project_dir = project_dir.as_ref();
     let path = project_dir.join(OXPLOW_CONFIG_FILE);
     let fallback_name = basename(project_dir);
+
+    // Schema-managed keys we own. Anything outside this set found
+    // in an existing file is copied through verbatim (best-effort,
+    // since YAML→serde_yaml::Value→YAML is still lossy on style).
+    const MANAGED_KEYS: &[&str] = &[
+        "agent",
+        "projectName",
+        "agentPromptAppend",
+        "snapshotRetentionDays",
+        "generatedDirs",
+        "snapshotMaxFileBytes",
+        "injectSessionContext",
+        "lsp",
+    ];
+
+    let existing_extras: serde_yaml::Mapping = if path.exists() {
+        match std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_yaml::from_str::<serde_yaml::Value>(&raw).ok())
+        {
+            Some(serde_yaml::Value::Mapping(m)) => m
+                .into_iter()
+                .filter(|(k, _)| match k {
+                    serde_yaml::Value::String(s) => !MANAGED_KEYS.contains(&s.as_str()),
+                    _ => true,
+                })
+                .collect(),
+            _ => serde_yaml::Mapping::new(),
+        }
+    } else {
+        serde_yaml::Mapping::new()
+    };
 
     let mut doc = serde_yaml::Mapping::new();
     if config.agent != AgentKind::default() {
@@ -223,6 +269,12 @@ pub fn write_project_config(
             .collect();
         lsp.insert("servers".into(), serde_yaml::Value::Sequence(servers));
         doc.insert("lsp".into(), serde_yaml::Value::Mapping(lsp));
+    }
+
+    // Carry forward any unknown top-level keys the user (or a
+    // sibling tool) added to oxplow.yaml.
+    for (k, v) in existing_extras {
+        doc.insert(k, v);
     }
 
     let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
@@ -510,5 +562,36 @@ lsp:
         write_project_config(dir.path(), &cfg).unwrap();
         let loaded = load_project_config(dir.path()).unwrap();
         assert!(!loaded.inject_session_context);
+    }
+
+    /// Third-party keys that aren't part of oxplow's schema should
+    /// survive a write. Comments still get stripped (no Rust YAML
+    /// crate round-trips them), but the keys themselves persist —
+    /// otherwise a sibling tool sharing oxplow.yaml would lose its
+    /// state every time the user touched oxplow's settings UI.
+    #[test]
+    fn write_preserves_unknown_top_level_keys() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "agent: claude\nthirdPartyTool:\n  enabled: true\n  values: [a, b]\n",
+        )
+        .unwrap();
+
+        let cfg = OxplowConfig {
+            snapshot_retention_days: 14,
+            ..default_config("test".into())
+        };
+        write_project_config(dir.path(), &cfg).unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        assert!(
+            raw.contains("thirdPartyTool"),
+            "third-party key should survive write, got:\n{raw}"
+        );
+        assert!(
+            raw.contains("snapshotRetentionDays"),
+            "managed key should still be present"
+        );
     }
 }
