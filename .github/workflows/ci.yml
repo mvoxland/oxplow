@@ -120,6 +120,13 @@ jobs:
       - name: Coverage report (with floor)
         run: cargo llvm-cov --workspace --summary-only --fail-under-lines 65
 
+      # Per-crate floors so a regression in one crate (e.g. the IPC
+      # command adapters going to 0% again) fails CI even if the
+      # workspace average still clears 65%. Floors live in
+      # scripts/coverage-floors.py.
+      - name: Per-crate coverage floors
+        run: cargo llvm-cov report --json | python3 scripts/coverage-floors.py
+
       - name: LCOV report
         run: cargo llvm-cov report --lcov --output-path lcov.info
 
