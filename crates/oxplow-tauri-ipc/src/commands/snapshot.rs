@@ -76,33 +76,102 @@ pub async fn get_snapshot_pair_diff(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct SnapshotSummary {
-    pub stream_id: Option<StreamId>,
-    /// Most recent capture per path; capped at `limit` (default 200).
-    pub latest: Vec<FileSnapshot>,
-    pub total_captured: i64,
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotEntry {
+    pub hash: String,
+    pub mtime_ms: i64,
+    pub size: i64,
+    /// "present" for normal captures, "oversize" for files that
+    /// exceeded the configured cap (no blob written).
+    pub state: String,
 }
 
-/// Most recent N captures for a stream, with a total count. Used by
-/// the snapshots-panel header.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SnapshotFileRow {
+    pub entry: SnapshotEntry,
+    /// "created" when this is the first capture of `path`,
+    /// "updated" when the prior capture had a different blob,
+    /// "deleted" when the current capture has no blob (file gone).
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
+pub struct SnapshotSummaryCounts {
+    pub created: i64,
+    pub updated: i64,
+    pub deleted: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotSummary {
+    pub snapshot: FileSnapshot,
+    pub previous_snapshot_id: Option<String>,
+    pub files: std::collections::HashMap<String, SnapshotFileRow>,
+    pub counts: SnapshotSummaryCounts,
+}
+
+/// Build a per-snapshot summary: the FileSnapshot row, the id of the
+/// prior capture of the same path (if any), and a one-row diff
+/// describing how the captured file relates to its predecessor
+/// (created / updated / deleted). The renderer's local-history pane
+/// keys off this shape.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_snapshot_summary(
     state: tauri::State<'_, AppState>,
-    stream_id: Option<StreamId>,
-    limit: Option<usize>,
-) -> Result<SnapshotSummary, IpcError> {
-    let limit = limit.unwrap_or(200);
-    let latest = match &stream_id {
-        Some(s) => state.snapshot_store.list_for_stream(s.as_str(), limit).await?,
-        None => vec![],
+    snapshot_id: i64,
+) -> Result<Option<SnapshotSummary>, IpcError> {
+    let Some(snap) = state.snapshot_store.get(snapshot_id).await? else {
+        return Ok(None);
     };
-    let total_captured = latest.len() as i64;
-    Ok(SnapshotSummary {
-        stream_id,
-        latest,
-        total_captured,
-    })
+    // Order is DESC by captured_at; find the row immediately after
+    // ours (i.e. older). Equal-timestamp ties fall back to id order
+    // implicitly via SQLite's row order.
+    let history = state.snapshot_store.list_for_path(&snap.path).await?;
+    let mut prev: Option<&FileSnapshot> = None;
+    let mut found_self = false;
+    for row in &history {
+        if found_self {
+            prev = Some(row);
+            break;
+        }
+        if row.id == snap.id {
+            found_self = true;
+        }
+    }
+    let kind = match (&snap.blob_hash, prev.and_then(|p| p.blob_hash.clone())) {
+        (None, _) => "deleted",
+        (Some(_), None) => "created",
+        (Some(cur), Some(prev_hash)) if *cur == prev_hash => "updated",
+        (Some(_), Some(_)) => "updated",
+    };
+    let state_label = if snap.oversize { "oversize" } else { "present" };
+    let entry = SnapshotEntry {
+        hash: snap.blob_hash.clone().unwrap_or_default(),
+        mtime_ms: 0,
+        size: snap.size_bytes,
+        state: state_label.to_string(),
+    };
+    let mut files = std::collections::HashMap::new();
+    files.insert(
+        snap.path.clone(),
+        SnapshotFileRow {
+            entry,
+            kind: kind.to_string(),
+        },
+    );
+    let counts = SnapshotSummaryCounts {
+        created: if kind == "created" { 1 } else { 0 },
+        updated: if kind == "updated" { 1 } else { 0 },
+        deleted: if kind == "deleted" { 1 } else { 0 },
+    };
+    Ok(Some(SnapshotSummary {
+        snapshot: snap,
+        previous_snapshot_id: prev.map(|p| p.id.to_string()),
+        files,
+        counts,
+    }))
 }
 
 /// Restore a file's contents from a snapshot. Reads the bytes from

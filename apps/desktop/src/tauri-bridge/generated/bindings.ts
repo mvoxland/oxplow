@@ -226,10 +226,18 @@ export const commands = {
 	 */
 	getSnapshotPairDiff: (beforeId: number | null, afterId: number | null) => typedError<SnapshotPairDiff, IpcError>(__TAURI_INVOKE("get_snapshot_pair_diff", { beforeId, afterId })),
 	/**
-	 *  Most recent N captures for a stream, with a total count. Used by
-	 *  the snapshots-panel header.
+	 *  Build a per-snapshot summary: the FileSnapshot row, the id of the
+	 *  prior capture of the same path (if any), and a one-row diff
+	 *  describing how the captured file relates to its predecessor
+	 *  (created / updated / deleted). The renderer's local-history pane
+	 *  keys off this shape.
 	 */
-	getSnapshotSummary: (streamId: string | null, limit: number | null) => typedError<SnapshotSummary, IpcError>(__TAURI_INVOKE("get_snapshot_summary", { streamId, limit })),
+	getSnapshotSummary: (snapshotId: number) => typedError<{
+	snapshot: FileSnapshot,
+	previousSnapshotId: string | null,
+	files: { [key in string]: SnapshotFileRow },
+	counts: SnapshotSummaryCounts,
+} | null, IpcError>(__TAURI_INVOKE("get_snapshot_summary", { snapshotId })),
 	/**
 	 *  Restore a file's contents from a snapshot. Reads the bytes from
 	 *  the content-addressed blob store using the snapshot's `blob_hash`
@@ -909,6 +917,27 @@ export type SetThreadPromptRequest = {
 	prompt: string | null,
 };
 
+export type SnapshotEntry = {
+	hash: string,
+	mtimeMs: number,
+	size: number,
+	/**
+	 *  "present" for normal captures, "oversize" for files that
+	 *  exceeded the configured cap (no blob written).
+	 */
+	state: string,
+};
+
+export type SnapshotFileRow = {
+	entry: SnapshotEntry,
+	/**
+	 *  "created" when this is the first capture of `path`,
+	 *  "updated" when the prior capture had a different blob,
+	 *  "deleted" when the current capture has no blob (file gone).
+	 */
+	kind: string,
+};
+
 export type SnapshotPairDiff = {
 	before: FileSnapshot | null,
 	after: FileSnapshot | null,
@@ -920,10 +949,16 @@ export type SnapshotPairDiff = {
 };
 
 export type SnapshotSummary = {
-	stream_id: StreamId | null,
-	// Most recent capture per path; capped at `limit` (default 200).
-	latest: FileSnapshot[],
-	total_captured: number,
+	snapshot: FileSnapshot,
+	previousSnapshotId: string | null,
+	files: { [key in string]: SnapshotFileRow },
+	counts: SnapshotSummaryCounts,
+};
+
+export type SnapshotSummaryCounts = {
+	created: number,
+	updated: number,
+	deleted: number,
 };
 
 export type Stream = {
