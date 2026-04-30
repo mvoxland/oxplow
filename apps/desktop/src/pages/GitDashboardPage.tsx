@@ -119,8 +119,13 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       const branch = stream?.branch ?? log.currentBranch ?? null;
       const headCommit = log.commits[0] ?? null;
       // Find an upstream ref via the remote branches list (best-effort).
+      // remoteBranches[].short_name is "<remote>/<branch>" (e.g.
+      // "origin/main"). Match the trailing branch name.
       const upstreamRef = branch
-        ? remoteBranches.find((r) => r.branch === branch)?.short_name ?? null
+        ? remoteBranches.find((r) => {
+            const idx = r.short_name.indexOf("/");
+            return idx >= 0 && r.short_name.slice(idx + 1) === branch;
+          })?.short_name ?? null
         : null;
       let aheadUpstream = 0;
       let behindUpstream = 0;
@@ -1038,7 +1043,10 @@ function RemoteBranchesCard({
                 />
                 <button
                   type="button"
-                  onClick={() => onPull(row.remote, row.branch)}
+                  onClick={() => {
+                    const [remote, ...rest] = row.short_name.split("/");
+                    onPull(remote, rest.join("/"));
+                  }}
                   disabled={isPending(pullLabel) || (c?.behind ?? 0) === 0}
                   title={
                     (c?.behind ?? 0) === 0
@@ -1051,7 +1059,10 @@ function RemoteBranchesCard({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onPush(row.remote, row.branch)}
+                  onClick={() => {
+                    const [remote, ...rest] = row.short_name.split("/");
+                    onPush(remote, rest.join("/"));
+                  }}
                   disabled={isPending(pushLabel) || (c?.ahead ?? 0) === 0}
                   title={
                     (c?.ahead ?? 0) === 0
@@ -1071,13 +1082,15 @@ function RemoteBranchesCard({
   );
 }
 
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "";
+function formatDate(input: string | number | null | undefined): string {
+  if (!input && input !== 0) return "";
   try {
-    const d = new Date(iso);
+    // Bindings ship Unix-seconds numbers; legacy callers pass ISO strings.
+    const d =
+      typeof input === "number" ? new Date(input * 1000) : new Date(input);
     return d.toLocaleDateString();
   } catch {
-    return iso;
+    return String(input);
   }
 }
 
