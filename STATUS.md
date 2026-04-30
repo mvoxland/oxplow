@@ -44,7 +44,7 @@ change that flips a row.
 |---|---|---|
 | `tauri-specta` v2 binding generation | ✅ working | `cargo test -p oxplow-tauri-ipc` regenerates `apps/desktop/src/tauri-bridge/generated/bindings.ts`. |
 | Bindings drift guard in CI | ✅ working | `.github/workflows/ci.yml` "Verify generated TS bindings are up to date" step fails the PR on a non-empty `git diff` after regeneration. |
-| `cargo-llvm-cov` workspace coverage in CI | ✅ working | Floor: 65% lines; current baseline ~70.7% lines / 66.6% regions / 54.7% functions. |
+| `cargo-llvm-cov` workspace coverage in CI | ✅ working | Workspace floor: 65% lines; current baseline ~72.3% lines / 69.2% regions / 59.2% functions. Per-crate floors enforced by `scripts/coverage-floors.py` (e.g. oxplow-runtime ≥90%, oxplow-git ≥80%, oxplow-app ≥75%, oxplow-tauri-ipc ≥12%). |
 | Capabilities listed explicitly in `tauri.conf.json` | ✅ working | `app.security.capabilities = ["main-window", "external-url"]`. |
 | External-URL capability targets webview labels | ✅ working | `external-url.json` uses `webviews: ["ext-url-*"]` (more precise than the parent-window label pattern). |
 | `shell:default` replaced with allowlist | ✅ working | tmux + git + typescript-language-server in `main-window.json`. |
@@ -68,15 +68,19 @@ change that flips a row.
 | `oxplow-pty` | 4 | 531 | 133 |
 | `oxplow-tmux` | 3 | 371 | 124 |
 | `oxplow-fs-watch` | 3 | 178 | 59 |
-| `oxplow-tauri-ipc` | 12 | 2,820 | 235 |
+| `oxplow-tauri-ipc` | 39 | 2,820 | 72 |
 | `oxplow-mcp` | 10 | 1,161 | 116 |
 
-Total: 268 tests. `oxplow-tauri-ipc` and `oxplow-mcp` got first
-backfills (error-mapping unit tests + tool-handler smoke tests
-covering ping/app_version/list_streams/list_backlog/get/upsert/
-delete_work_item/list_notes). `oxplow-tmux` and `oxplow-pty` stay
-thin — both are subprocess-driven and well-exercised by the
-`oxplow-app` integration paths.
+Total: 295 tests. `oxplow-tauri-ipc` got a `tauri::test` integration
+harness (`tests/commands.rs` + `tests/harness.rs`) that exercises 27
+representative commands across 17 of the 24 command modules — the
+seam REVIEW3/4 wanted protected (state plumbing, argument shapes,
+error mapping). The remaining 0%-coverage modules (agent_panes,
+branch, effort, log, lsp, menu, notes, terminal, webview) need real
+git/tmux/pty fixtures and are deferred. `oxplow-mcp` keeps its 10
+tool-handler smoke tests. `oxplow-tmux` and `oxplow-pty` stay thin —
+both are subprocess-driven and well-exercised by the `oxplow-app`
+integration paths.
 
 ## Frontend tests
 
@@ -111,10 +115,13 @@ README). No Tauri e2e harness exists yet.
 ```sh
 # Rust
 cargo test --workspace
-# expected: 250 passed, 0 failed
+# expected: 295 passed, 0 failed
 
 cargo llvm-cov --workspace --summary-only --fail-under-lines 65
-# expected: passes; current baseline ~70.7%
+# expected: passes; current baseline ~72.3%
+
+cargo llvm-cov report --json | python3 scripts/coverage-floors.py
+# expected: every crate clears its per-crate floor
 
 # Frontend
 cd apps/desktop && bun run typecheck
