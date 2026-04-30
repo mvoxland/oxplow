@@ -23,8 +23,11 @@ pub mod terminal_sessions;
 pub mod recovery;
 pub mod snapshot_capture;
 pub mod work_item_service;
+pub mod workspace_watch;
 
-pub use events::{EventBus, OxplowEvent};
+pub use events::{
+    CodeQualityScanPhase, EventBus, OxplowEvent, SnapshotSourceKind, WorkspaceChangeKind,
+};
 pub use oxplow_lsp::{LspError, LspProxy};
 pub use hook_ingest::{HookEnvelope, HookIngestError, HookIngestService};
 pub use work_item_service::{
@@ -104,6 +107,7 @@ pub struct Services {
     pub streams: StreamService,
     pub threads: ThreadService,
     pub work_items: WorkItemService,
+    pub stream_store: Arc<SqliteStreamStore>,
     pub thread_store: Arc<SqliteThreadStore>,
     pub work_item_store: Arc<SqliteWorkItemStore>,
     pub work_note_store: Arc<SqliteWorkNoteStore>,
@@ -194,6 +198,7 @@ impl Services {
             streams,
             threads,
             work_items,
+            stream_store,
             thread_store,
             work_item_store,
             work_note_store,
@@ -284,6 +289,7 @@ impl Services {
             streams,
             threads,
             work_items,
+            stream_store,
             thread_store,
             work_item_store,
             work_note_store,

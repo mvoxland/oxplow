@@ -1138,15 +1138,25 @@ export async function listCodeQualityScans(input: {
 }
 
 export function subscribeCodeQualityEvents(
-  _streamId: string,
-  _fn: (event: { scanId: number; tool: CodeQualityTool; scope: CodeQualityScope; status: CodeQualityScanStatus }) => void,
+  streamId: string,
+  fn: (event: { scanId: number; tool: CodeQualityTool; scope: CodeQualityScope; status: CodeQualityScanStatus }) => void,
 ): () => void {
-  // No backend `OxplowEvent` variant for code-quality scans yet — the
-  // Tauri rewrite collapsed this to a coarser bus that doesn't carry
-  // scan progress. Subscriber is a no-op until the backend re-emits;
-  // callers should still tolerate "no live updates" and refetch on
-  // their own cadence.
-  return () => {};
+  // Backend emits `codeQualityScanned` { streamId, scanId, tool, scope,
+  // phase: "started" | "completed" | "failed" }. Map phase → status
+  // for the renderer's enum.
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "codeQualityScanned") return;
+    if (event.streamId != null && event.streamId !== streamId) return;
+    const phase = event.phase as string;
+    const status: CodeQualityScanStatus =
+      phase === "completed" ? "done" : phase === "failed" ? "failed" : "running";
+    fn({
+      scanId: event.scanId as number,
+      tool: event.tool as CodeQualityTool,
+      scope: event.scope as CodeQualityScope,
+      status,
+    });
+  });
 }
 
 export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
@@ -1180,13 +1190,20 @@ export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
  * Notes-pane consumer only refetches on wiki-note visits.
  */
 export function subscribeUsageEvents(
-  _onEvent: (e: { kind: string; key: string; streamId: string | null; threadId: string | null }) => void,
-  _filter?: { kind?: string },
+  onEvent: (e: { kind: string; key: string; streamId: string | null; threadId: string | null }) => void,
+  filter?: { kind?: string },
 ): () => void {
-  // No backend `OxplowEvent` variant for usage events under Tauri.
-  // No-op until the backend re-emits; consumers should fall back to
-  // polling/refetching.
-  return () => {};
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "usageRecorded") return;
+    const usageKind = event.usageKind as string;
+    if (filter?.kind && usageKind !== filter.kind) return;
+    onEvent({
+      kind: usageKind,
+      key: (event.key as string | undefined) ?? "",
+      streamId: (event.streamId as string | null | undefined) ?? null,
+      threadId: (event.threadId as string | null | undefined) ?? null,
+    });
+  });
 }
 
 export async function reorderThreadQueue(
@@ -1409,12 +1426,21 @@ export interface FileSnapshotCreatedEventPayload {
 }
 
 export function subscribeSnapshotEvents(
-  _streamId: string,
-  _fn: (payload: FileSnapshotCreatedEventPayload) => void,
+  streamId: string,
+  fn: (payload: FileSnapshotCreatedEventPayload) => void,
 ): () => void {
-  // No backend `OxplowEvent` variant for file-snapshot.created under
-  // Tauri. No-op until the backend re-emits.
-  return () => {};
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "fileSnapshotCreated") return;
+    const eventStreamId = (event.streamId as string | null | undefined) ?? null;
+    if (eventStreamId != null && eventStreamId !== streamId) return;
+    fn({
+      streamId: eventStreamId ?? streamId,
+      snapshotId: String(event.snapshotId),
+      kind: (event.source as SnapshotSource) ?? "task-event",
+      effortId: (event.effortId as string | null | undefined) ?? null,
+      threadId: (event.threadId as string | null | undefined) ?? null,
+    });
+  });
 }
 
 export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
@@ -1494,29 +1520,40 @@ export function subscribeOxplowEvents(
 }
 
 export function subscribeWorkspaceContext(
-  _onEvent: (next: WorkspaceContext) => void,
+  onEvent: (next: WorkspaceContext) => void,
 ): () => void {
-  // No backend `OxplowEvent` variant for workspace-context under
-  // Tauri. No-op until the backend re-emits.
-  return () => {};
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "workspaceContextChanged") return;
+    onEvent({ gitEnabled: Boolean(event.gitEnabled) });
+  });
 }
 
 export function subscribeWorkspaceEvents(
-  _streamId: string,
-  _onEvent: (event: WorkspaceWatchEvent) => void,
+  streamId: string,
+  onEvent: (event: WorkspaceWatchEvent) => void,
 ): () => void {
-  // No backend `OxplowEvent` variant for workspace fs-watch events
-  // under Tauri. No-op until the backend re-emits.
-  return () => {};
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "workspaceChanged") return;
+    if (event.streamId !== streamId) return;
+    onEvent({
+      id: 0,
+      streamId,
+      kind: event.changeKind as WorkspaceWatchEvent["kind"],
+      path: event.path as string,
+      t: Date.now(),
+    });
+  });
 }
 
 export function subscribeGitRefsEvents(
-  _streamId: string,
-  _onEvent: () => void,
+  streamId: string,
+  onEvent: () => void,
 ): () => void {
-  // No backend `OxplowEvent` variant for git-refs changes under Tauri.
-  // No-op until the backend re-emits.
-  return () => {};
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "gitRefsChanged") return;
+    if (event.streamId !== streamId) return;
+    onEvent();
+  });
 }
 
 export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
@@ -1689,10 +1726,10 @@ export async function countPageVisitsByDay(opts: {
   return unwrap(await commands.countPageVisitsByDay(30)) as unknown as CountByDayRowApi[];
 }
 
-export function subscribePageVisitEvents(_onEvent: () => void): () => void {
-  // No backend `OxplowEvent` variant for page-visit changes under
-  // Tauri. No-op until the backend re-emits.
-  return () => {};
+export function subscribePageVisitEvents(onEvent: () => void): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.kind === "pageVisitChanged") onEvent();
+  });
 }
 
 /** Drop every visit row for a given page reference. Used when a page

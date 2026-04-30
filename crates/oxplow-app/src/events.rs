@@ -17,6 +17,40 @@ use tokio::sync::broadcast;
 
 use oxplow_domain::{StreamId, ThreadId, WorkItemId};
 
+/// fs-watch classification mirrored onto the wire so the renderer can
+/// distinguish create / modify / delete / rename without re-stating
+/// every variant of the upstream `notify` crate.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceChangeKind {
+    Created,
+    Updated,
+    Deleted,
+    Renamed,
+}
+
+/// Snapshot trigger source. The renderer renders these differently in
+/// the Snapshots panel ("startup" rows are dimmer than "task-end").
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum SnapshotSourceKind {
+    TaskStart,
+    TaskEnd,
+    TaskEvent,
+    Startup,
+    Manual,
+}
+
+/// Code-quality scan lifecycle phase the bus broadcasts. Mirrors the
+/// renderer-era enum.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum CodeQualityScanPhase {
+    Started,
+    Completed,
+    Failed,
+}
+
 /// What changed. Variants are deliberately broad — the renderer
 /// refetches the affected bucket on receipt rather than trying to
 /// reconcile diffs from the payload.
@@ -57,6 +91,51 @@ pub enum OxplowEvent {
     },
     /// agent_turn opened or closed.
     AgentTurnsChanged { thread_id: ThreadId },
+    /// A page visit was recorded (rail history, recently-finished, etc.).
+    /// Coarse — renderer refetches whatever view it cares about.
+    PageVisitChanged,
+    /// A usage event was recorded. The renderer's filtering uses
+    /// `usage_kind` to scope refetches (wiki-note vs editor-file vs
+    /// work-item, etc.).
+    UsageRecorded {
+        usage_kind: String,
+        key: String,
+        stream_id: Option<StreamId>,
+        thread_id: Option<ThreadId>,
+    },
+    /// A file snapshot landed in the snapshot store. Driven by the
+    /// background snapshot capture loop or an explicit task event.
+    FileSnapshotCreated {
+        stream_id: Option<StreamId>,
+        snapshot_id: i64,
+        source: SnapshotSourceKind,
+        effort_id: Option<String>,
+        thread_id: Option<ThreadId>,
+    },
+    /// A code-quality scan transitioned states (started / completed /
+    /// failed). The renderer refreshes scan + finding lists on receipt.
+    CodeQualityScanned {
+        stream_id: Option<StreamId>,
+        scan_id: i64,
+        tool: String,
+        scope: String,
+        phase: CodeQualityScanPhase,
+    },
+    /// `.git` directory appeared/disappeared at the project root —
+    /// "is this a git workspace" flipped. Renderer hides/restores the
+    /// git-aware UI on receipt.
+    WorkspaceContextChanged { git_enabled: bool },
+    /// A worktree file changed on disk. Renderer-wide: file tree, quick
+    /// open, project panel, git dashboard, uncommitted changes view all
+    /// refresh in response.
+    WorkspaceChanged {
+        stream_id: StreamId,
+        change_kind: WorkspaceChangeKind,
+        path: String,
+    },
+    /// A ref under `.git/refs/` changed. Drives history, branch list,
+    /// and ahead/behind refreshes. Coarse per stream.
+    GitRefsChanged { stream_id: StreamId },
 }
 
 /// Cheap-to-clone broadcast hub. Capacity is small — subscribers

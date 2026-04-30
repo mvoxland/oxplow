@@ -1,4 +1,5 @@
 use oxplow_app::code_quality_runner::{run_jscpd, run_lizard, RunOptions};
+use oxplow_app::{CodeQualityScanPhase, OxplowEvent};
 use oxplow_db::{CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus};
 
 use crate::error::IpcError;
@@ -42,6 +43,13 @@ pub async fn run_code_quality_scan(
         .code_quality_store
         .create_scan(&tool, &scope)
         .await?;
+    state.events.emit(OxplowEvent::CodeQualityScanned {
+        stream_id: None,
+        scan_id,
+        tool: tool.clone(),
+        scope: scope.clone(),
+        phase: CodeQualityScanPhase::Started,
+    });
     let findings_result = match tool.as_str() {
         "lizard" => run_lizard(&project, opts).await,
         "jscpd" => run_jscpd(&project, opts).await,
@@ -54,6 +62,13 @@ pub async fn run_code_quality_scan(
                     Some(format!("unknown tool: {other}")),
                 )
                 .await?;
+            state.events.emit(OxplowEvent::CodeQualityScanned {
+                stream_id: None,
+                scan_id,
+                tool: tool.clone(),
+                scope: scope.clone(),
+                phase: CodeQualityScanPhase::Failed,
+            });
             return Err(IpcError::invalid(format!("unknown code quality tool: {other}")));
         }
     };
@@ -81,6 +96,13 @@ pub async fn run_code_quality_scan(
                 .code_quality_store
                 .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
                 .await?;
+            state.events.emit(OxplowEvent::CodeQualityScanned {
+                stream_id: None,
+                scan_id,
+                tool: tool.clone(),
+                scope: scope.clone(),
+                phase: CodeQualityScanPhase::Completed,
+            });
         }
         Err(e) => {
             state
@@ -91,6 +113,13 @@ pub async fn run_code_quality_scan(
                     Some(e.to_string()),
                 )
                 .await?;
+            state.events.emit(OxplowEvent::CodeQualityScanned {
+                stream_id: None,
+                scan_id,
+                tool: tool.clone(),
+                scope: scope.clone(),
+                phase: CodeQualityScanPhase::Failed,
+            });
             return Err(IpcError::internal(e.to_string()));
         }
     }

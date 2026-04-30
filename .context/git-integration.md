@@ -50,10 +50,14 @@ than per-stream.
 
 ### 3. Git refs watcher
 
-`crates/oxplow-git/src/refs_watch.rs` — `GitRefsWatcherRegistry`. One watcher per
-stream, recursive on the stream's `.git/` directory, debounced ~200ms
-(a single `git commit` fires a dozen events touching `HEAD`, `refs/*`,
-`logs/*`, `index`, `ORIG_HEAD`, …).
+`crates/oxplow-git/src/refs_watch.rs` — `GitRefsWatcher`. The
+per-stream registry lives in
+`crates/oxplow-app/src/workspace_watch.rs`
+(`WorkspaceWatchRegistry`), which spawns one `GitRefsWatcher` and one
+`FsWatcher` per stream at boot and bridges their broadcasts onto the
+shared `EventBus` as `gitRefsChanged` / `workspaceChanged`. Watchers
+debounce ~250ms (a single `git commit` fires a dozen events touching
+`HEAD`, `refs/*`, `logs/*`, `index`, `ORIG_HEAD`, …).
 
 When the stream lives in a secondary worktree (the common case — oxplow
 manages its own worktrees under `.oxplow/worktrees/`), the stream's
@@ -64,7 +68,7 @@ the shared `.git` (where `refs/heads/*` actually update). Both dirs are
 watched; without the commondir watch, `git fetch` / ref updates from
 outside the worktree would be missed.
 
-Fires `git-refs.changed` after each debounce. Consumed silently (no
+Fires `gitRefsChanged` after each debounce. Consumed silently (no
 loading spinner) by:
 
 - `HistoryPanel` — reloads the commit log.

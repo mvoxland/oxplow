@@ -21,6 +21,7 @@ use oxplow_domain::{StreamId, Timestamp};
 use oxplow_fs_watch::FsWatcher;
 
 use crate::blob_store::BlobStore;
+use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
 
 #[derive(Clone)]
 pub struct SnapshotCaptureService {
@@ -31,6 +32,10 @@ pub struct SnapshotCaptureService {
     /// Files larger than this skip blob hashing and are flagged
     /// `oversize`. Pulled from `OxplowConfig::snapshot_max_file_bytes`.
     max_file_bytes: u64,
+    /// Optional event bus. When set, each captured snapshot fires a
+    /// `FileSnapshotCreated` event so the renderer can refresh the
+    /// Snapshots panel without polling.
+    events: Option<EventBus>,
 }
 
 impl SnapshotCaptureService {
@@ -47,7 +52,15 @@ impl SnapshotCaptureService {
             project_dir,
             stream_id,
             max_file_bytes,
+            events: None,
         }
+    }
+
+    /// Attach an `EventBus` so capture_path emits
+    /// `FileSnapshotCreated` after each successful insert.
+    pub fn with_events(mut self, events: EventBus) -> Self {
+        self.events = Some(events);
+        self
     }
 
     /// Spawn the capture loop. Watches `project_dir` for changes and
@@ -113,7 +126,19 @@ impl SnapshotCaptureService {
             captured_at: Timestamp::now(),
             oversize,
         };
-        self.store.capture(snap).await?;
+        let snapshot_id = self.store.capture(snap).await?;
+        if let Some(bus) = &self.events {
+            bus.emit(OxplowEvent::FileSnapshotCreated {
+                stream_id: self.stream_id.clone(),
+                snapshot_id,
+                // The capture loop is the periodic background source —
+                // task-start/task-end variants are reserved for explicit
+                // hook-triggered captures elsewhere.
+                source: SnapshotSourceKind::Startup,
+                effort_id: None,
+                thread_id: None,
+            });
+        }
         Ok(())
     }
 }
