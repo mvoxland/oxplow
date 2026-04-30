@@ -1077,7 +1077,7 @@ export async function getCommitDetail(
   streamId: string,
   sha: string,
 ): Promise<import("./tauri-bridge/index.js").CommitDetail | null> {
-  return desktopApi().getCommitDetail(streamId, sha);
+  return unwrap(await commands.getCommitDetail(streamId, sha));
 }
 
 export async function getChangeScopes(
@@ -1094,16 +1094,28 @@ export async function searchWorkspaceText(
   return desktopApi().searchWorkspaceText(streamId, query, options);
 }
 
-export async function gitRestorePath(streamId: string, path: string): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  return desktopApi().gitRestorePath(streamId, path);
+export async function gitRestorePath(
+  streamId: string,
+  path: string,
+): Promise<import("./tauri-bridge/index.js").GitOpResult> {
+  unwrap(await commands.restorePath(streamId, path));
+  return synthOk();
 }
 
-export async function gitAddPath(streamId: string, path: string): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  return desktopApi().gitAddPath(streamId, path);
+export async function gitAddPath(
+  streamId: string,
+  path: string,
+): Promise<import("./tauri-bridge/index.js").GitOpResult> {
+  unwrap(await commands.gitAddPath(streamId, path));
+  return synthOk();
 }
 
-export async function gitAppendToGitignore(streamId: string, path: string): Promise<import("./tauri-bridge/index.js").GitOpResult> {
-  return desktopApi().gitAppendToGitignore(streamId, path);
+export async function gitAppendToGitignore(
+  streamId: string,
+  path: string,
+): Promise<import("./tauri-bridge/index.js").GitOpResult> {
+  unwrap(await commands.appendToGitignore(streamId, path));
+  return synthOk();
 }
 
 export async function gitPush(
