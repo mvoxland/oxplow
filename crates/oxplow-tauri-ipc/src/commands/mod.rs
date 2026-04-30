@@ -18,6 +18,7 @@ pub mod git;
 pub mod hooks;
 pub mod log;
 pub mod lsp;
+pub mod menu;
 pub mod notes;
 pub mod page_visit;
 pub mod snapshot;
