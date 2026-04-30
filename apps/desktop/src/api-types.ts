@@ -211,28 +211,13 @@ export interface ChangeScopes {
   [extra: string]: any;
 }
 
-export interface CommitDetail {
-  sha: string;
-  short_sha: string;
-  author: string;
-  email: string;
-  timestamp_secs: number;
-  subject: string;
-  body: string;
-  parents: string[];
-  files: { path: string; additions: number; deletions: number; status: string }[];
-}
-
-export interface GitLogCommit {
-  sha: string;
-  short_sha: string;
-  author: string;
-  email: string;
-  timestamp_secs: number;
-  subject: string;
-  parents: string[];
-}
-
+/// `GitLogResult` is a renderer-side aggregate that wraps the
+/// bindings `GitLogCommit[]` with optional `currentBranch` /
+/// `branchHeads` / `tags` overlay slots populated separately by
+/// the renderer (e.g. via `listAllRefs`). The bindings type only
+/// carries `commits`, so this stays in api-types until the Rust
+/// surface grows the overlay or every consumer composes it
+/// renderer-side.
 export interface GitLogRef {
   ref: string;
   short: string;
@@ -240,20 +225,11 @@ export interface GitLogRef {
 }
 
 export interface GitLogResult {
-  commits: GitLogCommit[];
+  commits: import("./tauri-bridge/index.js").GitLogCommit[];
   refs?: GitLogRef[];
   currentBranch?: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [extra: string]: any;
-}
-
-export interface BlameLine {
-  line: number;
-  sha: string;
-  author: string;
-  author_mail: string;
-  author_time: number;
-  summary: string;
 }
 
 export interface GroupedGitRefs {
