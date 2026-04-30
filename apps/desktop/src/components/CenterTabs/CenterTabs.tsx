@@ -3,6 +3,7 @@ import type { AgentStatus } from "../../api.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { Kebab } from "../Kebab.js";
 import type { MenuItem } from "../../menu.js";
+import { ErrorBoundary } from "../ErrorBoundary.js";
 
 export interface CenterTab {
   id: string;
@@ -159,7 +160,11 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
       </div>
       {header}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {active ? active.render() : null}
+        {active ? (
+          <ErrorBoundary key={active.id} label={active.label}>
+            {active.render()}
+          </ErrorBoundary>
+        ) : null}
       </div>
     </div>
   );
