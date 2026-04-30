@@ -744,44 +744,56 @@ export interface WorkspaceWatchEvent {
   t: number;
 }
 
-export async function getCurrentStream(): Promise<Stream> {
-  return desktopApi().getCurrentStream();
-}
+// Stream + config wrappers. Each call goes straight to the
+// tauri-specta `commands` surface — no buildDesktopAdapter
+// detour. The unwrap() helper at the top of this file converts
+// the {status, data|error} envelope into a plain promise.
 
 export async function listStreams(): Promise<Stream[]> {
-  return desktopApi().listStreams();
+  return unwrap(await commands.listStreams());
+}
+
+export async function getCurrentStream(): Promise<Stream> {
+  const cur = unwrap(await commands.getCurrentStream());
+  if (cur) return cur;
+  const primary = unwrap(await commands.getPrimaryStream());
+  if (!primary) throw new Error("no primary stream available");
+  return primary;
 }
 
 export async function switchStream(id: string): Promise<Stream> {
-  return desktopApi().switchStream(id);
-}
-
-export async function renameCurrentStream(title: string): Promise<Stream> {
-  return desktopApi().renameCurrentStream(title);
+  unwrap(await commands.switchStream(id));
+  return getCurrentStream();
 }
 
 export async function renameStream(streamId: string, title: string): Promise<Stream> {
-  return desktopApi().renameStream(streamId, title);
+  return unwrap(await commands.renameStream({ id: streamId, title }));
+}
+
+export async function renameCurrentStream(title: string): Promise<Stream> {
+  const cur = unwrap(await commands.getCurrentStream());
+  if (!cur) throw new Error("no current stream to rename");
+  return renameStream(cur.id, title);
 }
 
 export async function getConfig(): Promise<import("./api-types.js").OxplowConfig> {
-  return desktopApi().getConfig();
+  return unwrap(await commands.getConfig()) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 export async function setAgentPromptAppend(text: string): Promise<import("./api-types.js").OxplowConfig> {
-  return desktopApi().setAgentPromptAppend(text);
+  return unwrap(await commands.setAgentPromptAppend(text)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 export async function setGeneratedDirs(dirs: string[]): Promise<import("./api-types.js").OxplowConfig> {
-  return desktopApi().setGeneratedDirs(dirs);
+  return unwrap(await commands.setGeneratedDirs(dirs)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 export async function setSnapshotRetentionDays(days: number): Promise<import("./api-types.js").OxplowConfig> {
-  return desktopApi().setSnapshotRetentionDays(days);
+  return unwrap(await commands.setSnapshotRetentionDays(days)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 export async function setSnapshotMaxFileBytes(bytes: number): Promise<import("./api-types.js").OxplowConfig> {
-  return desktopApi().setSnapshotMaxFileBytes(bytes);
+  return unwrap(await commands.setSnapshotMaxFileBytes(bytes)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 export async function listBranches(): Promise<BranchRef[]> {
