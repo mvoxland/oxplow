@@ -24,3 +24,7 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 specta = { workspace = true }
+
+[dev-dependencies]
+tauri = { workspace = true, features = ["test"] }
+tempfile = { workspace = true }
