@@ -1142,20 +1142,183 @@ pub async fn serve_stdio(services: Arc<Services>) -> Result<(), Box<dyn std::err
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::stores::WorkItemStore;
+    use oxplow_domain::work_item::{
+        WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemKind, WorkItemPriority,
+        WorkItemStatus,
+    };
+    use oxplow_domain::time::Timestamp;
+    use rmcp::handler::server::wrapper::Parameters;
+
+    fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
+        let project = tempfile::tempdir().unwrap();
+        let services = Arc::new(Services::in_memory(project.path()).unwrap());
+        let server = OxplowMcp::new(services.clone());
+        (project, services, server)
+    }
+
+    /// Pull the first text block out of an MCP CallToolResult. Most
+    /// of our handlers return a single JSON-encoded blob.
+    fn text_payload(result: CallToolResult) -> String {
+        for c in &result.content {
+            if let Some(text) = c.as_text() {
+                return text.text.clone();
+            }
+        }
+        panic!("CallToolResult had no text content");
+    }
+
+    fn make_work_item(thread_id: Option<ThreadId>, title: &str) -> WorkItem {
+        let now = Timestamp::now();
+        WorkItem {
+            id: WorkItemId::new(),
+            thread_id,
+            parent_id: None,
+            kind: WorkItemKind::Task,
+            title: title.into(),
+            description: String::new(),
+            acceptance_criteria: None,
+            status: WorkItemStatus::Ready,
+            priority: WorkItemPriority::Medium,
+            sort_index: 0,
+            created_by: WorkItemActorKind::User,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: Some(WorkItemAuthor::User),
+            category: None,
+            tags: None,
+        }
+    }
 
     #[tokio::test]
     async fn server_constructs() {
-        let project = tempfile::tempdir().unwrap();
-        let services = Arc::new(Services::in_memory(project.path()).unwrap());
-        let _server = OxplowMcp::new(services);
+        let (_proj, _svc, _server) = boot();
     }
 
     #[tokio::test]
     async fn get_info_advertises_tool_capability() {
-        let project = tempfile::tempdir().unwrap();
-        let services = Arc::new(Services::in_memory(project.path()).unwrap());
-        let server = OxplowMcp::new(services);
+        let (_proj, _svc, server) = boot();
         let info = server.get_info();
         assert!(info.capabilities.tools.is_some());
+    }
+
+    #[tokio::test]
+    async fn ping_returns_pong() {
+        let (_proj, _svc, server) = boot();
+        let r = server.ping().await.unwrap();
+        assert_eq!(text_payload(r), "pong");
+    }
+
+    #[tokio::test]
+    async fn app_version_returns_cargo_version() {
+        let (_proj, _svc, server) = boot();
+        let r = server.app_version().await.unwrap();
+        assert_eq!(text_payload(r), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn list_streams_returns_empty_for_fresh_project() {
+        // ensure_primary requires a real git repo; the in_memory
+        // service uses a tempdir that isn't one, so we exercise the
+        // empty path. Production startup wires through a real repo.
+        let (_proj, _services, server) = boot();
+        let r = server.list_streams().await.unwrap();
+        let body = text_payload(r);
+        assert_eq!(body.trim(), "[]");
+    }
+
+    #[tokio::test]
+    async fn list_backlog_includes_unassigned_items() {
+        let (_proj, services, server) = boot();
+        let backlog_item = make_work_item(None, "do the thing");
+        services
+            .work_item_store
+            .upsert(&backlog_item)
+            .await
+            .unwrap();
+
+        let r = server.list_backlog().await.unwrap();
+        let body = text_payload(r);
+        assert!(
+            body.contains(backlog_item.id.as_str()),
+            "backlog item missing from result: {body}",
+        );
+        assert!(body.contains("do the thing"), "title missing: {body}");
+    }
+
+    #[tokio::test]
+    async fn get_work_item_round_trips() {
+        let (_proj, services, server) = boot();
+        let item = make_work_item(None, "round trip");
+        services.work_item_store.upsert(&item).await.unwrap();
+
+        let r = server
+            .get_work_item(Parameters(WorkItemIdParams {
+                id: item.id.as_str().to_string(),
+            }))
+            .await
+            .unwrap();
+        let body = text_payload(r);
+        assert!(body.contains("round trip"), "unexpected body: {body}");
+    }
+
+    #[tokio::test]
+    async fn delete_work_item_soft_deletes() {
+        let (_proj, services, server) = boot();
+        let item = make_work_item(None, "to delete");
+        services.work_item_store.upsert(&item).await.unwrap();
+
+        server
+            .delete_work_item(Parameters(WorkItemIdParams {
+                id: item.id.as_str().to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Soft-deleted: list_backlog should no longer include it.
+        let r = server.list_backlog().await.unwrap();
+        let body = text_payload(r);
+        assert!(
+            !body.contains(item.id.as_str()),
+            "soft-deleted item should not appear in backlog: {body}",
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_work_item_round_trips() {
+        let (_proj, _services, server) = boot();
+        let item = make_work_item(None, "via mcp");
+        let json = serde_json::to_string(&item).unwrap();
+
+        let r = server
+            .upsert_work_item(Parameters(UpsertWorkItemParams {
+                item_json: json,
+            }))
+            .await
+            .unwrap();
+        let body = text_payload(r);
+        assert!(body.contains("via mcp"), "upsert response: {body}");
+
+        let fetched = server
+            .get_work_item(Parameters(WorkItemIdParams {
+                id: item.id.as_str().to_string(),
+            }))
+            .await
+            .unwrap();
+        let body = text_payload(fetched);
+        assert!(body.contains("via mcp"), "fetched after upsert: {body}");
+    }
+
+    #[tokio::test]
+    async fn list_notes_runs_against_empty_store() {
+        let (_proj, _services, server) = boot();
+        // No notes seeded — the tool should still respond with an
+        // empty-list payload rather than erroring.
+        let r = server.list_notes().await.unwrap();
+        let body = text_payload(r);
+        assert_eq!(body.trim(), "[]");
     }
 }

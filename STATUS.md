@@ -68,12 +68,15 @@ change that flips a row.
 | `oxplow-pty` | 4 | 531 | 133 |
 | `oxplow-tmux` | 3 | 371 | 124 |
 | `oxplow-fs-watch` | 3 | 178 | 59 |
-| `oxplow-tauri-ipc` | 2 | 2,820 | 1,410 |
-| `oxplow-mcp` | 2 | 1,161 | 580 |
+| `oxplow-tauri-ipc` | 12 | 2,820 | 235 |
+| `oxplow-mcp` | 10 | 1,161 | 116 |
 
-Total: 250 tests. The thinnest crates (`oxplow-tauri-ipc`,
-`oxplow-mcp`, `oxplow-tmux`, `oxplow-pty`) are the obvious backfill
-targets — see "still open" below.
+Total: 268 tests. `oxplow-tauri-ipc` and `oxplow-mcp` got first
+backfills (error-mapping unit tests + tool-handler smoke tests
+covering ping/app_version/list_streams/list_backlog/get/upsert/
+delete_work_item/list_notes). `oxplow-tmux` and `oxplow-pty` stay
+thin — both are subprocess-driven and well-exercised by the
+`oxplow-app` integration paths.
 
 ## Frontend tests
 
@@ -92,10 +95,16 @@ README). No Tauri e2e harness exists yet.
 - **Tauri e2e harness.** Three plausible paths (tauri-driver +
   WebdriverIO, CDP-into-webview via Playwright, hand-rolled HTTP
   probes). None built; see `tests-e2e.electron-archive/README.md`.
-- **Backfill `oxplow-tauri-ipc` and `oxplow-mcp` tests.** Both are
-  ~1,000–3,000 LOC with 2 tests each. The CI floor (65% workspace
-  lines) doesn't trigger on per-crate gaps; raising the floor as
-  these get backfilled is the lever.
+  The integration tests in `oxplow-app/` plus the new
+  `oxplow-tauri-ipc` and `oxplow-mcp` smoke suites cover the
+  business-logic surface that matters; the gap is renderer-side
+  click-through coverage.
+- **Per-crate coverage floors.** Workspace floor of 65% lines is
+  in place; raising it as `oxplow-tauri-ipc` / `oxplow-mcp`
+  coverage grows is the lever. The thinnest crates today are the
+  command-adapter modules (each `#[tauri::command]` is a thin
+  wrapper that needs an integration harness to exercise; unit
+  tests can only cover the IpcError mapping and helpers).
 
 ## How to verify
 
