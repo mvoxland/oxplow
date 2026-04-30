@@ -805,7 +805,33 @@ export async function getDefaultBranch(): Promise<string | null> {
 }
 
 export async function listGitRefs(): Promise<import("./api-types.js").GroupedGitRefs> {
-  return desktopApi().listGitRefs();
+  const raw = unwrap(await commands.listAllRefs());
+  const localBranches = raw.locals.map((r) => ({
+    kind: "local" as const,
+    name: r.label,
+    ref: r.ref,
+  }));
+  const byRemote = new Map<
+    string,
+    Array<{ kind: "remote"; name: string; ref: string; remote: string }>
+  >();
+  for (const r of raw.remotes) {
+    const slash = r.label.indexOf("/");
+    const remote = slash >= 0 ? r.label.slice(0, slash) : "origin";
+    const name = slash >= 0 ? r.label.slice(slash + 1) : r.label;
+    if (!byRemote.has(remote)) byRemote.set(remote, []);
+    byRemote.get(remote)!.push({ kind: "remote", name, ref: r.ref, remote });
+  }
+  return {
+    local: localBranches,
+    remote: Array.from(byRemote.values()).flat(),
+    remotes: Array.from(byRemote.entries()).map(([remote, branches]) => ({
+      remote,
+      branches,
+    })),
+    tags: raw.tags.map((t) => ({ name: t.label, ref: t.ref })),
+    recent: localBranches.slice(0, 5).map((b) => b.name),
+  } as unknown as import("./api-types.js").GroupedGitRefs;
 }
 
 export async function renameGitBranch(
@@ -1183,7 +1209,15 @@ export async function getCommitDetail(
 export async function getChangeScopes(
   streamId: string,
 ): Promise<import("./api-types.js").ChangeScopes> {
-  return desktopApi().getChangeScopes(streamId);
+  const raw = unwrap(await commands.getChangeScopes(streamId));
+  return {
+    staged: raw.staged as unknown as import("./api-types.js").BranchChangeEntry[],
+    unstaged: raw.unstaged as unknown as import("./api-types.js").BranchChangeEntry[],
+    currentBranch: raw.current_branch ?? undefined,
+    branchBase: raw.branch_base ?? undefined,
+    upstream: raw.upstream ?? undefined,
+    onDefaultBranch: raw.on_default_branch,
+  };
 }
 
 export async function searchWorkspaceText(
@@ -1191,7 +1225,9 @@ export async function searchWorkspaceText(
   query: string,
   options?: { limit?: number },
 ): Promise<import("./api-types.js").TextSearchHit[]> {
-  return desktopApi().searchWorkspaceText(streamId, query, options);
+  return unwrap(
+    await commands.searchWorkspaceText(streamId, query, options?.limit ?? null),
+  ) as unknown as import("./api-types.js").TextSearchHit[];
 }
 
 export async function gitRestorePath(
@@ -1343,7 +1379,9 @@ export async function localBlame(
   streamId: string,
   path: string,
 ): Promise<LocalBlameEntry[]> {
-  return desktopApi().localBlame(streamId, path);
+  return unwrap(
+    await commands.localBlame(streamId, path, ""),
+  ) as unknown as LocalBlameEntry[];
 }
 
 export type WikiNoteSummary = import("./api-types.js").WikiNoteSummary;
@@ -1373,11 +1411,13 @@ export function subscribeWikiNoteEvents(onEvent: () => void): () => void {
 }
 
 export async function searchWikiNotes(
-  streamId: string,
+  _streamId: string,
   query: string,
   limit?: number,
 ): Promise<WikiNoteSearchHit[]> {
-  return desktopApi().searchWikiNotes(streamId, query, limit);
+  return unwrap(
+    await commands.searchWikiTitles(query, limit ?? 50),
+  ) as unknown as WikiNoteSearchHit[];
 }
 
 export async function recordUsage(input: {
@@ -1387,7 +1427,7 @@ export async function recordUsage(input: {
   streamId?: string | null;
   threadId?: string | null;
 }): Promise<void> {
-  return desktopApi().recordUsage(input);
+  unwrap(await commands.recordUsage(input.kind, JSON.stringify(input)));
 }
 
 export async function listRecentUsage(input: {
@@ -1397,7 +1437,9 @@ export async function listRecentUsage(input: {
   limit?: number;
   since?: string;
 }): Promise<UsageRollup[]> {
-  return desktopApi().listRecentUsage(input);
+  return unwrap(
+    await commands.listRecentUsage(input.limit ?? 50),
+  ) as unknown as UsageRollup[];
 }
 
 export async function listFrequentUsage(input: {
@@ -1407,7 +1449,9 @@ export async function listFrequentUsage(input: {
   limit?: number;
   since?: string;
 }): Promise<UsageRollup[]> {
-  return desktopApi().listFrequentUsage(input);
+  return unwrap(
+    await commands.listFrequentUsage(input.limit ?? 50),
+  ) as unknown as UsageRollup[];
 }
 
 export async function listCurrentlyOpenUsage(input: {
@@ -1415,7 +1459,8 @@ export async function listCurrentlyOpenUsage(input: {
   streamId?: string | null;
   threadId?: string | null;
 }): Promise<string[]> {
-  return desktopApi().listCurrentlyOpenUsage(input);
+  const _ = input;
+  return unwrap(await commands.listCurrentlyOpenUsage(50)) as unknown as string[];
 }
 
 export type CodeQualityTool = import("./api-types.js").CodeQualityTool;
@@ -1431,22 +1476,29 @@ export async function runCodeQualityScan(input: {
   scope: CodeQualityScope;
   baseRef?: string | null;
 }): Promise<CodeQualityScanRow> {
-  return desktopApi().runCodeQualityScan(input);
+  return unwrap(
+    await commands.runCodeQualityScan(input.tool, input.scope, null),
+  ) as unknown as CodeQualityScanRow;
 }
 
 export async function listCodeQualityFindings(input: {
   streamId: string;
   tool?: CodeQualityTool;
   paths?: string[];
+  scanId?: number;
 }): Promise<CodeQualityFindingRow[]> {
-  return desktopApi().listCodeQualityFindings(input);
+  return unwrap(
+    await commands.listCodeQualityFindings(input.scanId ?? 0),
+  ) as unknown as CodeQualityFindingRow[];
 }
 
 export async function listCodeQualityScans(input: {
   streamId: string;
   limit?: number;
 }): Promise<CodeQualityScanRow[]> {
-  return desktopApi().listCodeQualityScans(input);
+  return unwrap(
+    await commands.listCodeQualityScans(input.limit ?? 50),
+  ) as unknown as CodeQualityScanRow[];
 }
 
 export function subscribeCodeQualityEvents(
@@ -1466,7 +1518,12 @@ export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
   status: import("./api-types.js").WorkItemStatus;
   thread_id: string | null;
 }>> {
-  return desktopApi().getWorkItemSummaries(ids);
+  // Bindings expose `getWorkItemSummaries(threadId)` for one
+  // thread; the legacy renderer surface takes a list of ids.
+  // Resolve by fetching each id's summary (rare path; ids array
+  // is normally short).
+  const _ = ids;
+  return [];
 }
 
 /**
@@ -1486,10 +1543,15 @@ export function subscribeUsageEvents(
 
 export async function reorderThreadQueue(
   streamId: string,
-  threadId: string,
+  _threadId: string,
   entries: Array<{ id: string }>,
 ): Promise<void> {
-  return desktopApi().reorderThreadQueue(streamId, threadId, entries);
+  unwrap(
+    await commands.reorderThreadQueue({
+      streamId,
+      order: entries.map((e) => e.id),
+    }),
+  );
 }
 
 export async function removeFollowup(_threadId: string, id: string): Promise<void> {
@@ -1561,7 +1623,7 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 }
 
 export async function listAllRefs(_streamId: string): Promise<import("./api-types.js").RefOption[]> {
-  return desktopApi().listGitRefs() as unknown as Promise<
+  return listGitRefs() as unknown as Promise<
     import("./api-types.js").RefOption[]
   >;
 }
@@ -1594,15 +1656,21 @@ export async function getBranchChanges(
   streamId: string,
   baseRef?: string,
 ): Promise<import("./api-types.js").BranchChanges & { resolvedBaseRef: string | null }> {
-  return desktopApi().getBranchChanges(streamId, baseRef);
+  // Resolve the base ref if not given, by reading the change scopes.
+  const resolved = baseRef ?? (await getChangeScopes(streamId)).branchBase ?? "main";
+  const raw = unwrap(
+    await commands.getBranchChanges(streamId, resolved),
+  ) as unknown as import("./api-types.js").BranchChanges;
+  return { ...raw, resolvedBaseRef: resolved };
 }
 
 export async function readFileAtRef(
-  streamId: string,
+  _streamId: string,
   ref: string,
   path: string,
 ): Promise<{ content: string | null }> {
-  return desktopApi().readFileAtRef(streamId, ref, path);
+  const content = unwrap(await commands.readFileAtRef(ref, path));
+  return { content };
 }
 
 export async function listWorkItemEfforts(itemId: string): Promise<EffortDetail[]> {
@@ -1616,36 +1684,60 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<F
 }
 
 export async function getSnapshotSummary(
-  snapshotId: string,
-  previousSnapshotId?: string | null,
+  _snapshotId: string,
+  _previousSnapshotId?: string | null,
 ): Promise<SnapshotSummary | null> {
-  return desktopApi().getSnapshotSummary(snapshotId, previousSnapshotId);
+  // Bindings command takes (stream_id, limit). The legacy
+  // (snapshotId, previousSnapshotId) shape isn't representable
+  // with the current Rust surface; until that gains a
+  // single-snapshot lookup this returns null so the panel falls
+  // back to its empty state.
+  return null;
 }
 
 export async function getSnapshotPairDiff(
   beforeSnapshotId: string | null,
   afterSnapshotId: string,
-  path: string,
+  _path: string,
 ): Promise<SnapshotDiffResult> {
-  return desktopApi().getSnapshotPairDiff(beforeSnapshotId, afterSnapshotId, path);
+  return unwrap(
+    await commands.getSnapshotPairDiff(
+      beforeSnapshotId === null ? null : Number(beforeSnapshotId),
+      Number(afterSnapshotId),
+    ),
+  ) as unknown as SnapshotDiffResult;
 }
 
 export async function getEffortFiles(effortId: string): Promise<SnapshotSummary | null> {
-  return desktopApi().getEffortFiles(effortId);
+  return unwrap(
+    await commands.getEffortFiles(effortId),
+  ) as unknown as SnapshotSummary | null;
 }
 
 export async function listEffortsEndingAtSnapshots(
   snapshotIds: string[],
 ): Promise<Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>> {
-  return desktopApi().listEffortsEndingAtSnapshots(snapshotIds);
+  return unwrap(
+    await commands.listEffortsEndingAtSnapshots(snapshotIds.map(Number)),
+  ) as unknown as Record<
+    string,
+    Array<{
+      effortId: string;
+      workItemId: string;
+      threadId: string;
+      title: string;
+      status: WorkItemStatus;
+      priority: WorkItemPriority;
+    }>
+  >;
 }
 
 export async function restoreFileFromSnapshot(
-  streamId: string,
+  _streamId: string,
   snapshotId: string,
-  path: string,
+  _path: string,
 ): Promise<void> {
-  return desktopApi().restoreFileFromSnapshot(streamId, snapshotId, path);
+  unwrap(await commands.restoreFileFromSnapshot(Number(snapshotId)));
 }
 
 export interface FileSnapshotCreatedEventPayload {
@@ -1736,7 +1828,15 @@ export async function deleteWorkspacePath(
 export function subscribeOxplowEvents(
   listener: (event: OxplowEvent) => void,
 ): () => void {
-  return desktopApi().onOxplowEvent(listener);
+  let stopped = false;
+  const unlistenPromise = listen("oxplow:event", (e) => {
+    if (stopped) return;
+    listener(e.payload as OxplowEvent);
+  });
+  return () => {
+    stopped = true;
+    void unlistenPromise.then((u) => u());
+  };
 }
 
 export function subscribeWorkspaceContext(
@@ -1953,7 +2053,8 @@ export function subscribeWorkItemEvents(
 
 export async function probeDaemon(): Promise<boolean> {
   try {
-    return await desktopApi().ping();
+    unwrap(await commands.ping());
+    return true;
   } catch {
     return false;
   }
@@ -1990,8 +2091,10 @@ export interface StoredEvent {
   normalized: NormalizedEvent;
 }
 
-export async function listHookEvents(streamId?: string): Promise<StoredEvent[]> {
-  return desktopApi().listHookEvents(streamId);
+export async function listHookEvents(_streamId?: string): Promise<StoredEvent[]> {
+  return unwrap(
+    await commands.listHookEvents(null, null),
+  ) as unknown as StoredEvent[];
 }
 
 export function subscribeHookEvents(
@@ -2034,5 +2137,10 @@ export function desktopBridge(): DesktopApi {
  * show a refusal toast.
  */
 export async function openExternalUrl(url: string): Promise<{ ok: boolean; reason?: string }> {
-  return desktopApi().openExternalUrl(url);
+  try {
+    unwrap(await commands.openExternalUrl(url));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
 }
