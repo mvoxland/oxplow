@@ -1,7 +1,7 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteGitBranch, gitMergeInto, gitRebaseOnto, listGitRefs, renameGitBranch, type BranchRef, type GroupedGitRefs } from "../api.js";
-import type { GitOpResult } from "../api.js";
+import type { GitOpResult } from "../tauri-bridge/index.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { Slideover } from "./Slideover.js";
@@ -160,7 +160,7 @@ export function BranchPicker({
     setError(null);
     try {
       const result = await renameGitBranch(renaming.from, to);
-      if (!result.ok) setError((result.stderr || result.stdout || "rename failed").trim());
+      if (!result.success) setError((result.stderr || result.stdout || "rename failed").trim());
       else await refresh();
     } catch (e) {
       setError(String(e));
@@ -178,7 +178,7 @@ export function BranchPicker({
       const { awaitDone } = await gitMergeInto(streamId, other);
       const task = await awaitDone;
       const result = task?.result as GitOpResult | undefined;
-      if (!result?.ok) setError(((result?.stderr ?? task?.error) || result?.stdout || "merge failed").trim());
+      if (!result?.success) setError(((result?.stderr ?? task?.error) || result?.stdout || "merge failed").trim());
       else { await refresh(); setOpen(false); }
     } catch (e) {
       setError(String(e));
@@ -195,7 +195,7 @@ export function BranchPicker({
       const { awaitDone } = await gitRebaseOnto(streamId, onto);
       const task = await awaitDone;
       const result = task?.result as GitOpResult | undefined;
-      if (!result?.ok) setError(((result?.stderr ?? task?.error) || result?.stdout || "rebase failed").trim());
+      if (!result?.success) setError(((result?.stderr ?? task?.error) || result?.stdout || "rebase failed").trim());
       else { await refresh(); setOpen(false); }
     } catch (e) {
       setError(String(e));
@@ -210,7 +210,7 @@ export function BranchPicker({
     setError(null);
     try {
       const result = await deleteGitBranch(deleting.branch, { force: deleting.force });
-      if (!result.ok) {
+      if (!result.success) {
         const msg = (result.stderr || result.stdout || "").trim();
         // Git signals "not fully merged" when refusing -d; offer a force path.
         if (!deleting.force && /not fully merged|is not fully merged/i.test(msg)) {

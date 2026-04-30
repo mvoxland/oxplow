@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { checkoutStreamBranch, listBranches, type AgentStatus, type BranchRef, type Stream } from "../api.js";
-import { AgentStatusDot } from "./AgentStatusDot.js";
+import { checkoutStreamBranch, listBranches, type BranchRef, type Stream } from "../api.js";
+import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
 import { WORK_ITEM_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
@@ -10,7 +10,7 @@ import { Slideover } from "./Slideover.js";
 interface Props {
   stream: Stream | null;
   streams: Stream[];
-  streamStatuses: Record<string, AgentStatus>;
+  streamStatuses: Record<string, AgentStatusDotState>;
   streamActiveThreadIds?: Record<string, string | null>;
   gitEnabled: boolean;
   onSwitch(id: string): void;
