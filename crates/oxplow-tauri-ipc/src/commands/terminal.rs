@@ -1,7 +1,8 @@
 use oxplow_app::agent_command::{build_agent_command, AgentCommandOptions, PaneKind};
 use oxplow_app::agent_prompt::assemble_system_prompt;
-use oxplow_app::terminal_sessions::TerminalSessionError;
+use oxplow_app::terminal_sessions::{AttachResult, TerminalSessionError};
 use oxplow_domain::stores::ThreadStore;
+use oxplow_app::terminal_sessions::SpawnRequest;
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -36,7 +37,7 @@ pub async fn open_terminal_session(
     cols: u16,
     rows: u16,
     transport_mode: String,
-) -> Result<String, IpcError> {
+) -> Result<AttachResult, IpcError> {
     let pane_kind = match pane_target.as_str() {
         "working" => PaneKind::Working,
         "talking" => PaneKind::Talking,
@@ -58,7 +59,7 @@ pub async fn open_terminal_session(
     // Pull the selected thread (if any) so the system prompt the
     // agent sees matches what the renderer is showing.
     let thread_id = state.threads.selected(&stream.id).await?;
-    let thread = match thread_id {
+    let thread = match thread_id.clone() {
         Some(id) => state.thread_store.get(&id).await?,
         None => None,
     };
@@ -67,7 +68,18 @@ pub async fn open_terminal_session(
     let cols = cols.max(20);
     let rows = rows.max(5);
 
-    let id = match transport_mode.as_str() {
+    // Identity used to deduplicate sessions so re-attaches resume the
+    // same PTY instead of spawning a new one. Includes the thread id
+    // when known so per-thread state is isolated.
+    let session_key = format!(
+        "{}|{}|{}|{}",
+        stream.id.0,
+        thread_id.as_ref().map(|t| t.0.as_str()).unwrap_or(""),
+        pane_target,
+        transport_mode,
+    );
+
+    let result = match transport_mode.as_str() {
         "tmux" => {
             let prompt = assemble_system_prompt(
                 &state.layout.project_dir,
@@ -88,9 +100,22 @@ pub async fn open_terminal_session(
                 .ensure_pane(&stream, pane_kind, &config, opts)
                 .await
                 .map_err(|e| IpcError::internal(e.to_string()))?;
+            let target_label = outcome.target.as_str().to_string();
             state
                 .terminal_sessions
-                .open(outcome.target.as_str().to_string(), cols, rows)
+                .attach_or_create(session_key, target_label.clone(), cols, rows, |c, r| {
+                    SpawnRequest {
+                        command: "tmux".into(),
+                        args: vec!["attach-session".into(), "-t".into(), target_label.clone()],
+                        cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                        env: vec![
+                            ("TERM".into(), "xterm-256color".into()),
+                            ("COLORTERM".into(), "truecolor".into()),
+                        ],
+                        cols: c,
+                        rows: r,
+                    }
+                })
                 .await?
         }
         // Default to direct.
@@ -113,11 +138,23 @@ pub async fn open_terminal_session(
             let cwd = std::path::PathBuf::from(&stream.worktree_path);
             state
                 .terminal_sessions
-                .open_command(pane_target, command, cwd, cols, rows)
+                .attach_or_create(session_key, pane_target.clone(), cols, rows, |c, r| {
+                    SpawnRequest {
+                        command: "sh".into(),
+                        args: vec!["-lc".into(), command],
+                        cwd,
+                        env: vec![
+                            ("TERM".into(), "xterm-256color".into()),
+                            ("COLORTERM".into(), "truecolor".into()),
+                        ],
+                        cols: c,
+                        rows: r,
+                    }
+                })
                 .await?
         }
     };
-    Ok(id)
+    Ok(result)
 }
 
 /// Forward a JSON-encoded protocol message from the renderer to the
@@ -134,10 +171,25 @@ pub async fn send_terminal_message(
     Ok(())
 }
 
-/// Tear down the PTY and forwarder backing `session_id`. Idempotent.
+/// Detach the renderer from `session_id` without killing the PTY —
+/// the agent keeps running in the background so the user can navigate
+/// away and come back. Use `terminate_terminal_session` to actually
+/// stop the agent.
 #[tauri::command]
 #[specta::specta]
 pub async fn close_terminal_session(
+    state: tauri::State<'_, AppState>,
+    session_id: String,
+) -> Result<(), IpcError> {
+    let _ = state.terminal_sessions.detach(&session_id).await;
+    Ok(())
+}
+
+/// Permanently kill the PTY behind `session_id`. Used when a thread
+/// is closed or the user explicitly terminates the agent.
+#[tauri::command]
+#[specta::specta]
+pub async fn terminate_terminal_session(
     state: tauri::State<'_, AppState>,
     session_id: String,
 ) -> Result<(), IpcError> {

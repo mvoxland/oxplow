@@ -418,12 +418,24 @@ export function TerminalPane({
       });
 
       logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows, transportMode });
-      void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows, transportMode).then((sessionId) => {
+      void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows, transportMode).then(({ sessionId, replayB64 }) => {
         if (disposed) {
           void desktopBridge().closeTerminalSession(sessionId);
           return;
         }
         sessionIdRef.current = sessionId;
+        // Replay the session's ring buffer into the fresh xterm so
+        // re-attaching to a long-running thread shows the same screen
+        // state the user left it in (instead of a blank pane that
+        // only fills as new output arrives).
+        if (replayB64) {
+          try {
+            const bin = atob(replayB64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            term.write(bytes);
+          } catch {}
+        }
         for (const event of pendingEvents) {
           if (event.sessionId === sessionId) applyEvent(event);
         }
