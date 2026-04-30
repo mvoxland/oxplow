@@ -17,7 +17,9 @@ pub mod config_service;
 pub mod events;
 pub mod followup;
 pub mod hook_ingest;
+pub mod lsp_clients;
 pub mod lsp_sessions;
+pub mod terminal_sessions;
 pub mod recovery;
 pub mod snapshot_capture;
 pub mod work_item_service;
@@ -124,6 +126,8 @@ pub struct Services {
     pub agent_panes: agent_pane::AgentPaneService,
     pub blobs: blob_store::BlobStore,
     pub lsp_sessions: lsp_sessions::LspSessionManager,
+    pub lsp_clients: lsp_clients::LspClientRegistry,
+    pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
 }
@@ -178,6 +182,9 @@ impl Services {
         // is paid on first request, not at boot.
         let config_arc = Arc::new(RwLock::new(config));
         let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
+        let lsp_clients = lsp_clients::LspClientRegistry::new(config_arc.clone());
+        let terminal_sessions =
+            terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
 
         Ok(Self {
@@ -209,6 +216,8 @@ impl Services {
             agent_panes,
             blobs,
             lsp_sessions: lsp,
+            lsp_clients,
+            terminal_sessions,
             recovery: recovery_svc,
             events: event_bus,
         })
@@ -264,6 +273,9 @@ impl Services {
         let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
         let config_arc = Arc::new(RwLock::new(config));
         let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
+        let lsp_clients = lsp_clients::LspClientRegistry::new(config_arc.clone());
+        let terminal_sessions =
+            terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
         Ok(Self {
             config: config_arc,
@@ -294,6 +306,8 @@ impl Services {
             agent_panes,
             blobs,
             lsp_sessions: lsp,
+            lsp_clients,
+            terminal_sessions,
             recovery: recovery_svc,
             events: event_bus,
         })

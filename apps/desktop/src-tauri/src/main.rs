@@ -16,6 +16,8 @@ fn main() {
 
     let state: AppState = Arc::new(services);
     let event_bus = state.events.clone();
+    let lsp_clients = state.lsp_clients.clone();
+    let terminal_sessions = state.terminal_sessions.clone();
 
     // Run daemon recovery — close any agent_turn rows that the
     // previous boot left open, reset agent_status rows from
@@ -60,6 +62,8 @@ fn main() {
         .setup(move |app| {
             specta.mount_events(app);
             spawn_event_bridge(app.handle().clone(), event_bus.clone());
+            spawn_lsp_event_bridge(app.handle().clone(), lsp_clients.clone());
+            spawn_terminal_event_bridge(app.handle().clone(), terminal_sessions.clone());
             Ok(())
         })
         .manage(state)
@@ -84,6 +88,54 @@ fn spawn_event_bridge(app: tauri::AppHandle, bus: oxplow_app::EventBus) {
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!(skipped = n, "event bridge lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+/// Forwards every `LspBridgeEvent` from the LSP client registry onto
+/// `lsp:event` for the renderer's lsp.ts module.
+fn spawn_lsp_event_bridge(
+    app: tauri::AppHandle,
+    registry: oxplow_app::lsp_clients::LspClientRegistry,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut rx = registry.subscribe();
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if let Err(err) = app.emit("lsp:event", &event) {
+                        tracing::warn!(?err, "failed to emit lsp event");
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "lsp event bridge lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+/// Forwards every `TerminalBridgeEvent` from the terminal session
+/// registry onto `terminal:event` for the renderer's TerminalPane.
+fn spawn_terminal_event_bridge(
+    app: tauri::AppHandle,
+    registry: oxplow_app::terminal_sessions::TerminalSessionRegistry,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut rx = registry.subscribe();
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if let Err(err) = app.emit("terminal:event", &event) {
+                        tracing::warn!(?err, "failed to emit terminal event");
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "terminal event bridge lagged");
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }

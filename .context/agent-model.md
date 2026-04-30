@@ -479,8 +479,9 @@ on every file event; `resync_note` forces an immediate re-baseline
 when the agent wants freshness pinned to the current HEAD without
 waiting for the debounce.
 
-The `oxplow-wiki-capture` skill (`crates/oxplow-session/src/wiki-capture-skill.ts`)
-loads when the agent uses these tools or when the user asks an
+The `oxplow-wiki-capture` skill (the orchestrator-side skill manifest;
+not yet ported into `crates/oxplow-session/`) loads when the agent
+uses these tools or when the user asks an
 exploration question ("how does X work", "where is X", "explain X")
 or types `/note`. It carries the find-or-create flow (search by
 title → body → file backlinks before creating), slug/body
@@ -498,8 +499,9 @@ rewrites `[[ ]]` into clickable links — SHA-shaped targets become
 `gitcommit:` links that dispatch through `onOpenCommit`; file-shaped
 targets become `file:` links that open in an editor tab via
 `onOpenFile`; bare slugs route to wiki navigation. The reference
-parser (`crates/oxplow-db/src/wiki-note-refs.ts`) already picks paths out
-of `[[ ]]` because the bracket characters fall outside its lookbehind,
+parser (in `crates/oxplow-db/src/wiki_note_store.rs`) already picks
+paths out of `[[ ]]` because the bracket characters fall outside its
+lookbehind,
 so backlinks/freshness work without parser changes. The
 `<wiki-capture-hint>` block injected on exploration UserPromptSubmits
 (see "Wiki-capture is a UserPromptSubmit hint" above) auto-loads the
@@ -518,9 +520,9 @@ in-progress changes.
   the tool's target path resolves OUTSIDE the project root AND outside
   the project's `.oxplow/`, the call is allowed (e.g. writing to
   `~/.claude/plans/foo.md`); the deny message names the specific
-  absolute path. Containment checks use `isInsideWorktree` from
-  `crates/oxplow-app/src/runtime-paths.ts`, shared with the runtime's hook-path
-  filter.
+  absolute path. Containment checks live alongside the write guard
+  in `crates/oxplow-runtime/` and reuse `AppLayout` from
+  `crates/oxplow-app/src/lib.rs`.
 - **Wiki-notes carve-out.** Writes to `.oxplow/notes/<slug>.md` are
   allowed even on non-writer threads — the per-project wiki is not
   committed to git and doesn't collide with the writer's in-progress
@@ -626,7 +628,8 @@ turns don't grow.
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer
 flag, and a pointer to the skills. Procedural policy is consolidated in
-one orchestrator-side skill (`crates/oxplow-session/src/agent-skills.ts`):
+one orchestrator-side skill (manifest registered alongside other
+skills in the agent prompt builder; not yet a dedicated Rust module):
 `oxplow-runtime` merges filing (when to file, how to shape items,
 acceptance-criteria style, epic-with-children rule), lifecycle
 (status conventions, epic rollup, notes), and dispatch (orchestrator

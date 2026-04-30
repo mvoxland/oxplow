@@ -169,7 +169,7 @@ The supported direction is the inverse: from the other stream, the
 Git Dashboard's worktrees card lists *our* branch with a
 "Merge into current" action so a human in that stream pulls our
 commits in safely. Tests pin this invariant: the gitMerge sibling-
-worktree test in `crates/oxplow-git/src/git.test.ts` asserts byte-equal HEAD,
+worktree test in `crates/oxplow-git/src/lib.rs` (`#[cfg(test)] mod tests`) asserts byte-equal HEAD,
 status, and file content on the sibling after merging *its* branch
 into the primary.
 

@@ -26,6 +26,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // app
         commands::app::app_version,
         commands::app::ping,
+        commands::app::log_ui,
         // streams
         commands::streams::list_streams,
         commands::streams::ensure_primary,
@@ -190,6 +191,14 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // webview
         commands::webview::open_external_url,
         commands::webview::clipboard_read_text,
+        // lsp
+        commands::lsp::open_lsp_client,
+        commands::lsp::send_lsp_message,
+        commands::lsp::close_lsp_client,
+        // terminal
+        commands::terminal::open_terminal_session,
+        commands::terminal::send_terminal_message,
+        commands::terminal::close_terminal_session,
     ])
 }
 

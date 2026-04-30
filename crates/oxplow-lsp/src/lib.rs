@@ -13,7 +13,7 @@
 //! command, multiplexing browser clients) lives in `oxplow-app`. This
 //! crate is intentionally a transport layer, nothing more.
 
-mod codec;
+pub mod codec;
 mod proxy;
 
 pub use codec::CodecError;

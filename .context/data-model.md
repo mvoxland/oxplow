@@ -347,10 +347,10 @@ Freshness is a general indicator, not a proof:
 - `captured_head_sha` is HEAD at last write. If HEAD advances, the
   note is flagged `stale`.
 - `captured_refs_json` stores `{path, blobSha, mtimeMs}` for every file
-  path mentioned in the note (extracted via `parseNoteRefs` in
-  `crates/oxplow-db/src/wiki-note-refs.ts`). `computeFreshness` rehashes
-  each referenced file; any mismatch → `stale`; any missing file →
-  `very-stale`.
+  path mentioned in the note (extracted by the wiki-note-refs parser
+  inside `crates/oxplow-db/src/wiki_note_store.rs`). `computeFreshness`
+  rehashes each referenced file; any mismatch → `stale`; any missing
+  file → `very-stale`.
 
 MCP tools (`crates/oxplow-mcp/src/lib.rs`) are metadata-only —
 `list_notes`, `get_note_metadata`, `resync_note`, `search_notes`
@@ -383,7 +383,7 @@ the `wiki_note_fts` FTS5 virtual table (migration v39); insert/update/
 delete triggers keep it in sync, so `WikiNoteStore.searchBodies()`
 returns ranked results with `<mark>…</mark>`-highlighted snippets.
 
-### `wiki_note_thread_update` — `WikiNoteThreadUpdateStore` (`crates/oxplow-db/src/wiki-note-thread-update-store.ts`)
+### `wiki_note_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_note_store.rs`)
 
 Per-thread attribution side table for wiki note edits. Notes themselves
 are global (one body per slug, shared across all threads/streams), but
@@ -578,12 +578,13 @@ un-blocked.
 
 ## Change events
 
-Every store has a `subscribe(listener)` for in-process listeners,
-implemented via the shared `StoreEmitter` helper
-(`crates/oxplow-db/src/store-emitter.ts`). The emitter snapshots its
-listener set before iterating so a listener that unsubscribes itself
-during emission doesn't skip subsequent subscribers, and a throwing
-listener is logged-and-skipped rather than killing the whole emit.
+Cross-store change fan-out is centralized on the typed EventBus
+(`crates/oxplow-app/src/events.rs`). Stores call `EventBus::emit(...)`
+with a coarse `OxplowEvent` variant (e.g. `WorkItemsChanged`,
+`StreamsChanged`); subscribers refetch the affected bucket on
+receipt. The bus is a `tokio::sync::broadcast` channel, so a slow
+subscriber sees `RecvError::Lagged` rather than blocking publishers,
+and adding/removing subscribers is lock-free.
 
 The runtime relays each store's changes onto the typed EventBus
 (`crates/oxplow-app/src/events.rs`) as `*.changed` events:
