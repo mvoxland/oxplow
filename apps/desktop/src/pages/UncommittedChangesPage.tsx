@@ -134,13 +134,13 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
         paths: [...selected],
         includeUntracked: hasUntrackedSelected,
       });
-      if (!result.ok) {
+      if (!result.success) {
         const errorId = recordOpError({
           label: "Commit all changes",
           command: `git commit -am "${message.trim()}"`,
           stderr: result.stderr ?? "",
           stdout: result.stdout ?? "",
-          exitCode: result.exitCode ?? null,
+          exitCode: result.status ?? null,
         });
         onOpenPage(opErrorRef(errorId), { newTab: true });
       } else {

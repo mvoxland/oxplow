@@ -179,12 +179,20 @@ export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untr
 export interface BranchChangeEntry {
   path: string;
   status: GitFileStatus;
+  /** Optional line counts; unset on staged/unstaged where we don't compute them. */
+  additions?: number | null;
+  deletions?: number | null;
 }
 
 export interface BranchChanges {
-  base: string;
-  ahead: number;
-  behind: number;
+  base?: string;
+  ahead?: number;
+  behind?: number;
+  /// New shape (matches Rust `oxplow_git::BranchChanges`): the
+  /// merge-base SHA between HEAD and the requested base ref. Either
+  /// this or the legacy `base` is populated.
+  base_ref?: string;
+  merge_base?: string | null;
   files: BranchChangeEntry[];
 }
 

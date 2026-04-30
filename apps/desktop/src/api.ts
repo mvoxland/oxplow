@@ -15,6 +15,15 @@ function notPorted(name: string): never {
   throw new Error(`oxplow desktop API method "${name}" is not yet ported to Tauri`);
 }
 
+/// Synthesize a success-shaped GitOpResult for void-returning Tauri
+/// commands (gitAddPath / gitRestorePath / gitAppendToGitignore).
+/// Renderer code expects a {success, stdout, stderr, status} shape
+/// to decide whether to surface a toast. Since these commands either
+/// succeed or throw, success here is unconditional.
+function synthOk(): import("./tauri-bridge/index.js").GitOpResult {
+  return { success: true, stdout: "", stderr: "", status: 0 };
+}
+
 /// Pure slug derivation: lowercase ASCII alphanumerics, runs of any
 /// other character collapse to a single hyphen, leading/trailing
 /// hyphens trimmed. Worktree slug is fixed at creation and never
@@ -254,10 +263,14 @@ function buildDesktopAdapter(): DesktopApi {
       unwrap(await commands.renameBranch(from, to)),
     deleteGitBranch: async (branch: string, force?: boolean) =>
       unwrap(await commands.deleteBranch(branch, force ?? false)),
-    gitAppendToGitignore: async (streamId: string | null | undefined, entry: string) =>
-      unwrap(await commands.appendToGitignore(streamId ?? null, entry)),
-    gitRestorePath: async (streamId: string | null | undefined, path: string) =>
-      unwrap(await commands.restorePath(streamId ?? null, path)),
+    gitAppendToGitignore: async (streamId: string | null | undefined, entry: string) => {
+      unwrap(await commands.appendToGitignore(streamId ?? null, entry));
+      return synthOk();
+    },
+    gitRestorePath: async (streamId: string | null | undefined, path: string) => {
+      unwrap(await commands.restorePath(streamId ?? null, path));
+      return synthOk();
+    },
     gitFetch: async (streamId: string | null | undefined, remote?: string | null) =>
       unwrap(await commands.gitFetch(streamId ?? null, remote ?? null)),
     gitPull: async (streamId: string | null | undefined) =>
@@ -283,8 +296,10 @@ function buildDesktopAdapter(): DesktopApi {
       unwrap(await commands.gitRebaseOnto(streamId ?? null, onto)),
     gitCommitAll: async (streamId: string | null | undefined, message: string) =>
       unwrap(await commands.gitCommitAll(streamId ?? null, message)),
-    gitAddPath: async (streamId: string | null | undefined, path: string) =>
-      unwrap(await commands.gitAddPath(streamId ?? null, path)),
+    gitAddPath: async (streamId: string | null | undefined, path: string) => {
+      unwrap(await commands.gitAddPath(streamId ?? null, path));
+      return synthOk();
+    },
     gitBlame: async (streamId: string | null | undefined, path: string) =>
       unwrap(await commands.gitBlame(streamId ?? null, path)),
     localBlame: async (
@@ -561,7 +576,42 @@ function buildDesktopAdapter(): DesktopApi {
 }
 
 export type { OxplowEvent } from "./api-types.js";
-export type { GitLogResult, GitLogCommit, GitLogRef, CommitDetail, ChangeScopes, TextSearchHit, GitOpResult, RefOption, BlameLine, GroupedGitRefs, GitWorktreeEntry, RemoteBranchEntry } from "./api-types.js";
+// Use the tauri-specta-generated shapes directly for the
+// snake_case-native bindings (CommitDetail, GitLogCommit,
+// RemoteBranchEntry, GitOpResult, BlameLine, …). The api-types
+// camelCase legacy definitions were drifting from runtime shape
+// and only existed because the original Electron build wrapped
+// them in adapters; nothing converts shape today.
+// Bindings shapes for the types whose call sites have been
+// migrated. Adding more is a per-call-site refactor: each consumer
+// has to be updated to the new field names. Types not on this list
+// stay on the api-types camelCase legacy shape until their consumers
+// are migrated.
+export type { GitOpResult } from "./tauri-bridge/index.js";
+// The remaining legacy types still come from api-types because
+// their consumers read fields that don't exist on the bindings
+// shape yet (e.g. GitLogResult.currentBranch / branchHeads / tags,
+// RemoteBranchEntry.remote / branch / lastCommitDate, GitWorktreeEntry
+// camelCase aliases, BranchChangeEntry.status / additions / deletions
+// — bindings expose .change and don't surface line counts here yet).
+// Migrating each one is per-call-site work; until then the shape
+// the runtime hands the renderer is the bindings shape but the
+// renderer's TypeScript believes it's the legacy shape.
+export type {
+  GitLogRef,
+  GitLogCommit,
+  GitLogResult,
+  CommitDetail,
+  ChangeScopes,
+  TextSearchHit,
+  RefOption,
+  GroupedGitRefs,
+  BlameLine,
+  BranchChangeEntry,
+  BranchChanges,
+  RemoteBranchEntry,
+  GitWorktreeEntry,
+} from "./api-types.js";
 
 // Stream / Thread types re-exported from the Tauri bindings. The
 // adapter at the bottom of this file augments runtime values with
@@ -685,19 +735,6 @@ export interface BranchRef {
 
 export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
-export interface BranchChangeEntry {
-  path: string;
-  status: GitFileStatus;
-  additions: number | null;
-  deletions: number | null;
-}
-
-export interface BranchChanges {
-  baseRef: string;
-  mergeBase: string | null;
-  files: BranchChangeEntry[];
-}
-
 export interface WorkspaceEntry {
   name: string;
   path: string;
@@ -792,11 +829,11 @@ export async function listGitRefs(): Promise<import("./api-types.js").GroupedGit
   return desktopApi().listGitRefs();
 }
 
-export async function renameGitBranch(from: string, to: string): Promise<import("./api-types.js").GitOpResult> {
+export async function renameGitBranch(from: string, to: string): Promise<import("./tauri-bridge/index.js").GitOpResult> {
   return desktopApi().renameGitBranch(from, to);
 }
 
-export async function deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<import("./api-types.js").GitOpResult> {
+export async function deleteGitBranch(branch: string, options?: { force?: boolean }): Promise<import("./tauri-bridge/index.js").GitOpResult> {
   return desktopApi().deleteGitBranch(branch, options);
 }
 
@@ -1060,15 +1097,15 @@ export async function searchWorkspaceText(
   return desktopApi().searchWorkspaceText(streamId, query, options);
 }
 
-export async function gitRestorePath(streamId: string, path: string): Promise<import("./api-types.js").GitOpResult> {
+export async function gitRestorePath(streamId: string, path: string): Promise<import("./tauri-bridge/index.js").GitOpResult> {
   return desktopApi().gitRestorePath(streamId, path);
 }
 
-export async function gitAddPath(streamId: string, path: string): Promise<import("./api-types.js").GitOpResult> {
+export async function gitAddPath(streamId: string, path: string): Promise<import("./tauri-bridge/index.js").GitOpResult> {
   return desktopApi().gitAddPath(streamId, path);
 }
 
-export async function gitAppendToGitignore(streamId: string, path: string): Promise<import("./api-types.js").GitOpResult> {
+export async function gitAppendToGitignore(streamId: string, path: string): Promise<import("./tauri-bridge/index.js").GitOpResult> {
   return desktopApi().gitAppendToGitignore(streamId, path);
 }
 
@@ -1100,7 +1137,7 @@ export async function gitCommitAll(
   streamId: string,
   message: string,
   options?: { includeUntracked?: boolean; paths?: string[] },
-): Promise<import("./api-types.js").GitOpResult & { sha?: string }> {
+): Promise<import("./tauri-bridge/index.js").GitOpResult & { sha?: string }> {
   return desktopApi().gitCommitAll(streamId, message, options);
 }
 
@@ -1425,7 +1462,7 @@ export async function getWorkNotes(itemId: string): Promise<WorkNote[]> {
 export async function getBranchChanges(
   streamId: string,
   baseRef?: string,
-): Promise<BranchChanges & { resolvedBaseRef: string | null }> {
+): Promise<import("./api-types.js").BranchChanges & { resolvedBaseRef: string | null }> {
   return desktopApi().getBranchChanges(streamId, baseRef);
 }
 
