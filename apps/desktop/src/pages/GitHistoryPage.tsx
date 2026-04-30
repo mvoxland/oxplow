@@ -1,4 +1,4 @@
-import type { Stream } from "../api.js";
+import type { Stream } from "../tauri-bridge/index.js";
 import { Page } from "../tabs/Page.js";
 import { HistoryPanel } from "../components/History/HistoryPanel.js";
 import { gitCommitRef } from "../tabs/pageRefs.js";

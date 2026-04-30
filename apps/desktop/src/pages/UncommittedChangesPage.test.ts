@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { BranchChangeEntry } from "../api.js";
+import type { BranchChangeEntry } from "../tauri-bridge/index.js";
 import { buildTree, summarize } from "./UncommittedChangesPage.js";
 
 function entry(

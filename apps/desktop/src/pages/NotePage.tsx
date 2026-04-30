@@ -1,4 +1,4 @@
-import type { Stream, ThreadWorkState } from "../api.js";
+import type { Stream, ThreadWorkState } from "../tauri-bridge/index.js";
 import { Page } from "../tabs/Page.js";
 import { NoteTab } from "../components/Notes/NoteTab.js";
 import type { TabRef } from "../tabs/tabState.js";

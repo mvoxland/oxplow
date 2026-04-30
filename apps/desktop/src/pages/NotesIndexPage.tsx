@@ -1,4 +1,4 @@
-import type { Stream } from "../api.js";
+import type { Stream } from "../tauri-bridge/index.js";
 import { Page } from "../tabs/Page.js";
 import { NotesPane } from "../components/Notes/NotesPane.js";
 
