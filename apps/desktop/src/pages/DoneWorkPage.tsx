@@ -39,7 +39,7 @@ export function DoneWorkPage({ onOpenPage, ...rest }: DoneWorkPageProps) {
     </button>
   );
   return (
-    <Page testId="page-done-work" title="Done work">
+    <Page testId="page-done-work" title="Done Work">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <PlanPane
           {...rest}

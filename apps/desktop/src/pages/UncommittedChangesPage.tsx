@@ -163,14 +163,14 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
 
   if (!streamId) {
     return (
-      <Page testId="page-uncommitted-changes" title="Uncommitted changes">
+      <Page testId="page-uncommitted-changes" title="Uncommitted Changes">
         <div style={muted}>No stream selected.</div>
       </Page>
     );
   }
 
   return (
-    <Page testId="page-uncommitted-changes" title="Uncommitted changes">
+    <Page testId="page-uncommitted-changes" title="Uncommitted Changes">
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
         {error ? <div style={errorBanner}>{error}</div> : null}
         {loading && !data ? <div style={muted}>Loading…</div> : null}

@@ -22,7 +22,7 @@ export function OpErrorPage({ errorId }: OpErrorPageProps) {
 
   if (!entry) {
     return (
-      <Page testId="page-op-error" title="Operation error">
+      <Page testId="page-op-error" title="Operation Error">
         <div style={{ padding: 16, color: "var(--text-muted)" }}>
           This error has been dismissed or expired from the in-memory log.
         </div>

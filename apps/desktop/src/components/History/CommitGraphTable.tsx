@@ -113,12 +113,15 @@ export function indexRefsBySha(log: GitLogResult | null): {
   const branchHeadsBySha = new Map<string, string[]>();
   const tagsBySha = new Map<string, string[]>();
   if (!log) return { branchHeadsBySha, tagsBySha };
-  for (const head of log.branchHeads) {
+  // The Rust backend's `GitLogResult` only emits `commits` today —
+  // `branchHeads` / `tags` aren't populated. Tolerate their absence
+  // (no overlay markers in that case) instead of crashing the table.
+  for (const head of log.branchHeads ?? []) {
     const list = branchHeadsBySha.get(head.commit.sha) ?? [];
     list.push(head.name);
     branchHeadsBySha.set(head.commit.sha, list);
   }
-  for (const tag of log.tags) {
+  for (const tag of log.tags ?? []) {
     const list = tagsBySha.get(tag.commit.sha) ?? [];
     list.push(tag.name);
     tagsBySha.set(tag.commit.sha, list);

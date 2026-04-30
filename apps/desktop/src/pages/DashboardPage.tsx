@@ -189,7 +189,7 @@ function PlanningSections({
 
   return (
     <>
-      <Section title="Ready in this thread">
+      <Section title="Ready in This Thread">
         {ready.length === 0 ? <EmptyHint>Nothing ready.</EmptyHint> : null}
         {ready.slice(0, 10).map((item) => (
           <RowButton
@@ -212,7 +212,7 @@ function PlanningSections({
           />
         ))}
       </Section>
-      <Section title="Recent notes">
+      <Section title="Recent Notes">
         {notes.length === 0 ? <EmptyHint>No notes yet.</EmptyHint> : null}
         {notes.slice(0, 8).map((note) => (
           <RowButton
@@ -223,7 +223,7 @@ function PlanningSections({
           />
         ))}
       </Section>
-      <Section title="Subsystem docs">
+      <Section title="Subsystem Docs">
         <RowButton
           label="Open subsystem docs index"
           onClick={() => onOpenPage(indexRef("subsystem-docs"))}
@@ -246,7 +246,7 @@ function ReviewSections({
 
   return (
     <>
-      <Section title="Recent snapshots">
+      <Section title="Recent Snapshots">
         {snaps.length === 0 ? <EmptyHint>No snapshots yet.</EmptyHint> : null}
         {snaps.map((snap) => (
           <RowButton
@@ -257,7 +257,7 @@ function ReviewSections({
           />
         ))}
       </Section>
-      <Section title="New findings">
+      <Section title="New Findings">
         {findings.length === 0 ? <EmptyHint>No findings recorded.</EmptyHint> : null}
         {findings.slice(0, 10).map((f) => (
           <RowButton
@@ -282,7 +282,7 @@ function QualitySections({ stream, onOpenPage }: { stream: Stream | null; onOpen
 
   return (
     <>
-      <Section title="All findings">
+      <Section title="All Findings">
         {findings.length === 0 ? <EmptyHint>No findings recorded yet — run a scan from the Code quality page.</EmptyHint> : null}
         {findings.slice(0, 20).map((f) => (
           <RowButton
@@ -293,7 +293,7 @@ function QualitySections({ stream, onOpenPage }: { stream: Stream | null; onOpen
           />
         ))}
       </Section>
-      <Section title="Complexity outliers">
+      <Section title="Complexity Outliers">
         {complexity.length === 0 ? <EmptyHint>No complexity findings.</EmptyHint> : null}
         {complexity.map((f) => (
           <RowButton
@@ -304,7 +304,7 @@ function QualitySections({ stream, onOpenPage }: { stream: Stream | null; onOpen
           />
         ))}
       </Section>
-      <Section title="Duplicate blocks">
+      <Section title="Duplicate Blocks">
         {dupes.length === 0 ? <EmptyHint>No duplicate blocks reported.</EmptyHint> : null}
         {dupes.slice(0, 10).map((f) => (
           <RowButton
@@ -344,10 +344,10 @@ function VisitsSections({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
 
   return (
     <>
-      <Section title="Visits per day (last 30d)">
+      <Section title="Visits per Day (Last 30d)">
         <DailyChart rows={byDay} />
       </Section>
-      <Section title="Top 25 most visited (last 30d)">
+      <Section title="Top 25 Most Visited (Last 30d)">
         {top.length === 0 ? <EmptyHint>No visits recorded yet.</EmptyHint> : null}
         {top.map((r) => (
           <RowButton

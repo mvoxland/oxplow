@@ -2012,14 +2012,14 @@ export function App() {
       } else if (ref.kind === "code-quality") {
         tabs.push({
           id: ref.id,
-          label: "Code quality",
+          label: "Code Quality",
           closable: true,
           render: () => <CodeQualityPage stream={stream} onOpenFile={navOpenFile} />,
         });
       } else if (ref.kind === "local-history") {
         tabs.push({
           id: ref.id,
-          label: "Local history",
+          label: "Local History",
           closable: true,
           render: () => (
             <LocalHistoryPage
@@ -2033,7 +2033,7 @@ export function App() {
       } else if (ref.kind === "git-history") {
         tabs.push({
           id: ref.id,
-          label: "Git history",
+          label: "Git History",
           closable: true,
           render: () => (
             <GitHistoryPage stream={stream} onOpenPage={navOpen} />
@@ -2042,7 +2042,7 @@ export function App() {
       } else if (ref.kind === "git-dashboard") {
         tabs.push({
           id: ref.id,
-          label: "Git dashboard",
+          label: "Git Dashboard",
           closable: true,
           render: () => (
             <GitDashboardPage
@@ -2084,7 +2084,7 @@ export function App() {
       } else if (ref.kind === "hook-events") {
         tabs.push({
           id: ref.id,
-          label: "Hook events",
+          label: "Hook Events",
           closable: true,
           render: () => <HookEventsPage streamId={stream?.id ?? null} />,
         });
@@ -2092,7 +2092,7 @@ export function App() {
         const errorId = (ref.payload as { errorId?: string } | null)?.errorId ?? "";
         tabs.push({
           id: ref.id,
-          label: "Op error",
+          label: "Op Error",
           closable: true,
           render: () => <OpErrorPage errorId={errorId} />,
         });
@@ -2157,7 +2157,7 @@ export function App() {
         };
         const labelByKind: Record<string, string> = {
           "tasks": "Tasks",
-          "done-work": "Done work",
+          "done-work": "Done Work",
           "backlog": "Backlog",
           "archived": "Archived",
         };
@@ -2183,14 +2183,14 @@ export function App() {
       } else if (ref.kind === "subsystem-docs") {
         tabs.push({
           id: ref.id,
-          label: "Subsystem docs",
+          label: "Subsystem Docs",
           closable: true,
           render: () => <SubsystemDocsPage stream={stream} onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "closed-threads") {
         tabs.push({
           id: ref.id,
-          label: "Closed threads",
+          label: "Closed Threads",
           closable: true,
           render: () => <ClosedThreadsPage stream={stream} />,
         });
@@ -2208,7 +2208,7 @@ export function App() {
           contextMenu: [
             {
               id: "external-url.open-in-browser",
-              label: "Open in browser",
+              label: "Open in Browser",
               enabled: true,
               run: () => { void openExternalUrl(externalUrl); },
             },
@@ -2291,7 +2291,7 @@ export function App() {
         const targetStream = streams.find((s) => s.id === targetStreamId) ?? null;
         tabs.push({
           id: ref.id,
-          label: targetStream ? `Settings · ${targetStream.title}` : "Stream settings",
+          label: targetStream ? `Settings · ${targetStream.title}` : "Stream Settings",
           closable: true,
           render: () => (
             <StreamSettingsPage
@@ -2306,7 +2306,7 @@ export function App() {
         const targetThread = currentThreadState.threads.find((t) => t.id === targetThreadId) ?? null;
         tabs.push({
           id: ref.id,
-          label: targetThread ? `Settings · ${targetThread.title}` : "Thread settings",
+          label: targetThread ? `Settings · ${targetThread.title}` : "Thread Settings",
           closable: true,
           render: () => (
             <ThreadSettingsPage
@@ -2329,7 +2329,7 @@ export function App() {
       } else if (ref.kind === "new-stream") {
         tabs.push({
           id: ref.id,
-          label: "New stream",
+          label: "New Stream",
           closable: true,
           render: () => (
             <NewStreamPage

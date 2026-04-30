@@ -305,15 +305,15 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
 
   if (!streamId) {
     return (
-      <Page testId="page-git-dashboard" title="Git dashboard">
+      <Page testId="page-git-dashboard" title="Git Dashboard">
         <div style={muted}>No stream selected.</div>
       </Page>
     );
   }
 
   const dashboardTitle = data?.branchHeader.branch
-    ? `Git dashboard: ${data.branchHeader.branch}`
-    : "Git dashboard";
+    ? `Git Dashboard: ${data.branchHeader.branch}`
+    : "Git Dashboard";
 
   return (
     <Page testId="page-git-dashboard" title={dashboardTitle}>
@@ -568,7 +568,7 @@ function RecentCommitsCard({
   return (
     <Card
       testId="git-dashboard-recent-commits"
-      title="Recent commits"
+      title="Recent Commits"
       action={
         <button
           type="button"
@@ -1009,7 +1009,7 @@ function RemoteBranchesCard({
   }, [streamId, rows]);
 
   return (
-    <Card testId="git-dashboard-remote-branches" title="Recent remote branches">
+    <Card testId="git-dashboard-remote-branches" title="Recent Remote Branches">
       {rows.length === 0 ? (
         <div style={muted}>No remote branches.</div>
       ) : (

@@ -48,7 +48,7 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
   if (!verdict.ok) {
     const reason = describeRejection(verdict.reason);
     return (
-      <Page testId="page-external-url" title="Link blocked" kind="external-url">
+      <Page testId="page-external-url" title="Link Blocked" kind="external-url">
         <div style={{ padding: "16px 20px", maxWidth: 720 }}>
           <div style={{ color: "var(--severity-critical)", fontSize: 13, marginBottom: 8 }}>
             Couldn't open link

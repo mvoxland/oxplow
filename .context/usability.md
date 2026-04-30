@@ -257,6 +257,30 @@ Things I keep forgetting. Read this before adding any UI.
   `diff:` tabs each shuffle within their own group; the `agent` tab is
   pinned (no `reorderGroup`). Cross-group drops are no-ops.
 
+## Capitalization
+
+- **Title-case for every UI title.** Page titles (`<Page title=…>`),
+  tab labels (`label:` in CenterTab arrays), section / card headers
+  (`<Section title=…>`, `<Card title=…>`), modal headers, and menu
+  items that name a destination (e.g. `New Stream…`) all use
+  title case: capitalize the first and last words plus all major
+  words (nouns, verbs, adjectives, adverbs, pronouns), and
+  lowercase only articles (`a`, `an`, `the`), short prepositions
+  (`in`, `on`, `of`, `at`, `to`, `by`, `for`, `with`), and
+  coordinating conjunctions (`and`, `but`, `or`, `nor`, `yet`,
+  `so`).
+  - Right: `Git Dashboard`, `Hook Events`, `Recent Remote
+    Branches`, `Ready in This Thread`, `Open in Browser`.
+  - Wrong: `Git dashboard`, `Hook events`, `Open in browser`.
+- **Sentence-case is OK for inline UI copy** — descriptions,
+  hints, button labels that read as commands ("Save", "Cancel"),
+  empty-state messages, error toasts. The rule is only for things
+  the user reads as a *title*.
+- **Mirror the literal across surfaces** — when you change a
+  page's title, also update the matching tab label and any
+  `deriveDefaultLabel` / `labelByKind` map entry so the renderer
+  shows the same string everywhere.
+
 ## Empty and error states
 
 - **Every pane has an empty state message** (not just a blank panel).

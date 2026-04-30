@@ -95,7 +95,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       }
     >
       <div style={{ padding: "20px 24px", maxWidth: 720 }}>
-        <Section title="Agent prompt additions">
+        <Section title="Agent Prompt Additions">
           <Hint>
             Text appended to every agent's system prompt. Applies to agent sessions started after Save —
             existing sessions keep the prompt they launched with. Stored in <code>oxplow.yaml</code>.
@@ -111,7 +111,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           />
         </Section>
 
-        <Section title="File snapshots">
+        <Section title="File Snapshots">
           <Hint>
             Snapshots capture the project's files around every agent turn so history and diffs stay
             available after branches change.
@@ -148,7 +148,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           />
         </Section>
 
-        <Section title="Generated directories">
+        <Section title="Generated Directories">
           <Hint>
             Directory names (one per line, matched at any path segment) excluded from fs-watch and
             snapshot tracking. Added on top of the built-in list (node_modules, dist, build, .git, etc.).

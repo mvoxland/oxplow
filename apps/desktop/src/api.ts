@@ -1666,12 +1666,12 @@ function deriveDefaultLabelFromKind(kind: string, id: string): string {
     case "files": return "Files";
     case "notes-index": return "Notes";
     case "git-dashboard": return "Git";
-    case "git-history": return "Git history";
-    case "git-commit": return "Git commit";
+    case "git-history": return "Git History";
+    case "git-commit": return "Git Commit";
     case "settings": return "Settings";
-    case "code-quality": return "Code quality";
-    case "hook-events": return "Hook events";
-    case "subsystem-docs": return "Subsystem docs";
+    case "code-quality": return "Code Quality";
+    case "hook-events": return "Hook Events";
+    case "subsystem-docs": return "Subsystem Docs";
     case "file": return id.split("/").pop() ?? id;
     default: return id;
   }
