@@ -203,12 +203,12 @@ primary key `(effort_id, path)`. Rows come from the `touchedFiles`
 payload on the `update_work_item` transition to `done`, not
 from the PostToolUse hook (the previous heuristic couldn't attribute
 writes when ≥2 efforts were in_progress). See agent-model.md's
-"Per-effort write log" for the flow. Consumed by
-`computeEffortFiles(effortStore, snapshotStore, effortId)` (exported
-from `runtime.ts`): when ≥2 efforts share an end snapshot AND this
-effort has ≥1 row here, the pair-diff is filtered to those paths;
-0 rows → fall back to raw pair-diff ("assume all"); 1 effort → raw
-pair-diff.
+"Per-effort write log" for the flow. Consumed by `get_effort_files`
+(`crates/oxplow-tauri-ipc/src/commands/effort.rs`) over the
+`EffortStore` and `SnapshotStore`: when ≥2 efforts share an end
+snapshot AND this effort has ≥1 row here, the pair-diff is filtered
+to those paths; 0 rows → fall back to raw pair-diff ("assume all");
+1 effort → raw pair-diff.
 
 Read API: `listEffortsForWorkItem(itemId)`, `listOpenEfforts()`,
 `listEffortsForSnapshot(snapshotId)`,
@@ -400,9 +400,10 @@ Writers funnel through two seams, both routing through
 
 - **`oxplow__resync_note` MCP** — accepts `threadId` and records the
   edit when present. The wiki-capture skill always supplies it.
-- **PostToolUse hook** in `runtime.ts` — when the agent writes a path
-  matching `.oxplow/notes/<slug>.md` via Write/Edit/MultiEdit, attribution
-  is recorded immediately, no waiting on the watcher debounce.
+- **PostToolUse hook** in `crates/oxplow-runtime/src/lib.rs` — when
+  the agent writes a path matching `.oxplow/notes/<slug>.md` via
+  Write/Edit/MultiEdit, attribution is recorded immediately, no
+  waiting on the watcher debounce.
 
 The notes file watcher itself does not record attribution (it has no
 thread context). `Runtime.writeWikiNoteBody` (the editor save IPC)

@@ -109,10 +109,13 @@ existing agent sessions; tmux keeps them alive in the background.
 
 ## Plugin hook bridge
 
-`createElectronPlugin` (`crates/oxplow-app/src/agent_command.rs`) writes a per-project
-Claude Code plugin into `<projectDir>/.oxplow/runtime/claude-plugin/`. The
-plugin's `hooks.json` registers HTTP hooks for `PreToolUse`, `PostToolUse`,
-`UserPromptSubmit`, `SessionStart`, `SessionEnd`, `Stop`, and `Notification`.
+A per-project Claude Code plugin is installed at
+`<projectDir>/.oxplow/runtime/claude-plugin/` and passed to `claude`
+via the `--plugin-dir` flag built up in
+`crates/oxplow-app/src/agent_command.rs`. The plugin's `hooks.json`
+registers HTTP hooks for `PreToolUse`, `PostToolUse`,
+`UserPromptSubmit`, `SessionStart`, `SessionEnd`, `Stop`, and
+`Notification`.
 
 Gotcha: Claude Code silently drops HTTP hooks for `SessionStart` ("HTTP hooks
 are not supported for SessionStart" in `claude --debug-file`). Only command-
@@ -145,10 +148,10 @@ to `runtime.handleHookEnvelope`, which:
    blocks the tool (read-only thread; see Write guard below) or if
    `buildFilingEnforcementPreToolDeny` blocks it (Edit / Write /
    MultiEdit / NotebookEdit on a writer thread without an in_progress
-   item; see `filing-enforcement.ts`).
+   item; see `crates/oxplow-runtime/src/filing.rs`).
 5. For `UserPromptSubmit`: returns `additionalContext` made up of a
    live `<session-context>` block (stream + thread + writer, rebuilt
-   from the stores — see `buildSessionContextBlock` in `runtime.ts`)
+   from the stores — see `buildSessionContextBlock` in `crates/oxplow-runtime/src/lib.rs`)
    followed by the editor-focus summary from
    `(removed under Tauri)`. The session-context block refreshes
    on every turn so the agent notices when the user promoted a
@@ -191,7 +194,7 @@ next UserPromptSubmit.
 
 **Filing enforcement (writer thread, PreToolUse).** Enforcement runs
 in the PreToolUse hook (`buildFilingEnforcementPreToolDeny` in
-`filing-enforcement.ts`), not the Stop hook. When the agent invokes
+`crates/oxplow-runtime/src/filing.rs`), not the Stop hook. When the agent invokes
 Edit / Write / MultiEdit / NotebookEdit on a writer thread and the
 thread has no `in_progress` work item, the hook returns
 `permissionDecision: "deny"` and the edit is rejected before it
@@ -213,7 +216,7 @@ fires for any lingering items, so real edits made via Bash under an
 open item are unaffected.
 
 **Plan-mode plan file is exempt** (`isPlanModePlanFile` in
-`filing-enforcement.ts`). Writes whose `tool_input.file_path` lands
+`crates/oxplow-runtime/src/filing.rs`). Writes whose `tool_input.file_path` lands
 under `$HOME/.claude/plans/<slug>.md` skip the filing guard — that
 file is owned by the harness's plan workflow, not project work, and
 plan mode denies every other tool while it's on, so blocking the
@@ -230,7 +233,7 @@ names the open item and tells the agent to either file a new row
 — so multi-prompt turns don't quietly pile new asks into whichever
 item was already open. Pairs with the recent-done reminder: that one
 fires when the prior item already closed, this one fires when it's
-still running. Builder lives in `runtime.ts` next to
+still running. Builder lives in `crates/oxplow-runtime/src/lib.rs` next to
 `buildRecentDoneReminder`.
 
 **Ready-match nudge (UserPromptSubmit).** Sibling of the prior-prompt
@@ -405,7 +408,7 @@ primary tool for queue-driven dispatch.
 
 `buildWorkItemMcpTools` (`crates/oxplow-mcp/src/lib.rs`) registers the agent's
 tool surface. Internally each `ToolDef.name` carries an `oxplow__`
-prefix (historical), but `mcp-server.ts` strips that prefix at the
+prefix (historical), but `crates/oxplow-mcp/src/lib.rs` strips that prefix at the
 `tools/list` boundary via `exposedToolName` so the harness sees clean
 names like `create_work_item`. With the harness's own `mcp__oxplow__`
 namespace on top, the agent calls `mcp__oxplow__create_work_item` —
@@ -608,7 +611,7 @@ writer promotion used to leave the agent acting read-only long after
 the UI flipped it. To supersede the stale block in-place,
 `buildSessionContextBlock` accepts an `initialRole` input and appends a
 loud `ROLE CHANGE:` line before `</session-context>` when the current
-role differs from it. `buildRefreshedSessionContext` (in `runtime.ts`)
+role differs from it. `buildRefreshedSessionContext` (in `crates/oxplow-runtime/src/lib.rs`)
 captures the role once per Claude session id in
 `initialRoleBySessionId`, keyed off the first `UserPromptSubmit` the
 runtime sees for that session, so the comparison baseline is stable
@@ -646,7 +649,7 @@ tools).
 
 `config.agentPromptAppend` (loaded from `oxplow.yaml` via
 `loadProjectConfig` in `crates/oxplow-config/src/lib.rs`) is concatenated into every
-agent's system prompt by `buildBatchAgentPrompt` (in `runtime.ts`). The
+agent's system prompt by `buildBatchAgentPrompt` (in `crates/oxplow-runtime/src/lib.rs`). The
 Settings modal (`apps/desktop/src/components/SettingsModal.tsx`) reads/writes this
 via `runtime.setAgentPromptAppend` which calls `writeProjectConfig` to
 persist back to YAML.
@@ -691,7 +694,7 @@ the in-flight tool's `PostToolUse` is dropped and no `Stop` lands, so
 the reducer would otherwise stay `working` until the next prompt. The
 runtime's `sendTerminalMessage` watches the websocket input stream and,
 when it sees a bare `\x1b` or `\x03` byte (interrupt heuristic in
-`terminalInputIsInterrupt`, runtime.ts), ingests a synthetic
+`terminalInputIsInterrupt`, `crates/oxplow-runtime/src/lib.rs`), ingests a synthetic
 `Interrupt` meta hook event for the thread that owns the terminal
 session. The reducer's `meta` branch treats `hookEventName ===
 "Interrupt"` as a forced reset: status drops back to `done` and
@@ -771,7 +774,7 @@ stores them in `work_item_effort_file` (see data-model.md).
 **Agent-declared payload.** When calling `update_work_item` or
 `complete_task` to close an effort, the agent passes
 `touchedFiles: string[]` — the repo-relative paths it wrote or edited
-during this effort. `applyStatusTransition` (in `runtime.ts`) captures
+during this effort. `applyStatusTransition` (in `crates/oxplow-runtime/src/lib.rs`) captures
 the open effort id, flushes the task-end snapshot, closes the effort,
 and then inserts `work_item_effort_file` rows for each deduped path
 via `INSERT OR IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100
@@ -837,9 +840,10 @@ snapshot `S`:
   `touchedFiles` payload, or list exceeded the cap) we fall back to
   the raw pair-diff — better to over-report than silently show empty.
 
-`getEffortFiles` is exported from `runtime.ts` as `computeEffortFiles`
-(pure helper over the two stores) for test reuse, and wired to IPC via
-the same pattern as `getSnapshotSummary`.
+`get_effort_files` is implemented in
+`crates/oxplow-tauri-ipc/src/commands/effort.rs` over the
+`EffortStore` and `SnapshotStore` and wired to IPC via the same
+pattern as `get_snapshot_summary`.
 
 ## Task lifecycle
 
