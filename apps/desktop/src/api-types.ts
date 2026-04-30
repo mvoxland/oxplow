@@ -97,35 +97,17 @@ export interface WorkItemEvent {
 
 // ---- Snapshots ----
 
-export type SnapshotSource = "git" | "local" | "manual";
-export type SnapshotEntryState = "present" | "oversize";
-
-export interface FileSnapshot {
-  id: string;
-  source: SnapshotSource;
-  capturedAt: string;
-  blobHash: string | null;
-  size: number;
-  state: SnapshotEntryState;
-}
-
-export interface SnapshotEntry {
-  path: string;
-  state: SnapshotEntryState;
-  blobHash: string | null;
-  size: number;
-}
-
-export interface SnapshotFileRow {
-  path: string;
-  latestCapturedAt: string;
-}
+// Snapshot interfaces (FileSnapshot, SnapshotSource, SnapshotEntry,
+// SnapshotEntryState, SnapshotFileRow) live in api.ts now — the
+// renderer-side aggregate surface is richer than the bindings
+// shape (label, source enum, created_at) and is the version every
+// consumer reads.
 
 export interface SnapshotSummary {
-  files: SnapshotFileRow[];
+  files: import("./api.js").SnapshotFileRow[];
 }
 
-export type SnapshotDiffSide = "absent" | SnapshotEntryState;
+export type SnapshotDiffSide = "absent" | import("./api.js").SnapshotEntryState;
 
 export interface SnapshotDiffResult {
   pathA: string;
