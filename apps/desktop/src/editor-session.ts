@@ -23,12 +23,7 @@ export type FileSession = FileSessionState;
 
 export interface TerminalEvent {
   sessionId: string;
-  kind: "data" | "exit" | "resize";
-  data?: string;
-  exitCode?: number;
-  cols?: number;
-  rows?: number;
-  message?: string;
+  message: string;
 }
 
 export function createEmptyFileSession(): FileSessionState {

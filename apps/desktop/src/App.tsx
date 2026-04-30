@@ -1387,8 +1387,8 @@ export function App() {
 
   useEffect(() => {
     if (!isElectron) return;
-    return desktopBridge().onMenuCommand((commandId) => {
-      const command = commandMap.get(commandId);
+    return desktopBridge().onMenuCommand((commandId: string) => {
+      const command = commandMap.get(commandId as never);
       if (!command || !command.run) return;
       // React 18 only auto-flushes effects synchronously for discrete
       // user input events (click, keydown on webContents). IPC messages
