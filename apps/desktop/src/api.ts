@@ -1492,18 +1492,22 @@ export async function reorderThreadQueue(
   return desktopApi().reorderThreadQueue(streamId, threadId, entries);
 }
 
-export async function removeFollowup(threadId: string, id: string): Promise<void> {
-  return desktopApi().removeFollowup(threadId, id);
+export async function removeFollowup(_threadId: string, id: string): Promise<void> {
+  unwrap(await commands.removeFollowup(id));
 }
 
 export type BackgroundTask = import("./api-types.js").BackgroundTask;
 
 export async function listBackgroundTasks(): Promise<BackgroundTask[]> {
-  return desktopApi().listBackgroundTasks();
+  return (unwrap(await commands.listBackgroundTasks()) as unknown[]).map(
+    adaptBackgroundTask,
+  ) as BackgroundTask[];
 }
 
 export async function getBackgroundTask(id: string): Promise<BackgroundTask | null> {
-  return desktopApi().getBackgroundTask(id);
+  return adaptBackgroundTask(unwrap(await commands.getBackgroundTask(id))) as
+    | BackgroundTask
+    | null;
 }
 
 export function subscribeBackgroundTaskEvents(
@@ -1556,29 +1560,34 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
   });
 }
 
-export async function listAllRefs(streamId: string): Promise<import("./api-types.js").RefOption[]> {
-  return desktopApi().listAllRefs(streamId);
+export async function listAllRefs(_streamId: string): Promise<import("./api-types.js").RefOption[]> {
+  return desktopApi().listGitRefs() as unknown as Promise<
+    import("./api-types.js").RefOption[]
+  >;
 }
 
 export async function addWorkItemNote(
-  streamId: string,
-  threadId: string,
+  _streamId: string,
+  _threadId: string,
   itemId: string,
   note: string,
 ): Promise<WorkItemEvent[]> {
-  return desktopApi().addWorkItemNote(streamId, threadId, itemId, note);
+  unwrap(await commands.addWorkNote(itemId, note, "user"));
+  return listWorkItemEvents(_streamId, _threadId, itemId);
 }
 
 export async function listWorkItemEvents(
-  streamId: string,
-  threadId: string,
+  _streamId: string,
+  _threadId: string,
   itemId?: string,
 ): Promise<WorkItemEvent[]> {
-  return desktopApi().listWorkItemEvents(streamId, threadId, itemId);
+  return unwrap(
+    await commands.listWorkItemEvents(itemId ?? null, null),
+  ) as unknown as WorkItemEvent[];
 }
 
 export async function getWorkNotes(itemId: string): Promise<WorkNote[]> {
-  return desktopApi().getWorkNotes(itemId);
+  return unwrap(await commands.listWorkNotes(itemId)) as unknown as WorkNote[];
 }
 
 export async function getBranchChanges(
@@ -1597,11 +1606,13 @@ export async function readFileAtRef(
 }
 
 export async function listWorkItemEfforts(itemId: string): Promise<EffortDetail[]> {
-  return desktopApi().listWorkItemEfforts(itemId);
+  return unwrap(await commands.listWorkItemEfforts(itemId)) as unknown as EffortDetail[];
 }
 
 export async function listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]> {
-  return desktopApi().listSnapshots(streamId, limit);
+  return unwrap(
+    await commands.listSnapshotsForStream(streamId, limit ?? null),
+  ) as unknown as FileSnapshot[];
 }
 
 export async function getSnapshotSummary(
@@ -1662,43 +1673,64 @@ export function subscribeSnapshotEvents(
   });
 }
 
-export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
-  return desktopApi().listWorkspaceEntries(streamId, path);
+export async function listWorkspaceEntries(_streamId: string, path = ""): Promise<WorkspaceEntry[]> {
+  return unwrap(await commands.listWorkspaceEntries(path)) as unknown as WorkspaceEntry[];
 }
 
-export async function listWorkspaceFiles(streamId: string): Promise<{
+export async function listWorkspaceFiles(_streamId: string): Promise<{
   files: WorkspaceIndexedFile[];
   summary: WorkspaceStatusSummary;
 }> {
-  return desktopApi().listWorkspaceFiles(streamId);
+  const raw = unwrap(await commands.listWorkspaceFiles()) as unknown as {
+    files: WorkspaceIndexedFile[];
+    summary: WorkspaceStatusSummary;
+  };
+  return raw;
 }
 
-export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {
-  return desktopApi().readWorkspaceFile(streamId, path);
+export async function readWorkspaceFile(_streamId: string, path: string): Promise<WorkspaceFile> {
+  return unwrap(await commands.readWorkspaceFile(path));
 }
 
-export async function writeWorkspaceFile(streamId: string, path: string, content: string): Promise<WorkspaceFile> {
-  return desktopApi().writeWorkspaceFile(streamId, path, content);
+export async function writeWorkspaceFile(
+  _streamId: string,
+  path: string,
+  content: string,
+): Promise<WorkspaceFile> {
+  return unwrap(await commands.writeWorkspaceFile(path, content));
 }
 
-export async function createWorkspaceFile(streamId: string, path: string, content = ""): Promise<WorkspaceFile> {
-  return desktopApi().createWorkspaceFile(streamId, path, content);
+export async function createWorkspaceFile(
+  _streamId: string,
+  path: string,
+  content = "",
+): Promise<WorkspaceFile> {
+  return unwrap(await commands.createWorkspaceFile(path, content));
 }
 
-export async function createWorkspaceDirectory(streamId: string, path: string): Promise<WorkspacePathChange> {
-  return desktopApi().createWorkspaceDirectory(streamId, path);
+export async function createWorkspaceDirectory(
+  _streamId: string,
+  path: string,
+): Promise<WorkspacePathChange> {
+  unwrap(await commands.createWorkspaceDirectory(path));
+  return { path };
 }
 
 export async function renameWorkspacePath(
-  streamId: string,
+  _streamId: string,
   fromPath: string,
   toPath: string,
 ): Promise<WorkspaceRenameResult> {
-  return desktopApi().renameWorkspacePath(streamId, fromPath, toPath);
+  unwrap(await commands.renameWorkspacePath(fromPath, toPath));
+  return { fromPath, toPath };
 }
 
-export async function deleteWorkspacePath(streamId: string, path: string): Promise<WorkspacePathChange> {
-  return desktopApi().deleteWorkspacePath(streamId, path);
+export async function deleteWorkspacePath(
+  _streamId: string,
+  path: string,
+): Promise<WorkspacePathChange> {
+  unwrap(await commands.deleteWorkspacePath(path));
+  return { path };
 }
 
 export function subscribeOxplowEvents(
