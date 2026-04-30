@@ -190,6 +190,65 @@ impl StreamService {
         Ok(stream)
     }
 
+    /// Register an existing on-disk worktree as a new oxplow stream.
+    ///
+    /// The path must already exist as a `git worktree` of the
+    /// project's primary repo (the renderer's `listAdoptableWorktrees`
+    /// is the source of valid candidates). The branch and detected
+    /// current branch are read from the worktree itself; we don't
+    /// `git worktree add` here. Idempotent: if a stream already
+    /// points at the path we return it unchanged.
+    pub async fn adopt_worktree(
+        &self,
+        worktree_path: PathBuf,
+        title: impl Into<String>,
+    ) -> Result<Stream, SessionError> {
+        self.validate_workspace()?;
+        let _primary = self
+            .streams
+            .primary()
+            .await?
+            .ok_or(SessionError::PrimaryMissing)?;
+
+        // Idempotent: if a stream already tracks this path, return
+        // it. Path comparison is string-based (matches what gets
+        // persisted in stream_store).
+        let path_str = worktree_path.to_string_lossy().into_owned();
+        for existing in self.streams.list().await? {
+            if existing.worktree_path == path_str {
+                return Ok(existing);
+            }
+        }
+
+        // Read the branch from the worktree's HEAD. If the worktree
+        // is detached we still record it so the user can fix that on
+        // their own (the rest of oxplow tolerates a missing branch).
+        let branch =
+            detect_current_branch(&worktree_path).unwrap_or_else(|| "HEAD".to_string());
+
+        let title = title.into();
+        let now = Timestamp::now();
+        let stream = Stream {
+            id: StreamId::new(),
+            kind: StreamKind::Worktree,
+            title,
+            summary: String::new(),
+            branch: branch.clone(),
+            branch_ref: format!("refs/heads/{branch}"),
+            branch_source: branch,
+            worktree_path: path_str,
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            created_at: now,
+            updated_at: now,
+        };
+        self.streams.upsert(&stream).await?;
+        info!(stream_id = %stream.id, path = %worktree_path.display(), "adopted existing worktree");
+        Ok(stream)
+    }
+
     /// List all streams ordered with primary first.
     pub async fn list_streams(&self) -> Result<Vec<Stream>, SessionError> {
         Ok(self.streams.list().await?)

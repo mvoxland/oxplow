@@ -17,6 +17,13 @@ export const commands = {
 	listStreams: () => typedError<Stream[], IpcError>(__TAURI_INVOKE("list_streams")),
 	ensurePrimary: () => typedError<Stream, IpcError>(__TAURI_INVOKE("ensure_primary")),
 	createWorktree: (req: CreateWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("create_worktree", { req })),
+	/**
+	 *  Register an on-disk git worktree as a new stream without
+	 *  running `git worktree add`. Source of valid paths is
+	 *  `list_adoptable_worktrees`; the renderer's New Stream form's
+	 *  "worktree" mode dispatches here.
+	 */
+	adoptWorktree: (req: AdoptWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("adopt_worktree", { req })),
 	deleteStream: (id: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_stream", { id })),
 	/**
 	 *  Returns the primary stream — the project root. Useful for any UI
@@ -390,6 +397,11 @@ export const commands = {
 };
 
 /* Types */
+export type AdoptWorktreeRequest = {
+	path: string,
+	title: string,
+};
+
 export type AgentKind = "claude" | "copilot";
 
 export type AgentStatus = {

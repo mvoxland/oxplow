@@ -31,6 +31,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::streams::list_streams,
         commands::streams::ensure_primary,
         commands::streams::create_worktree,
+        commands::streams::adopt_worktree,
         commands::streams::delete_stream,
         commands::streams::get_primary_stream,
         commands::streams::get_current_stream,

@@ -599,7 +599,12 @@ export async function createStream(input:
         }),
       );
     case "worktree":
-      throw new Error("Adopting an existing worktree on disk is not yet ported to Tauri");
+      return unwrap(
+        await commands.adoptWorktree({
+          path: input.worktreePath,
+          title: input.title,
+        }),
+      );
   }
 }
 
