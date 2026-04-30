@@ -104,6 +104,41 @@ impl TerminalSessionRegistry {
             cols,
             rows,
         };
+        self.spawn_with(pane_target, req).await
+    }
+
+    /// Direct-mode open: spawn a shell command in a fresh PTY (no
+    /// tmux). Mirrors the main-branch `AgentPty` path — useful when
+    /// the renderer is wired directly to the agent CLI without going
+    /// through tmux. `pane_target` is stored as a label only; the
+    /// underlying PTY is the spawned `sh -lc <command>`.
+    pub async fn open_command(
+        &self,
+        pane_target: String,
+        command: String,
+        cwd: std::path::PathBuf,
+        cols: u16,
+        rows: u16,
+    ) -> Result<String, TerminalSessionError> {
+        let req = SpawnRequest {
+            command: "sh".into(),
+            args: vec!["-lc".into(), command],
+            cwd,
+            env: vec![
+                ("TERM".into(), "xterm-256color".into()),
+                ("COLORTERM".into(), "truecolor".into()),
+            ],
+            cols,
+            rows,
+        };
+        self.spawn_with(pane_target, req).await
+    }
+
+    async fn spawn_with(
+        &self,
+        pane_target: String,
+        req: SpawnRequest,
+    ) -> Result<String, TerminalSessionError> {
 
         let mut handle = self.pty.spawn_pane(req).await?;
         let pane_id = handle.id.clone();

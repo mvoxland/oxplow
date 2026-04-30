@@ -247,6 +247,11 @@ export function App() {
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   const isElectron = !!window.oxplowDesktop?.isElectron;
+  // macOS uses the native top-of-screen menu bar (wired up by Tauri's
+  // menu plugin in src-tauri/src/main.rs); the in-window Menubar would
+  // duplicate it.
+  const isMac = typeof navigator !== "undefined"
+    && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
 
   useEffect(() => {
     return subscribeUiError(({ label, message }) => {
@@ -2486,7 +2491,7 @@ export function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-        {!isElectron ? <Menubar groups={menuGroups} /> : null}
+        {!isElectron && !isMac ? <Menubar groups={menuGroups} /> : null}
         <StreamRail
           stream={stream}
           streams={streams}

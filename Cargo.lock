@@ -2810,6 +2810,7 @@ name = "oxplow-desktop"
 version = "0.3.0"
 dependencies = [
  "oxplow-app",
+ "oxplow-domain",
  "oxplow-mcp",
  "oxplow-tauri-ipc",
  "serde",

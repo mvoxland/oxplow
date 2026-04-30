@@ -58,11 +58,17 @@ export const NON_TRACKED_KINDS: ReadonlySet<string> = new Set([
   "new-work-item",
 ]);
 
-/** Kinds excluded from the rail History display (still recorded for analytics). */
+/** Kinds excluded from the rail History display (still recorded for analytics).
+ *  Includes the kinds already pinned in the rail's curated "Pages" section
+ *  so they don't appear twice. */
 export const RAIL_HISTORY_EXCLUDE_KINDS: string[] = [
   "agent",
   "new-stream",
   "new-work-item",
   "diff",
   "git-commit",
+  "tasks",
+  "notes-index",
+  "files",
+  "git-dashboard",
 ];

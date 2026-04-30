@@ -1,8 +1,5 @@
 # Developing Oxplow
 
-> **Post-Tauri rewrite.** Oxplow is now a Tauri 2 desktop app with a
-> Rust backend. The previous Electron/Node shell is gone.
-
 ## Prerequisites
 
 - **Bun 1.3.9** and **Node 22.13.1** (frontend toolchain).
@@ -37,19 +34,69 @@ This installs only the frontend deps (React, Monaco, xterm,
 ./bin/oxplow
 ```
 
-The launcher prefers `target/release/oxplow` if present, then
-`target/debug/oxplow`, then falls back to `cargo tauri dev` from
-`apps/desktop/` for the dev loop.
-
-In dev mode Tauri spawns Vite on `http://localhost:5173` and reloads
-the frontend on save. Rust changes require a rebuild — `cargo tauri
-dev` rebuilds the shell automatically; for crate-internal iteration,
-`cargo build --workspace` while the app is running and then restart.
-
-`bin/oxplow` treats the current working directory as the project root.
-Oxplow's workspace isolation rule (see
+`bin/oxplow` treats the current working directory as the project
+root. Oxplow's workspace isolation rule (see
 [.context/architecture.md](./.context/architecture.md)) keeps it
 from climbing into a parent repo.
+
+The launcher dispatches by what's already built:
+
+1. `target/release/oxplow` if present — production binary, embedded
+   frontend, no Vite needed.
+2. `target/debug/oxplow` if present — debug binary; **expects Vite
+   running on `http://localhost:5173`** (Tauri reads `devUrl` for
+   debug profile and only embeds `frontendDist` in release builds).
+3. Falls back to `cargo tauri dev` from `apps/desktop/` (requires
+   `cargo install tauri-cli`).
+
+### Recommended dev loop (rapid iteration)
+
+The fastest loop avoids rebuilding the Rust shell unless Rust code
+changed. Run two long-lived processes:
+
+```
+# terminal 1 — frontend dev server (HMR, ~150ms reloads on TS save)
+cd apps/desktop && bun run dev
+
+# terminal 2 — Rust shell, rebuilt only when Rust changes
+cargo build -p oxplow-desktop
+./bin/oxplow
+```
+
+Then iterate:
+
+- **Frontend-only change (`apps/desktop/src/**`)**: save the file —
+  Vite HMR pushes it into the running window. No rebuild, no restart.
+- **Rust crate change (`crates/**` or `apps/desktop/src-tauri/**`)**:
+  `cargo build -p oxplow-desktop` in terminal 2, then quit the app
+  window and re-run `./bin/oxplow`. Cargo's incremental builds make
+  this ~5–15s for typical edits.
+- **`tauri.conf.json` / capability JSON change**: same as Rust —
+  `tauri-build` only re-embeds config when its build script reruns.
+  A `cargo clean -p oxplow-desktop` + rebuild forces it.
+- **IPC surface change (`#[tauri::command]` signatures, request /
+  response types)**: `cargo test -p oxplow-tauri-ipc` regenerates
+  `apps/desktop/src/tauri-bridge/generated/bindings.ts`. Commit the
+  diff in the same change — CI gates on it.
+
+### Gotchas
+
+- **Blank window** usually means the debug binary couldn't reach
+  Vite. Confirm `curl -sI http://localhost:5173/` returns 200; if
+  not, start `bun run dev` first.
+- **`tauri-build` doesn't re-embed `frontendDist` automatically** —
+  it caches across debug builds. If a release-mode build picks up
+  stale assets, `cargo clean -p oxplow-desktop` and rebuild.
+- **Bare-DB boot** (no streams / threads) is normal on a fresh clone.
+  The desktop shell auto-creates the primary stream and seeds a
+  default thread on first launch.
+- **Agent pane "can't find session"**: that's tmux mode trying to
+  attach to a session that doesn't exist yet. The default transport
+  is `direct` (spawns the agent CLI in a PTY, no tmux); switch back
+  via the agent pane's kebab → "Use direct mode" if you toggled it.
+- **Vite must be running for any debug build** even if you're only
+  iterating on Rust. Killing Vite and re-running the binary is
+  what produces the empty white window.
 
 ## Test
 

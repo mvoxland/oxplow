@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use oxplow_app::{AppLayout, Services};
+use oxplow_domain::stores::ThreadStore;
 use oxplow_tauri_ipc::{specta_builder, AppState, OXPLOW_EVENT_CHANNEL};
 use tauri::Emitter;
 
@@ -12,6 +13,18 @@ fn main() {
 
     let project_dir = std::env::current_dir().expect("current dir");
     let layout = AppLayout::for_project(&project_dir);
+    // Services::boot synchronously calls `tokio::spawn` (PtyManager owner
+    // task), which requires an entered Tokio runtime. Tauri builds its
+    // own runtime later, so we stand up a dedicated multi-thread runtime
+    // here, enter it for the duration of boot, and leak the runtime so
+    // background tasks keep running for the life of the process.
+    let boot_runtime = Box::leak(Box::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime"),
+    ));
+    let _enter = boot_runtime.enter();
     let services = Services::boot(layout).expect("services boot");
 
     let state: AppState = Arc::new(services);
@@ -27,6 +40,41 @@ fn main() {
     tauri::async_runtime::block_on(async move {
         if let Err(e) = recovery.run().await {
             tracing::warn!(error = %e, "daemon recovery failed");
+        }
+    });
+
+    // Ensure the project's primary stream exists. The renderer's
+    // bootstrap path expects it to be present and errors out with
+    // "no primary stream available" otherwise.
+    let streams = state.streams.clone();
+    let threads = state.threads.clone();
+    let thread_store = state.thread_store.clone();
+    boot_runtime.block_on(async move {
+        let stream = match streams.ensure_primary().await {
+            Ok(s) => {
+                tracing::info!(stream_id = %s.id, "primary stream ready");
+                Some(s)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "ensure_primary failed at boot");
+                None
+            }
+        };
+        // Seed a default thread for the primary stream when the project
+        // is brand new. The renderer expects every stream to have at
+        // least one thread; otherwise the UI shows "No threads yet."
+        if let Some(stream) = stream {
+            match thread_store.list_for_stream(&stream.id).await {
+                Ok(existing) if existing.is_empty() => {
+                    if let Err(e) = threads.create(&stream.id, "main", "working").await {
+                        tracing::warn!(error = %e, "default thread create failed");
+                    } else {
+                        tracing::info!(stream_id = %stream.id, "default thread seeded");
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "list_for_stream failed at boot"),
+            }
         }
     });
 
@@ -57,7 +105,6 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
             specta.mount_events(app);
