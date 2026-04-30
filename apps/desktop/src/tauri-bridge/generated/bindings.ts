@@ -380,22 +380,35 @@ export const commands = {
 	 */
 	closeLspClient: (clientId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_lsp_client", { clientId })),
 	/**
-	 *  Spawn `tmux attach-session -t <pane_target>` and return a handle
-	 *  the renderer addresses by `session_id`. `transport_mode` is
-	 *  accepted for protocol compatibility (the original Electron build
-	 *  used the same value to choose direct vs tmux flows) but oxplow's
-	 *  model always runs through tmux today, so the parameter is recorded
-	 *  for future use but does not branch.
+	 *  Open a renderer-attached terminal session.
+	 * 
+	 *  Two transports, mirroring the main-branch design:
+	 *  - `transport_mode == "direct"` — spawn the agent CLI directly via
+	 *    `sh -lc <build_agent_command>` in a PTY; no tmux. The default.
+	 *  - `transport_mode == "tmux"` — `ensure_pane` to create/reuse a
+	 *    tmux session+window running the agent command, then
+	 *    `tmux attach-session -t <resolved-target>`. The target is the
+	 *    `oxplow-<stream-id>:working|talking` form, not the bare slot.
 	 */
-	openTerminalSession: (paneTarget: string, cols: number, rows: number, transportMode: string) => typedError<string, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows, transportMode })),
+	openTerminalSession: (paneTarget: string, cols: number, rows: number, transportMode: string) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows, transportMode })),
 	/**
 	 *  Forward a JSON-encoded protocol message from the renderer to the
 	 *  session backing `session_id`. See
 	 *  `oxplow_app::terminal_sessions` for the message shapes.
 	 */
 	sendTerminalMessage: (sessionId: string, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("send_terminal_message", { sessionId, message })),
-	// Tear down the PTY and forwarder backing `session_id`. Idempotent.
+	/**
+	 *  Detach the renderer from `session_id` without killing the PTY —
+	 *  the agent keeps running in the background so the user can navigate
+	 *  away and come back. Use `terminate_terminal_session` to actually
+	 *  stop the agent.
+	 */
 	closeTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_terminal_session", { sessionId })),
+	/**
+	 *  Permanently kill the PTY behind `session_id`. Used when a thread
+	 *  is closed or the user explicitly terminates the agent.
+	 */
+	terminateTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("terminate_terminal_session", { sessionId })),
 	/**
 	 *  Replace the app's native menu with the supplied snapshot. Each
 	 *  activation fires `menu:command` with `{ id: "<command-id>" }` to
@@ -446,6 +459,16 @@ export type AheadBehind = {
 
 export type AppVersion = {
 	version: string,
+};
+
+/**
+ *  Result of `attach_or_create` — the session id plus a base64
+ *  snapshot of the replay buffer that the renderer should write into
+ *  a fresh xterm before starting to consume live events.
+ */
+export type AttachResult = {
+	sessionId: string,
+	replayB64: string,
 };
 
 export type BackgroundTask = {
