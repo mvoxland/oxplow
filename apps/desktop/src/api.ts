@@ -11,10 +11,6 @@ function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error:
   throw new Error(err?.message ?? err?.code ?? "ipc error");
 }
 
-function notPorted(name: string): never {
-  throw new Error(`oxplow desktop API method "${name}" is not yet ported to Tauri`);
-}
-
 /// Synthesize a success-shaped GitOpResult for void-returning Tauri
 /// commands (gitAddPath / gitRestorePath / gitAppendToGitignore).
 /// Renderer code expects a {success, stdout, stderr, status} shape
@@ -66,7 +62,7 @@ function adaptBackgroundTask(t: any): any {
 }
 
 function buildDesktopAdapter(): DesktopApi {
-  const adapter: Partial<DesktopApi> = {
+  const adapter: DesktopApi = {
     ping: async () => unwrap(await commands.ping()),
     listStreams: async () =>
       (unwrap(await commands.listStreams()) as unknown[])/* bindings shape */,
@@ -541,16 +537,10 @@ function buildDesktopAdapter(): DesktopApi {
     },
   };
 
-  return new Proxy(adapter, {
-    get(target, prop, receiver) {
-      const v = Reflect.get(target, prop, receiver);
-      if (v !== undefined) return v;
-      if (typeof prop === "string") {
-        return (..._args: unknown[]) => notPorted(prop);
-      }
-      return undefined;
-    },
-  }) as DesktopApi;
+  // The whole DesktopApi surface is filled in above; no Proxy or
+  // throw-stub wrapper. Missing methods are a TypeScript error,
+  // not a runtime crash on first call.
+  return adapter;
 }
 
 export type { OxplowEvent } from "./api-types.js";
