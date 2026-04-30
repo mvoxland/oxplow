@@ -77,7 +77,8 @@ export interface WorkItem {
 
 export interface WorkNote {
   id: string;
-  work_item_id: string;
+  work_item_id: string | null;
+  thread_id: string | null;
   body: string;
   author: string;
   created_at: string;

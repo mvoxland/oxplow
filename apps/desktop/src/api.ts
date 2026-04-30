@@ -587,7 +587,7 @@ export type { OxplowEvent } from "./api-types.js";
 // has to be updated to the new field names. Types not on this list
 // stay on the api-types camelCase legacy shape until their consumers
 // are migrated.
-export type { GitOpResult } from "./tauri-bridge/index.js";
+export type { GitOpResult, GitWorktreeEntry } from "./tauri-bridge/index.js";
 // The remaining legacy types still come from api-types because
 // their consumers read fields that don't exist on the bindings
 // shape yet (e.g. GitLogResult.currentBranch / branchHeads / tags,
@@ -610,7 +610,6 @@ export type {
   BranchChangeEntry,
   BranchChanges,
   RemoteBranchEntry,
-  GitWorktreeEntry,
 } from "./api-types.js";
 
 // Stream / Thread types re-exported from the Tauri bindings. The
@@ -885,11 +884,11 @@ export async function createStream(input:
   return desktopApi().createStream(input);
 }
 
-export async function listAdoptableWorktrees(): Promise<import("./api-types.js").GitWorktreeEntry[]> {
+export async function listAdoptableWorktrees(): Promise<import("./tauri-bridge/index.js").GitWorktreeEntry[]> {
   return desktopApi().listAdoptableWorktrees();
 }
 
-export async function listSiblingWorktrees(streamId: string): Promise<import("./api-types.js").GitWorktreeEntry[]> {
+export async function listSiblingWorktrees(streamId: string): Promise<import("./tauri-bridge/index.js").GitWorktreeEntry[]> {
   return desktopApi().listSiblingWorktrees(streamId);
 }
 
