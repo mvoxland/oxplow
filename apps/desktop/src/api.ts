@@ -635,18 +635,6 @@ export async function createThread(streamId: string, title: string): Promise<Thr
   return getThreadState(streamId);
 }
 
-export async function reorderThread(
-  streamId: string,
-  _threadId: string,
-  _targetIndex: number,
-): Promise<ThreadState> {
-  // Legacy "single move" call: the renderer now sends a full
-  // ordered list to reorderThreads. This helper stays for source
-  // compat but just refetches; callers who need to actually
-  // reorder should use reorderThreads.
-  return getThreadState(streamId);
-}
-
 export async function reorderThreads(streamId: string, orderedThreadIds: string[]): Promise<void> {
   unwrap(
     await commands.reorderThreadQueue({ streamId, order: orderedThreadIds }),
@@ -1107,15 +1095,6 @@ export async function listFrequentUsage(input: {
   ) as unknown as UsageRollup[];
 }
 
-export async function listCurrentlyOpenUsage(input: {
-  kind: string;
-  streamId?: string | null;
-  threadId?: string | null;
-}): Promise<string[]> {
-  const _ = input;
-  return unwrap(await commands.listCurrentlyOpenUsage(50)) as unknown as string[];
-}
-
 export type CodeQualityTool = import("./api-types.js").CodeQualityTool;
 export type CodeQualityScope = import("./api-types.js").CodeQualityScope;
 export type CodeQualityScanStatus = import("./api-types.js").CodeQualityScanStatus;
@@ -1171,12 +1150,24 @@ export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
   status: import("./api-types.js").WorkItemStatus;
   thread_id: string | null;
 }>> {
-  // Bindings expose `getWorkItemSummaries(threadId)` for one
-  // thread; the legacy renderer surface takes a list of ids.
-  // Resolve by fetching each id's summary (rare path; ids array
-  // is normally short).
-  const _ = ids;
-  return [];
+  if (ids.length === 0) return [];
+  const items = await Promise.all(
+    ids.map(async (id) => {
+      try {
+        return unwrap(await commands.getWorkItem(id)) as unknown as WorkItem | null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return items
+    .filter((x): x is WorkItem => x !== null)
+    .map((w) => ({
+      id: w.id,
+      title: w.title,
+      status: w.status,
+      thread_id: w.thread_id,
+    }));
 }
 
 /**
