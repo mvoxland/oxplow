@@ -1604,9 +1604,34 @@ export async function listRecentPageVisits(opts: {
   dedupeByRef?: boolean;
   excludeKinds?: string[];
 }): Promise<PageVisitApi[]> {
-  return unwrap(
-    await commands.listRecentPageVisits(opts.limit ?? 50),
-  ) as unknown as PageVisitApi[];
+  // Backend command only takes `limit`; thread/exclude/dedupe are
+  // applied client-side until the IPC surface grows the parameters.
+  // Over-fetch a bit so post-filtering still has enough rows.
+  const raw = await unwrap(
+    await commands.listRecentPageVisits(Math.max(opts.limit ?? 50, 50) * 4),
+  );
+  const exclude = new Set(opts.excludeKinds ?? []);
+  const seen = new Set<string>();
+  const out: PageVisitApi[] = [];
+  for (const v of raw) {
+    if (exclude.has(v.page_kind)) continue;
+    const key = `${v.page_kind}:${v.page_id}`;
+    if (opts.dedupeByRef && seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      id: Number(v.id),
+      t: v.visited_at,
+      streamId: null,
+      threadId: null,
+      refKind: v.page_kind,
+      refId: v.page_id,
+      payload: null,
+      label: deriveDefaultLabelFromKind(v.page_kind, v.page_id),
+      source: null,
+    });
+    if (out.length >= (opts.limit ?? 50)) break;
+  }
+  return out;
 }
 
 export async function topVisitedPages(opts: {
@@ -1615,9 +1640,41 @@ export async function topVisitedPages(opts: {
   limit: number;
   excludeKinds?: string[];
 }): Promise<TopVisitedRowApi[]> {
-  return unwrap(
-    await commands.topVisitedPages(opts.limit ?? 50),
-  ) as unknown as TopVisitedRowApi[];
+  const raw = await unwrap(
+    await commands.topVisitedPages(Math.max(opts.limit ?? 50, 50) * 4),
+  );
+  const exclude = new Set(opts.excludeKinds ?? []);
+  const out: TopVisitedRowApi[] = [];
+  for (const v of raw) {
+    if (exclude.has(v.page_kind)) continue;
+    out.push({
+      refId: v.page_id,
+      refKind: v.page_kind,
+      payload: null,
+      label: deriveDefaultLabelFromKind(v.page_kind, v.page_id),
+      count: v.visit_count,
+      lastT: "",
+    });
+    if (out.length >= (opts.limit ?? 50)) break;
+  }
+  return out;
+}
+
+function deriveDefaultLabelFromKind(kind: string, id: string): string {
+  switch (kind) {
+    case "tasks": return "Tasks";
+    case "files": return "Files";
+    case "notes-index": return "Notes";
+    case "git-dashboard": return "Git";
+    case "git-history": return "Git history";
+    case "git-commit": return "Git commit";
+    case "settings": return "Settings";
+    case "code-quality": return "Code quality";
+    case "hook-events": return "Hook events";
+    case "subsystem-docs": return "Subsystem docs";
+    case "file": return id.split("/").pop() ?? id;
+    default: return id;
+  }
 }
 
 export async function countPageVisitsByDay(opts: {

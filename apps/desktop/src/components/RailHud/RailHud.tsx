@@ -959,8 +959,17 @@ function HistorySection({
     };
   }, [threadId]);
 
-  const source = mode === "recent" ? recent : top;
-  if (source.length === 0) return null;
+  // Hide the entire section when there is nothing to show in either
+  // mode — no header, no toggle, no flicker. If the user has data in
+  // only one of the two modes, fall back to that one so the section
+  // doesn't appear "broken" when toggled.
+  if (recent.length === 0 && top.length === 0) return null;
+  const effectiveMode = mode === "recent" && recent.length === 0 && top.length > 0
+    ? "top"
+    : mode === "top" && top.length === 0 && recent.length > 0
+    ? "recent"
+    : mode;
+  const source = effectiveMode === "recent" ? recent : top;
   const limit = expanded ? 10 : 5;
   const entries = source.slice(0, limit);
   const hasMore = source.length > 5;
@@ -984,13 +993,13 @@ function HistorySection({
             letterSpacing: 0.4,
           }}
         >
-          {mode === "recent" ? "History" : "Most visited"}
+          {effectiveMode === "recent" ? "History" : "Most visited"}
         </span>
         <button
           type="button"
           data-testid="rail-history-mode"
           onClick={() => setMode((m) => (m === "recent" ? "top" : "recent"))}
-          title={mode === "recent" ? "Show most visited (last 30d)" : "Show recent"}
+          title={effectiveMode === "recent" ? "Show most visited (last 30d)" : "Show recent"}
           style={{
             background: "transparent",
             border: "none",
@@ -1000,13 +1009,13 @@ function HistorySection({
             padding: "0 4px",
           }}
         >
-          {mode === "recent" ? "top" : "recent"}
+          {effectiveMode === "recent" ? "top" : "recent"}
         </button>
       </div>
       <div data-testid="rail-history" style={{ paddingBottom: 4 }}>
         {entries.map((e) => {
           const ref: TabRef = { id: e.refId, kind: e.refKind as TabRef["kind"], payload: e.payload };
-          const trailing = mode === "top" ? (e as TopVisitedRowApi).count : null;
+          const trailing = effectiveMode === "top" ? (e as TopVisitedRowApi).count : null;
           return (
             <button
               key={e.refId}
