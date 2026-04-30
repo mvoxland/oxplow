@@ -45,9 +45,10 @@ Things I keep forgetting. Read this before adding any UI.
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
   `apps/desktop/src/pages/SettingsPage.tsx` — full Page tab, no backdrop.
-- **Never call `window.prompt()`.** Electron disables it — it returns
-  `null` synchronously without showing anything, so any code path
-  gated on its return value silently no-ops. Use `InlineEdit` (for
+- **Never call `window.prompt()`.** The Tauri webview blocks it the
+  same way Electron did — it returns `null` synchronously without
+  showing anything, so any code path gated on its return value
+  silently no-ops. Use `InlineEdit` (for
   click-to-edit) or `InlinePromptStrip` (for new-X flows that need a
   target-path entry) instead. `window.confirm` / `window.alert` block
   the renderer; prefer `InlineConfirm` for destructive actions on a

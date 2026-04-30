@@ -33,19 +33,16 @@ touches roughly seven files. They sit in this order:
    signature to the `OxplowApi` interface. This is the source of truth for
    what's exposed to the renderer.
 
-5. **Preload binding** — `(removed under Tauri)`. One line per method:
-   `name: (args) => ipcRenderer.invoke("oxplow:name", args)`. Channel
-   names follow `oxplow:<methodName>`.
+5. **Tauri command + binding** — add a `#[tauri::command] #[specta::specta]`
+   adapter alongside the others in
+   `crates/oxplow-tauri-ipc/src/commands/<area>.rs` and register it in
+   `specta_builder()` (`crates/oxplow-tauri-ipc/src/lib.rs`). The
+   `cargo test -p oxplow-tauri-ipc` `export_ts_bindings` test
+   regenerates `apps/desktop/src/tauri-bridge/generated/bindings.ts`;
+   CI fails on a non-empty diff after regen, so check that file in.
 
-6. **Main-process handler** — `apps/desktop/src-tauri/src/main.rs`.
-   `handle("oxplow:name", (_event, ...args) => currentRuntime.name(...args))`.
-   Use the local `handle()` wrapper, not `ipcMain.handle` directly —
-   the wrapper records the channel so `disposeRuntime()` can remove
-   every handler before the SQLite database closes (otherwise late
-   in-flight requests crash with "database is not open" during quit).
-
-7. **UI api wrapper** — `apps/desktop/src/api.ts`. `desktopApi().name(...)` with a
-   typed return.
+6. **UI api wrapper** — `apps/desktop/src/api.ts`. Thin wrapper around
+   the typed `commands.name(...)` import from the generated bindings.
 
 The component then calls the api wrapper and (if the data is reactive)
 subscribes to the relevant `*.changed` event to refetch.
@@ -66,8 +63,10 @@ union. To add an event:
 
 1. Add a new interface (`type: "thing.changed"; …`).
 2. Add it to the `OxplowEvent` union.
-3. Publish from `runtime.ts` inside the relevant store's `subscribe`
-   block.
+3. Publish from `crates/oxplow-app/src/lib.rs` (or the relevant
+   service file) by sending on the broadcast channel that backs
+   `Services::events()`. The Tauri shell forwards every event to the
+   renderer via `app_handle.emit("oxplow:event", ...)`.
 4. Consume in the UI via `subscribeOxplowEvents((e) => { if (e.type === ...) ... })`.
 
 ## Git dashboard / cross-worktree IPC
@@ -111,13 +110,14 @@ For commonly-filtered events there are scoped helpers in `apps/desktop/src/api.t
 Add a new helper any time more than one component would write the same
 filter.
 
-**Listener count:** each UI subscriber adds one listener to
-`ipcRenderer`. Electron's default `MaxListeners=10` is too low for
-oxplow (~11 stores subscribe on startup), so `(removed under Tauri)`
-calls `ipcRenderer.setMaxListeners(64)` at load time. These are
-long-lived per-store subscribers and grow only when we add a store —
-not a leak. If the count ever climbs into dozens, switch to a single
-preload fan-out bus instead of raising the cap further.
+**Listener count:** each UI subscriber registers via
+`listen("oxplow:event", ...)` from `@tauri-apps/api/event`. Tauri 2's
+event bus has no `MaxListeners` cap, so the historical
+`setMaxListeners(64)` workaround is gone. Subscribers are still
+long-lived per-store and grow only when we add a store; if you find
+yourself adding many short-lived listeners, prefer a single fan-out
+helper in `apps/desktop/src/api.ts` rather than calling `listen`
+directly from each component.
 
 ## Cross-store atomicity
 

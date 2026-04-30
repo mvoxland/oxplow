@@ -26,9 +26,11 @@ attributes in sync if the mount structure changes.
 
 Save is registered TWICE on purpose:
 
-1. The native Electron menu (via `commands.ts` → `setNativeMenu`) binds
-   the Cmd/Ctrl+S accelerator. This is what real users hit in day-to-day
-   use — the OS menu catches the key before the webview sees it.
+1. The native Tauri menu (built by the renderer's menu service and
+   pushed via `desktopBridge().setNativeMenu` →
+   `commands::menu::set_native_menu`) binds the Cmd/Ctrl+S
+   accelerator. This is what real users hit in day-to-day use — the
+   OS menu catches the key before the webview sees it.
 2. Inside `EditorPane`, right after the editor is created:
    `editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, onSave)`.
    Monaco owns its own keybinding service, so this makes the shortcut
