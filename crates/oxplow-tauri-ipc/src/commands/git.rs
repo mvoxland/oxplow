@@ -17,7 +17,10 @@ fn project_dir(state: &tauri::State<'_, AppState>) -> std::path::PathBuf {
 /// stream's worktree path wins. Otherwise we fall back to the
 /// project root, matching the pre-per-stream behavior. Worktree
 /// paths recorded as relative are resolved against the project dir.
-async fn resolve_repo_dir(
+///
+/// Public so other command modules (`log`, `snapshot`, …) can reuse
+/// it without duplicating the lookup.
+pub(crate) async fn resolve_repo_dir(
     state: &tauri::State<'_, AppState>,
     stream_id: Option<&str>,
 ) -> std::path::PathBuf {
@@ -53,8 +56,9 @@ where
 #[specta::specta]
 pub async fn get_repo_conflict_state(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
 ) -> Result<RepoConflictState, IpcError> {
-    let path = state.layout.project_dir.clone();
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     let s = tokio::task::spawn_blocking(move || oxplow_git::get_repo_conflict_state(&path))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?;
@@ -65,10 +69,11 @@ pub async fn get_repo_conflict_state(
 #[specta::specta]
 pub async fn get_ahead_behind(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     base: String,
     head: String,
 ) -> Result<AheadBehind, IpcError> {
-    let path = state.layout.project_dir.clone();
+    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
     let ab = tokio::task::spawn_blocking(move || oxplow_git::get_ahead_behind(&path, &base, &head))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?;
@@ -239,10 +244,11 @@ pub async fn list_recent_remote_branches(
 #[specta::specta]
 pub async fn list_file_commits(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     path: String,
     limit: Option<usize>,
 ) -> Result<Vec<oxplow_git::GitLogCommit>, IpcError> {
-    let project = project_dir(&state);
+    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
     let limit = limit.unwrap_or(50);
     Ok(
         tokio::task::spawn_blocking(move || oxplow_git::list_file_commits(&project, &path, limit))
@@ -255,9 +261,10 @@ pub async fn list_file_commits(
 #[specta::specta]
 pub async fn git_blame(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     path: String,
 ) -> Result<Vec<BlameLine>, IpcError> {
-    let project = project_dir(&state);
+    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
     Ok(tokio::task::spawn_blocking(move || oxplow_git::git_blame(&project, &path))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?)
@@ -267,10 +274,11 @@ pub async fn git_blame(
 #[specta::specta]
 pub async fn local_blame(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     path: String,
     disk_text: String,
 ) -> Result<Vec<LocalBlameEntry>, IpcError> {
-    let project = project_dir(&state);
+    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
     Ok(tokio::task::spawn_blocking(move || {
         oxplow_git::local_blame(&project, &path, &disk_text)
     })
@@ -294,9 +302,10 @@ pub async fn get_change_scopes(
 #[specta::specta]
 pub async fn get_branch_changes(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     base_ref: String,
 ) -> Result<BranchChanges, IpcError> {
-    let project = project_dir(&state);
+    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
     Ok(tokio::task::spawn_blocking(move || oxplow_git::list_branch_changes(&project, &base_ref))
         .await
         .map_err(|e| IpcError::internal(e.to_string()))?)
@@ -348,10 +357,11 @@ pub async fn list_adoptable_worktrees(
 #[specta::specta]
 pub async fn search_workspace_text(
     state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<TextSearchHit>, IpcError> {
-    let project = project_dir(&state);
+    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
     Ok(
         tokio::task::spawn_blocking(move || oxplow_git::search_workspace_text(&project, &query, limit))
             .await

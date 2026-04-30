@@ -178,11 +178,22 @@ function buildDesktopAdapter(): DesktopApi {
       unwrap(await commands.getEffortFiles(effortId)),
     listEffortsEndingAtSnapshots: async (snapshotIds: number[]) =>
       unwrap(await commands.listEffortsEndingAtSnapshots(snapshotIds)),
-    getRepoConflictState: async () => unwrap(await commands.getRepoConflictState()),
-    getAheadBehind: async (base: string, head: string) =>
-      unwrap(await commands.getAheadBehind(base, head)),
-    getCommitsAheadOf: async (base: string, head: string, limit?: number) =>
-      unwrap(await commands.getCommitsAheadOf(base, head, limit ?? 200)),
+    getRepoConflictState: async (streamId?: string | null) =>
+      unwrap(await commands.getRepoConflictState(streamId ?? null)),
+    getAheadBehind: async (
+      streamId: string | null | undefined,
+      base: string,
+      head: string,
+    ) => unwrap(await commands.getAheadBehind(streamId ?? null, base, head)),
+    getCommitsAheadOf: async (
+      streamId: string | null | undefined,
+      base: string,
+      head: string,
+      limit?: number,
+    ) =>
+      unwrap(
+        await commands.getCommitsAheadOf(streamId ?? null, base, head, limit ?? 200),
+      ),
     getDefaultBranch: async () => unwrap(await commands.getDefaultBranch()),
     listBranches: async () => unwrap(await commands.listLocalBranches()),
     renameGitBranch: async (from: string, to: string) =>
@@ -220,9 +231,13 @@ function buildDesktopAdapter(): DesktopApi {
       unwrap(await commands.gitCommitAll(streamId ?? null, message)),
     gitAddPath: async (streamId: string | null | undefined, path: string) =>
       unwrap(await commands.gitAddPath(streamId ?? null, path)),
-    gitBlame: async (path: string) => unwrap(await commands.gitBlame(path)),
-    localBlame: async (path: string, diskText: string) =>
-      unwrap(await commands.localBlame(path, diskText)),
+    gitBlame: async (streamId: string | null | undefined, path: string) =>
+      unwrap(await commands.gitBlame(streamId ?? null, path)),
+    localBlame: async (
+      streamId: string | null | undefined,
+      path: string,
+      diskText: string,
+    ) => unwrap(await commands.localBlame(streamId ?? null, path, diskText)),
     listAllRefs: async () => unwrap(await commands.listAllRefs()),
     listGitRefs: async () => {
       const raw = unwrap(await commands.listAllRefs());
@@ -250,16 +265,23 @@ function buildDesktopAdapter(): DesktopApi {
         recent: localBranches.slice(0, 5).map((b) => b.name),
       };
     },
-    listFileCommits: async (path: string, limit?: number) =>
-      unwrap(await commands.listFileCommits(path, limit ?? null)),
+    listFileCommits: async (
+      streamId: string | null | undefined,
+      path: string,
+      limit?: number,
+    ) =>
+      unwrap(await commands.listFileCommits(streamId ?? null, path, limit ?? null)),
     listRecentRemoteBranches: async (limit?: number) =>
       unwrap(await commands.listRecentRemoteBranches(limit ?? null)),
     readFileAtRef: async (ref: string, path: string) =>
       unwrap(await commands.readFileAtRef(ref, path)),
-    searchWorkspaceText: async (query: string, limit?: number) =>
-      unwrap(await commands.searchWorkspaceText(query, limit ?? null)),
-    getBranchChanges: async (baseRef: string) =>
-      unwrap(await commands.getBranchChanges(baseRef)),
+    searchWorkspaceText: async (
+      streamId: string | null | undefined,
+      query: string,
+      limit?: number,
+    ) => unwrap(await commands.searchWorkspaceText(streamId ?? null, query, limit ?? null)),
+    getBranchChanges: async (streamId: string | null | undefined, baseRef: string) =>
+      unwrap(await commands.getBranchChanges(streamId ?? null, baseRef)),
     getChangeScopes: async (streamId?: string | null) => {
       const raw = unwrap(await commands.getChangeScopes(streamId ?? null));
       return {
@@ -273,9 +295,15 @@ function buildDesktopAdapter(): DesktopApi {
     },
     listAdoptableWorktrees: async () => unwrap(await commands.listAdoptableWorktrees()),
     listSiblingWorktrees: async () => unwrap(await commands.listSiblingWorktrees()),
-    getCommitDetail: async (sha: string) => unwrap(await commands.getCommitDetail(sha)),
-    getGitLog: async (options?: { limit?: number; all?: boolean }) =>
-      unwrap(await commands.getGitLog(options?.limit ?? null, options?.all ?? false)),
+    getCommitDetail: async (streamId: string | null | undefined, sha: string) =>
+      unwrap(await commands.getCommitDetail(streamId ?? null, sha)),
+    getGitLog: async (
+      streamId?: string | null,
+      options?: { limit?: number; all?: boolean },
+    ) =>
+      unwrap(
+        await commands.getGitLog(streamId ?? null, options?.limit ?? null, options?.all ?? false),
+      ),
     listWorkspaceEntries: async (dir: string) =>
       unwrap(await commands.listWorkspaceEntries(dir)),
     listWorkspaceFiles: async () => unwrap(await commands.listWorkspaceFiles()),
