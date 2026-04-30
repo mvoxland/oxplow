@@ -1418,63 +1418,65 @@ export function subscribeSnapshotEvents(
   });
 }
 
-export async function listWorkspaceEntries(_streamId: string, path = ""): Promise<WorkspaceEntry[]> {
-  return unwrap(await commands.listWorkspaceEntries(path)) as unknown as WorkspaceEntry[];
+export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
+  return unwrap(
+    await commands.listWorkspaceEntries(streamId || null, path),
+  ) as unknown as WorkspaceEntry[];
 }
 
-export async function listWorkspaceFiles(_streamId: string): Promise<{
+export async function listWorkspaceFiles(streamId: string): Promise<{
   files: WorkspaceIndexedFile[];
   summary: WorkspaceStatusSummary;
 }> {
-  const raw = unwrap(await commands.listWorkspaceFiles()) as unknown as {
+  const raw = unwrap(await commands.listWorkspaceFiles(streamId || null)) as unknown as {
     files: WorkspaceIndexedFile[];
     summary: WorkspaceStatusSummary;
   };
   return raw;
 }
 
-export async function readWorkspaceFile(_streamId: string, path: string): Promise<WorkspaceFile> {
-  return unwrap(await commands.readWorkspaceFile(path));
+export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {
+  return unwrap(await commands.readWorkspaceFile(streamId || null, path));
 }
 
 export async function writeWorkspaceFile(
-  _streamId: string,
+  streamId: string,
   path: string,
   content: string,
 ): Promise<WorkspaceFile> {
-  return unwrap(await commands.writeWorkspaceFile(path, content));
+  return unwrap(await commands.writeWorkspaceFile(streamId || null, path, content));
 }
 
 export async function createWorkspaceFile(
-  _streamId: string,
+  streamId: string,
   path: string,
   content = "",
 ): Promise<WorkspaceFile> {
-  return unwrap(await commands.createWorkspaceFile(path, content));
+  return unwrap(await commands.createWorkspaceFile(streamId || null, path, content));
 }
 
 export async function createWorkspaceDirectory(
-  _streamId: string,
+  streamId: string,
   path: string,
 ): Promise<WorkspacePathChange> {
-  unwrap(await commands.createWorkspaceDirectory(path));
+  unwrap(await commands.createWorkspaceDirectory(streamId || null, path));
   return { path };
 }
 
 export async function renameWorkspacePath(
-  _streamId: string,
+  streamId: string,
   fromPath: string,
   toPath: string,
 ): Promise<WorkspaceRenameResult> {
-  unwrap(await commands.renameWorkspacePath(fromPath, toPath));
+  unwrap(await commands.renameWorkspacePath(streamId || null, fromPath, toPath));
   return { fromPath, toPath };
 }
 
 export async function deleteWorkspacePath(
-  _streamId: string,
+  streamId: string,
   path: string,
 ): Promise<WorkspacePathChange> {
-  unwrap(await commands.deleteWorkspacePath(path));
+  unwrap(await commands.deleteWorkspacePath(streamId || null, path));
   return { path };
 }
 
