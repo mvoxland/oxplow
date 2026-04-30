@@ -71,6 +71,22 @@ The original Electron-era Playwright suite lives under
 Tauri build; see that directory's README for the path forward.
 There is no current Tauri e2e harness.
 
+### Coverage
+
+CI runs `cargo llvm-cov --workspace --summary-only` on every PR and
+uploads an `lcov.info` artifact. To reproduce locally:
+
+```
+cargo install cargo-llvm-cov   # one-time
+cargo llvm-cov --workspace --summary-only   # per-crate line %
+cargo llvm-cov --html --workspace           # HTML report under target/llvm-cov/html
+```
+
+No coverage floor is gated yet — the goal is to keep the numbers
+visible so the thinnest crates (`oxplow-mcp`, `oxplow-tauri-ipc`,
+`oxplow-pty`, `oxplow-tmux`) get backfill before regressions creep
+in.
+
 ## Build installers
 
 ```
