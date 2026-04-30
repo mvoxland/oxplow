@@ -50,7 +50,7 @@ export function StreamSettingsPage({ stream, onClose, onSaved }: StreamSettingsP
   return (
     <Page
       testId="page-stream-settings"
-      title={stream ? `Stream settings — ${stream.title}` : "Stream settings"}
+      title={stream ? `Stream Settings — ${stream.title}` : "Stream Settings"}
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>
@@ -66,7 +66,7 @@ export function StreamSettingsPage({ stream, onClose, onSaved }: StreamSettingsP
           </div>
         ) : (
           <>
-            <Section title="Custom prompt">
+            <Section title="Custom Prompt">
               <Hint>
                 Appended to the agent's system prompt for every thread inside this stream.
                 Applies to agent sessions started after Save — existing sessions keep the prompt

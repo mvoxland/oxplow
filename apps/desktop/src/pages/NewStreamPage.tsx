@@ -203,7 +203,7 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
 
   if (!gitEnabled) {
     return (
-      <Page testId="page-new-stream" title="New stream">
+      <Page testId="page-new-stream" title="New Stream">
         <div style={{ padding: "20px 24px", color: "var(--text-secondary)", fontSize: 13 }}>
           This workspace root does not contain its own <code>.git</code> directory, so streams
           cannot be created here. Open a git-enabled workspace to add streams.
@@ -215,7 +215,7 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
   return (
     <Page
       testId="page-new-stream"
-      title="New stream"
+      title="New Stream"
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>

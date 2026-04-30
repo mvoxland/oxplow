@@ -13,24 +13,24 @@ export function deriveDefaultLabel(ref: TabRef): string {
       return path.split("/").pop() ?? path ?? "File";
     }
     case "tasks": return "Tasks";
-    case "done-work": return "Done work";
+    case "done-work": return "Done Work";
     case "backlog": return "Backlog";
     case "archived": return "Archived";
     case "notes-index": return "Notes";
     case "files": return "Files";
-    case "code-quality": return "Code quality";
-    case "local-history": return "Local history";
-    case "git-history": return "Git history";
-    case "git-dashboard": return "Git dashboard";
-    case "git-commit": return "Git commit";
+    case "code-quality": return "Code Quality";
+    case "local-history": return "Local History";
+    case "git-history": return "Git History";
+    case "git-dashboard": return "Git Dashboard";
+    case "git-commit": return "Git Commit";
     case "uncommitted-changes": return "Uncommitted";
-    case "hook-events": return "Hook events";
-    case "subsystem-docs": return "Subsystem docs";
+    case "hook-events": return "Hook Events";
+    case "subsystem-docs": return "Subsystem Docs";
     case "settings": return "Settings";
-    case "stream-settings": return "Stream settings";
-    case "thread-settings": return "Thread settings";
-    case "new-stream": return "New stream";
-    case "new-work-item": return "New work item";
+    case "stream-settings": return "Stream Settings";
+    case "thread-settings": return "Thread Settings";
+    case "new-stream": return "New Stream";
+    case "new-work-item": return "New Work Item";
     case "dashboard": {
       const variant = (ref.payload as { variant?: string } | null)?.variant ?? "";
       return variant ? `Dashboard: ${variant}` : "Dashboard";

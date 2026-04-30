@@ -40,7 +40,7 @@ export const RAIL_PAGE_IDS: ReadonlySet<string> = new Set([
 export function computePagesDirectory(opts: { backlogReadyCount: number }): PageDirectoryEntry[] {
   return [
     { id: "tasks", label: "📋  Tasks", ref: tasksRef() },
-    { id: "done-work", label: "✓  Done work", ref: doneWorkRef() },
+    { id: "done-work", label: "✓  Done Work", ref: doneWorkRef() },
     {
       id: "backlog",
       label: "📦  Backlog",
@@ -50,12 +50,12 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "archived", label: "▣  Archived", ref: archivedRef() },
     { id: "notes-index", label: "📒  Notes", ref: indexRef("notes-index") },
     { id: "files", label: "📁  Files", ref: indexRef("files") },
-    { id: "code-quality", label: "⚠  Code quality", ref: indexRef("code-quality") },
-    { id: "local-history", label: "⏱  Local history", ref: indexRef("local-history") },
+    { id: "code-quality", label: "⚠  Code Quality", ref: indexRef("code-quality") },
+    { id: "local-history", label: "⏱  Local History", ref: indexRef("local-history") },
     { id: "git-dashboard", label: "🌐  Git", ref: gitDashboardRef() },
     { id: "uncommitted-changes", label: "✎  Uncommitted", ref: uncommittedChangesRef() },
-    { id: "hook-events", label: "🪝  Hook events", ref: indexRef("hook-events") },
-    { id: "subsystem-docs", label: "📑  Subsystem docs", ref: indexRef("subsystem-docs") },
+    { id: "hook-events", label: "🪝  Hook Events", ref: indexRef("hook-events") },
+    { id: "subsystem-docs", label: "📑  Subsystem Docs", ref: indexRef("subsystem-docs") },
     { id: "settings", label: "⚙  Settings", ref: indexRef("settings") },
     { id: "dashboard-planning", label: "📊  Planning", ref: dashboardRef("planning") },
     { id: "dashboard-review", label: "📊  Review", ref: dashboardRef("review") },

@@ -47,7 +47,7 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
   return (
     <Page
       testId="page-thread-settings"
-      title={thread ? `Thread settings — ${thread.title}` : "Thread settings"}
+      title={thread ? `Thread Settings — ${thread.title}` : "Thread Settings"}
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>
@@ -63,7 +63,7 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
           </div>
         ) : (
           <>
-            <Section title="Custom prompt">
+            <Section title="Custom Prompt">
               <Hint>
                 Appended to the agent's system prompt for this thread (on top of any
                 stream-level prompt). Applies to agent sessions started after Save —
