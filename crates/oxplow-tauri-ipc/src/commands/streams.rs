@@ -42,6 +42,30 @@ pub async fn create_worktree(
     Ok(stream)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct AdoptWorktreeRequest {
+    pub path: String,
+    pub title: String,
+}
+
+/// Register an on-disk git worktree as a new stream without
+/// running `git worktree add`. Source of valid paths is
+/// `list_adoptable_worktrees`; the renderer's New Stream form's
+/// "worktree" mode dispatches here.
+#[tauri::command]
+#[specta::specta]
+pub async fn adopt_worktree(
+    state: tauri::State<'_, AppState>,
+    req: AdoptWorktreeRequest,
+) -> Result<Stream, IpcError> {
+    let stream = state
+        .streams
+        .adopt_worktree(std::path::PathBuf::from(&req.path), req.title)
+        .await?;
+    state.events.emit(OxplowEvent::StreamsChanged);
+    Ok(stream)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_stream(

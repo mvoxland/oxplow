@@ -32,7 +32,7 @@ change that flips a row.
 | Native menu (macOS/Windows) | ✅ working | `set_native_menu` translates `MenuGroupSnapshot[]` → `tauri::menu::Menu`; `menu:command` event re-emits activations to renderer. |
 | External-URL tabs | ✅ working | `WebviewWindow` spawn via `open_external_url`; sandboxed by the `external-url` capability with **zero** oxplow commands and zero plugin permissions. |
 | `getChangeScopes` staged/unstaged | ✅ working | `oxplow-git::collect_working_tree_changes` populates both arrays from `git status --porcelain`. |
-| `createStream` / new-stream form | ✅ working | Maps "existing" / "new" source modes to `create_worktree`. Worktree-adoption mode (mode "worktree") still throws — no Rust counterpart yet. |
+| `createStream` / new-stream form | ✅ working | Maps "existing" / "new" / "worktree" source modes to `create_worktree` and `adopt_worktree` Tauri commands. |
 | Per-stream git scoping | ✅ working | All 22 git/log commands accept `Option<String> stream_id` and resolve the active worktree via `SqliteStreamStore::list`. |
 | Editor focus tracking | 🟡 no-op | The renderer pushes editor focus to `desktopBridge().updateEditorFocus`; the bridge currently swallows it because the daemon doesn't consume editor focus yet. Harmless. |
 | `legacy-bridge.ts` / `legacy-*` filenames | ✅ gone | All renamed (`api-types.ts`, `editor-session.ts`); `window.oxplowApi` global eliminated. |
@@ -49,8 +49,8 @@ change that flips a row.
 | External-URL capability targets webview labels | ✅ working | `external-url.json` uses `webviews: ["ext-url-*"]` (more precise than the parent-window label pattern). |
 | `shell:default` replaced with allowlist | ✅ working | tmux + git + typescript-language-server in `main-window.json`. |
 | CSP set in `tauri.conf.json` | ✅ working | `unsafe-inline` retained for styles only (Monaco needs it). |
-| Auto-update signing key | ❌ deferred | Operational; needs cert generation + secret wiring. Blocks shipping signed updates. |
-| macOS / Windows code signing | ❌ deferred | Same — needs Apple Developer cert + Windows EV cert + CI secret integration. |
+| Auto-update signing key | ❌ deferred | Operational; needs cert generation + secret wiring. Blocks shipping signed updates. Punch-list in `ideas/signing-and-auto-update.md`. |
+| macOS / Windows code signing | ❌ deferred | Same — needs Apple Developer cert + Windows EV cert + CI secret integration. Punch-list in `ideas/signing-and-auto-update.md`. |
 | `oxplow-config` preserves user comments on write | 🟡 partial | Unknown top-level keys are preserved through writes; YAML comments are not (no comment-aware Rust YAML crate). Documented in the `write_project_config` docstring. |
 
 ## Test counts (per `cargo test`)
@@ -84,10 +84,11 @@ Electron-era Playwright suite at `tests-e2e.electron-archive/`
 **does not** work against the Tauri build (see that directory's
 README). No Tauri e2e harness exists yet.
 
-## Still open (deferred, not closing in this session)
+## Still open (deferred)
 
 - **Auto-update signing key + macOS/Windows code signing.** Blocks
-  shipping signed installers. Operational, not code.
+  shipping signed installers. Operational, not code. Detailed
+  punch-list in `ideas/signing-and-auto-update.md`.
 - **Tauri e2e harness.** Three plausible paths (tauri-driver +
   WebdriverIO, CDP-into-webview via Playwright, hand-rolled HTTP
   probes). None built; see `tests-e2e.electron-archive/README.md`.
@@ -95,10 +96,6 @@ README). No Tauri e2e harness exists yet.
   ~1,000–3,000 LOC with 2 tests each. The CI floor (65% workspace
   lines) doesn't trigger on per-crate gaps; raising the floor as
   these get backfilled is the lever.
-- **Worktree-adoption mode for `createStream`.** The "worktree"
-  source path in `apps/desktop/src/api.ts::createStream` still
-  throws — no Rust counterpart for adopting an existing on-disk
-  worktree into oxplow's tracking.
 
 ## How to verify
 
