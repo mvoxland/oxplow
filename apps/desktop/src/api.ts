@@ -1328,15 +1328,12 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<F
 }
 
 export async function getSnapshotSummary(
-  _snapshotId: string,
+  snapshotId: string,
   _previousSnapshotId?: string | null,
 ): Promise<SnapshotSummary | null> {
-  // Bindings command takes (stream_id, limit). The legacy
-  // (snapshotId, previousSnapshotId) shape isn't representable
-  // with the current Rust surface; until that gains a
-  // single-snapshot lookup this returns null so the panel falls
-  // back to its empty state.
-  return null;
+  const id = Number(snapshotId);
+  if (!Number.isFinite(id)) return null;
+  return unwrap(await commands.getSnapshotSummary(id)) as unknown as SnapshotSummary | null;
 }
 
 export async function getSnapshotPairDiff(
