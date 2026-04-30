@@ -271,6 +271,15 @@ export function App() {
         setStream(current);
         setThreadStates((prev) => ({ ...prev, [current.id]: initialThreadState }));
         setWorkspaceContext(context);
+        // Prefetch thread state for the remaining streams so the
+        // navigator can render every thread under every stream
+        // immediately, not only after the user switches to that stream.
+        const otherStreams = allStreams.filter((s) => s.id !== current.id);
+        for (const s of otherStreams) {
+          void getThreadState(s.id)
+            .then((state) => setThreadStates((prev) => ({ ...prev, [s.id]: state })))
+            .catch((e) => logUi("warn", "failed to prefetch thread state", { streamId: s.id, error: String(e) }));
+        }
         setError(null);
         setDaemonUnavailable(false);
         logUi("info", "loaded initial app state", {
@@ -608,14 +617,23 @@ export function App() {
     });
   }
 
-  async function handleSelectThread(threadId: string) {
-    if (!stream) return;
+  async function handleSelectThread(streamId: string, threadId: string) {
     try {
-      const next = await selectThread(stream.id, threadId);
-      setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
+      // Cross-stream selection: switch the active stream first so the
+      // rest of the app (center tabs, file session, work panel) reframes
+      // around the new stream before we apply the thread selection.
+      // Doing this sequentially also avoids a race where handleSwitch's
+      // own setThreadStates write (seeded from the prefetched state with
+      // the OLD selectedThreadId) clobbers the selection we're about to
+      // apply.
+      if (stream && streamId !== stream.id) {
+        await handleSwitch(streamId);
+      }
+      const next = await selectThread(streamId, threadId);
+      setThreadStates((prev) => ({ ...prev, [streamId]: next }));
       const thread = next.threads.find((candidate) => candidate.id === threadId);
       if (thread) {
-        const work = await getThreadWorkState(stream.id, thread.id);
+        const work = await getThreadWorkState(streamId, thread.id);
         setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
       }
       setError(null);
@@ -1872,7 +1890,16 @@ export function App() {
                 onOpenWorkItem={handleRequestEditWorkItem}
               />
               <div style={{ flex: 1, minHeight: 0 }}>
+                {/* Key on thread.id so switching to a different thread
+                 *  remounts the terminal — pane_target alone collides
+                 *  ("working" for every thread), so without the key
+                 *  React reuses the same xterm + PTY session and the
+                 *  user keeps seeing the old thread's transcript even
+                 *  though the backend would happily attach a different
+                 *  per-thread session (session_key includes thread_id;
+                 *  see crates/oxplow-tauri-ipc/src/commands/terminal.rs). */}
                 <TerminalPane
+                  key={selectedThread.id}
                   paneTarget={selectedThread.pane_target}
                   visible={effectiveCenterActive === "agent"}
                   transportMode={agentTransportMode}

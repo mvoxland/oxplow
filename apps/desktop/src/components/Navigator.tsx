@@ -12,7 +12,7 @@ interface NavigatorProps {
   streamStatuses: Record<string, AgentStatusDotState>;
   agentStatuses: Record<string, AgentStatusDotState>;
   onSwitchStream(id: string): void | Promise<void>;
-  onSelectThread(id: string): void | Promise<void>;
+  onSelectThread(streamId: string, threadId: string): void | Promise<void>;
   onCreateThread(streamId: string, title: string): Promise<void>;
   onOpenNewStreamPage?(): void;
   onRenameStream?(streamId: string, title: string): void | Promise<void>;
@@ -31,10 +31,11 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  *
  * Layout: a thin always-visible vertical strip on the left holding a
  * letter glyph per stream and per thread. Clicking a glyph navigates
- * directly. Clicking the toggle (or the empty space below the last
- * glyph) slides an overlay panel out to the right that re-renders the
- * same rows with full titles — y-positions are identical between the
- * strip and the overlay so items don't move when switching modes.
+ * directly. Hovering the strip slides an overlay panel out to the
+ * right that re-renders the same rows with full titles — y-positions
+ * are identical between the strip and the overlay so items don't move
+ * when switching modes. The overlay closes when the pointer leaves
+ * the wrapper (with a short grace delay) or on Escape.
  *
  * Visual hierarchy:
  *   - Stream rows: two-letter glyph, weight 700, with a subtle
@@ -73,6 +74,29 @@ export function Navigator({
   const [pendingNewThreadFor, setPendingNewThreadFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+
+  // Hover-to-open behavior: opening on mouse-enter to the strip,
+  // closing when the pointer leaves the whole nav (strip + overlay).
+  // A short delay on close keeps the overlay open across small gaps
+  // (e.g., when crossing into the kebab menu portal) and gives users
+  // a moment to slide back if they overshoot.
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      // Don't snap shut while the user is mid-rename or mid-new-thread —
+      // they're committed to an action inside the overlay.
+      setOverlayOpen(false);
+      closeTimerRef.current = null;
+    }, 180);
+  };
+  useEffect(() => () => cancelClose(), []);
 
   const orderedStreams = useMemo(() => {
     return streams.slice().sort((a, b) => {
@@ -82,38 +106,25 @@ export function Navigator({
     });
   }, [streams]);
 
-  // Close overlay on Escape, or click outside.
+  // Close overlay on Escape. Click-outside is no longer needed —
+  // mouseleave on the wrapper handles dismissal.
   useEffect(() => {
     if (!overlayOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOverlayOpen(false);
     };
-    const onClick = (e: MouseEvent) => {
-      const root = overlayRef.current;
-      if (!root) return;
-      if (e.target instanceof Node && !root.contains(e.target)) {
-        setOverlayOpen(false);
-      }
-    };
     document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onClick);
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onClick);
     };
   }, [overlayOpen]);
 
-  const handleSwitchStream = (id: string) => {
-    if (id !== currentStreamId) void onSwitchStream(id);
-    // Streams are containers, not destinations — clicking a stream
-    // toggles the overlay: pops it open from the closed strip so the
-    // user can pick a thread, and closes it again when clicked from
-    // the open overlay. Selecting a thread auto-closes regardless.
-    setOverlayOpen((v) => !v);
-  };
   const handleSelectThread = (streamId: string, threadId: string) => {
-    if (streamId !== currentStreamId) void onSwitchStream(streamId);
-    void onSelectThread(threadId);
+    // App.handleSelectThread switches the stream first when streamId
+    // differs from the current one, so we don't dispatch onSwitchStream
+    // separately here — doing both in parallel races their thread-state
+    // writes and can leave the old thread selected.
+    void onSelectThread(streamId, threadId);
     setOverlayOpen(false);
   };
 
@@ -144,6 +155,11 @@ export function Navigator({
   return (
     <div
       ref={overlayRef}
+      onMouseEnter={() => {
+        cancelClose();
+        setOverlayOpen(true);
+      }}
+      onMouseLeave={scheduleClose}
       style={{
         position: "relative",
         display: "flex",
@@ -171,14 +187,7 @@ export function Navigator({
         }}
       >
         <div
-          onClick={() => {
-            // Any click that bubbles up to the strip wrapper opens
-            // the overlay. StripRow's onClick stops propagation, so
-            // direct clicks on items navigate without opening — only
-            // gap-rows and padding around items reach this handler.
-            setOverlayOpen(true);
-          }}
-          style={{ flex: 1, overflowY: "auto", paddingTop: STRIP_PADDING_Y, cursor: "pointer" }}
+          style={{ flex: 1, overflowY: "auto", paddingTop: STRIP_PADDING_Y }}
         >
           {rows.map((row, idx) => {
             if (row.kind === "gap") {
@@ -197,17 +206,14 @@ export function Navigator({
               );
             }
             if (row.kind === "stream") {
-              const isCurrent = row.stream.id === currentStreamId;
               return (
                 <StripRow
                   key={`s-${row.stream.id}`}
                   letter={firstLetter(row.stream.title)}
                   isStream
                   isWriter={false}
-                  selected={isCurrent}
+                  selected={false}
                   status={undefined}
-                  title={row.stream.title}
-                  onClick={() => handleSwitchStream(row.stream.id)}
                 />
               );
             }
@@ -222,22 +228,10 @@ export function Navigator({
                 isWriter={row.isWriter}
                 selected={isSelected}
                 status={agentStatuses[row.thread.id]}
-                title={`${row.stream.title} · ${row.thread.title}${row.isWriter ? " (writer)" : ""}`}
                 onClick={() => handleSelectThread(row.stream.id, row.thread.id)}
               />
             );
           })}
-        </div>
-        <div style={{ borderTop: "1px solid var(--border-subtle)", padding: 4, display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
-          <button
-            type="button"
-            data-testid="navigator-toggle-overlay"
-            onClick={() => setOverlayOpen((v) => !v)}
-            title={overlayOpen ? "Close navigator" : "Open navigator"}
-            style={stripIconButton}
-          >
-            {overlayOpen ? "«" : "»"}
-          </button>
         </div>
       </aside>
 
@@ -268,7 +262,6 @@ export function Navigator({
                 return <div key={`o-gap-${row.afterStreamId}-${idx}`} style={{ height: GAP_HEIGHT }} />;
               }
               if (row.kind === "stream") {
-                const isCurrent = row.stream.id === currentStreamId;
                 const streamMenu: MenuItem[] = [
                   {
                     id: "stream.add-thread",
@@ -296,9 +289,8 @@ export function Navigator({
                     label={row.stream.title}
                     isStream
                     isWriter={false}
-                    selected={isCurrent}
+                    selected={false}
                     status={undefined}
-                    onClick={() => handleSwitchStream(row.stream.id)}
                     renaming={renaming?.kind === "stream" && renaming.id === row.stream.id}
                     onCommitRename={async (next) => {
                       setRenaming(null);
@@ -386,41 +378,21 @@ export function Navigator({
               onClick={() => onOpenNewStreamPage?.()}
             />
           </div>
-          {/* Footer mirrors the strip's footer position so the close
-              button stays where the open button was. */}
-          <div
-            style={{
-              borderTop: "1px solid var(--border-subtle)",
-              padding: 4,
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <div style={{ width: STRIP_WIDTH - 8, display: "flex", justifyContent: "center" }}>
-              <button
-                type="button"
-                onClick={() => setOverlayOpen(false)}
-                title="Close navigator"
-                style={stripIconButton}
-              >
-                «
-              </button>
-            </div>
-          </div>
         </div>
       ) : null}
     </div>
   );
 }
 
-/** Single row inside the strip — letter + status, fixed height. */
+/** Single row inside the strip — letter + status, fixed height.
+ *  No tooltip: hovering the strip pops the overlay open, which shows
+ *  the full title in-line, so a hover label here would be redundant. */
 function StripRow({
   letter,
   isStream,
   isWriter,
   selected,
   status,
-  title,
   onClick,
 }: {
   letter: string;
@@ -428,89 +400,52 @@ function StripRow({
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
-  title: string;
-  onClick(): void;
+  onClick?(): void;
 }) {
-  const rowRef = useRef<HTMLDivElement | null>(null);
-  const [tipPos, setTipPos] = useState<{ left: number; top: number } | null>(null);
-
-  function showTip() {
-    const rect = rowRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setTipPos({ left: rect.right + 6, top: rect.top + rect.height / 2 });
-  }
-  function hideTip() {
-    setTipPos(null);
-  }
-
+  const interactive = !!onClick;
   return (
-    <>
-      <div
-        ref={rowRef}
-        role="button"
-        tabIndex={0}
-        onClick={(e) => {
-          // Stop bubbling so the strip wrapper's onClick (which opens
-          // the overlay) doesn't also fire when the user clicked a row
-          // directly.
-          e.stopPropagation();
-          hideTip();
-          onClick();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            e.stopPropagation();
-            onClick();
-          }
-        }}
-        onMouseEnter={showTip}
-        onMouseLeave={hideTip}
-        onFocus={showTip}
-        onBlur={hideTip}
-        style={{
-          height: ROW_HEIGHT,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          background: selected ? "var(--accent-soft-bg)" : "transparent",
-          borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
-          borderBottom: isStream ? "1px solid var(--border-subtle)" : "1px solid transparent",
-          position: "relative",
-          transition: "background 120ms ease",
-        }}
-      >
-        <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} />
-      </div>
-      {/* Hover label — fixed-positioned so it can float outside the
-          strip's `overflow: hidden` clip. Anchored to the row's
-          live bounding rect (recomputed on each enter). */}
-      {tipPos ? (
-        <span
-          role="tooltip"
-          style={{
-            position: "fixed",
-            left: tipPos.left,
-            top: tipPos.top,
-            transform: "translateY(-50%)",
-            background: "var(--surface-elevated)",
-            color: "var(--text-primary)",
-            border: "1px solid var(--border-strong)",
-            borderRadius: 4,
-            padding: "4px 8px",
-            fontSize: 12,
-            fontWeight: isStream ? 600 : 400,
-            whiteSpace: "nowrap",
-            boxShadow: "2px 2px 8px rgba(0, 0, 0, 0.4)",
-            pointerEvents: "none",
-            zIndex: 25,
-          }}
-        >
-          {title}
-        </span>
-      ) : null}
-    </>
+    <div
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={
+        interactive
+          ? (e) => {
+              e.stopPropagation();
+              onClick!();
+            }
+          : undefined
+      }
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                onClick!();
+              }
+            }
+          : undefined
+      }
+      style={{
+        height: ROW_HEIGHT,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: interactive ? "pointer" : "default",
+        background: selected
+          ? "var(--accent-soft-bg)"
+          : isStream
+            ? "var(--surface-app)"
+            : "transparent",
+        borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
+        borderTop: isStream ? "2px solid var(--border-strong)" : "1px solid transparent",
+        borderBottom: "1px solid transparent",
+        position: "relative",
+        transition: "background 120ms ease",
+      }}
+    >
+      <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} />
+    </div>
   );
 }
 
@@ -536,41 +471,53 @@ function OverlayRow({
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
-  onClick(): void;
+  onClick?(): void;
   renaming?: boolean;
   onCommitRename?(next: string): void | Promise<void>;
   onCancelRename?(): void;
   menu?: MenuItem[];
   menuTestId?: string;
 }) {
+  const interactive = !!onClick && !renaming;
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={(e) => {
-        if (renaming) return;
-        // Suppress row navigation when the click originated inside the
-        // kebab — the menu manages its own click flow.
-        if ((e.target as HTMLElement).closest("[data-navigator-row-kebab]")) return;
-        onClick();
-      }}
-      onKeyDown={(e) => {
-        if (renaming) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={
+        interactive
+          ? (e) => {
+              // Suppress row navigation when the click originated inside the
+              // kebab — the menu manages its own click flow.
+              if ((e.target as HTMLElement).closest("[data-navigator-row-kebab]")) return;
+              onClick!();
+            }
+          : undefined
+      }
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick!();
+              }
+            }
+          : undefined
+      }
       title={label}
       style={{
         height: ROW_HEIGHT,
         display: "flex",
         alignItems: "center",
         gap: 8,
-        cursor: renaming ? "default" : "pointer",
-        background: selected ? "var(--accent-soft-bg)" : "transparent",
+        cursor: interactive ? "pointer" : "default",
+        background: selected
+          ? "var(--accent-soft-bg)"
+          : isStream
+            ? "var(--surface-app)"
+            : "transparent",
         borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
-        borderBottom: isStream ? "1px solid var(--border-subtle)" : "1px solid transparent",
+        borderTop: isStream ? "2px solid var(--border-strong)" : "1px solid transparent",
+        borderBottom: "1px solid transparent",
         paddingRight: 6,
         transition: "background 120ms ease",
       }}
@@ -581,7 +528,7 @@ function OverlayRow({
       {renaming ? (
         <RenameInput
           initial={label}
-          paddingLeft={isStream ? 0 : 8}
+          paddingLeft={0}
           onCommit={(next) => onCommitRename?.(next)}
           onCancel={() => onCancelRename?.()}
         />
@@ -590,9 +537,13 @@ function OverlayRow({
           style={{
             flex: 1,
             fontSize: 13,
-            fontWeight: isStream ? 600 : 400,
-            color: selected ? "var(--text-primary)" : "var(--text-secondary)",
-            paddingLeft: isStream ? 0 : 8,
+            fontWeight: isStream ? 700 : 400,
+            color: isStream
+              ? "var(--text-primary)"
+              : selected
+                ? "var(--text-primary)"
+                : "var(--text-secondary)",
+            paddingLeft: 0,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -846,24 +797,9 @@ const ICON_BOX = 30;
 const STRIP_WIDTH = 40;
 const STRIP_PADDING_Y = 6;
 const ROW_HEIGHT = 36;
-const GAP_HEIGHT = 10;
+const GAP_HEIGHT = 14;
 // Height reserved (strip) and matched (overlay) for the per-stream
 // "+ New thread" row so subsequent items stay y-aligned across the
 // two views. Must match the rendered AddThreadRow height.
 const ADD_ROW_HEIGHT = 40;
 const OVERLAY_WIDTH = 240;
-
-const stripIconButton: CSSProperties = {
-  width: 24,
-  height: 24,
-  borderRadius: 6,
-  border: "1px solid var(--border-subtle)",
-  background: "transparent",
-  color: "var(--text-secondary)",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 12,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
