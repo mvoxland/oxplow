@@ -129,3 +129,79 @@ impl From<ThreadError> for IpcError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_sets_internal_code() {
+        let e = IpcError::internal("boom");
+        assert_eq!(e.code, "INTERNAL");
+        assert_eq!(e.message, "boom");
+        assert!(e.cause.is_none());
+    }
+
+    #[test]
+    fn invalid_sets_invalid_code() {
+        let e = IpcError::invalid("bad input");
+        assert_eq!(e.code, "INVALID");
+        assert_eq!(e.message, "bad input");
+    }
+
+    #[test]
+    fn not_found_factory() {
+        let e = IpcError::not_found();
+        assert_eq!(e.code, "NOT_FOUND");
+        assert_eq!(e.message, "not found");
+    }
+
+    #[test]
+    fn with_cause_attaches_string() {
+        let inner = std::io::Error::new(std::io::ErrorKind::Other, "io fault");
+        let e = IpcError::internal("wrapped").with_cause(inner);
+        assert_eq!(e.cause.as_deref(), Some("io fault"));
+    }
+
+    #[test]
+    fn from_domain_invalid_uses_invalid_code() {
+        let e: IpcError = DomainError::Invalid("bad".into()).into();
+        assert_eq!(e.code, "INVALID");
+        assert_eq!(e.message, "bad");
+    }
+
+    #[test]
+    fn from_domain_not_found_maps_to_not_found() {
+        let e: IpcError = DomainError::NotFound.into();
+        assert_eq!(e.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn from_domain_invariant_uses_invariant_code() {
+        let e: IpcError = DomainError::Invariant("rule".into()).into();
+        assert_eq!(e.code, "INVARIANT");
+    }
+
+    #[test]
+    fn from_session_not_a_repo_maps() {
+        let e: IpcError = SessionError::NotARepo("/no/such".into()).into();
+        assert_eq!(e.code, "NOT_A_REPO");
+        assert!(e.message.contains("/no/such"));
+    }
+
+    #[test]
+    fn from_session_primary_missing_maps() {
+        let e: IpcError = SessionError::PrimaryMissing.into();
+        assert_eq!(e.code, "PRIMARY_MISSING");
+    }
+
+    #[test]
+    fn ipc_error_serde_round_trips() {
+        let e = IpcError::internal("hi").with_cause("inner");
+        let json = serde_json::to_string(&e).unwrap();
+        let back: IpcError = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.code, "INTERNAL");
+        assert_eq!(back.message, "hi");
+        assert_eq!(back.cause.as_deref(), Some("inner"));
+    }
+}
