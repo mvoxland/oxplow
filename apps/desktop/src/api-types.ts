@@ -448,20 +448,8 @@ export interface OxplowEvent {
 }
 
 
-// ---- DesktopApi (the earlier preload-injected window.oxplowApi
-// shape; runtime is gone, this lives on for typecheck compatibility
-// while UI methods are being migrated to the bridge). ----
-
-export interface DesktopApi {
-  // The original shape had 130+ methods. Rather than enumerate them
-  // all, we accept arbitrary access so the typecheck doesn't fail —
-  // each call site now goes through `bridgeShim()`, which throws at
-  // runtime for unported methods. New UI code should not reach for
-  // `DesktopApi` at all.
-  //
-  // `any` (not `unknown`) so callers that destructure the return
-  // shape don't all need narrowing. This is a temporary scaffold;
-  // each call site is expected to migrate to the bridge.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [method: string]: (...args: any[]) => any;
-}
+// DesktopApi (the legacy permissive index-signature interface) was
+// deleted: every renderer caller now reaches for either a typed
+// top-level wrapper in api.ts or the small DesktopBridge facade
+// returned by `desktopBridge()`. The window.oxplowApi global is
+// long gone.
