@@ -591,6 +591,9 @@ export type {
   GitOpResult,
   GitWorktreeEntry,
   RemoteBranchEntry,
+  GitLogCommit,
+  CommitDetail,
+  BlameLine,
 } from "./tauri-bridge/index.js";
 // The remaining legacy types still come from api-types because
 // their consumers read fields that don't exist on the bindings
@@ -603,14 +606,11 @@ export type {
 // renderer's TypeScript believes it's the legacy shape.
 export type {
   GitLogRef,
-  GitLogCommit,
   GitLogResult,
-  CommitDetail,
   ChangeScopes,
   TextSearchHit,
   RefOption,
   GroupedGitRefs,
-  BlameLine,
   BranchChangeEntry,
   BranchChanges,
 } from "./api-types.js";
@@ -1081,7 +1081,7 @@ export async function getGitLog(
 export async function getCommitDetail(
   streamId: string,
   sha: string,
-): Promise<import("./api-types.js").CommitDetail | null> {
+): Promise<import("./tauri-bridge/index.js").CommitDetail | null> {
   return desktopApi().getCommitDetail(streamId, sha);
 }
 
@@ -1156,7 +1156,7 @@ export async function getCommitsAheadOf(
   base: string,
   head: string,
   limit?: number,
-): Promise<import("./api-types.js").GitLogCommit[]> {
+): Promise<import("./tauri-bridge/index.js").GitLogCommit[]> {
   return desktopApi().getCommitsAheadOf(streamId, base, head, limit);
 }
 
@@ -1189,14 +1189,14 @@ export async function listFileCommits(
   streamId: string,
   path: string,
   limit?: number,
-): Promise<import("./api-types.js").GitLogCommit[]> {
+): Promise<import("./tauri-bridge/index.js").GitLogCommit[]> {
   return desktopApi().listFileCommits(streamId, path, limit);
 }
 
 export async function gitBlame(
   streamId: string,
   path: string,
-): Promise<import("./api-types.js").BlameLine[]> {
+): Promise<import("./tauri-bridge/index.js").BlameLine[]> {
   return desktopApi().gitBlame(streamId, path);
 }
 
