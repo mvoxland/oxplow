@@ -19,10 +19,10 @@ use specta::Type;
 use thiserror::Error;
 
 use oxplow_db::SqliteWorkItemStore;
-use oxplow_domain::stores::WorkItemStore;
+use oxplow_domain::stores::{WorkItemLinkStore, WorkItemStore};
 use oxplow_domain::{
     DomainError, ThreadId, Timestamp, WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemId,
-    WorkItemKind, WorkItemPriority, WorkItemStatus,
+    WorkItemKind, WorkItemLinkType, WorkItemPriority, WorkItemStatus,
 };
 
 #[derive(Debug, Error)]
@@ -31,6 +31,44 @@ pub enum WorkItemServiceError {
     NotFound(WorkItemId),
     #[error("storage: {0}")]
     Storage(#[from] DomainError),
+}
+
+async fn item_is_blocked(
+    id: &WorkItemId,
+    link_store: &dyn WorkItemLinkStore,
+    by_id: &std::collections::HashMap<WorkItemId, WorkItem>,
+) -> Result<bool, DomainError> {
+    let incoming = link_store.list_incoming(id).await?;
+    for link in incoming {
+        if !matches!(link.link_type, WorkItemLinkType::Blocks) {
+            continue;
+        }
+        if let Some(blocker) = by_id.get(&link.from_item_id) {
+            if !matches!(
+                blocker.status,
+                WorkItemStatus::Done | WorkItemStatus::Canceled | WorkItemStatus::Archived
+            ) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Discriminated result for `read_work_options`. The shape mirrors
+/// main's TS contract so the agent-side skill text stays accurate
+/// without a translation layer.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum ReadWorkOptionsResult {
+    Empty,
+    Epic {
+        epic: WorkItem,
+        children: Vec<WorkItem>,
+    },
+    Standalone {
+        items: Vec<WorkItem>,
+    },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
@@ -200,6 +238,72 @@ impl WorkItemService {
 
     pub async fn list_backlog(&self) -> Result<Vec<WorkItem>, WorkItemServiceError> {
         Ok(self.store.list_backlog().await?)
+    }
+
+    /// Return the next dispatch unit for the orchestrator. Mirrors
+    /// `readWorkOptions` from `src/persistence/work-item-store.ts`:
+    ///
+    /// 1. Filter to `ready`, sort by `sort_index` ascending.
+    /// 2. Honor `blocks` links — an item is hidden while any blocker
+    ///    isn't yet `done`/`canceled`/`archived`.
+    /// 3. If the head is an epic, recursively gather its `ready`
+    ///    descendants (also blocks-aware).
+    /// 4. Otherwise return all ready non-epic items so the caller can
+    ///    pick one.
+    pub async fn read_work_options(
+        &self,
+        thread: &ThreadId,
+        link_store: &dyn WorkItemLinkStore,
+    ) -> Result<ReadWorkOptionsResult, WorkItemServiceError> {
+        let all = self.store.list_for_thread(thread).await?;
+        let by_id: std::collections::HashMap<WorkItemId, WorkItem> =
+            all.iter().map(|i| (i.id.clone(), i.clone())).collect();
+
+        let mut ready: Vec<WorkItem> = all
+            .iter()
+            .filter(|i| i.status == WorkItemStatus::Ready)
+            .cloned()
+            .collect();
+        ready.sort_by_key(|i| (i.sort_index, i.created_at.clone()));
+
+        let mut unblocked_ready: Vec<WorkItem> = Vec::new();
+        for item in &ready {
+            if !item_is_blocked(&item.id, link_store, &by_id).await? {
+                unblocked_ready.push(item.clone());
+            }
+        }
+
+        let Some(head) = unblocked_ready.first().cloned() else {
+            return Ok(ReadWorkOptionsResult::Empty);
+        };
+
+        if head.kind == WorkItemKind::Epic {
+            let mut children: Vec<WorkItem> = Vec::new();
+            let mut frontier = vec![head.id.clone()];
+            while let Some(parent_id) = frontier.pop() {
+                for it in &all {
+                    if it.parent_id.as_ref() == Some(&parent_id) {
+                        if it.status == WorkItemStatus::Ready
+                            && !item_is_blocked(&it.id, link_store, &by_id).await?
+                        {
+                            children.push(it.clone());
+                        }
+                        frontier.push(it.id.clone());
+                    }
+                }
+            }
+            children.sort_by_key(|i| (i.sort_index, i.created_at.clone()));
+            return Ok(ReadWorkOptionsResult::Epic {
+                epic: head,
+                children,
+            });
+        }
+
+        let standalone: Vec<WorkItem> = unblocked_ready
+            .into_iter()
+            .filter(|i| i.kind != WorkItemKind::Epic)
+            .collect();
+        Ok(ReadWorkOptionsResult::Standalone { items: standalone })
     }
 
     pub async fn soft_delete(&self, id: &WorkItemId) -> Result<(), WorkItemServiceError> {
