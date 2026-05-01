@@ -60,6 +60,19 @@ pub struct ReorderWorkItemsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DelegateQueryParams {
+    pub thread_id: String,
+    pub question: String,
+    pub focus: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RecordQueryFindingParams {
+    pub note_id: String,
+    pub body: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpsertWorkItemParams {
     /// JSON-encoded WorkItem. Use this rather than nesting the struct
     /// directly so we don't have to plumb JsonSchema through every
@@ -205,6 +218,13 @@ pub struct ForkThreadParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FindNotesForFileParams {
     pub path: String,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FindNotesForNoteParams {
+    pub slug: String,
     #[serde(default = "default_limit")]
     pub limit: u32,
 }
@@ -463,6 +483,74 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&notes)
+    }
+
+    #[tool(
+        description = "Prepare an exploration query for an Explore subagent. Use when you need to \
+                       understand a codebase area before dispatching real work and would otherwise \
+                       read 5+ files inline — offloading the reads keeps your own cached context \
+                       small. Returns { prompt, provisionalNoteId }. The orchestrator then calls \
+                       Agent(subagent_type='Explore', prompt=<prompt>); the prompt instructs the \
+                       subagent to call mcp__oxplow__record_query_finding({ noteId: \
+                       <provisionalNoteId>, body }) with its findings. Read the finding later via \
+                       mcp__oxplow__list_thread_notes."
+    )]
+    async fn delegate_query(
+        &self,
+        params: Parameters<DelegateQueryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let thread_id = ThreadId::from(params.0.thread_id.clone());
+        let question = params.0.question.trim().to_string();
+        if question.is_empty() {
+            return Err(McpError::invalid_params(
+                "delegate_query: `question` is required",
+                None,
+            ));
+        }
+        let focus = params.0.focus.unwrap_or_default().trim().to_string();
+        // Allocate the finding note up front with an empty body. The
+        // subagent fills it in via record_query_finding when done.
+        let provisional = self
+            .services
+            .work_note_store
+            .add_for_thread(&thread_id, "", "explore-subagent")
+            .await
+            .map_err(internal)?;
+        let prompt = compose_delegate_query_prompt(
+            &params.0.thread_id,
+            &question,
+            &focus,
+            provisional.id.as_str(),
+        );
+        json_result(&serde_json::json!({
+            "ok": true,
+            "prompt": prompt,
+            "provisionalNoteId": provisional.id.as_str(),
+        }))
+    }
+
+    #[tool(
+        description = "Write the Explore subagent's finding into a pre-allocated thread-scoped note \
+                       (id returned by mcp__oxplow__delegate_query). Call this once at the end of \
+                       the exploration — the orchestrator reads it later via list_thread_notes."
+    )]
+    async fn record_query_finding(
+        &self,
+        params: Parameters<RecordQueryFindingParams>,
+    ) -> Result<CallToolResult, McpError> {
+        if params.0.note_id.is_empty() {
+            return Err(McpError::invalid_params(
+                "record_query_finding: `noteId` is required",
+                None,
+            ));
+        }
+        let id = NoteId::from(params.0.note_id.clone());
+        self.services
+            .work_note_store
+            .update_body(&id, &params.0.body)
+            .await
+            .map_err(internal)?;
+        json_result(&serde_json::json!({ "ok": true, "noteId": params.0.note_id }))
     }
 
     #[tool(description = "Delete a note by id.")]
@@ -928,21 +1016,45 @@ impl OxplowMcp {
         json_result(&child)
     }
 
-    #[tool(description = "Wiki notes whose body contains the file path. Substring match against the body excerpt + path index.")]
+    #[tool(
+        description = "Wiki notes that reference the given file path in their parsed file_refs \
+                       (from [[wikilinks]] or inline path mentions). Use this for backlinks: \
+                       \"which notes discuss src/foo.ts?\""
+    )]
     async fn find_notes_for_file(
         &self,
         params: Parameters<FindNotesForFileParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        // Body search hits whose snippet mentions the path. The new
-        // wiki schema doesn't have a dedicated path index yet (per
-        // MIGRATION_REVIEW2 §3); FTS body search is a useful proxy.
-        let hits = self
-            .services
-            .wiki_note_store
-            .search_bodies(&p.path, p.limit as usize)
-            .await
-            .map_err(internal)?;
+        let mut hits = oxplow_app::wiki_notes::backlinks_for_file(
+            &self.services.wiki_note_store,
+            &p.path,
+        )
+        .await
+        .map_err(internal)?;
+        if (p.limit as usize) > 0 && hits.len() > p.limit as usize {
+            hits.truncate(p.limit as usize);
+        }
+        json_result(&hits)
+    }
+
+    #[tool(
+        description = "Wiki notes that reference the given note slug in their related_notes \
+                       (from [[other-note-slug]] wikilinks). Use for note-to-note backlinks."
+    )]
+    async fn find_notes_for_note(
+        &self,
+        params: Parameters<FindNotesForNoteParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut hits = oxplow_app::wiki_notes::backlinks_for_note(
+            &self.services.wiki_note_store,
+            &params.0.slug,
+        )
+        .await
+        .map_err(internal)?;
+        if (params.0.limit as usize) > 0 && hits.len() > params.0.limit as usize {
+            hits.truncate(params.0.limit as usize);
+        }
         json_result(&hits)
     }
 
@@ -1179,6 +1291,41 @@ impl ServerHandler for OxplowMcp {
 
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
     McpError::internal_error(e.to_string(), None)
+}
+
+/// Compose the prompt the orchestrator passes to
+/// `Agent(subagent_type='Explore', prompt=…)`. Pure so it's
+/// testable without an MCP server. Mirrors `composeDelegateQueryPrompt`
+/// from `src/mcp/mcp-tools.ts`.
+fn compose_delegate_query_prompt(
+    thread_id: &str,
+    question: &str,
+    focus: &str,
+    note_id: &str,
+) -> String {
+    let mut parts: Vec<String> = vec![
+        "You are an Explore subagent answering one focused exploration question for the orchestrator.".into(),
+        String::new(),
+        format!("threadId: {thread_id}"),
+        format!("noteId: {note_id}"),
+        String::new(),
+        "## Question".into(),
+        question.to_string(),
+    ];
+    if !focus.is_empty() {
+        parts.push(String::new());
+        parts.push("## Focus".into());
+        parts.push(focus.to_string());
+    }
+    parts.push(String::new());
+    parts.push("## How to report".into());
+    parts.push(
+        "When done, call `mcp__oxplow__record_query_finding({ noteId, body })` ONCE with your complete finding. \
+         The body should be concise, structured prose — file paths, key function names, and the direct answer to the question. \
+         Do not make code changes. Do not create work items. Read/Grep/Glob only."
+            .into(),
+    );
+    parts.join("\n")
 }
 
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {

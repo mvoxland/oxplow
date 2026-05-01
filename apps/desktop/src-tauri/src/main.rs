@@ -97,6 +97,23 @@ fn main() {
     // need to outlive setup() and there's no shutdown hook today.
     Box::leak(Box::new(watch_registry));
 
+    // Wiki notes watcher: keeps `wiki_note` rows in sync with
+    // `.oxplow/notes/<slug>.md` on disk (initial scan + debounced
+    // re-syncs on change). Held alive for the life of the process.
+    let wiki_store = state.wiki_note_store.clone();
+    let wiki_dir = state.layout.project_dir.clone();
+    let wiki_events = event_bus.clone();
+    if let Some(watcher) = boot_runtime.block_on(async move {
+        oxplow_app::wiki_notes_watch::WikiNotesWatcher::spawn(
+            wiki_dir,
+            wiki_store,
+            wiki_events,
+        )
+        .await
+    }) {
+        Box::leak(Box::new(watcher));
+    }
+
     // Boot the in-process control plane (axum server hosting the
     // plugin's HTTP hook receiver + the streamable-HTTP MCP transport).
     // The handle's URLs + token feed the per-spawn plugin writer in

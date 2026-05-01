@@ -73,6 +73,10 @@ pub trait WorkNoteStore: Send + Sync {
     ) -> Result<WorkNote, DomainError>;
     async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkNote>, DomainError>;
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkNote>, DomainError>;
+    /// Replace the body of an existing note. Used by
+    /// `oxplow__record_query_finding` to fill in a note that was
+    /// pre-allocated empty by `oxplow__delegate_query`.
+    async fn update_body(&self, id: &NoteId, body: &str) -> Result<(), DomainError>;
     async fn delete(&self, id: &NoteId) -> Result<(), DomainError>;
 }
 
