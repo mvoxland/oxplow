@@ -15,7 +15,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode};
+use notify::RecommendedWatcher;
+pub use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -58,6 +59,20 @@ impl FsWatcher {
         path: impl AsRef<Path>,
         debounce_window: Duration,
     ) -> Result<Self, FsWatchError> {
+        Self::watch_paths(
+            vec![(path.as_ref().to_path_buf(), RecursiveMode::Recursive)],
+            debounce_window,
+        )
+    }
+
+    /// Watch a set of paths with per-path recursion modes, debouncing
+    /// events within `debounce_window`. A single OS-level debouncer is
+    /// shared across every entry, so an event on any registered path
+    /// flows through the same broadcast channel.
+    pub fn watch_paths(
+        paths: Vec<(PathBuf, RecursiveMode)>,
+        debounce_window: Duration,
+    ) -> Result<Self, FsWatchError> {
         let (tx, _) = broadcast::channel(256);
         let tx_clone = tx.clone();
 
@@ -69,7 +84,6 @@ impl FsWatcher {
                 for evt in events {
                     let kind = classify(&evt.event);
                     for path in evt.event.paths.iter() {
-                        // best-effort send — receivers may be lagging or absent
                         let _ = tx_clone.send(WatchEvent {
                             path: path.clone(),
                             kind: kind.clone(),
@@ -79,7 +93,9 @@ impl FsWatcher {
             },
         )?;
 
-        debouncer.watch(path.as_ref(), RecursiveMode::Recursive)?;
+        for (p, mode) in paths {
+            debouncer.watch(&p, mode)?;
+        }
 
         Ok(Self {
             _debouncer: debouncer,
@@ -155,6 +171,100 @@ mod tests {
 
         assert!(count > 0, "expected at least one event");
         assert!(count < 20, "expected debouncing, got {count} events");
+    }
+
+    #[tokio::test]
+    async fn watch_paths_registers_multiple_dirs() {
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        let watcher = FsWatcher::watch_paths(
+            vec![
+                (a.path().to_path_buf(), RecursiveMode::Recursive),
+                (b.path().to_path_buf(), RecursiveMode::Recursive),
+            ],
+            Duration::from_millis(50),
+        )
+        .unwrap();
+        let mut rx = watcher.subscribe();
+
+        let ta = a.path().join("a.txt");
+        let tb = b.path().join("b.txt");
+        std::fs::write(&ta, b"a").unwrap();
+        std::fs::write(&tb, b"b").unwrap();
+
+        let mut saw_a = false;
+        let mut saw_b = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline && !(saw_a && saw_b) {
+            match timeout(Duration::from_millis(500), rx.recv()).await {
+                Ok(Ok(evt)) => {
+                    let p = evt.path.canonicalize().unwrap_or(evt.path.clone());
+                    if p == ta.canonicalize().unwrap() {
+                        saw_a = true;
+                    }
+                    if p == tb.canonicalize().unwrap() {
+                        saw_b = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_a, "expected event for {ta:?}");
+        assert!(saw_b, "expected event for {tb:?}");
+    }
+
+    #[tokio::test]
+    async fn non_recursive_only_reports_top_level() {
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("nested");
+        std::fs::create_dir(&sub).unwrap();
+
+        let watcher = FsWatcher::watch_paths(
+            vec![(dir.path().to_path_buf(), RecursiveMode::NonRecursive)],
+            Duration::from_millis(50),
+        )
+        .unwrap();
+        let mut rx = watcher.subscribe();
+
+        // Write into a subdir — should NOT show up under non-recursive.
+        let nested = sub.join("hidden.txt");
+        std::fs::write(&nested, b"x").unwrap();
+
+        // Drain for ~600ms; if we see the nested path, fail.
+        let drain_deadline = std::time::Instant::now() + Duration::from_millis(600);
+        let mut nested_seen = false;
+        while std::time::Instant::now() < drain_deadline {
+            match timeout(Duration::from_millis(150), rx.recv()).await {
+                Ok(Ok(evt)) => {
+                    let canon = evt.path.canonicalize().unwrap_or(evt.path.clone());
+                    if canon == nested.canonicalize().unwrap() {
+                        nested_seen = true;
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        assert!(!nested_seen, "non-recursive watch should not surface nested writes");
+
+        // Top-level write should be reported.
+        let top = dir.path().join("top.txt");
+        std::fs::write(&top, b"y").unwrap();
+        let mut top_seen = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            match timeout(Duration::from_millis(500), rx.recv()).await {
+                Ok(Ok(evt)) => {
+                    let canon = evt.path.canonicalize().unwrap_or(evt.path.clone());
+                    if canon == top.canonicalize().unwrap() {
+                        top_seen = true;
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        assert!(top_seen, "expected top-level event for {top:?}");
     }
 
     #[tokio::test]

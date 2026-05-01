@@ -22,9 +22,16 @@ use std::time::Duration;
 
 use oxplow_domain::stores::StreamStore;
 use oxplow_domain::StreamId;
-use oxplow_fs_watch::{FsWatcher, WatchEvent, WatchEventKind};
+use oxplow_fs_watch::{FsWatcher, RecursiveMode, WatchEvent, WatchEventKind};
 use oxplow_git::GitRefsWatcher;
 use tracing::{debug, warn};
+
+/// Top-level worktree entries we never want to watch — they're noisy
+/// and the renderer never reacts to changes inside them. Skipping them
+/// at registration time (rather than just filtering events afterwards)
+/// is what makes boot fast: `notify_debouncer_full` walks every
+/// registered subtree to seed its cache, and these dirs dominate.
+const EXCLUDED_TOP_LEVEL: &[&str] = &[".git", ".oxplow", "target", "node_modules"];
 
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 
@@ -74,7 +81,29 @@ fn spawn_for_stream(
         debug!(?worktree, %stream_id, "skipping watcher — worktree missing");
         return None;
     }
-    let fs = match FsWatcher::watch(&worktree, Duration::from_millis(250)) {
+    let mut paths: Vec<(PathBuf, RecursiveMode)> = Vec::new();
+    // Top-level non-recursive watch so new files at the worktree root
+    // (and the appearance/disappearance of top-level dirs) still fire.
+    paths.push((worktree.clone(), RecursiveMode::NonRecursive));
+    match std::fs::read_dir(&worktree) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let Ok(file_type) = entry.file_type() else { continue };
+                if !file_type.is_dir() {
+                    continue;
+                }
+                let name = entry.file_name();
+                if EXCLUDED_TOP_LEVEL.iter().any(|ex| name == *ex) {
+                    continue;
+                }
+                paths.push((entry.path(), RecursiveMode::Recursive));
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, %stream_id, ?worktree, "could not enumerate worktree top-level");
+        }
+    }
+    let fs = match FsWatcher::watch_paths(paths, Duration::from_millis(250)) {
         Ok(w) => w,
         Err(e) => {
             warn!(error = %e, %stream_id, ?worktree, "fs watcher failed to start");
@@ -147,7 +176,13 @@ fn spawn_for_stream(
 /// UI without polling. Initial state is reported on the first emit;
 /// callers also `getWorkspaceContext` for the first paint.
 fn spawn_project_context(project_dir: PathBuf, events: EventBus) -> Option<FsWatcher> {
-    let watcher = match FsWatcher::watch(&project_dir, Duration::from_millis(500)) {
+    // Non-recursive: we only care about whether `.git` appears or
+    // disappears at the project root. A recursive watch here would
+    // re-walk the entire .git tree on boot for nothing.
+    let watcher = match FsWatcher::watch_paths(
+        vec![(project_dir.clone(), RecursiveMode::NonRecursive)],
+        Duration::from_millis(500),
+    ) {
         Ok(w) => w,
         Err(e) => {
             warn!(error = %e, ?project_dir, "project context watcher failed to start");
@@ -200,20 +235,74 @@ fn classify(k: &WatchEventKind) -> WorkspaceChangeKind {
 /// files.
 fn is_uninteresting(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    if s.contains("/.git/") || s.ends_with("/.git") {
-        return true;
-    }
-    if s.contains("/node_modules/") {
-        return true;
-    }
-    if s.contains("/target/") {
-        return true;
-    }
-    if s.contains("/.oxplow/") {
-        return true;
+    for ex in EXCLUDED_TOP_LEVEL {
+        let mid = format!("/{ex}/");
+        let trail = format!("/{ex}");
+        if s.contains(&*mid) || s.ends_with(&*trail) {
+            return true;
+        }
     }
     if s.ends_with('~') || s.ends_with(".swp") || s.ends_with(".tmp") {
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::EventBus;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tempfile::tempdir;
+    use tokio::time::timeout;
+
+    #[tokio::test]
+    async fn spawn_for_stream_skips_target_and_node_modules() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        for sub in ["target", "node_modules", "src"] {
+            std::fs::create_dir(root.join(sub)).unwrap();
+        }
+
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe();
+        let stream_id: StreamId = StreamId::from("stream-test");
+        let _watchers =
+            spawn_for_stream(stream_id.clone(), root.clone(), bus.clone()).expect("watchers");
+
+        // Give notify a moment to settle the cache walk before writing.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        std::fs::write(root.join("target").join("ignored.txt"), b"x").unwrap();
+        std::fs::write(root.join("node_modules").join("ignored.txt"), b"x").unwrap();
+        std::fs::write(root.join("src").join("seen.txt"), b"y").unwrap();
+
+        let mut seen_src = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            match timeout(Duration::from_millis(500), rx.recv()).await {
+                Ok(Ok(crate::events::OxplowEvent::WorkspaceChanged { path, .. })) => {
+                    if path.contains("target") || path.contains("node_modules") {
+                        panic!("unexpected event for excluded path: {path}");
+                    }
+                    if path.contains("seen.txt") {
+                        seen_src = true;
+                        // Drain a moment longer to ensure no excluded events sneak in.
+                    }
+                }
+                Ok(Ok(_)) => {}
+                _ => {
+                    if seen_src {
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(seen_src, "expected WorkspaceChanged event for src/seen.txt");
+
+        // Keep arc alive to avoid drop ordering surprises.
+        drop(_watchers);
+        let _ = Arc::new(());
+    }
 }

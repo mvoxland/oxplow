@@ -14,9 +14,23 @@ Each cares about a different slice of the project state.
 
 ### 1. Workspace watcher
 
-`crates/oxplow-fs-watch/src/lib.rs` — `WorkspaceWatcherRegistry`. One watcher
-per stream, recursive on the worktree (`fs.watch(rootDir, { recursive: true })`),
-**explicitly excluding `.git`** via `shouldIgnoreWorkspaceWatchPath`.
+`crates/oxplow-app/src/workspace_watch.rs` — `WorkspaceWatchRegistry`.
+One watcher per stream. Rather than registering a single recursive
+watch on the worktree root (which would force `notify_debouncer_full`
+to walk every subtree — including `target/` and `node_modules/` — at
+boot to seed its cache), registration is **scoped**:
+
+- A non-recursive watch on the worktree root, so top-level file
+  changes and the appearance/disappearance of top-level dirs still
+  fire.
+- One recursive watch per top-level directory **except** the names in
+  `EXCLUDED_TOP_LEVEL` (`.git`, `.oxplow`, `target`, `node_modules`).
+
+`is_uninteresting` still filters events from those dirs as a
+defence-in-depth step (and to drop swap/temp files), but the meaningful
+win is at registration: we never seed cache for the dirs we never
+care about. `EXCLUDED_TOP_LEVEL` is the single source of truth for
+both pieces.
 
 Drives `workspace.changed` events. Consumed by:
 
@@ -31,9 +45,12 @@ file-tree current and to feed the snapshot dirty set.
 
 ### 2. Git root watcher
 
-A tiny `fs.watch` on `projectDir` itself, set up inline in
-`runtime.initialize` (`gitRootWatcher` field). Listens only for direntry
-changes whose filename is `.git`.
+A non-recursive `FsWatcher` on `projectDir` itself, set up inline in
+`workspace_watch::spawn_project_context`. Listens only for direntry
+changes whose filename is `.git`. Non-recursive is sufficient: we only
+need to know whether `.git` appears or disappears at the project root,
+and a recursive watch here would re-walk the entire `.git` tree on
+boot for nothing.
 
 Fires when the user runs `git init` (or removes `.git`) in the project
 root. On change:
@@ -103,6 +120,16 @@ They watch overlapping but disjoint things:
 A single recursive watcher on the root would lump them together and
 either spam the UI on every internal git op or miss external changes
 that don't touch source files.
+
+### Boot is async
+
+`WorkspaceWatchRegistry::spawn` and `WikiNotesWatcher::spawn` run as
+background tasks reported through `BackgroundTaskStore` (kinds `Git`
+and `NotesResync`). The desktop boot path does not block on either —
+the renderer paints first, and the `BackgroundTaskIndicator` shows
+"Starting workspace watchers" / "Initial wiki notes scan" rows until
+each scan settles. Filesystem events start arriving once the cache
+walk completes.
 
 ## Runtime git operations
 
