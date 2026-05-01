@@ -205,6 +205,23 @@ impl WorkNoteStore for SqliteWorkNoteStore {
         .unwrap()
     }
 
+    async fn update_body(&self, id: &NoteId, body: &str) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id = id.clone();
+        let body = body.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE work_notes SET body = ?2 WHERE id = ?1",
+                    params![id.as_str(), body],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     async fn delete(&self, id: &NoteId) -> Result<(), DomainError> {
         let db = self.db.clone();
         let id = id.clone();

@@ -17,6 +17,8 @@ pub mod config_service;
 pub mod events;
 pub mod followup;
 pub mod hook_ingest;
+pub mod wiki_notes;
+pub mod wiki_notes_watch;
 pub mod lsp_clients;
 pub mod lsp_sessions;
 pub mod terminal_sessions;
@@ -53,8 +55,9 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentStatusStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
     SqliteHookEventStore, SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore,
-    SqliteThreadStore, SqliteUsageStore, SqliteWikiNoteStore, SqliteWorkItemEffortStore,
-    SqliteWorkItemEventStore, SqliteWorkItemLinkStore, SqliteWorkItemStore, SqliteWorkNoteStore,
+    SqliteThreadStore, SqliteUsageStore, SqliteWikiNoteStore, SqliteWikiNoteThreadUpdateStore,
+    SqliteWorkItemEffortStore, SqliteWorkItemEventStore, SqliteWorkItemLinkStore,
+    SqliteWorkItemStore, SqliteWorkNoteStore,
 };
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
 
@@ -122,6 +125,7 @@ pub struct Services {
     pub agent_status_store: Arc<SqliteAgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     pub effort_store: Arc<SqliteWorkItemEffortStore>,
+    pub wiki_note_thread_updates: Arc<SqliteWikiNoteThreadUpdateStore>,
     pub hook_ingest: HookIngestService,
     pub background_tasks: BackgroundTaskStore,
     pub followups: FollowupStore,
@@ -161,6 +165,8 @@ impl Services {
         let agent_status_store = Arc::new(SqliteAgentStatusStore::new(db.clone()));
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
+        let wiki_note_thread_updates =
+            Arc::new(SqliteWikiNoteThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
@@ -213,6 +219,7 @@ impl Services {
             agent_status_store,
             agent_turn_store,
             effort_store,
+            wiki_note_thread_updates,
             hook_ingest,
             background_tasks: BackgroundTaskStore::new(),
             followups: FollowupStore::new(),
@@ -257,6 +264,8 @@ impl Services {
         let agent_status_store = Arc::new(SqliteAgentStatusStore::new(db.clone()));
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
+        let wiki_note_thread_updates =
+            Arc::new(SqliteWikiNoteThreadUpdateStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
         let streams = StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
         let threads = ThreadService::new(thread_store.clone());
@@ -304,6 +313,7 @@ impl Services {
             agent_status_store,
             agent_turn_store,
             effort_store,
+            wiki_note_thread_updates,
             hook_ingest,
             background_tasks: BackgroundTaskStore::new(),
             followups: FollowupStore::new(),

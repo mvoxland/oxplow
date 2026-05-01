@@ -135,11 +135,28 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
             async move { auth_middleware(token, req, next).await }
         }));
 
+    // Health-check endpoint. Not full dev-hot-reload (Rust dylib swap
+    // in-process isn't practical with rmcp's tower service factory),
+    // but lets external tooling verify the control plane is up + the
+    // bearer token matches before spawning an agent.
+    let dev_router = Router::new()
+        .route("/dev/ping", post(handle_dev_ping))
+        .layer(axum::middleware::from_fn({
+            let token = mcp_token.clone();
+            move |req, next| {
+                let token = token.clone();
+                async move { auth_middleware(token, req, next).await }
+            }
+        }));
+
     let hook_router = Router::new()
         .route("/hook/{event}", post(handle_hook))
         .with_state(ctx);
 
-    let app = Router::new().merge(hook_router).merge(mcp_router);
+    let app = Router::new()
+        .merge(hook_router)
+        .merge(mcp_router)
+        .merge(dev_router);
 
     info!(addr = %bind_addr, "control plane listening");
 
@@ -186,6 +203,17 @@ fn check_bearer(headers: &HeaderMap, expected: &str) -> bool {
         return false;
     };
     rest == expected
+}
+
+async fn handle_dev_ping() -> Response {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "ok": true,
+            "service": "oxplow-control-plane",
+        })),
+    )
+        .into_response()
 }
 
 async fn handle_hook(
@@ -292,6 +320,17 @@ async fn handle_hook(
     // left off (without this, every re-attach starts a fresh session).
     update_resume_session_id(&ctx, &envelope_for_resume).await;
 
+    // PostToolUse: attribute wiki-note edits to the originating thread
+    // so the rail's "Finished" list can surface only the notes this
+    // thread authored or revised.
+    if kind == HookKind::PostToolUse {
+        if let (Some(thread_id), Some(body)) =
+            (envelope_for_resume.thread_id.as_ref(), body_value.as_ref())
+        {
+            attribute_wiki_note_edit(&ctx, thread_id, body).await;
+        }
+    }
+
     // Stop — emit a directive after the turn closes when the
     // in_progress audit branch fires (or other gates ever land).
     if kind == HookKind::Stop {
@@ -378,6 +417,69 @@ async fn pre_tool_check(
     }
 
     None
+}
+
+/// When a PostToolUse hook reports an Edit/Write/MultiEdit/NotebookEdit
+/// targeting a `.oxplow/notes/<slug>.md` path, record an entry in the
+/// per-thread wiki-note attribution table. Mirrors how main attributes
+/// note touches via the runtime's PostToolUse handler. Tolerant of
+/// missing fields — attribution is best-effort.
+async fn attribute_wiki_note_edit(
+    ctx: &AppCtx,
+    thread_id: &ThreadId,
+    body: &serde_json::Value,
+) {
+    let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+    if !matches!(
+        tool_name,
+        "Edit" | "Write" | "MultiEdit" | "NotebookEdit"
+    ) {
+        return;
+    }
+    let tool_input = match body.get("tool_input") {
+        Some(t) => t,
+        None => return,
+    };
+    let raw_path = tool_input
+        .get("file_path")
+        .or_else(|| tool_input.get("notebook_path"))
+        .or_else(|| tool_input.get("path"))
+        .and_then(|v| v.as_str());
+    let Some(path) = raw_path else { return };
+    let Some(slug) = wiki_note_slug_from_path(path, &ctx.services.layout.project_dir) else {
+        return;
+    };
+    if let Err(err) = ctx
+        .services
+        .wiki_note_thread_updates
+        .touch(thread_id, &slug, oxplow_domain::Timestamp::now())
+        .await
+    {
+        warn!(?err, slug, "wiki-note attribution failed");
+    }
+}
+
+/// Map an Edit-tool file path to a wiki-note slug iff the path is
+/// inside `.oxplow/notes/` with a `.md` extension. Accepts absolute
+/// or workspace-relative paths.
+fn wiki_note_slug_from_path(raw: &str, project_dir: &Path) -> Option<String> {
+    let path = Path::new(raw);
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_dir.join(path)
+    };
+    let notes_dir = project_dir.join(".oxplow").join("notes");
+    let rel = abs.strip_prefix(&notes_dir).ok()?;
+    if rel.parent().map(|p| !p.as_os_str().is_empty()).unwrap_or(false) {
+        return None; // refuses subdirectories
+    }
+    let stem = rel.file_stem()?.to_string_lossy().into_owned();
+    let ext = rel.extension()?.to_string_lossy();
+    if ext != "md" {
+        return None;
+    }
+    Some(stem)
 }
 
 /// Adopt the observed session_id as the thread's resume token when it
