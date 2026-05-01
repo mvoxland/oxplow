@@ -10,6 +10,7 @@ license.workspace = true
 oxplow-app = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-mcp = { workspace = true }
+oxplow-runtime = { workspace = true }
 
 axum = { version = "0.8", features = ["json"] }
 tower = "0.5"
@@ -32,5 +33,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+parking_lot = "0.12"
 rand = "0.8"
 base64 = "0.22"
+
+[dev-dependencies]
+tempfile = { workspace = true }

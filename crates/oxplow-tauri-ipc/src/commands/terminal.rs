@@ -1,4 +1,6 @@
-use oxplow_app::agent_command::{build_agent_command, AgentCommandOptions, PaneKind};
+use oxplow_app::agent_command::{
+    build_agent_command_for_session, AgentCommandOptions, PaneKind,
+};
 use oxplow_app::agent_prompt::assemble_system_prompt;
 use oxplow_app::terminal_sessions::{AttachResult, TerminalSessionError};
 use oxplow_domain::stores::ThreadStore;
@@ -169,7 +171,21 @@ pub async fn open_terminal_session(
                 },
                 ..Default::default()
             };
-            let command = build_agent_command(config.agent, &stream, pane_kind, &opts);
+            // Resume from the THREAD's resume_session_id (populated by
+            // the resume-tracker in the control plane), not the
+            // stream's working_session_id. Each thread runs an
+            // independent Claude session even though they share the
+            // working pane slot.
+            let resume_session_id = thread
+                .as_ref()
+                .map(|t| t.resume_session_id.as_str())
+                .unwrap_or("");
+            let command = build_agent_command_for_session(
+                config.agent,
+                &stream.worktree_path,
+                resume_session_id,
+                &opts,
+            );
             let cwd = std::path::PathBuf::from(&stream.worktree_path);
             state
                 .terminal_sessions

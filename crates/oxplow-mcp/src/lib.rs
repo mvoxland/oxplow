@@ -51,6 +51,15 @@ pub struct WorkItemIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ReorderWorkItemsParams {
+    /// Optional thread scope. Omit for the project-wide backlog.
+    pub thread_id: Option<String>,
+    /// New sort order. Items not present keep their relative order
+    /// at the end of the list.
+    pub ordered_item_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpsertWorkItemParams {
     /// JSON-encoded WorkItem. Use this rather than nesting the struct
     /// directly so we don't have to plumb JsonSchema through every
@@ -300,6 +309,54 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&list)
+    }
+
+    #[tool(
+        description = "Return the next dispatch unit for the orchestrator. If the highest-priority \
+                       ready item is an epic, returns the epic and all its ready descendants as one \
+                       atomic unit. Otherwise returns all ready non-epic items so you can pick one or \
+                       a related cluster to dispatch. Honors `blocks` links — items waiting on a \
+                       non-done blocker are skipped. Returns { mode: \"empty\" } when nothing is ready."
+    )]
+    async fn read_work_options(
+        &self,
+        params: Parameters<ThreadIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let thread_id = ThreadId::from(params.0.thread_id);
+        let result = self
+            .services
+            .work_items
+            .read_work_options(&thread_id, &*self.services.work_item_link_store)
+            .await
+            .map_err(internal)?;
+        json_result(&result)
+    }
+
+    #[tool(
+        description = "Reorder work items on a thread (or backlog). The orderedItemIds array becomes \
+                       the new sort order; items not in the list keep their relative order at the end."
+    )]
+    async fn reorder_work_items(
+        &self,
+        params: Parameters<ReorderWorkItemsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let thread = params
+            .0
+            .thread_id
+            .as_deref()
+            .map(|s| ThreadId::from(s.to_string()));
+        let ids: Vec<WorkItemId> = params
+            .0
+            .ordered_item_ids
+            .into_iter()
+            .map(WorkItemId::from)
+            .collect();
+        self.services
+            .work_items
+            .reorder(thread.as_ref(), &ids)
+            .await
+            .map_err(internal)?;
+        json_result(&serde_json::json!({ "ok": true }))
     }
 
     #[tool(description = "Get a single work item by id.")]
