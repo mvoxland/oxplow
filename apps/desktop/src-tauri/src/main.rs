@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use oxplow_app::{AppLayout, Services};
+use oxplow_app::{AppLayout, BackgroundTaskKind, Services, StartInput};
 use oxplow_tauri_ipc::{
     specta_builder, AppState, PluginRuntime, PluginRuntimeState, OXPLOW_EVENT_CHANNEL,
 };
@@ -82,36 +82,60 @@ fn main() {
     // the EventBus so the renderer's QuickOpen, project panel, history,
     // git dashboard, etc. refresh without polling. Held in a registry
     // for the life of the daemon; dropping it cancels every watcher.
-    let stream_store = state.stream_store.clone();
-    let watch_bus = event_bus.clone();
-    let watch_project_dir = project_dir.clone();
-    let watch_registry = boot_runtime.block_on(async move {
-        oxplow_app::workspace_watch::WorkspaceWatchRegistry::spawn(
-            stream_store,
-            watch_bus,
-            watch_project_dir,
-        )
-        .await
-    });
-    // Leak the registry for the life of the process — its watchers
-    // need to outlive setup() and there's no shutdown hook today.
-    Box::leak(Box::new(watch_registry));
+    //
+    // Pushed off the synchronous boot path: the initial cache walk that
+    // notify_debouncer_full performs can take seconds on large
+    // worktrees. Surfacing it as a BackgroundTask lets the renderer
+    // paint while watchers settle.
+    {
+        let stream_store = state.stream_store.clone();
+        let watch_bus = event_bus.clone();
+        let watch_project_dir = project_dir.clone();
+        let bts = state.background_tasks.clone();
+        let task = bts.start(StartInput {
+            kind: BackgroundTaskKind::Git,
+            label: "Starting workspace watchers".into(),
+            ..Default::default()
+        });
+        let task_id = task.id.clone();
+        boot_runtime.spawn(async move {
+            let registry = oxplow_app::workspace_watch::WorkspaceWatchRegistry::spawn(
+                stream_store,
+                watch_bus,
+                watch_project_dir,
+            )
+            .await;
+            Box::leak(Box::new(registry));
+            bts.complete(&task_id, None);
+        });
+    }
 
     // Wiki notes watcher: keeps `wiki_note` rows in sync with
     // `.oxplow/notes/<slug>.md` on disk (initial scan + debounced
     // re-syncs on change). Held alive for the life of the process.
-    let wiki_store = state.wiki_note_store.clone();
-    let wiki_dir = state.layout.project_dir.clone();
-    let wiki_events = event_bus.clone();
-    if let Some(watcher) = boot_runtime.block_on(async move {
-        oxplow_app::wiki_notes_watch::WikiNotesWatcher::spawn(
-            wiki_dir,
-            wiki_store,
-            wiki_events,
-        )
-        .await
-    }) {
-        Box::leak(Box::new(watcher));
+    {
+        let wiki_store = state.wiki_note_store.clone();
+        let wiki_dir = state.layout.project_dir.clone();
+        let wiki_events = event_bus.clone();
+        let bts = state.background_tasks.clone();
+        let task = bts.start(StartInput {
+            kind: BackgroundTaskKind::NotesResync,
+            label: "Initial wiki notes scan".into(),
+            ..Default::default()
+        });
+        let task_id = task.id.clone();
+        boot_runtime.spawn(async move {
+            if let Some(watcher) = oxplow_app::wiki_notes_watch::WikiNotesWatcher::spawn(
+                wiki_dir,
+                wiki_store,
+                wiki_events,
+            )
+            .await
+            {
+                Box::leak(Box::new(watcher));
+            }
+            bts.complete(&task_id, None);
+        });
     }
 
     // Boot the in-process control plane (axum server hosting the

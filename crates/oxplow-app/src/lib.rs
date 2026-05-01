@@ -42,7 +42,7 @@ use std::sync::Arc;
 
 pub use background_task::{
     BackgroundTask, BackgroundTaskChange, BackgroundTaskChangeKind, BackgroundTaskKind,
-    BackgroundTaskStatus, BackgroundTaskStore,
+    BackgroundTaskStatus, BackgroundTaskStore, StartInput,
 };
 pub use followup::{Followup, FollowupStore};
 
