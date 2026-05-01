@@ -39,7 +39,7 @@ use tokio::net::TcpListener;
 use tracing::{info, warn};
 
 use oxplow_app::{HookEnvelope, Services};
-use oxplow_domain::stores::{ThreadStore, WorkItemStore};
+use oxplow_domain::stores::{AgentTurnStore, HookEventStore, ThreadStore, WorkItemStore};
 use oxplow_domain::{HookKind, StreamId, ThreadId, WorkItemStatus};
 use oxplow_runtime::filing::{
     build_filing_enforcement_pre_tool_deny, FilingEnforcementContext,
@@ -303,6 +303,19 @@ async fn handle_hook(
         prompt,
     };
 
+    // Mine per-turn signals BEFORE ingest closes the open agent_turn
+    // for Stop hooks. Cheap query (capped at 200 recent events) — only
+    // runs for Stop, not on every hook.
+    let turn_signals: Option<TurnSignals> = if kind == HookKind::Stop {
+        if let Some(tid) = thread_id.as_ref() {
+            mine_turn_signals(&ctx, tid).await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let envelope_for_resume = envelope.clone();
     if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
         warn!(?event, ?err, "hook ingest failed");
@@ -332,13 +345,20 @@ async fn handle_hook(
     }
 
     // Stop — emit a directive after the turn closes when the
-    // in_progress audit branch fires (or other gates ever land).
+    // in_progress audit branch (or filed-but-didn't-ship advisory)
+    // fires. We mine per-turn activity by scanning hook events
+    // received since the open turn's started_at, BEFORE ingest
+    // closes the turn. The signals fed in here:
+    //   - turn_had_activity: any PreToolUse/PostToolUse fired
+    //   - turn_had_writes: any Edit/Write/MultiEdit/NotebookEdit fired
+    // Other signals (subagent-in-flight, turn_filed_ready_item)
+    // need cross-tool correlation we haven't wired yet — defaulting
+    // them to false is a soft-degrade that silences a few advisory
+    // branches but doesn't emit wrong directives.
     if kind == HookKind::Stop {
-        if let Some(directive) = stop_directive(&ctx, thread_id.as_ref()).await {
-            // Claude Code's Stop-hook contract: returning
-            // { "decision": "block", "reason": "..." } prompts the agent
-            // to keep going with the reason injected as the next user-
-            // turn directive.
+        if let Some(directive) =
+            stop_directive(&ctx, thread_id.as_ref(), turn_signals.as_ref()).await
+        {
             return (StatusCode::OK, Json(directive)).into_response();
         }
     }
@@ -540,6 +560,55 @@ fn git_operation_in_progress(project_dir: &Path) -> bool {
     false
 }
 
+/// Per-turn signals reconstructed from the hook_event_store between
+/// the open agent_turn's started_at and now. Powers the Stop
+/// pipeline's Q&A-turn carve-out and the writes-vs-no-writes branch
+/// of the filed-but-didn't-ship advisory.
+#[derive(Debug, Clone, Default)]
+struct TurnSignals {
+    /// At least one PreToolUse / PostToolUse fired since the turn opened.
+    had_activity: bool,
+    /// At least one Edit/Write/MultiEdit/NotebookEdit fired since the turn opened.
+    had_writes: bool,
+}
+
+async fn mine_turn_signals(ctx: &AppCtx, thread_id: &ThreadId) -> Option<TurnSignals> {
+    let open = ctx
+        .services
+        .agent_turn_store
+        .list_open(thread_id)
+        .await
+        .ok()?;
+    let started_at = open.first()?.started_at.clone();
+    let events = ctx
+        .services
+        .hook_event_store
+        .list_recent(Some(thread_id), 200)
+        .await
+        .ok()?;
+    let mut signals = TurnSignals::default();
+    for evt in events {
+        if evt.received_at < started_at {
+            continue;
+        }
+        if !matches!(evt.kind, HookKind::PreToolUse | HookKind::PostToolUse) {
+            continue;
+        }
+        signals.had_activity = true;
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&evt.payload_json) {
+            if let Some(tool_name) = payload.get("tool_name").and_then(|v| v.as_str()) {
+                if matches!(
+                    tool_name,
+                    "Edit" | "Write" | "MultiEdit" | "NotebookEdit"
+                ) {
+                    signals.had_writes = true;
+                }
+            }
+        }
+    }
+    Some(signals)
+}
+
 /// Build a Stop directive for the writer thread. Pulls the current
 /// in_progress set, runs `decide_stop_directive` with the in-memory
 /// audit-signature dedup, and persists the side effects back to
@@ -547,6 +616,7 @@ fn git_operation_in_progress(project_dir: &Path) -> bool {
 async fn stop_directive(
     ctx: &AppCtx,
     thread_id: Option<&ThreadId>,
+    turn_signals: Option<&TurnSignals>,
 ) -> Option<serde_json::Value> {
     let thread_id = thread_id?;
     let thread = ctx
@@ -583,15 +653,23 @@ async fn stop_directive(
         thread: Some(&thread),
         work_items: &work_items,
         last_in_progress_audit_signature: last_signature.as_deref(),
-        // V1: signal-mining (subagent dispatch tracking,
-        // turn-write-count, ready-filing detection) is not yet wired.
-        // Default these to "unknown / false" so the in_progress audit
-        // branch always reaches its check — that's the user-visible
-        // nudge users care about.
+        // Mined from hook_event_store between this turn's started_at
+        // and now. Letting the Q&A-turn carve-out fire silences the
+        // audit nudge on read-only / one-off question turns where
+        // there's no work to claim.
+        turn_had_activity: turn_signals.map(|s| s.had_activity),
+        turn_had_writes: turn_signals.map(|s| s.had_writes).unwrap_or(false),
+        // Not yet wired (default false ⇒ branches stay silent rather
+        // than emit wrong directives):
+        // - subagent_in_flight: would need PreToolUse(Task) /
+        //   SubagentStop correlation
+        // - turn_had_filing / turn_filed_ready_item: would need MCP
+        //   call attribution back to this thread/turn
+        // - awaiting_user: only set when await_user MCP tool fires,
+        //   which is tracked via agent_status_store but not surfaced
+        //   here yet
         subagent_in_flight: false,
-        turn_had_activity: None,
         awaiting_user: false,
-        turn_had_writes: false,
         turn_had_filing: false,
         turn_filed_ready_item: false,
         filed_but_didnt_ship_fired,
