@@ -5,7 +5,7 @@ use oxplow_domain::stores::ThreadStore;
 use oxplow_app::terminal_sessions::SpawnRequest;
 
 use crate::error::IpcError;
-use crate::state::AppState;
+use crate::state::{AppState, PluginRuntimeState};
 
 impl From<TerminalSessionError> for IpcError {
     fn from(value: TerminalSessionError) -> Self {
@@ -33,6 +33,7 @@ impl From<TerminalSessionError> for IpcError {
 #[specta::specta]
 pub async fn open_terminal_session(
     state: tauri::State<'_, AppState>,
+    plugin_runtime: tauri::State<'_, PluginRuntimeState>,
     pane_target: String,
     cols: u16,
     rows: u16,
@@ -79,6 +80,34 @@ pub async fn open_terminal_session(
         transport_mode,
     );
 
+    // Materialize the Claude Code plugin (.oxplow/runtime/claude-plugin/)
+    // every spawn — overwrites in place so live edits to skill content
+    // take effect without manual cleanup. The hook URL + token live on
+    // the control-plane handle stashed at boot; per-spawn identity rides
+    // in env vars below.
+    let plugin_paths = oxplow_plugin::write_plugin(
+        &state.layout.project_dir,
+        &plugin_runtime.hook_base_url,
+        &plugin_runtime.mcp_endpoint_url,
+    )
+    .map_err(|e| IpcError::internal(format!("plugin write failed: {e}")))?;
+
+    let plugin_env = vec![
+        (
+            "OXPLOW_HOOK_TOKEN".to_string(),
+            plugin_runtime.hook_token.clone(),
+        ),
+        ("OXPLOW_STREAM_ID".to_string(), stream.id.0.clone()),
+        (
+            "OXPLOW_THREAD_ID".to_string(),
+            thread_id
+                .as_ref()
+                .map(|t| t.0.clone())
+                .unwrap_or_default(),
+        ),
+        ("OXPLOW_PANE".to_string(), pane_target.clone()),
+    ];
+
     let result = match transport_mode.as_str() {
         "tmux" => {
             let prompt = assemble_system_prompt(
@@ -88,6 +117,9 @@ pub async fn open_terminal_session(
                 thread.as_ref(),
             );
             let opts = AgentCommandOptions {
+                plugin_dir: Some(plugin_paths.plugin_dir.to_string_lossy().into_owned()),
+                mcp_config: Some(plugin_paths.mcp_config.to_string_lossy().into_owned()),
+                env: plugin_env.clone(),
                 append_system_prompt: if prompt.is_empty() {
                     None
                 } else {
@@ -127,6 +159,9 @@ pub async fn open_terminal_session(
                 thread.as_ref(),
             );
             let opts = AgentCommandOptions {
+                plugin_dir: Some(plugin_paths.plugin_dir.to_string_lossy().into_owned()),
+                mcp_config: Some(plugin_paths.mcp_config.to_string_lossy().into_owned()),
+                env: plugin_env.clone(),
                 append_system_prompt: if prompt.is_empty() {
                     None
                 } else {

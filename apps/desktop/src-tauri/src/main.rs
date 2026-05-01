@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use oxplow_app::{AppLayout, Services};
-use oxplow_tauri_ipc::{specta_builder, AppState, OXPLOW_EVENT_CHANNEL};
+use oxplow_tauri_ipc::{
+    specta_builder, AppState, PluginRuntime, PluginRuntimeState, OXPLOW_EVENT_CHANNEL,
+};
 use tauri::Emitter;
 
 fn main() {
@@ -95,6 +97,20 @@ fn main() {
     // need to outlive setup() and there's no shutdown hook today.
     Box::leak(Box::new(watch_registry));
 
+    // Boot the in-process control plane (axum server hosting the
+    // plugin's HTTP hook receiver + the streamable-HTTP MCP transport).
+    // The handle's URLs + token feed the per-spawn plugin writer in
+    // terminal.rs; nothing here needs to keep the handle around — the
+    // axum task is detached.
+    let control_plane = boot_runtime
+        .block_on(async { oxplow_control_plane::spawn(state.clone()).await })
+        .expect("control plane boot");
+    let plugin_runtime: PluginRuntimeState = Arc::new(PluginRuntime {
+        hook_base_url: control_plane.hook_base_url(),
+        mcp_endpoint_url: control_plane.mcp_endpoint_url(),
+        hook_token: control_plane.hook_token.clone(),
+    });
+
     let specta = specta_builder();
 
     tauri::Builder::default()
@@ -111,6 +127,7 @@ fn main() {
             Ok(())
         })
         .manage(state)
+        .manage(plugin_runtime)
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

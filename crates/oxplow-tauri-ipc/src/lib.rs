@@ -10,7 +10,7 @@ pub mod error;
 pub mod state;
 
 pub use error::IpcError;
-pub use state::AppState;
+pub use state::{AppState, PluginRuntime, PluginRuntimeState};
 
 use tauri_specta::{collect_commands, Builder};
 

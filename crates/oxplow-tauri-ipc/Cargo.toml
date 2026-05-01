@@ -17,6 +17,7 @@ tauri-plugin-clipboard-manager = { workspace = true }
 specta-typescript = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-git = { workspace = true }
+oxplow-plugin = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
