@@ -138,11 +138,25 @@ pub struct CreateWorkItemMcpParams {
     pub thread_id: Option<String>,
     pub title: String,
     pub description: Option<String>,
+    /// One observable criterion per line. Authoritative completion
+    /// signal; reviewers + complete_task scan for it.
+    pub acceptance_criteria: Option<String>,
     pub kind: Option<String>,
     pub priority: Option<String>,
     pub category: Option<String>,
     pub tags: Option<String>,
     pub parent_id: Option<String>,
+    /// Initial status — defaults to `ready`. Pass `in_progress`
+    /// when starting the work in the same call (filing-enforcement
+    /// requires an in_progress row to exist before edits land), or
+    /// `done`/`blocked` when filing a row for already-shipped work
+    /// (`touched_files` then drives Local History attribution).
+    pub status: Option<String>,
+    /// Repo-relative paths edited for this effort. When passed
+    /// alongside `status: "done"` or `"blocked"`, the runtime
+    /// synthesizes the in_progress→target effort transition so
+    /// Local History attributes the writes to this item.
+    pub touched_files: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -150,8 +164,16 @@ pub struct UpdateWorkItemMcpParams {
     pub id: String,
     pub title: Option<String>,
     pub description: Option<String>,
+    /// Replace the AC list. Pass an empty string to clear.
+    pub acceptance_criteria: Option<String>,
+    /// Reparent (or detach with empty string).
+    pub parent_id: Option<String>,
     pub status: Option<String>,
     pub priority: Option<String>,
+    /// Repo-relative paths edited for the effort that's closing
+    /// alongside this update. Required for Local History attribution
+    /// when transitioning to `done`/`blocked` from `in_progress`.
+    pub touched_files: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -160,6 +182,9 @@ pub struct CompleteTaskParams {
     /// Summary note appended to the work item before marking done.
     pub summary: String,
     pub author: Option<String>,
+    /// Repo-relative paths edited for this effort. Drives the file-
+    /// attribution effort row Local History reads from.
+    pub touched_files: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -207,6 +232,13 @@ pub struct EpicChildSpec {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DispatchWorkItemParams {
     pub thread_id: String,
+    /// The specific work item to dispatch. When omitted, picks the
+    /// first ready item on the thread (mirrors main's
+    /// dispatch-without-id shortcut for /work-next composition).
+    pub item_id: Option<String>,
+    /// Optional extra context appended to the brief — usually
+    /// orchestrator notes about how this fits into the larger plan.
+    pub extra_context: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -680,13 +712,20 @@ impl OxplowMcp {
 
     // ---------- work item orchestration ----------
 
-    #[tool(description = "Create a new work item. Allocates id + sort_index, fires creation event.")]
+    #[tool(
+        description = "Create a new work item. Allocates id + sort_index, fires creation event. \
+                       Pass `status: \"in_progress\"` to start the work in the same call (filing-\
+                       enforcement requires an in_progress row to exist before edits land). Pass \
+                       `status: \"done\"` (or `blocked`) with `touched_files` to file a row for \
+                       already-shipped work — the runtime synthesizes the in_progress→target \
+                       effort so Local History attributes the writes."
+    )]
     async fn create_work_item(
         &self,
         params: Parameters<CreateWorkItemMcpParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let thread = p.thread_id.map(ThreadId::from);
+        let thread = p.thread_id.clone().map(ThreadId::from);
         let kind = match p.kind.as_deref() {
             Some(k) => Some(parse_kind(k)?),
             None => None,
@@ -695,18 +734,22 @@ impl OxplowMcp {
             Some(s) => Some(parse_priority(s)?),
             None => None,
         };
+        let status = match p.status.as_deref() {
+            Some(s) => Some(parse_status(s)?),
+            None => None,
+        };
         let item = self
             .services
             .work_items
             .create(
-                thread,
+                thread.clone(),
                 CreateWorkItemInput {
                     kind,
                     title: p.title,
                     description: p.description,
-                    acceptance_criteria: None,
+                    acceptance_criteria: p.acceptance_criteria,
                     parent_id: p.parent_id.map(WorkItemId::from),
-                    status: None,
+                    status,
                     priority,
                     category: p.category,
                     tags: p.tags,
@@ -715,10 +758,47 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
+
+        // Synthesize the in_progress→target effort when the row was
+        // filed directly into a closing state with touched files.
+        // Mirrors main: a `done`/`blocked` create with `touchedFiles`
+        // is the "file and close in one call" shortcut for retroactive
+        // splits, and Local History needs the effort row to attribute
+        // the writes to this item.
+        let touched = p.touched_files.unwrap_or_default();
+        if !touched.is_empty()
+            && matches!(
+                item.status,
+                WorkItemStatus::Done | WorkItemStatus::Blocked
+            )
+        {
+            let thread_for_effort = thread.or_else(|| item.thread_id.clone());
+            if let Some(tid) = thread_for_effort {
+                if let Err(err) = self
+                    .services
+                    .work_items
+                    .record_effort(
+                        &self.services.effort_store,
+                        &item.id,
+                        &tid,
+                        &touched,
+                        None,
+                    )
+                    .await
+                {
+                    tracing::warn!(?err, "create_work_item: effort record failed");
+                }
+            }
+        }
         json_result(&item)
     }
 
-    #[tool(description = "Update fields on an existing work item (partial-patch).")]
+    #[tool(
+        description = "Update fields on an existing work item (partial-patch). Pass `touched_files` \
+                       alongside a `status` transition to `done`/`blocked` to attribute the closing \
+                       effort. Pass `acceptance_criteria` (empty string clears) to update the AC list. \
+                       `parent_id` reparents (empty string detaches)."
+    )]
     async fn update_work_item(
         &self,
         params: Parameters<UpdateWorkItemMcpParams>,
@@ -733,6 +813,23 @@ impl OxplowMcp {
             Some(s) => Some(parse_priority(s)?),
             None => None,
         };
+        // Acceptance-criteria + parent: `Option<Option<…>>` semantics
+        // — outer Some means "the field was passed", inner None means
+        // "clear it". Empty string = clear; non-empty = set.
+        let acceptance_criteria: Option<Option<String>> = p.acceptance_criteria.map(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        });
+        let parent_id: Option<Option<WorkItemId>> = p.parent_id.map(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(WorkItemId::from(s))
+            }
+        });
         let updated = self
             .services
             .work_items
@@ -741,8 +838,8 @@ impl OxplowMcp {
                 UpdateWorkItemChanges {
                     title: p.title,
                     description: p.description,
-                    acceptance_criteria: None,
-                    parent_id: None,
+                    acceptance_criteria,
+                    parent_id,
                     status,
                     priority,
                     category: None,
@@ -751,10 +848,39 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
+
+        let touched = p.touched_files.unwrap_or_default();
+        if !touched.is_empty()
+            && matches!(
+                updated.status,
+                WorkItemStatus::Done | WorkItemStatus::Blocked
+            )
+        {
+            if let Some(tid) = updated.thread_id.clone() {
+                if let Err(err) = self
+                    .services
+                    .work_items
+                    .record_effort(
+                        &self.services.effort_store,
+                        &updated.id,
+                        &tid,
+                        &touched,
+                        None,
+                    )
+                    .await
+                {
+                    tracing::warn!(?err, "update_work_item: effort record failed");
+                }
+            }
+        }
         json_result(&updated)
     }
 
-    #[tool(description = "Append a summary note to a work item then mark it `done`.")]
+    #[tool(
+        description = "Append a summary note to a work item then mark it `done`. Pass \
+                       `touched_files` (repo-relative paths edited for this effort) to attribute \
+                       the writes via Local History — skip only if you edited >100 files."
+    )]
     async fn complete_task(
         &self,
         params: Parameters<CompleteTaskParams>,
@@ -779,6 +905,26 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
+
+        let touched = p.touched_files.unwrap_or_default();
+        if !touched.is_empty() {
+            if let Some(tid) = item.thread_id.clone() {
+                if let Err(err) = self
+                    .services
+                    .work_items
+                    .record_effort(
+                        &self.services.effort_store,
+                        &item.id,
+                        &tid,
+                        &touched,
+                        Some(p.summary.clone()),
+                    )
+                    .await
+                {
+                    tracing::warn!(?err, "complete_task: effort record failed");
+                }
+            }
+        }
         json_result(&item)
     }
 
@@ -951,31 +1097,63 @@ impl OxplowMcp {
         )]))
     }
 
-    #[tool(description = "Pick the next ready work item on the thread, transition it to in_progress, and return a dispatch brief.")]
+    #[tool(
+        description = "Compose a ready-to-paste dispatch brief for a work item and transition it \
+                       to in_progress in one atomic call. When `item_id` is given, dispatches that \
+                       specific item; otherwise picks the first ready non-epic item on the thread \
+                       (mirrors main's /work-next composition shortcut). Returns \
+                       `{ ok, prompt, itemId }` — pass `prompt` to the general-purpose Agent tool. \
+                       The brief carries the item fields, AC, recent notes, and the subagent \
+                       protocol preamble so the orchestrator brief stays slim."
+    )]
     async fn dispatch_work_item(
         &self,
         params: Parameters<DispatchWorkItemParams>,
     ) -> Result<CallToolResult, McpError> {
-        let thread_id = ThreadId::from(params.0.thread_id);
-        let items = self
-            .services
-            .work_item_store
-            .list_for_thread(&thread_id)
-            .await
-            .map_err(internal)?;
-        let next = items
-            .into_iter()
-            .find(|i| matches!(i.status, oxplow_domain::WorkItemStatus::Ready));
-        let Some(item) = next else {
-            return Ok(CallToolResult::success(vec![Content::text(
-                "no ready item on thread",
-            )]));
+        let thread_id = ThreadId::from(params.0.thread_id.clone());
+        let target = match params.0.item_id.clone() {
+            Some(raw) => {
+                let id = WorkItemId::from(raw);
+                self.services
+                    .work_item_store
+                    .get(&id)
+                    .await
+                    .map_err(internal)?
+                    .ok_or_else(|| McpError::invalid_params(
+                        format!("dispatch_work_item: item not found: {}", id.0),
+                        None,
+                    ))?
+            }
+            None => {
+                let items = self
+                    .services
+                    .work_item_store
+                    .list_for_thread(&thread_id)
+                    .await
+                    .map_err(internal)?;
+                let mut ready_first: Vec<_> = items
+                    .into_iter()
+                    .filter(|i| {
+                        matches!(i.status, oxplow_domain::WorkItemStatus::Ready)
+                            && i.kind != oxplow_domain::WorkItemKind::Epic
+                    })
+                    .collect();
+                ready_first.sort_by_key(|i| (i.sort_index, i.created_at.clone()));
+                let Some(it) = ready_first.into_iter().next() else {
+                    return json_result(&serde_json::json!({
+                        "ok": false,
+                        "reason": "no ready non-epic item on thread",
+                    }));
+                };
+                it
+            }
         };
+
         let updated = self
             .services
             .work_items
             .update(
-                &item.id,
+                &target.id,
                 oxplow_app::UpdateWorkItemChanges {
                     status: Some(oxplow_domain::WorkItemStatus::InProgress),
                     ..Default::default()
@@ -983,15 +1161,29 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
-        let brief = serde_json::json!({
-            "id": updated.id,
-            "title": updated.title,
-            "description": updated.description,
-            "acceptance_criteria": updated.acceptance_criteria,
-        });
-        Ok(CallToolResult::success(vec![Content::text(
-            brief.to_string(),
-        )]))
+
+        // Pull recent notes for the brief — same shape as main's
+        // dispatch_work_item: reviewer-facing context already lives
+        // on the row, but recent notes carry hand-offs from prior
+        // attempts.
+        let notes = self
+            .services
+            .work_note_store
+            .list_for_item(&updated.id)
+            .await
+            .map_err(internal)?;
+        let recent_notes: Vec<&oxplow_domain::WorkNote> = notes.iter().rev().take(5).collect();
+
+        let prompt = compose_dispatch_brief(
+            &updated,
+            &recent_notes,
+            params.0.extra_context.as_deref().unwrap_or(""),
+        );
+        json_result(&serde_json::json!({
+            "ok": true,
+            "prompt": prompt,
+            "itemId": updated.id,
+        }))
     }
 
     #[tool(description = "Branch a new thread off an existing one (shared stream, fresh thread row).")]
@@ -1326,6 +1518,64 @@ fn compose_delegate_query_prompt(
             .into(),
     );
     parts.join("\n")
+}
+
+/// Compose the brief the orchestrator passes to the general-purpose
+/// Agent tool to dispatch a work item to a subagent. Pure so it's
+/// testable; mirrors main's `composeDispatchBrief`.
+///
+/// The output preserves the same sections main shipped: identity,
+/// description, AC, recent notes, optional extra context, and the
+/// closing reminder pointing at the subagent-protocol skill.
+fn compose_dispatch_brief(
+    item: &oxplow_domain::WorkItem,
+    recent_notes: &[&oxplow_domain::WorkNote],
+    extra_context: &str,
+) -> String {
+    let mut out: Vec<String> = vec![
+        format!("Work item: {}", item.title),
+        format!("itemId: {}", item.id.0),
+        format!("kind: {:?} | priority: {:?}", item.kind, item.priority),
+        String::new(),
+    ];
+    if !item.description.is_empty() {
+        out.push("## Description".into());
+        out.push(item.description.clone());
+        out.push(String::new());
+    }
+    if let Some(ac) = item.acceptance_criteria.as_deref() {
+        if !ac.is_empty() {
+            out.push("## Acceptance criteria".into());
+            out.push(ac.to_string());
+            out.push(String::new());
+        }
+    }
+    if !recent_notes.is_empty() {
+        out.push("## Recent notes (newest first)".into());
+        for note in recent_notes {
+            out.push(format!(
+                "- [{}] {}",
+                note.author,
+                note.body.lines().next().unwrap_or("").trim()
+            ));
+        }
+        out.push(String::new());
+    }
+    if !extra_context.is_empty() {
+        out.push("## Extra context".into());
+        out.push(extra_context.to_string());
+        out.push(String::new());
+    }
+    out.push(
+        "## Protocol".into(),
+    );
+    out.push(
+        "Follow the `oxplow-subagent-work-protocol` skill: mark in_progress on entry; \
+         done on exit. Return ONE line: `oxplow-result: {\"ok\":true,\"itemId\":\"<id>\",…}`. \
+         Pass `touched_files` to `complete_task` so Local History attributes the writes."
+            .into(),
+    );
+    out.join("\n")
 }
 
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {

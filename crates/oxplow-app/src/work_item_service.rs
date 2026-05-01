@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
+use oxplow_db::{EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffortStore};
 use oxplow_db::SqliteWorkItemStore;
 use oxplow_domain::stores::{WorkItemLinkStore, WorkItemStore};
 use oxplow_domain::{
@@ -234,6 +235,33 @@ impl WorkItemService {
         thread: &ThreadId,
     ) -> Result<Vec<WorkItem>, WorkItemServiceError> {
         Ok(self.store.list_for_thread(thread).await?)
+    }
+
+    /// Open + record + close an effort for `item` against `thread`,
+    /// attributing every path in `touched_files` as Updated. The
+    /// `summary` is stored on the effort row for the Local History
+    /// panel. Idempotent only at the effort-row level: each call
+    /// creates a new effort row, even for the same item — that's the
+    /// shape main expects (one effort per close + per redo).
+    pub async fn record_effort(
+        &self,
+        effort_store: &SqliteWorkItemEffortStore,
+        item: &WorkItemId,
+        thread: &ThreadId,
+        touched_files: &[String],
+        summary: Option<String>,
+    ) -> Result<(), WorkItemServiceError> {
+        let effort = effort_store.start(item, thread, None).await?;
+        for path in touched_files {
+            if path.is_empty() {
+                continue;
+            }
+            effort_store
+                .record_file(&effort.id, path, EffortFileChange::Updated)
+                .await?;
+        }
+        effort_store.finish(&effort.id, None, summary).await?;
+        Ok(())
     }
 
     pub async fn list_backlog(&self) -> Result<Vec<WorkItem>, WorkItemServiceError> {
