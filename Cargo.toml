@@ -15,6 +15,8 @@ members = [
     "crates/oxplow-mcp",
     "crates/oxplow-app",
     "crates/oxplow-tauri-ipc",
+    "crates/oxplow-plugin",
+    "crates/oxplow-control-plane",
 ]
 
 [workspace.package]
@@ -97,6 +99,8 @@ oxplow-lsp = { path = "crates/oxplow-lsp" }
 oxplow-mcp = { path = "crates/oxplow-mcp" }
 oxplow-app = { path = "crates/oxplow-app" }
 oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }
+oxplow-plugin = { path = "crates/oxplow-plugin" }
+oxplow-control-plane = { path = "crates/oxplow-control-plane" }
 
 [profile.release]
 codegen-units = 1
