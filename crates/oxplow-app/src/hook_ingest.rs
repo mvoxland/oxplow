@@ -5,10 +5,14 @@
 //! drives the agent_turn lifecycle + agent_status transitions:
 //!
 //! - `UserPromptSubmit`: open a new agent_turn, mark the pane Running.
-//! - `Stop` / `SubagentStop`: close the open agent_turn for the
-//!   thread, mark the pane Idle (or AwaitingUser if a `mcp__oxplow__await_user`
-//!   call fired during the turn — recorded as a sentinel in the
-//!   payload).
+//! - `Stop`: close the open agent_turn for the thread, mark the pane
+//!   Idle (or AwaitingUser if a `mcp__oxplow__await_user` call fired
+//!   during the turn — recorded as a sentinel in the payload).
+//! - `SubagentStop`: persist the hook event only. The parent turn is
+//!   still in flight when a Task-tool subagent finishes, so we MUST
+//!   NOT close the open turn or flip status to Idle here — doing so
+//!   makes the agent indicator render "waiting" mid-turn whenever the
+//!   parent dispatches a subagent.
 //! - `Interrupt`: close any open turn with a synthetic answer note,
 //!   mark the pane Stopped.
 //!
@@ -118,7 +122,7 @@ impl HookIngestService {
                 }
                 self.set_status(&thread, AgentStatusState::Running, None).await?;
             }
-            HookKind::Stop | HookKind::SubagentStop => {
+            HookKind::Stop => {
                 self.close_open_turns(&thread, None).await?;
                 let detail = if payload_signals_await_user(&env.payload_json) {
                     Some("await_user".to_string())
@@ -132,6 +136,12 @@ impl HookIngestService {
                 };
                 self.set_status(&thread, state, detail).await?;
             }
+            HookKind::SubagentStop => {
+                // A Task-tool subagent finished. The parent agent is
+                // still working — do NOT close the parent turn or
+                // flip the status. Hook event is already persisted
+                // at the top of ingest; that's all we need here.
+            }
             HookKind::Interrupt => {
                 self.close_open_turns(&thread, Some("interrupted".into())).await?;
                 self.set_status(&thread, AgentStatusState::Stopped, Some("interrupt".into()))
@@ -142,8 +152,24 @@ impl HookIngestService {
                     .await?;
             }
             HookKind::PreToolUse | HookKind::PostToolUse => {
-                // No state-machine transition; the renderer just
-                // refreshes the hook log via HookEventsChanged.
+                // No agent_turn / agent_status table transition, but
+                // these events DO change the renderer's derived
+                // status (PreToolUse(Task) bumps pending_tasks etc.
+                // — see agent_status_derive). Re-derive from the
+                // hook event log and emit AgentStatusChanged with
+                // the new state so the renderer can update without
+                // a refetch round-trip.
+                let recent = self
+                    .hooks
+                    .list_recent(Some(&thread), 200)
+                    .await
+                    .unwrap_or_default();
+                let derived = crate::agent_status_derive::derive_thread_status(&recent);
+                self.events.emit(OxplowEvent::AgentStatusChanged {
+                    thread_id: thread.clone(),
+                    pane_target: self.thread_pane(&thread).await,
+                    state: derived,
+                });
             }
         }
 
@@ -176,6 +202,7 @@ impl HookIngestService {
         self.events.emit(OxplowEvent::AgentStatusChanged {
             thread_id: status.thread_id,
             pane_target: status.pane_target,
+            state: status.state,
         });
         Ok(())
     }
@@ -206,7 +233,8 @@ fn payload_signals_await_user(payload: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_db::{Database, SqliteAgentStatusStore, SqliteAgentTurnStore, SqliteHookEventStore, SqliteStreamStore, SqliteThreadStore};
+    use crate::thread_runtime::ThreadRuntimeRegistry;
+    use oxplow_db::{Database, SqliteAgentTurnStore, SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamKind, Thread, ThreadStatus};
 
@@ -248,9 +276,10 @@ mod tests {
             updated_at: now,
         };
         threads.upsert(&t).await.unwrap();
+        let registry = Arc::new(ThreadRuntimeRegistry::with_default_capacity());
         let svc = HookIngestService::new(
-            Arc::new(SqliteHookEventStore::new(db.clone())),
-            Arc::new(SqliteAgentStatusStore::new(db.clone())),
+            registry.clone(),
+            registry,
             Arc::new(SqliteAgentTurnStore::new(db)),
             EventBus::new(),
         );
@@ -356,6 +385,35 @@ mod tests {
         let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
         assert_eq!(status.state, AgentStatusState::Stopped);
         assert!(svc.turns.list_open(&tid).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn subagent_stop_does_not_close_parent_turn_or_flip_status() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(HookEnvelope {
+            kind: HookKind::UserPromptSubmit,
+            thread_id: Some(tid.clone()),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: Some("p".into()),
+        })
+        .await
+        .unwrap();
+        svc.ingest(HookEnvelope {
+            kind: HookKind::SubagentStop,
+            thread_id: Some(tid.clone()),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: None,
+        })
+        .await
+        .unwrap();
+        // Parent turn must still be open and status still Running.
+        assert_eq!(svc.turns.list_open(&tid).await.unwrap().len(), 1);
+        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        assert_eq!(status.state, AgentStatusState::Running);
     }
 
     #[test]

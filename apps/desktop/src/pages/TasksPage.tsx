@@ -4,7 +4,6 @@ import { PlanPane } from "../components/Plan/PlanPane.js";
 import { TasksList } from "../components/Plan/TasksList.js";
 import { TaskDetailPane } from "../components/Plan/TaskDetailPane.js";
 import { BacklogDrawer } from "../components/Plan/BacklogDrawer.js";
-import { Kebab } from "../components/Kebab.js";
 import { cardLinkButton } from "../components/Card.js";
 import { backlogRef, doneWorkRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -47,20 +46,6 @@ const PREVIEW_LIMIT = 5;
  * next" surfaces a different view of the same data.
  */
 export function TasksPage({ onOpenPage, onMoveBacklogItemToThread, ...rest }: TasksPageProps) {
-  const actions = (
-    <Kebab
-      testId="tasks-kebab"
-      size={16}
-      items={[
-        {
-          id: "tasks.view-backlog",
-          label: "View backlog →",
-          enabled: true,
-          run: () => onOpenPage(backlogRef()),
-        },
-      ]}
-    />
-  );
   const viewAllDone = (
     <button
       type="button"
@@ -72,7 +57,7 @@ export function TasksPage({ onOpenPage, onMoveBacklogItemToThread, ...rest }: Ta
     </button>
   );
   return (
-    <Page testId="page-tasks" title="Tasks" actions={actions}>
+    <Page testId="page-tasks" title="Tasks">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
           <TasksList

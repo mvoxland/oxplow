@@ -12,7 +12,16 @@ use tauri::Emitter;
 fn main() {
     init_tracing();
 
-    let project_dir = std::env::current_dir().expect("current dir");
+    // Project root resolution. `tauri dev` runs the binary with cwd
+    // set to `apps/desktop` (the package being built), which isn't a
+    // git toplevel — `ensure_primary` would refuse it and the
+    // renderer would see "no primary stream available". Honour
+    // `OXPLOW_PROJECT_DIR` so the dev launcher can pin cwd to the
+    // repo root; production launches via `./bin/oxplow` from the
+    // repo root and just use cwd as before.
+    let project_dir = std::env::var_os("OXPLOW_PROJECT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().expect("current dir"));
     let layout = AppLayout::for_project(&project_dir);
     // Services::boot synchronously calls `tokio::spawn` (PtyManager owner
     // task), which requires an entered Tokio runtime. Tauri builds its
@@ -135,6 +144,17 @@ fn main() {
                 Box::leak(Box::new(watcher));
             }
             bts.complete(&task_id, None);
+        });
+    }
+
+    // Lightweight self-diagnostics: once a minute, log RSS + open
+    // fds + stream count so a long-running process leaves a trail
+    // we can correlate against system-wide weirdness. See
+    // `crates/oxplow-app/src/diagnostics.rs`.
+    {
+        let streams = state.stream_store.clone();
+        boot_runtime.spawn(async move {
+            oxplow_app::diagnostics::spawn(streams);
         });
     }
 

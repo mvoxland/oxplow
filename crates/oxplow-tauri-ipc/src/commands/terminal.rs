@@ -91,6 +91,7 @@ pub async fn open_terminal_session(
         &state.layout.project_dir,
         &plugin_runtime.hook_base_url,
         &plugin_runtime.mcp_endpoint_url,
+        &plugin_runtime.hook_token,
     )
     .map_err(|e| IpcError::internal(format!("plugin write failed: {e}")))?;
 

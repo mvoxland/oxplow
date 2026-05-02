@@ -137,15 +137,15 @@ mod tests {
         assert_eq!(count, 1);
     }
 
-    /// Schema regression: every table the v1 migration is supposed to
-    /// produce should exist after `Database::in_memory()`. Failing this
-    /// test means the migration SQL drifted from the type system —
-    /// catch it before stores try to query a missing table.
+    /// Schema regression: every table that should exist after all
+    /// migrations apply should be present. agent_status + hook_event
+    /// were dropped in V2 (now in-memory) — assert they're GONE so a
+    /// future migration accidentally re-adding them fails this test.
     #[test]
-    fn v1_creates_expected_tables() {
+    fn migrations_produce_expected_table_set() {
         let db = Database::in_memory();
         let conn = db.conn().unwrap();
-        let expected = [
+        let expected_present = [
             "streams",
             "runtime_state",
             "threads",
@@ -161,14 +161,13 @@ mod tests {
             "code_quality_scan",
             "code_quality_finding",
             "file_snapshot",
-            "hook_event",
-            "agent_status",
             "work_item_commit",
             "work_item_effort",
             "work_item_effort_file",
             "work_item_effort_turn",
             "wiki_note_thread_update",
         ];
+        let expected_absent = ["hook_event", "agent_status"];
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
             .unwrap();
@@ -181,10 +180,16 @@ mod tests {
             // sqlite's autoindex bookkeeping isn't a "table" we care about.
             .filter(|n| !n.starts_with("sqlite_"))
             .collect();
-        for table in expected {
+        for table in expected_present {
             assert!(
                 actual.iter().any(|a| a == table),
                 "expected table `{table}` to exist; got: {actual:?}"
+            );
+        }
+        for table in expected_absent {
+            assert!(
+                !actual.iter().any(|a| a == table),
+                "expected table `{table}` to be DROPPED; got: {actual:?}"
             );
         }
     }

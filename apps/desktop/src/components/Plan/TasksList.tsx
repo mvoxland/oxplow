@@ -49,9 +49,13 @@ export function TasksList(props: Omit<PlanPaneProps, "hideAuto" | "onlyStatuses"
   const onlyStatuses: WorkItemStatus[] | undefined = filters.statuses.size > 0
     ? [...filters.statuses]
     : undefined;
+  // Don't exclude "done" here: the Tasks page renders a dedicated
+  // Done preview section, and stripping done rows before sectioning
+  // leaves that section permanently empty. The showClosed toggle now
+  // governs only the terminal-and-hidden states (canceled/archived).
   const excludeStatuses: WorkItemStatus[] | undefined = filters.showClosed
     ? undefined
-    : ["done", "canceled", "archived"];
+    : ["canceled", "archived"];
 
   // visibleSections in props takes precedence — Tasks page passes
   // ["toDo", "blocked", "done"] and we don't override.

@@ -2276,7 +2276,20 @@ export function App() {
         });
       } else if (ref.kind === "work-item") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
-        const items = selectedThreadWork?.items ?? [];
+        // ThreadWorkState splits items by status (Ready→items, InProgress→inProgress,
+        // Done/Canceled/Archived→done, Blocked→waiting, Epics→epics). Merge them all
+        // for the lookup so WorkItemPage can resolve any item on this thread, not
+        // just Ready ones — otherwise clicking a done/in-progress item renders the
+        // misleading "not loaded in the current thread" fallback.
+        const items = selectedThreadWork
+          ? [
+              ...selectedThreadWork.inProgress,
+              ...selectedThreadWork.items,
+              ...selectedThreadWork.waiting,
+              ...selectedThreadWork.done,
+              ...selectedThreadWork.epics,
+            ]
+          : [];
         const matching = items.find((i) => i.id === itemId);
         tabs.push({
           id: ref.id,
@@ -2555,6 +2568,8 @@ export function App() {
           onOpenThreadSettings={(threadId) => handleOpenPage(threadSettingsRef(threadId))}
           gitEnabled={workspaceContext.gitEnabled}
         />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <RailHud
           threadId={selectedThread?.id ?? null}
           threadWork={selectedThreadWork}
@@ -2611,8 +2626,8 @@ export function App() {
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
         </div>
-      </div>
-      <div
+        </div>
+        <div
         style={{
           display: "flex",
           alignItems: "center",
@@ -2646,6 +2661,8 @@ export function App() {
           );
         })()}
         <StatusBar stream={stream} gitEnabled={workspaceContext.gitEnabled} />
+      </div>
+        </div>
       </div>
       <QuickOpenOverlay
         open={quickOpenVisible}

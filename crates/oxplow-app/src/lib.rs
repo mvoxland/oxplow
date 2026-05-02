@@ -10,10 +10,12 @@
 pub mod agent_command;
 pub mod agent_pane;
 pub mod agent_prompt;
+pub mod agent_status_derive;
 pub mod blob_store;
 pub mod code_quality_runner;
 pub mod background_task;
 pub mod config_service;
+pub mod diagnostics;
 pub mod events;
 pub mod followup;
 pub mod hook_ingest;
@@ -24,6 +26,7 @@ pub mod lsp_sessions;
 pub mod terminal_sessions;
 pub mod recovery;
 pub mod snapshot_capture;
+pub mod thread_runtime;
 pub mod work_item_service;
 pub mod workspace_watch;
 
@@ -53,12 +56,12 @@ use std::sync::RwLock;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
-    Database, SqliteAgentStatusStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
-    SqliteHookEventStore, SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore,
-    SqliteThreadStore, SqliteUsageStore, SqliteWikiNoteStore, SqliteWikiNoteThreadUpdateStore,
-    SqliteWorkItemEffortStore, SqliteWorkItemEventStore, SqliteWorkItemLinkStore,
-    SqliteWorkItemStore, SqliteWorkNoteStore,
+    Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqlitePageVisitStore,
+    SqliteSnapshotStore, SqliteStreamStore, SqliteThreadStore, SqliteUsageStore,
+    SqliteWikiNoteStore, SqliteWikiNoteThreadUpdateStore, SqliteWorkItemEffortStore,
+    SqliteWorkItemEventStore, SqliteWorkItemLinkStore, SqliteWorkItemStore, SqliteWorkNoteStore,
 };
+use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
 
 #[derive(Debug, Error)]
@@ -121,9 +124,14 @@ pub struct Services {
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
     pub snapshot_store: Arc<SqliteSnapshotStore>,
-    pub hook_event_store: Arc<SqliteHookEventStore>,
-    pub agent_status_store: Arc<SqliteAgentStatusStore>,
+    pub hook_event_store: Arc<dyn HookEventStore>,
+    pub agent_status_store: Arc<dyn AgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
+    /// Backing in-memory state for hook events + agent status. Both
+    /// `hook_event_store` and `agent_status_store` are trait-object
+    /// views of this same registry — keep the concrete handle around
+    /// for code that wants to bypass the trait surfaces.
+    pub thread_runtime: Arc<thread_runtime::ThreadRuntimeRegistry>,
     pub effort_store: Arc<SqliteWorkItemEffortStore>,
     pub wiki_note_thread_updates: Arc<SqliteWikiNoteThreadUpdateStore>,
     pub hook_ingest: HookIngestService,
@@ -161,8 +169,10 @@ impl Services {
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
         let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
-        let hook_event_store = Arc::new(SqliteHookEventStore::new(db.clone()));
-        let agent_status_store = Arc::new(SqliteAgentStatusStore::new(db.clone()));
+        let thread_runtime =
+            Arc::new(thread_runtime::ThreadRuntimeRegistry::with_default_capacity());
+        let hook_event_store: Arc<dyn HookEventStore> = thread_runtime.clone();
+        let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
         let wiki_note_thread_updates =
@@ -179,11 +189,8 @@ impl Services {
             agent_turn_store.clone(),
             event_bus.clone(),
         );
-        let recovery_svc = recovery::RecoveryService::new(
-            agent_turn_store.clone(),
-            agent_status_store.clone(),
-            event_bus.clone(),
-        );
+        let recovery_svc =
+            recovery::RecoveryService::new(agent_turn_store.clone(), event_bus.clone());
 
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
@@ -218,6 +225,7 @@ impl Services {
             hook_event_store,
             agent_status_store,
             agent_turn_store,
+            thread_runtime,
             effort_store,
             wiki_note_thread_updates,
             hook_ingest,
@@ -260,8 +268,10 @@ impl Services {
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
         let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
-        let hook_event_store = Arc::new(SqliteHookEventStore::new(db.clone()));
-        let agent_status_store = Arc::new(SqliteAgentStatusStore::new(db.clone()));
+        let thread_runtime =
+            Arc::new(thread_runtime::ThreadRuntimeRegistry::with_default_capacity());
+        let hook_event_store: Arc<dyn HookEventStore> = thread_runtime.clone();
+        let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
         let wiki_note_thread_updates =
@@ -277,11 +287,8 @@ impl Services {
             agent_turn_store.clone(),
             event_bus.clone(),
         );
-        let recovery_svc = recovery::RecoveryService::new(
-            agent_turn_store.clone(),
-            agent_status_store.clone(),
-            event_bus.clone(),
-        );
+        let recovery_svc =
+            recovery::RecoveryService::new(agent_turn_store.clone(), event_bus.clone());
         let pty = oxplow_pty::PtyManager::spawn();
         let tmux: Arc<dyn oxplow_tmux::TmuxRunner> = Arc::new(oxplow_tmux::SystemTmux::new());
         let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
@@ -312,6 +319,7 @@ impl Services {
             hook_event_store,
             agent_status_store,
             agent_turn_store,
+            thread_runtime,
             effort_store,
             wiki_note_thread_updates,
             hook_ingest,

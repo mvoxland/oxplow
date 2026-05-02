@@ -13,7 +13,7 @@
     "test": "bun run --cwd apps/desktop test && cargo test --workspace",
     "test:rust": "cargo test --workspace",
     "test:ts": "bun run --cwd apps/desktop test",
-    "tauri:dev": "bun run --cwd apps/desktop tauri dev",
+    "tauri:dev": "OXPLOW_PROJECT_DIR=\"$PWD\" bun run --cwd apps/desktop tauri dev",
     "tauri:build": "bun run --cwd apps/desktop tauri build",
     "e2e": "bunx playwright test"
   },
