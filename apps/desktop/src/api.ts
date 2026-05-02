@@ -1322,16 +1322,6 @@ export async function listAllRefs(_streamId: string): Promise<import("./api-type
   >;
 }
 
-export async function addWorkItemNote(
-  _streamId: string,
-  _threadId: string,
-  itemId: string,
-  note: string,
-): Promise<WorkItemEvent[]> {
-  unwrap(await commands.addWorkNote(itemId, note, "user"));
-  return listWorkItemEvents(_streamId, _threadId, itemId);
-}
-
 export async function listWorkItemEvents(
   _streamId: string,
   _threadId: string,
@@ -1340,10 +1330,6 @@ export async function listWorkItemEvents(
   return unwrap(
     await commands.listWorkItemEvents(itemId ?? null, null),
   ) as unknown as WorkItemEvent[];
-}
-
-export async function getWorkNotes(itemId: string): Promise<WorkNote[]> {
-  return unwrap(await commands.listWorkNotes(itemId)) as unknown as WorkNote[];
 }
 
 export async function getBranchChanges(
@@ -1615,6 +1601,25 @@ export interface AgentStatusEntry {
   streamId: string;
   threadId: string;
   status: AgentStatus;
+}
+
+/// Synthesize an Interrupt hook for `threadId`. Used by the agent
+/// terminal's Escape handler — Claude Code cancels the in-flight turn
+/// on Escape but does not emit a Stop/Interrupt hook itself, so the
+/// working-dot would stay Running until the next user prompt.
+/// Posting an Interrupt envelope here closes any open agent_turn and
+/// flips the derived status back to Idle immediately.
+export async function recordUserInterrupt(threadId: string, streamId: string | null): Promise<void> {
+  unwrap(
+    await commands.ingestHookEvent({
+      kind: "interrupt",
+      thread_id: threadId,
+      stream_id: streamId,
+      session_id: null,
+      payload_json: JSON.stringify({ source: "user-escape" }),
+      prompt: null,
+    }),
+  );
 }
 
 export async function listAgentStatuses(_streamId?: string): Promise<AgentStatusEntry[]> {

@@ -183,9 +183,7 @@ export const commands = {
 	listBacklog: () => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_backlog")),
 	// Bucketed backlog view: ready/blocked/in_progress/done.
 	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
-	addWorkNote: (workItemId: WorkItemId, body: string, author: string) => typedError<WorkNote, IpcError>(__TAURI_INVOKE("add_work_note", { workItemId, body, author })),
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<WorkNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
-	listWorkNotes: (workItemId: WorkItemId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_work_notes", { workItemId })),
 	listThreadNotes: (threadId: ThreadId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
 	listWorkItemEvents: (itemId: string | null, threadId: string | null) => typedError<WorkItemEvent[], IpcError>(__TAURI_INVOKE("list_work_item_events", { itemId, threadId })),

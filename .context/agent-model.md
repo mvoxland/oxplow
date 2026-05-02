@@ -283,11 +283,11 @@ The pipeline runs in priority order:
    `in_progress` rows pile up because nothing forces a settle.
    **No-change suppression.** The runtime keeps a per-thread fingerprint
    (`lastAuditSignatureByThread`, signature = sorted
-   `id|updated_at|note_count` over the in_progress set) of the last set
+   `id|updated_at` over the in_progress set) of the last set
    it audited. On the next Stop, if the current signature matches the
    recorded one — same items, no `update_work_item` /
-   `complete_task` (which bumps `updated_at`), no `add_work_note`
-   (which bumps `note_count`) — the directive is suppressed. Any
+   `complete_task` (which bumps `updated_at`) — the directive is
+   suppressed. Any
    change re-arms the audit. This stops the tight ack-loop where the
    agent answers "still in progress" → Stop fires → identical audit
    nudge → same answer, costing the user a wall of repeated lines and
@@ -371,7 +371,8 @@ that, the orchestrator has two modes:
 2. **Subagent dispatch for bigger work.** For multi-file/multi-step/
    risky changes, the orchestrator calls `oxplow__read_work_options`,
    launches one `general-purpose` subagent with the brief, and
-   records the summary via `add_work_note`. Subagents run in isolated
+   closes the item via `complete_task` (whose `summary` lands on the
+   matching `work_item_effort.summary` row). Subagents run in isolated
    context windows — their tokens don't count against the orchestrator,
    so main context stays flat regardless of queue depth.
 
@@ -428,7 +429,7 @@ intermediate `ready` step.
 - `get_batch_context`, `list_batch_work`,
   `list_ready_work`, `read_work_options`, `create_work_item`, `update_work_item`,
   `get_work_item`, `delete_work_item`, `reorder_work_items`,
-  `link_work_items`, `add_work_note`, `list_recent_file_changes`,
+  `link_work_items`, `list_recent_file_changes`,
   `dispatch_work_item`, `file_epic_with_children`, `complete_task`,
   `transition_work_items`
 - `dispatch_work_item({ threadId, itemId, extraContext?, autoStart? })` composes

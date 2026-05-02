@@ -73,10 +73,16 @@ export function TerminalPane({
   paneTarget,
   visible,
   transportMode,
+  onUserInterrupt,
 }: {
   paneTarget: string;
   visible: boolean;
   transportMode: "direct" | "tmux";
+  /// Fires when the user presses Escape in live mode (i.e. signals
+  /// Claude Code to cancel the in-flight turn). Lets the host
+  /// synthesize an Interrupt hook so the working-dot flips to idle
+  /// even though Claude Code itself doesn't emit a Stop. */
+  onUserInterrupt?(): void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -304,6 +310,20 @@ export function TerminalPane({
         if (event.key === "Escape") {
           return false;
         }
+      }
+
+      // Plain Escape in live mode: Claude Code interprets a single
+      // \x1b as "cancel the in-flight turn" but does NOT emit a Stop
+      // hook for it, so oxplow's working-dot would stay Running until
+      // the next user prompt. Notify the host so it can synthesize an
+      // Interrupt hook. Don't intercept the byte itself — Claude still
+      // needs to receive the \x1b through the normal onData path.
+      if (
+        event.key === "Escape" &&
+        modeRef.current === "live" &&
+        !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
+      ) {
+        onUserInterrupt?.();
       }
 
       return true;

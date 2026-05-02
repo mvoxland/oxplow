@@ -72,9 +72,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::backlog::list_backlog,
         commands::backlog::get_backlog_state,
         // notes (work item / thread)
-        commands::notes::add_work_note,
         commands::notes::add_thread_note,
-        commands::notes::list_work_notes,
         commands::notes::list_thread_notes,
         commands::notes::delete_work_note,
         commands::notes::list_work_item_events,

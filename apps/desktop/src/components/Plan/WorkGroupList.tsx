@@ -221,6 +221,21 @@ export function WorkGroupList({
     if (from < 0 || to < 0) { resetDrag(); return; }
     const dragged = allRows[from]!;
     const target = allRows[to]!;
+    // Manual reorder *within* the Done section is intentionally a
+    // no-op: Done is sorted newest-completed first (visual descending
+    // by sort_index, which `updateItem` bumps to MAX+1 on every
+    // non-Done → Done transition). Letting the user drag rows around
+    // inside Done would break that contract. Cross-section drops
+    // (Done ↔ another section) still flow through to status changes
+    // below.
+    if (
+      dragged.kind === "work" && target.kind === "work" &&
+      classifyRow(dragged.item, epicChildrenMap) === "done" &&
+      classifyRow(target.item, epicChildrenMap) === "done"
+    ) {
+      resetDrag();
+      return;
+    }
     const isMultiDrag = dragged.kind === "work" && markedIds && markedIds.has(dragged.item.id) && markedIds.size > 1;
     // Track any status changes the drop implies so we can feed the *effective*
     // new status into finalizeReorderIds below — otherwise the dragged row
@@ -600,9 +615,9 @@ export function WorkGroupList({
                 </span>
               ) : null}
             </div>
-            {!isCollapsed ? (
+            {!isCollapsed || empty ? (
               <>
-                {section.kind === "toDo" && followups && followups.length > 0
+                {!isCollapsed && section.kind === "toDo" && followups && followups.length > 0
                   ? followups.map((fu) => (
                       <FollowupRow
                         key={fu.id}
@@ -611,7 +626,7 @@ export function WorkGroupList({
                       />
                     ))
                   : null}
-                {renderedRows.map(renderRow)}
+                {!isCollapsed ? renderedRows.map(renderRow) : null}
                 {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
                   <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
                     {section.kind === "inProgress"
