@@ -209,6 +209,9 @@ impl Services {
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
 
+        let background_tasks = BackgroundTaskStore::new();
+        bridge_background_task_events(&background_tasks, &event_bus);
+
         Ok(Self {
             config: config_arc,
             db,
@@ -234,7 +237,7 @@ impl Services {
             effort_store,
             wiki_note_thread_updates,
             hook_ingest,
-            background_tasks: BackgroundTaskStore::new(),
+            background_tasks,
             followups: FollowupStore::new(),
             pty,
             tmux,
@@ -329,7 +332,11 @@ impl Services {
             effort_store,
             wiki_note_thread_updates,
             hook_ingest,
-            background_tasks: BackgroundTaskStore::new(),
+            background_tasks: {
+                let store = BackgroundTaskStore::new();
+                bridge_background_task_events(&store, &event_bus);
+                store
+            },
             followups: FollowupStore::new(),
             pty,
             tmux,
@@ -343,6 +350,36 @@ impl Services {
             finished_cleared_at: Arc::new(RwLock::new(None)),
         })
     }
+}
+
+/// Forward every BackgroundTaskStore broadcast event onto the typed
+/// EventBus as `OxplowEvent::BackgroundTasksChanged`. The store's own
+/// channel carries finer-grained `Started`/`Updated`/`Ended` info, but
+/// the renderer's coarse `backgroundTasksChanged` listener (re-fetches
+/// the row and decides terminal vs non-terminal from `status`) is
+/// sufficient. Without this bridge the bottom-bar indicator stays
+/// silent and `awaitBackgroundTask` never resolves.
+fn bridge_background_task_events(
+    store: &BackgroundTaskStore,
+    bus: &EventBus,
+) {
+    let mut rx = store.subscribe();
+    let bus = bus.clone();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(_) => {
+                    bus.emit(OxplowEvent::BackgroundTasksChanged);
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    // A laggy subscriber missed some events; emit one
+                    // catch-up tick so the UI re-fetches.
+                    bus.emit(OxplowEvent::BackgroundTasksChanged);
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 #[cfg(test)]
