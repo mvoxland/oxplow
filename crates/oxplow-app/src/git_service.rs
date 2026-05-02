@@ -32,7 +32,7 @@ use oxplow_git::{
     WorkspaceFile, WorkspaceIndexedFile, WorkspaceStatusSummary,
 };
 use tokio::sync::{broadcast, mpsc, RwLock};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::events::{EventBus, OxplowEvent};
 
@@ -346,6 +346,7 @@ impl GitService {
     }
 
     async fn do_refresh(&self, stream_id: &StreamId, kinds: RefreshKinds) {
+        let t0 = Instant::now();
         let snapshot = {
             let inner = self.inner.read().await;
             match inner.snapshots.get(stream_id) {
@@ -447,6 +448,17 @@ impl GitService {
             inner.recent_remote_branches = Some(rb);
             changed.remote_branches = true;
         }
+        info!(
+            target: "git_service.timing",
+            stream = %stream_id,
+            method = "do_refresh",
+            statuses = kinds.statuses,
+            branches = kinds.branches,
+            conflict = kinds.conflict,
+            log = kinds.log,
+            remote_branches = kinds.remote_branches,
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+        );
         if changed.statuses
             || changed.branches
             || changed.conflict
@@ -502,9 +514,17 @@ impl GitService {
         &self,
         stream_id: Option<&str>,
     ) -> WorkspaceStatusSummary {
+        let t0 = Instant::now();
         if let Some(snap) = self.snapshot_for(stream_id).await {
             let guard = snap.read().await;
             if let Some(s) = guard.status_summary.as_ref() {
+                info!(
+                    target: "git_service.timing",
+                    stream = stream_id.unwrap_or("<root>"),
+                    method = "status_summary",
+                    cache = "hit",
+                    elapsed_ms = t0.elapsed().as_millis() as u64,
+                );
                 return s.clone();
             }
         }
@@ -517,8 +537,22 @@ impl GitService {
         .await
         .ok();
         let Some((summary, map)) = summary else {
+            info!(
+                target: "git_service.timing",
+                stream = stream_id.unwrap_or("<root>"),
+                method = "status_summary",
+                cache = "miss-empty",
+                elapsed_ms = t0.elapsed().as_millis() as u64,
+            );
             return WorkspaceStatusSummary::default();
         };
+        info!(
+            target: "git_service.timing",
+            stream = stream_id.unwrap_or("<root>"),
+            method = "status_summary",
+            cache = "miss",
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+        );
         if let Some(snap) = self.snapshot_for(stream_id).await {
             let mut guard = snap.write().await;
             guard.statuses = Some(map);
@@ -608,10 +642,19 @@ impl GitService {
         base: String,
         head: String,
     ) -> AheadBehind {
+        let t0 = Instant::now();
         let key = (base.clone(), head.clone());
         if let Some(snap) = self.snapshot_for(stream_id).await {
             let guard = snap.read().await;
             if let Some(v) = guard.ahead_behind.get(&key) {
+                info!(
+                    target: "git_service.timing",
+                    stream = stream_id.unwrap_or("<root>"),
+                    method = "ahead_behind",
+                    cache = "hit",
+                    base = %base, head = %head,
+                    elapsed_ms = t0.elapsed().as_millis() as u64,
+                );
                 return v.clone();
             }
         }
@@ -623,6 +666,14 @@ impl GitService {
         })
         .await
         .expect("ahead_behind join");
+        info!(
+            target: "git_service.timing",
+            stream = stream_id.unwrap_or("<root>"),
+            method = "ahead_behind",
+            cache = "miss",
+            base = %base, head = %head,
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+        );
         if let Some(snap) = self.snapshot_for(stream_id).await {
             let mut guard = snap.write().await;
             guard.ahead_behind.insert(key, result.clone());
@@ -653,6 +704,7 @@ impl GitService {
         stream_id: Option<&str>,
         opts: GitLogOptions,
     ) -> GitLogResult {
+        let t0 = Instant::now();
         // Cache hit: HEAD-only query whose limit fits inside the
         // pre-fetched window. The dashboard asks for limit=5; the
         // GitHistory page's first paint asks for ~50.
@@ -663,6 +715,14 @@ impl GitService {
                     let guard = snap.read().await;
                     if let Some(cached) = guard.recent_log.as_ref() {
                         let take = want.min(cached.commits.len());
+                        info!(
+                            target: "git_service.timing",
+                            stream = stream_id.unwrap_or("<root>"),
+                            method = "git_log",
+                            cache = "hit",
+                            limit = want,
+                            elapsed_ms = t0.elapsed().as_millis() as u64,
+                        );
                         return GitLogResult {
                             commits: cached.commits[..take].to_vec(),
                         };
@@ -671,9 +731,21 @@ impl GitService {
             }
         }
         let path = self.resolve_repo_dir(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::get_git_log(&path, opts))
+        let limit_for_log = opts.limit.unwrap_or(0);
+        let all_for_log = opts.all;
+        let r = tokio::task::spawn_blocking(move || oxplow_git::get_git_log(&path, opts))
             .await
-            .expect("git_log join")
+            .expect("git_log join");
+        info!(
+            target: "git_service.timing",
+            stream = stream_id.unwrap_or("<root>"),
+            method = "git_log",
+            cache = "miss",
+            limit = limit_for_log,
+            all = all_for_log,
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+        );
+        r
     }
 
     pub async fn commit_detail(
@@ -768,11 +840,19 @@ impl GitService {
     }
 
     pub async fn list_recent_remote_branches(&self, limit: usize) -> Vec<RemoteBranchEntry> {
+        let t0 = Instant::now();
         {
             let inner = self.inner.read().await;
             if let Some(cached) = inner.recent_remote_branches.as_ref() {
                 if limit <= cached.len() || cached.len() < RECENT_REMOTE_BRANCHES_LIMIT {
                     let take = limit.min(cached.len());
+                    info!(
+                        target: "git_service.timing",
+                        method = "list_recent_remote_branches",
+                        cache = "hit",
+                        limit,
+                        elapsed_ms = t0.elapsed().as_millis() as u64,
+                    );
                     return cached[..take].to_vec();
                 }
             }
@@ -783,6 +863,13 @@ impl GitService {
         })
         .await
         .unwrap_or_default();
+        info!(
+            target: "git_service.timing",
+            method = "list_recent_remote_branches",
+            cache = "miss",
+            limit,
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+        );
         {
             let mut inner = self.inner.write().await;
             inner.recent_remote_branches = Some(fetched.clone());
