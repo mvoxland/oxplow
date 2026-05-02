@@ -1629,7 +1629,7 @@ export type FinishedEntry =
   | { kind: "note"; slug: string; title: string; t: string };
 
 export async function listRecentlyFinished(_threadId: string | null, limit: number): Promise<FinishedEntry[]> {
-  return unwrap(await commands.listRecentlyFinished(limit)) as unknown as FinishedEntry[];
+  return unwrap(await commands.listRecentlyFinished(limit)) as FinishedEntry[];
 }
 
 export async function clearRecentlyFinished(_threadId: string | null): Promise<void> {
