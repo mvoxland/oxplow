@@ -18,7 +18,7 @@ use tracing::{debug, warn};
 
 use oxplow_db::{FileSnapshot, SqliteSnapshotStore};
 use oxplow_domain::{StreamId, Timestamp};
-use oxplow_fs_watch::FsWatcher;
+use oxplow_fs_watch::{should_ignore_workspace_watch_path, FsWatcher};
 
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
@@ -84,6 +84,15 @@ impl SnapshotCaptureService {
             match rx.recv().await {
                 Ok(event) => {
                     let path = event.path;
+                    // Skip oxplow / git / build-cache dirs before we
+                    // even stat the path. These churn fast (lock files,
+                    // .tmp blobs, incremental compile artifacts) and
+                    // always race the watcher to a NotFound, which
+                    // used to spam DEBUG logs.
+                    let rel = path.strip_prefix(&self.project_dir).unwrap_or(&path);
+                    if should_ignore_workspace_watch_path(rel) {
+                        continue;
+                    }
                     if let Err(e) = self.capture_path(&path).await {
                         debug!(?path, error = %e, "snapshot capture: skipped");
                     }

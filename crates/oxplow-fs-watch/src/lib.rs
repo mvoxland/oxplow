@@ -120,6 +120,42 @@ fn classify(event: &notify::Event) -> WatchEventKind {
     }
 }
 
+/// Path segments that should never trigger workspace-level watch
+/// reactions (snapshot capture, indexing). These are either oxplow's
+/// own state directories, git's internal write spool (which churns
+/// faster than we can capture and produces ephemeral lock/tmp files
+/// that always race the watcher to a NotFound), or common build /
+/// cache dirs whose churn is enormous and uninteresting.
+const IGNORED_WORKSPACE_SEGMENTS: &[&str] = &[
+    ".git",
+    ".oxplow",
+    "target",
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+    ".turbo",
+    ".cache",
+    ".venv",
+    "__pycache__",
+];
+
+/// True if any path component of `relative` matches an ignored
+/// workspace segment. `relative` should already be made relative to
+/// the workspace root; absolute paths still work but match conserva-
+/// tively against the same segment list (`.git/...` anywhere in the
+/// chain is treated as ignored).
+pub fn should_ignore_workspace_watch_path(path: &Path) -> bool {
+    use std::path::Component;
+    path.components().any(|c| match c {
+        Component::Normal(seg) => seg
+            .to_str()
+            .map(|s| IGNORED_WORKSPACE_SEGMENTS.iter().any(|ig| *ig == s))
+            .unwrap_or(false),
+        _ => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,6 +301,16 @@ mod tests {
             }
         }
         assert!(top_seen, "expected top-level event for {top:?}");
+    }
+
+    #[test]
+    fn should_ignore_filters_oxplow_git_and_build_dirs() {
+        assert!(should_ignore_workspace_watch_path(Path::new(".oxplow/blobs/aa/foo.tmp")));
+        assert!(should_ignore_workspace_watch_path(Path::new(".git/index.lock")));
+        assert!(should_ignore_workspace_watch_path(Path::new("target/debug/x.bin")));
+        assert!(should_ignore_workspace_watch_path(Path::new("node_modules/foo/index.js")));
+        assert!(!should_ignore_workspace_watch_path(Path::new("src/main.rs")));
+        assert!(!should_ignore_workspace_watch_path(Path::new("docs/README.md")));
     }
 
     #[tokio::test]
