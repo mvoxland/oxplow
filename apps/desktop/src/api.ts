@@ -1643,12 +1643,12 @@ export type FinishedEntry =
   | { kind: "work-item"; itemId: string; title: string; t: string }
   | { kind: "note"; slug: string; title: string; t: string };
 
-export async function listRecentlyFinished(_threadId: string | null, limit: number): Promise<FinishedEntry[]> {
-  return unwrap(await commands.listRecentlyFinished(limit)) as FinishedEntry[];
+export async function listRecentlyFinished(threadId: string | null, limit: number): Promise<FinishedEntry[]> {
+  return unwrap(await commands.listRecentlyFinished(threadId, limit)) as FinishedEntry[];
 }
 
-export async function clearRecentlyFinished(_threadId: string | null): Promise<void> {
-  unwrap(await commands.clearRecentlyFinished());
+export async function clearRecentlyFinished(threadId: string | null): Promise<void> {
+  unwrap(await commands.clearRecentlyFinished(threadId));
 }
 
 export interface PageVisitInputApi {

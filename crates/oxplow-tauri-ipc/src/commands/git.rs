@@ -8,61 +8,13 @@ use oxplow_domain::stores::StreamStore;
 use crate::error::IpcError;
 use crate::state::AppState;
 
-fn project_dir(state: &tauri::State<'_, AppState>) -> std::path::PathBuf {
-    state.layout.project_dir.clone()
-}
-
-/// Resolve the working directory a git op should run against. When
-/// `stream_id` is provided and matches a registered stream, the
-/// stream's worktree path wins. Otherwise we fall back to the
-/// project root, matching the pre-per-stream behavior. Worktree
-/// paths recorded as relative are resolved against the project dir.
-///
-/// Public so other command modules (`log`, `snapshot`, …) can reuse
-/// it without duplicating the lookup.
-pub(crate) async fn resolve_repo_dir(
-    state: &tauri::State<'_, AppState>,
-    stream_id: Option<&str>,
-) -> std::path::PathBuf {
-    let Some(id) = stream_id else {
-        return project_dir(state);
-    };
-    let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
-    if let Ok(streams) = store.list().await {
-        if let Some(s) = streams.into_iter().find(|s| s.id.as_str() == id) {
-            let raw = std::path::PathBuf::from(&s.worktree_path);
-            if raw.is_absolute() {
-                return raw;
-            }
-            return state.layout.project_dir.join(raw);
-        }
-    }
-    project_dir(state)
-}
-
-async fn run_blocking_io<R>(
-    f: impl FnOnce() -> std::io::Result<R> + Send + 'static,
-) -> Result<R, IpcError>
-where
-    R: Send + 'static,
-{
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?
-        .map_err(|e| IpcError::internal(e.to_string()))
-}
-
 #[tauri::command]
 #[specta::specta]
 pub async fn get_repo_conflict_state(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<RepoConflictState, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    let s = tokio::task::spawn_blocking(move || oxplow_git::get_repo_conflict_state(&path))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?;
-    Ok(s)
+    Ok(state.git.conflict_state(stream_id.as_deref()).await)
 }
 
 #[tauri::command]
@@ -73,11 +25,7 @@ pub async fn get_ahead_behind(
     base: String,
     head: String,
 ) -> Result<AheadBehind, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    let ab = tokio::task::spawn_blocking(move || oxplow_git::get_ahead_behind(&path, &base, &head))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?;
-    Ok(ab)
+    Ok(state.git.ahead_behind(stream_id.as_deref(), base, head).await)
 }
 
 #[tauri::command]
@@ -87,12 +35,11 @@ pub async fn append_to_gitignore(
     stream_id: Option<String>,
     entry: String,
 ) -> Result<(), IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    tokio::task::spawn_blocking(move || oxplow_git::append_to_gitignore(&path, &entry))
+    state
+        .git
+        .append_to_gitignore(stream_id.as_deref(), entry)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))?
-        .map_err(|e| IpcError::internal(e.to_string()))?;
-    Ok(())
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -102,12 +49,11 @@ pub async fn restore_path(
     stream_id: Option<String>,
     path: String,
 ) -> Result<(), IpcError> {
-    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    tokio::task::spawn_blocking(move || oxplow_git::restore_path(&project, &path))
+    state
+        .git
+        .restore_path(stream_id.as_deref(), path)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))?
-        .map_err(|e| IpcError::internal(e.to_string()))?;
-    Ok(())
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 /// Re-export the operation kind so the TS bindings include it.
@@ -122,8 +68,11 @@ pub async fn git_fetch(
     stream_id: Option<String>,
     remote: Option<String>,
 ) -> Result<GitOpResult, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::fetch(&path, remote.as_deref())).await
+    state
+        .git
+        .fetch(stream_id.as_deref(), remote)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -132,8 +81,11 @@ pub async fn git_pull(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<GitOpResult, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::pull(&path)).await
+    state
+        .git
+        .pull(stream_id.as_deref())
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -144,8 +96,11 @@ pub async fn git_pull_remote_into_current(
     remote: String,
     branch: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::pull_remote_into_current(&path, &remote, &branch)).await
+    state
+        .git
+        .pull_remote_into_current(stream_id.as_deref(), remote, branch)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -154,8 +109,11 @@ pub async fn git_push(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<GitOpResult, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::push(&path)).await
+    state
+        .git
+        .push(stream_id.as_deref())
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -166,8 +124,11 @@ pub async fn git_push_current_to(
     remote: String,
     branch: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::push_current_to(&path, &remote, &branch)).await
+    state
+        .git
+        .push_current_to(stream_id.as_deref(), remote, branch)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -177,8 +138,11 @@ pub async fn git_merge_into(
     stream_id: Option<String>,
     source: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::merge(&path, &source)).await
+    state
+        .git
+        .merge(stream_id.as_deref(), source)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -188,8 +152,11 @@ pub async fn git_rebase_onto(
     stream_id: Option<String>,
     onto: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::rebase(&path, &onto)).await
+    state
+        .git
+        .rebase(stream_id.as_deref(), onto)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -199,8 +166,11 @@ pub async fn git_commit_all(
     stream_id: Option<String>,
     message: String,
 ) -> Result<GitOpResult, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::commit_all(&path, &message)).await
+    state
+        .git
+        .commit_all(stream_id.as_deref(), message)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -210,8 +180,11 @@ pub async fn git_add_path(
     stream_id: Option<String>,
     path: String,
 ) -> Result<GitOpResult, IpcError> {
-    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    run_blocking_io(move || oxplow_git::add_path(&project, &path)).await
+    state
+        .git
+        .add_path(stream_id.as_deref(), path)
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -219,10 +192,7 @@ pub async fn git_add_path(
 pub async fn list_all_refs(
     state: tauri::State<'_, AppState>,
 ) -> Result<GroupedGitRefs, IpcError> {
-    let path = project_dir(&state);
-    Ok(tokio::task::spawn_blocking(move || oxplow_git::list_all_refs(&path))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?)
+    Ok(state.git.list_all_refs().await)
 }
 
 #[tauri::command]
@@ -231,13 +201,10 @@ pub async fn list_recent_remote_branches(
     state: tauri::State<'_, AppState>,
     limit: Option<usize>,
 ) -> Result<Vec<RemoteBranchEntry>, IpcError> {
-    let path = project_dir(&state);
-    let limit = limit.unwrap_or(50);
-    Ok(
-        tokio::task::spawn_blocking(move || oxplow_git::list_recent_remote_branches(&path, limit))
-            .await
-            .map_err(|e| IpcError::internal(e.to_string()))?,
-    )
+    Ok(state
+        .git
+        .list_recent_remote_branches(limit.unwrap_or(50))
+        .await)
 }
 
 #[tauri::command]
@@ -248,13 +215,10 @@ pub async fn list_file_commits(
     path: String,
     limit: Option<usize>,
 ) -> Result<Vec<oxplow_git::GitLogCommit>, IpcError> {
-    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    let limit = limit.unwrap_or(50);
-    Ok(
-        tokio::task::spawn_blocking(move || oxplow_git::list_file_commits(&project, &path, limit))
-            .await
-            .map_err(|e| IpcError::internal(e.to_string()))?,
-    )
+    Ok(state
+        .git
+        .list_file_commits(stream_id.as_deref(), path, limit.unwrap_or(50))
+        .await)
 }
 
 #[tauri::command]
@@ -264,10 +228,7 @@ pub async fn git_blame(
     stream_id: Option<String>,
     path: String,
 ) -> Result<Vec<BlameLine>, IpcError> {
-    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    Ok(tokio::task::spawn_blocking(move || oxplow_git::git_blame(&project, &path))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?)
+    Ok(state.git.blame(stream_id.as_deref(), path).await)
 }
 
 #[tauri::command]
@@ -278,12 +239,7 @@ pub async fn local_blame(
     path: String,
     disk_text: String,
 ) -> Result<Vec<LocalBlameEntry>, IpcError> {
-    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    Ok(tokio::task::spawn_blocking(move || {
-        oxplow_git::local_blame(&project, &path, &disk_text)
-    })
-    .await
-    .map_err(|e| IpcError::internal(e.to_string()))?)
+    Ok(state.git.local_blame(stream_id.as_deref(), path, disk_text).await)
 }
 
 #[tauri::command]
@@ -292,10 +248,7 @@ pub async fn get_change_scopes(
     state: tauri::State<'_, AppState>,
     stream_id: Option<String>,
 ) -> Result<ChangeScopes, IpcError> {
-    let path = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    Ok(tokio::task::spawn_blocking(move || oxplow_git::get_change_scopes(&path))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?)
+    Ok(state.git.change_scopes(stream_id.as_deref()).await)
 }
 
 #[tauri::command]
@@ -305,10 +258,7 @@ pub async fn get_branch_changes(
     stream_id: Option<String>,
     base_ref: String,
 ) -> Result<BranchChanges, IpcError> {
-    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    Ok(tokio::task::spawn_blocking(move || oxplow_git::list_branch_changes(&project, &base_ref))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?)
+    Ok(state.git.branch_changes(stream_id.as_deref(), base_ref).await)
 }
 
 #[tauri::command]
@@ -316,10 +266,7 @@ pub async fn get_branch_changes(
 pub async fn list_existing_worktrees(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GitWorktreeEntry>, IpcError> {
-    let path = project_dir(&state);
-    Ok(tokio::task::spawn_blocking(move || oxplow_git::list_existing_worktrees(&path))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?)
+    Ok(state.git.list_existing_worktrees().await)
 }
 
 #[tauri::command]
@@ -327,7 +274,6 @@ pub async fn list_existing_worktrees(
 pub async fn list_adoptable_worktrees(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GitWorktreeEntry>, IpcError> {
-    let path = project_dir(&state);
     let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
     let registered: Vec<String> = store
         .list()
@@ -335,11 +281,7 @@ pub async fn list_adoptable_worktrees(
         .into_iter()
         .map(|s| s.worktree_path)
         .collect();
-    Ok(tokio::task::spawn_blocking(move || {
-        oxplow_git::list_adoptable_worktrees(&path, &registered)
-    })
-    .await
-    .map_err(|e| IpcError::internal(e.to_string()))?)
+    Ok(state.git.list_adoptable_worktrees(registered).await)
 }
 
 #[tauri::command]
@@ -350,12 +292,10 @@ pub async fn search_workspace_text(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<TextSearchHit>, IpcError> {
-    let project = resolve_repo_dir(&state, stream_id.as_deref()).await;
-    Ok(
-        tokio::task::spawn_blocking(move || oxplow_git::search_workspace_text(&project, &query, limit))
-            .await
-            .map_err(|e| IpcError::internal(e.to_string()))?,
-    )
+    Ok(state
+        .git
+        .search_workspace_text(stream_id.as_deref(), query, limit)
+        .await)
 }
 
 #[tauri::command]
@@ -365,8 +305,5 @@ pub async fn read_file_at_ref(
     r#ref: String,
     path: String,
 ) -> Result<Option<String>, IpcError> {
-    let project = project_dir(&state);
-    Ok(tokio::task::spawn_blocking(move || oxplow_git::read_file_at_ref(&project, &r#ref, &path))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?)
+    Ok(state.git.read_file_at_ref(r#ref, path).await)
 }

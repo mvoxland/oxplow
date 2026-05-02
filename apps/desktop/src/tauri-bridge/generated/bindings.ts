@@ -217,13 +217,14 @@ export const commands = {
 	 *  been closed yet). The renderer already filters to its own tab list.
 	 */
 	listCurrentlyOpenUsage: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_currently_open_usage", { limit })),
-	listRecentlyFinished: (limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { limit })),
+	listRecentlyFinished: (threadId: string | null, limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { threadId, limit })),
 	/**
 	 *  Hide the current "Finished" entries behind a cursor. Source rows
 	 *  (work items / wiki notes) are untouched; new finishes still surface
-	 *  because their timestamp is newer than the cursor.
+	 *  because their timestamp is newer than the cursor. Cursor is
+	 *  per-thread so clearing one thread's section doesn't blank another.
 	 */
-	clearRecentlyFinished: () => typedError<null, IpcError>(__TAURI_INVOKE("clear_recently_finished")),
+	clearRecentlyFinished: (threadId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("clear_recently_finished", { threadId })),
 	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
 	listRecentUsage: (limit: number) => typedError<UsageEvent[], IpcError>(__TAURI_INVOKE("list_recent_usage", { limit })),
 	/**
