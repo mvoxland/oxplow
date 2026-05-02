@@ -15,7 +15,7 @@ import {
   listAgentStatuses,
   listRecentRemoteBranches,
   listStreams,
-  listWorkspaceFiles,
+  getWorkspaceStatusSummary,
   subscribeAgentStatus,
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
@@ -108,8 +108,8 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     }
     try {
       setError(null);
-      const [filesResult, log, remoteBranches, streams] = await Promise.all([
-        listWorkspaceFiles(streamId),
+      const [statusSummary, log, remoteBranches, streams] = await Promise.all([
+        getWorkspaceStatusSummary(streamId),
         getGitLog(streamId, { limit: RECENT_LIMIT, all: false }),
         listRecentRemoteBranches(streamId, 20),
         listStreams(),
@@ -140,9 +140,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       const otherStreams = streams.filter((s) => s.id !== streamId);
       const streamRows: StreamRow[] = await Promise.all(
         otherStreams.map(async (other) => {
-          const uncommitted = await listWorkspaceFiles(other.id)
-            .then((r) => r.summary)
-            .catch(() => null);
+          const uncommitted = await getWorkspaceStatusSummary(other.id).catch(() => null);
           const otherBranch = other.branch || null;
           if (!otherBranch || !branch || otherBranch === branch) {
             return { stream: other, branch: otherBranch, ahead: 0, behind: 0, uncommitted };
@@ -161,7 +159,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
           aheadUpstream,
           behindUpstream,
         },
-        uncommitted: filesResult.summary,
+        uncommitted: statusSummary,
         recentLog: log,
         streams: streamRows,
         remoteBranches,
