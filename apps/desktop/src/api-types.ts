@@ -392,13 +392,6 @@ export interface RepoConflictState {
   conflictedCount: number;
 }
 
-export interface UsageRollup {
-  totalEvents: number;
-  byKind: Record<string, number>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
 export interface FinishedEntry {
   id: string;
   kind: string;

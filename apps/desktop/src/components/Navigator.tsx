@@ -1,9 +1,10 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Stream, Thread, ThreadState } from "../api.js";
+import { archiveStream, type Stream, type Thread, type ThreadState } from "../api.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
+import { Slideover } from "./Slideover.js";
 
 interface NavigatorProps {
   streams: Stream[];
@@ -75,6 +76,25 @@ export function Navigator({
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
+  // Remove-stream confirm flow
+  const [removeStream, setRemoveStream] = useState<Stream | null>(null);
+  const [removeWorktree, setRemoveWorktree] = useState(false);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  async function handleRemoveStream() {
+    if (!removeStream) return;
+    try {
+      setRemoveBusy(true);
+      setRemoveError(null);
+      await archiveStream(removeStream.id, removeWorktree);
+      setRemoveStream(null);
+    } catch (e) {
+      setRemoveError(String(e));
+    } finally {
+      setRemoveBusy(false);
+    }
+  }
 
   // Hover-to-open behavior: opening on mouse-enter to the strip,
   // closing when the pointer leaves the whole nav (strip + overlay).
@@ -263,6 +283,8 @@ export function Navigator({
                 return <div key={`o-gap-${row.afterStreamId}-${idx}`} style={{ height: GAP_HEIGHT }} />;
               }
               if (row.kind === "stream") {
+                const isPrimary = row.stream.kind === "primary";
+                const isWorking = streamStatuses[row.stream.id] === "working";
                 const streamMenu: MenuItem[] = [
                   {
                     id: "stream.add-thread",
@@ -283,6 +305,21 @@ export function Navigator({
                     run: () => onOpenStreamSettings?.(row.stream.id),
                   },
                 ];
+                if (!isPrimary) {
+                  streamMenu.push({
+                    id: "stream.remove",
+                    label: "Remove…",
+                    // Disable when an agent is currently running in
+                    // any of this stream's threads — the IPC also
+                    // rejects, but disabling avoids a useless prompt.
+                    enabled: !isWorking,
+                    run: () => {
+                      setRemoveStream(row.stream);
+                      setRemoveWorktree(false);
+                      setRemoveError(null);
+                    },
+                  });
+                }
                 return (
                   <OverlayRow
                     key={`o-s-${row.stream.id}`}
@@ -382,6 +419,80 @@ export function Navigator({
           </div>
         </div>
       ) : null}
+      <Slideover
+        open={!!removeStream}
+        onClose={() => { if (!removeBusy) setRemoveStream(null); }}
+        title={removeStream ? `Remove stream — ${removeStream.title}` : "Remove stream"}
+        testId="stream-remove-slideover"
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={() => setRemoveStream(null)}
+              disabled={removeBusy}
+              style={{
+                background: "var(--surface-card)",
+                color: "var(--text-primary)",
+                border: "1px solid var(--border-subtle)",
+                padding: "6px 12px",
+                borderRadius: 6,
+                cursor: removeBusy ? "not-allowed" : "pointer",
+                fontFamily: "inherit",
+                fontSize: 12,
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              data-testid="stream-remove-confirm"
+              onClick={() => { void handleRemoveStream(); }}
+              disabled={removeBusy}
+              style={{
+                background: "#b32a2a",
+                color: "#fff",
+                border: "1px solid transparent",
+                padding: "6px 12px",
+                borderRadius: 6,
+                cursor: removeBusy ? "not-allowed" : "pointer",
+                fontFamily: "inherit",
+                fontSize: 12,
+                fontWeight: 500,
+              }}
+            >
+              {removeBusy ? "Removing…" : "Remove"}
+            </button>
+          </>
+        )}
+      >
+        {removeStream ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 12 }}>
+            <p style={{ margin: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              The stream and every thread under it will be archived (hidden from the rail). History — closed efforts, snapshots, and visit logs — stays intact.
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                data-testid="stream-remove-delete-worktree"
+                checked={removeWorktree}
+                onChange={(e) => setRemoveWorktree(e.target.checked)}
+                disabled={removeBusy || removeStream.kind !== "worktree"}
+              />
+              <span>
+                Also delete the on-disk worktree
+                {removeStream.kind === "worktree" ? (
+                  <span style={{ color: "var(--text-secondary)" }}> ({removeStream.worktree_path})</span>
+                ) : (
+                  <span style={{ color: "var(--text-secondary)" }}> — primary stream has no worktree to delete</span>
+                )}
+              </span>
+            </label>
+            {removeError ? (
+              <div style={{ color: "#ff6b6b", whiteSpace: "pre-wrap" }}>{removeError}</div>
+            ) : null}
+          </div>
+        ) : null}
+      </Slideover>
     </div>
   );
 }

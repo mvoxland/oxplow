@@ -53,6 +53,6 @@ pub use workspace::{
     WorkspaceStatusSummary,
 };
 pub use worktree::{
-    ensure_worktree, list_adoptable_worktrees, list_existing_worktrees, list_sibling_worktrees,
+    ensure_worktree, list_adoptable_worktrees, list_existing_worktrees,
     EnsureWorktreeError, GitWorktreeEntry,
 };

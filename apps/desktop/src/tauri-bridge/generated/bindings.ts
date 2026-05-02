@@ -231,6 +231,13 @@ export const commands = {
 	clearRecentlyFinished: () => typedError<null, IpcError>(__TAURI_INVOKE("clear_recently_finished")),
 	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
 	listRecentUsage: (limit: number) => typedError<UsageEvent[], IpcError>(__TAURI_INVOKE("list_recent_usage", { limit })),
+	/**
+	 *  Per-key rollup of recent usage events of a single `kind`. Returns
+	 *  the most-recently-touched keys (file paths, note slugs, work-item
+	 *  ids, …) along with how many times each has been touched. Drives
+	 *  "recent files" / "recent notes" affordances in the renderer.
+	 */
+	listRecentUsageRollup: (kind: string, streamId: string | null, limit: number) => typedError<UsageRollup[], IpcError>(__TAURI_INVOKE("list_recent_usage_rollup", { kind, streamId, limit })),
 	listCodeQualityScans: (limit: number) => typedError<CodeQualityScan[], IpcError>(__TAURI_INVOKE("list_code_quality_scans", { limit })),
 	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
 	/**
@@ -301,7 +308,6 @@ export const commands = {
 	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
 	searchWorkspaceText: (streamId: string | null, query: string, limit: number | null) => typedError<TextSearchHit[], IpcError>(__TAURI_INVOKE("search_workspace_text", { streamId, query, limit })),
 	listExistingWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_existing_worktrees")),
-	listSiblingWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_sibling_worktrees")),
 	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
 	gitBlame: (streamId: string | null, path: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("git_blame", { streamId, path })),
 	localBlame: (streamId: string | null, path: string, diskText: string) => typedError<LocalBlameEntry[], IpcError>(__TAURI_INVOKE("local_blame", { streamId, path, diskText })),
@@ -1153,6 +1159,19 @@ export type UsageEvent = {
 	kind: string,
 	payload_json: string,
 	occurred_at: Timestamp,
+};
+
+/**
+ *  Per-key aggregation of usage events. Returned by
+ *  `SqliteUsageStore::list_recent_rollup` for callers that want
+ *  "most-recently-touched X" lists rather than the raw event log
+ *  (e.g. the WikiActivityBar's recent-files strip).
+ */
+export type UsageRollup = {
+	kind: string,
+	key: string,
+	last_at: Timestamp,
+	count: number,
 };
 
 export type VisitedPage = {
