@@ -164,12 +164,19 @@ unseeded streams just take the live-query path until the seed lands.
 ### What's cached vs. pass-through
 
 Cached today: `status_summary`, `statuses`, `branches_for`,
-`conflict_state`. Pass-through (no cache yet, but routed through the
-service so caching can be layered in later without touching call
-sites): `git_log`, `commit_detail`, `commits_ahead_of`, `blame`,
-`local_blame`, `list_file_commits`, `read_file_at_ref`, `branch_changes`,
-`change_scopes`, `ahead_behind`, `search_workspace_text`,
-`list_all_refs`, `list_recent_remote_branches`,
+`conflict_state`, `git_log` (top `RECENT_LOG_LIMIT` HEAD-only commits
+per stream — slices to serve smaller-limit reads), `ahead_behind`
+(per-stream `(base, head) → AheadBehind` memo, cleared whenever refs
+or HEAD move), and `list_recent_remote_branches` (project-wide,
+`RECENT_REMOTE_BRANCHES_LIMIT` entries). All cached slices are warmed
+on `register()` via `RefreshKinds::all()` and re-fetched from the
+debounced refresh worker on `WorkspaceChanged` / `GitRefsChanged`.
+
+Pass-through (no cache yet, but routed through the service so caching
+can be layered in later without touching call sites):
+`commit_detail`, `commits_ahead_of`, `blame`, `local_blame`,
+`list_file_commits`, `read_file_at_ref`, `branch_changes`,
+`change_scopes`, `search_workspace_text`, `list_all_refs`,
 `list_existing_worktrees`, `list_adoptable_worktrees`,
 `detect_default_branch`. Workspace-file ops
 (`list_workspace_entries` / `read_workspace_file` /
