@@ -2,8 +2,9 @@
 //!
 //! A `Stream` is the project-level workspace context. Exactly one
 //! `primary` stream per project (representing the repo root); every
-//! other stream is a `worktree` stream with its own
-//! `.oxplow/worktrees/<slug>/`. Encoded in `.context/architecture.md`.
+//! other stream is a `worktree` stream living at
+//! `<parent>/<project_basename>-<slug>/` (a sibling of the main
+//! repo). Encoded in `.context/architecture.md`.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;

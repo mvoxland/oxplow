@@ -77,7 +77,7 @@ debounce ~250ms (a single `git commit` fires a dozen events touching
 `HEAD`, `refs/*`, `logs/*`, `index`, `ORIG_HEAD`, …).
 
 When the stream lives in a secondary worktree (the common case — oxplow
-manages its own worktrees under `.oxplow/worktrees/`), the stream's
+creates worktrees as siblings of the main repo), the stream's
 `.git` is a pointer file, not a directory. The watcher reads the
 `gitdir:` line to find the per-worktree state dir (containing `HEAD`,
 `index`, `logs/HEAD`) and also follows the `commondir` pointer to watch

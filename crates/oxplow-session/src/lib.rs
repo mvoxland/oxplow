@@ -2,7 +2,8 @@
 //!
 //! Encodes the primary-vs-worktree invariant from
 //! `.context/architecture.md`: exactly one primary stream per project,
-//! everything else is a worktree under `.oxplow/worktrees/<slug>/`.
+//! everything else is a worktree at `<parent>/<basename>-<slug>/` —
+//! a sibling of the main repo (see `.context/architecture.md`).
 //!
 //! Composes `oxplow-git` (for actual `git worktree add`) and the
 //! `StreamStore` trait from `oxplow-domain` for persistence.
@@ -43,18 +44,41 @@ pub enum SessionError {
 pub struct WorkspaceLayout {
     /// Project root — the daemon's start directory.
     pub project_dir: PathBuf,
-    /// Where worktree streams live: `<project_dir>/.oxplow/worktrees/`.
+    /// Parent directory of `project_dir`; new worktrees land here as
+    /// `<project_basename>-<slug>/` siblings of the main repo. Falls
+    /// back to `project_dir` itself if the project has no parent
+    /// (e.g. `/`), in which case `git worktree add` will surface the
+    /// error.
     pub worktrees_root: PathBuf,
+    /// Project basename (the leaf segment of `project_dir`). Used to
+    /// namespace sibling worktree directories so two projects sharing
+    /// the same parent don't collide on a slug.
+    pub project_slug_prefix: String,
 }
 
 impl WorkspaceLayout {
     pub fn for_project(project_dir: impl Into<PathBuf>) -> Self {
         let project_dir = project_dir.into();
-        let worktrees_root = project_dir.join(".oxplow").join("worktrees");
+        let worktrees_root = project_dir
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| project_dir.clone());
+        let project_slug_prefix = project_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "oxplow".into());
         Self {
             project_dir,
             worktrees_root,
+            project_slug_prefix,
         }
+    }
+
+    /// Resolve the on-disk path for a new worktree of the given slug.
+    /// Sibling pattern: `<parent>/<project_basename>-<slug>/`.
+    pub fn worktree_path_for(&self, slug: &str) -> PathBuf {
+        self.worktrees_root
+            .join(format!("{}-{}", self.project_slug_prefix, slug))
     }
 }
 
@@ -171,9 +195,10 @@ impl StreamService {
         Ok(stream)
     }
 
-    /// Create a worktree stream. Slug is the directory name under
-    /// `.oxplow/worktrees/`; it's fixed at creation and never changes.
-    /// `branch_source` is the branch to fork from (e.g. `main`).
+    /// Create a worktree stream. New worktrees are placed as siblings
+    /// of the main repo at `<parent>/<project_basename>-<slug>/`. The
+    /// slug is fixed at creation and never changes; `branch_source`
+    /// is the branch to fork from (e.g. `main`).
     pub async fn create_worktree(
         &self,
         slug: &str,
@@ -193,7 +218,7 @@ impl StreamService {
         let branch_source = branch_source.into();
         let title = title.into();
 
-        let worktree_path = self.layout.worktrees_root.join(slug);
+        let worktree_path = self.layout.worktree_path_for(slug);
 
         // Reject duplicate slug — not on the path, but on a stream
         // already pointing at the same path. (We can't easily query the
@@ -510,15 +535,51 @@ mod tests {
             .unwrap();
     }
 
-    fn make_service() -> (StreamService, tempfile::TempDir) {
-        let project = tempdir().unwrap();
-        init_repo(project.path());
-        let layout = WorkspaceLayout::for_project(project.path());
+    /// Wraps the project dir inside a parent tempdir so sibling
+    /// worktrees (which now land at `<parent>/<basename>-<slug>/`)
+    /// get cleaned up when the parent drops.
+    struct TestEnv {
+        _parent: tempfile::TempDir,
+        project: PathBuf,
+    }
+
+    impl TestEnv {
+        fn project_path(&self) -> &Path {
+            &self.project
+        }
+
+        /// Resolve where a worktree with `slug` will land, given the
+        /// `<parent>/<basename>-<slug>/` sibling pattern.
+        fn worktree_path(&self, slug: &str) -> PathBuf {
+            let basename = self
+                .project
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "project".into());
+            self.project
+                .parent()
+                .unwrap()
+                .join(format!("{basename}-{slug}"))
+        }
+    }
+
+    fn make_service() -> (StreamService, TestEnv) {
+        let parent = tempdir().unwrap();
+        let project = parent.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        init_repo(&project);
+        let layout = WorkspaceLayout::for_project(&project);
         let db = Database::in_memory();
         let streams = Arc::new(SqliteStreamStore::new(db.clone()));
         let threads = Arc::new(SqliteThreadStore::new(db));
         let service = StreamService::new(layout, streams, threads);
-        (service, project)
+        (
+            service,
+            TestEnv {
+                _parent: parent,
+                project,
+            },
+        )
     }
 
     #[tokio::test]
@@ -557,7 +618,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stream.kind, StreamKind::Worktree);
-        let path = dir.path().join(".oxplow/worktrees/feature-1");
+        let path = dir.worktree_path("feature-1");
         assert!(path.exists(), "worktree dir should exist at {path:?}");
     }
 
@@ -590,7 +651,7 @@ mod tests {
             .create_worktree("feature-rm", "Feature", "feature-rm", "main")
             .await
             .unwrap();
-        let path = dir.path().join(".oxplow/worktrees/feature-rm");
+        let path = dir.worktree_path("feature-rm");
         assert!(path.exists());
         svc.delete_stream(&stream.id).await.unwrap();
         // git worktree remove deletes the dir; the row is gone.
@@ -618,7 +679,7 @@ mod tests {
             .create_worktree("feat-archive", "Feat", "feat-archive", "main")
             .await
             .unwrap();
-        let path = dir.path().join(".oxplow/worktrees/feat-archive");
+        let path = dir.worktree_path("feat-archive");
         assert!(path.exists());
         // delete_worktree=false: row is archived, dir remains on disk.
         svc.archive_stream(&stream.id, false).await.unwrap();
@@ -634,7 +695,7 @@ mod tests {
             .create_worktree("feat-arch-del", "Feat", "feat-arch-del", "main")
             .await
             .unwrap();
-        let path = dir.path().join(".oxplow/worktrees/feat-arch-del");
+        let path = dir.worktree_path("feat-arch-del");
         assert!(path.exists());
         svc.archive_stream(&stream.id, true).await.unwrap();
         assert!(!path.exists(), "worktree dir should be pruned when delete_worktree=true");

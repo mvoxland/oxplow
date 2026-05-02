@@ -11,9 +11,11 @@ through real work without them clobbering each other.
 
 ## What it gives you
 
-- **Streams + worktrees.** Each stream owns a branch and a checkout
-  under `.oxplow/worktrees/`. Running agents never share a working
-  tree — writes from non-writer threads are denied at the hook level.
+- **Streams + worktrees.** Each stream owns a branch and its own
+  checkout, created as a sibling of the main repo at
+  `<parent>/<project_basename>-<slug>/`. Running agents never share
+  a working tree — writes from non-writer threads are denied at the
+  hook level.
 - **Threads inside a stream.** One active "writer" thread, any number
   of read-only query threads. Agents on query threads can ask the
   writer anything but can't modify files.

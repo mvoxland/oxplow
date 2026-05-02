@@ -23,21 +23,22 @@ That means the app already has a strong custom domain model. In particular, **st
 
 There is exactly one **primary** stream (`kind: "primary"`). It represents the repo itself: its `worktree_path` IS the daemon's project directory, its `title` is the project basename, and its recorded branch tracks whatever HEAD is currently checked out. The primary is the leftmost tab and cannot be deleted.
 
-Every other stream is a **worktree** stream (`kind: "worktree"`). At creation it gets its own `git worktree add` under `.oxplow/worktrees/<slug>/` (slug fixed at creation).
+Every other stream is a **worktree** stream (`kind: "worktree"`). At creation it gets its own `git worktree add` at `<parent_of_project>/<project_basename>-<slug>/` — a sibling of the main repo. The slug is fixed at creation; the project-basename prefix prevents collisions when multiple projects share a parent directory. Pre-existing worktree streams created under the legacy `<project>/.oxplow/worktrees/<slug>/` location keep their stored `worktree_path` and continue to work unchanged; only new worktrees use the sibling layout.
 
 Both kinds can switch branches — either via the StreamRail "Switch branch…" context menu (routed through `Services.checkoutStreamBranch()`), or by an external `git checkout` in the worktree dir (picked up by the `GitRefsWatcherRegistry` → `maybeSyncStreamBranch()`). Git's own errors (dirty tree, missing branch, already checked out elsewhere) propagate verbatim to the UI; oxplow does no pre-flight validation.
 
 ## Workspace isolation rule
 
-Oxplow usage must always be isolated to the directory where the daemon was started and that directory's descendants.
+Oxplow may write only inside (a) the daemon's start directory and its descendants, or (b) a worktree directory that an oxplow stream owns. Anywhere else is off-limits.
 
 Specifically:
 
-- do not look to parent directories for project data, repo state, workspace files, or configuration
+- do not look to parent directories for project data, repo state, workspace files, or configuration — even when oxplow's own worktree streams live there as siblings
 - treat the daemon start directory as the workspace root, even if it lives inside some larger parent repo
 - only consider Git enabled when that workspace root itself contains the repo root
 - if the workspace root is not its own Git repo, oxplow should still work for file browsing/editing and agent panes, but Git features must be disabled
 - when Git is disabled, alternate stream creation and other Git-dependent flows must also be disabled
+- the one explicit exception: stream-creation can `git worktree add` a sibling of the project at `<parent>/<project_basename>-<slug>/`, and stream operations may read/write inside *that* directory tree (and only that). Other paths in the parent dir remain off-limits.
 
 This rule takes priority over convenience heuristics like "find the nearest enclosing git repo."
 

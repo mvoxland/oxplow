@@ -21,8 +21,8 @@ pub fn is_git_repo(path: impl AsRef<Path>) -> bool {
 /// True when `path` is a secondary git worktree (its `.git` is a
 /// regular file pointing at the main repo's worktrees/ dir).
 ///
-/// Oxplow refuses to start in such a worktree because it manages its
-/// own worktrees under `.oxplow/worktrees/`, and nesting one inside
+/// Oxplow refuses to start in such a worktree because it creates its
+/// own worktrees as siblings of the main repo, and nesting one inside
 /// a user-created worktree makes pane/stream accounting incoherent.
 pub fn is_git_worktree(path: impl AsRef<Path>) -> bool {
     let dot_git = path.as_ref().join(".git");
