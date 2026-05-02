@@ -70,7 +70,7 @@ omits any mention of follow-ups.
 | `delete_note` | Remove a note. |
 
 There is intentionally **no** create-note or update-note tool.
-The agent writes bodies directly to `.oxplow/notes/<slug>.md`
+The agent writes bodies directly to `.oxplow/wiki/<slug>.md`
 with its `Write` / `Edit` tools — the notes watcher syncs
 metadata + body on every file event.
 

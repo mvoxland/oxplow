@@ -8,7 +8,7 @@ import {
   hookEventsRef,
   indexRef,
   newWorkItemRef,
-  noteRef,
+  wikiPageRef,
   workItemRef,
 } from "./pageRefs.js";
 
@@ -38,8 +38,8 @@ describe("pageRefs", () => {
     expect(a.id).not.toBe(b.id);
   });
 
-  test("noteRef and workItemRef encode their identifiers", () => {
-    expect(noteRef("how-x-works").id).toBe("note:how-x-works");
+  test("wikiPageRef and workItemRef encode their identifiers", () => {
+    expect(wikiPageRef("how-x-works").id).toBe("note:how-x-works");
     expect(workItemRef("wi-123").id).toBe("wi:wi-123");
   });
 

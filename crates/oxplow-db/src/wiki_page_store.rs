@@ -1,6 +1,6 @@
 //! Wiki-note metadata + FTS5-backed body search.
 //!
-//! Note body lives on disk at `.oxplow/notes/<slug>.md`. This store
+//! Note body lives on disk at `.oxplow/wiki/<slug>.md`. This store
 //! holds the metadata row + an FTS5 search index synced from
 //! the on-disk body via `resync`.
 
@@ -14,7 +14,7 @@ use oxplow_domain::{DomainError, Timestamp};
 use crate::database::Database;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct WikiNote {
+pub struct WikiPage {
     pub slug: String,
     pub title: String,
     pub body_path: String,
@@ -27,7 +27,7 @@ pub struct WikiNote {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct WikiNoteSearchHit {
+pub struct WikiPageSearchHit {
     pub slug: String,
     pub title: String,
     pub snippet: String,
@@ -35,11 +35,11 @@ pub struct WikiNoteSearchHit {
 }
 
 #[derive(Clone)]
-pub struct SqliteWikiNoteStore {
+pub struct SqliteWikiPageStore {
     db: Database,
 }
 
-impl SqliteWikiNoteStore {
+impl SqliteWikiPageStore {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
@@ -54,7 +54,7 @@ fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
         .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
 }
 
-fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiNote> {
+fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiPage> {
     let slug: String = row.get("slug")?;
     let title: String = row.get("title")?;
     let body_path: String = row.get("body_path")?;
@@ -69,7 +69,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiNote> {
     };
     let file_refs: Vec<String> = serde_json::from_str(&file_refs_json).unwrap_or_default();
     let related_notes: Vec<String> = serde_json::from_str(&related_notes_json).unwrap_or_default();
-    Ok(WikiNote {
+    Ok(WikiPage {
         slug,
         title,
         body_path,
@@ -82,12 +82,12 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiNote> {
     })
 }
 
-impl SqliteWikiNoteStore {
-    pub async fn list(&self) -> Result<Vec<WikiNote>, DomainError> {
+impl SqliteWikiPageStore {
+    pub async fn list(&self) -> Result<Vec<WikiPage>, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                let mut stmt = conn.prepare("SELECT * FROM wiki_note ORDER BY updated_at DESC")?;
+                let mut stmt = conn.prepare("SELECT * FROM wiki_page ORDER BY updated_at DESC")?;
                 let rows = stmt.query_map([], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -96,12 +96,12 @@ impl SqliteWikiNoteStore {
         .unwrap()
     }
 
-    pub async fn get(&self, slug: &str) -> Result<Option<WikiNote>, DomainError> {
+    pub async fn get(&self, slug: &str) -> Result<Option<WikiPage>, DomainError> {
         let db = self.db.clone();
         let slug = slug.to_string();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                let mut stmt = conn.prepare("SELECT * FROM wiki_note WHERE slug = ?1")?;
+                let mut stmt = conn.prepare("SELECT * FROM wiki_page WHERE slug = ?1")?;
                 let mut rows = stmt.query_map(params![slug], row_to_note)?;
                 match rows.next() {
                     Some(r) => Ok(Some(r?)),
@@ -113,7 +113,7 @@ impl SqliteWikiNoteStore {
         .unwrap()
     }
 
-    pub async fn upsert(&self, note: &WikiNote) -> Result<(), DomainError> {
+    pub async fn upsert(&self, note: &WikiPage) -> Result<(), DomainError> {
         let db = self.db.clone();
         let note = note.clone();
         tokio::task::spawn_blocking(move || {
@@ -123,7 +123,7 @@ impl SqliteWikiNoteStore {
                 let related_notes_json = serde_json::to_string(&note.related_notes)
                     .unwrap_or_else(|_| "[]".to_string());
                 conn.execute(
-                    "INSERT INTO wiki_note (
+                    "INSERT INTO wiki_page (
                         slug, title, body_path, body_excerpt, body_size_bytes,
                         file_refs_json, related_notes_json, created_at, updated_at
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -149,11 +149,11 @@ impl SqliteWikiNoteStore {
                 )?;
                 // FTS5 mirror.
                 conn.execute(
-                    "DELETE FROM wiki_note_fts WHERE slug = ?1",
+                    "DELETE FROM wiki_page_fts WHERE slug = ?1",
                     params![note.slug],
                 )?;
                 conn.execute(
-                    "INSERT INTO wiki_note_fts (slug, title, body_excerpt) VALUES (?1, ?2, ?3)",
+                    "INSERT INTO wiki_page_fts (slug, title, body_excerpt) VALUES (?1, ?2, ?3)",
                     params![note.slug, note.title, note.body_excerpt],
                 )?;
                 Ok(())
@@ -168,8 +168,8 @@ impl SqliteWikiNoteStore {
         let slug = slug.to_string();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                conn.execute("DELETE FROM wiki_note WHERE slug = ?1", params![slug])?;
-                conn.execute("DELETE FROM wiki_note_fts WHERE slug = ?1", params![slug])?;
+                conn.execute("DELETE FROM wiki_page WHERE slug = ?1", params![slug])?;
+                conn.execute("DELETE FROM wiki_page_fts WHERE slug = ?1", params![slug])?;
                 Ok(())
             })
         })
@@ -182,17 +182,17 @@ impl SqliteWikiNoteStore {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<WikiNoteSearchHit>, DomainError> {
+    ) -> Result<Vec<WikiPageSearchHit>, DomainError> {
         let db = self.db.clone();
         let query = query.to_string();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT n.slug, n.title, snippet(wiki_note_fts, 2, '<b>', '</b>', '…', 12) AS snippet,
+                    "SELECT n.slug, n.title, snippet(wiki_page_fts, 2, '<b>', '</b>', '…', 12) AS snippet,
                             n.updated_at
-                     FROM wiki_note_fts f
-                     JOIN wiki_note n ON n.slug = f.slug
-                     WHERE wiki_note_fts MATCH ?1
+                     FROM wiki_page_fts f
+                     JOIN wiki_page n ON n.slug = f.slug
+                     WHERE wiki_page_fts MATCH ?1
                      ORDER BY rank
                      LIMIT ?2",
                 )?;
@@ -208,7 +208,7 @@ impl SqliteWikiNoteStore {
                             Box::new(e),
                         )
                     };
-                    Ok(WikiNoteSearchHit {
+                    Ok(WikiPageSearchHit {
                         slug,
                         title,
                         snippet,
@@ -227,13 +227,13 @@ impl SqliteWikiNoteStore {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<WikiNote>, DomainError> {
+    ) -> Result<Vec<WikiPage>, DomainError> {
         let db = self.db.clone();
         let pattern = format!("%{}%", query);
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM wiki_note WHERE title LIKE ?1 OR slug LIKE ?1 \
+                    "SELECT * FROM wiki_page WHERE title LIKE ?1 OR slug LIKE ?1 \
                      ORDER BY updated_at DESC LIMIT ?2",
                 )?;
                 let rows = stmt.query_map(params![pattern, limit as i64], row_to_note)?;
@@ -246,42 +246,42 @@ impl SqliteWikiNoteStore {
 }
 
 #[async_trait]
-pub trait WikiNoteStore: Send + Sync {
-    async fn list(&self) -> Result<Vec<WikiNote>, DomainError>;
-    async fn get(&self, slug: &str) -> Result<Option<WikiNote>, DomainError>;
-    async fn upsert(&self, note: &WikiNote) -> Result<(), DomainError>;
+pub trait WikiPageStore: Send + Sync {
+    async fn list(&self) -> Result<Vec<WikiPage>, DomainError>;
+    async fn get(&self, slug: &str) -> Result<Option<WikiPage>, DomainError>;
+    async fn upsert(&self, note: &WikiPage) -> Result<(), DomainError>;
     async fn delete(&self, slug: &str) -> Result<(), DomainError>;
     async fn search_bodies(
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<WikiNoteSearchHit>, DomainError>;
-    async fn search_titles(&self, query: &str, limit: usize) -> Result<Vec<WikiNote>, DomainError>;
+    ) -> Result<Vec<WikiPageSearchHit>, DomainError>;
+    async fn search_titles(&self, query: &str, limit: usize) -> Result<Vec<WikiPage>, DomainError>;
 }
 
 #[async_trait]
-impl WikiNoteStore for SqliteWikiNoteStore {
-    async fn list(&self) -> Result<Vec<WikiNote>, DomainError> {
-        SqliteWikiNoteStore::list(self).await
+impl WikiPageStore for SqliteWikiPageStore {
+    async fn list(&self) -> Result<Vec<WikiPage>, DomainError> {
+        SqliteWikiPageStore::list(self).await
     }
-    async fn get(&self, slug: &str) -> Result<Option<WikiNote>, DomainError> {
-        SqliteWikiNoteStore::get(self, slug).await
+    async fn get(&self, slug: &str) -> Result<Option<WikiPage>, DomainError> {
+        SqliteWikiPageStore::get(self, slug).await
     }
-    async fn upsert(&self, note: &WikiNote) -> Result<(), DomainError> {
-        SqliteWikiNoteStore::upsert(self, note).await
+    async fn upsert(&self, note: &WikiPage) -> Result<(), DomainError> {
+        SqliteWikiPageStore::upsert(self, note).await
     }
     async fn delete(&self, slug: &str) -> Result<(), DomainError> {
-        SqliteWikiNoteStore::delete(self, slug).await
+        SqliteWikiPageStore::delete(self, slug).await
     }
     async fn search_bodies(
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<WikiNoteSearchHit>, DomainError> {
-        SqliteWikiNoteStore::search_bodies(self, query, limit).await
+    ) -> Result<Vec<WikiPageSearchHit>, DomainError> {
+        SqliteWikiPageStore::search_bodies(self, query, limit).await
     }
-    async fn search_titles(&self, query: &str, limit: usize) -> Result<Vec<WikiNote>, DomainError> {
-        SqliteWikiNoteStore::search_titles(self, query, limit).await
+    async fn search_titles(&self, query: &str, limit: usize) -> Result<Vec<WikiPage>, DomainError> {
+        SqliteWikiPageStore::search_titles(self, query, limit).await
     }
 }
 
@@ -293,11 +293,11 @@ mod tests {
         Timestamp::from_unix_ms(1_700_000_000_000)
     }
 
-    fn note(slug: &str, title: &str, excerpt: &str) -> WikiNote {
-        WikiNote {
+    fn note(slug: &str, title: &str, excerpt: &str) -> WikiPage {
+        WikiPage {
             slug: slug.into(),
             title: title.into(),
-            body_path: format!(".oxplow/notes/{slug}.md"),
+            body_path: format!(".oxplow/wiki/{slug}.md"),
             body_excerpt: excerpt.into(),
             body_size_bytes: excerpt.len() as i64,
             file_refs: vec![],
@@ -309,7 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_get_round_trips() {
-        let store = SqliteWikiNoteStore::new(Database::in_memory());
+        let store = SqliteWikiPageStore::new(Database::in_memory());
         let n = note("hello", "Hello world", "the quick brown fox");
         store.upsert(&n).await.unwrap();
         let got = store.get("hello").await.unwrap().unwrap();
@@ -318,7 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn fts_finds_body_terms() {
-        let store = SqliteWikiNoteStore::new(Database::in_memory());
+        let store = SqliteWikiPageStore::new(Database::in_memory());
         store
             .upsert(&note("a", "Cats and dogs", "cats are great pets"))
             .await
@@ -334,7 +334,7 @@ mod tests {
 
     #[tokio::test]
     async fn search_titles_glob() {
-        let store = SqliteWikiNoteStore::new(Database::in_memory());
+        let store = SqliteWikiPageStore::new(Database::in_memory());
         store.upsert(&note("a", "Streams", "")).await.unwrap();
         store.upsert(&note("b", "Threads", "")).await.unwrap();
         let hits = store.search_titles("Thread", 10).await.unwrap();
@@ -344,7 +344,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_clears_fts_too() {
-        let store = SqliteWikiNoteStore::new(Database::in_memory());
+        let store = SqliteWikiPageStore::new(Database::in_memory());
         store.upsert(&note("a", "x", "find me")).await.unwrap();
         store.delete("a").await.unwrap();
         assert!(store.search_bodies("me", 10).await.unwrap().is_empty());

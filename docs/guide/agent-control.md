@@ -80,7 +80,7 @@ This is non-bypassable from the agent side — the guard is
 out-of-process. Promote a different thread to writer (or switch
 to the writer thread) if you need to edit.
 
-The wiki notes directory (`.oxplow/notes/`) is exempt — note
+The wiki notes directory (`.oxplow/wiki/`) is exempt — note
 capture works on read-only threads too, because the wiki is
 research output, not authored project change.
 

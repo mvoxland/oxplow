@@ -27,7 +27,7 @@ export type OxplowEventKind =
   | "selectedThreadChanged"
   | "workItemsChanged"
   | "workNotesChanged"
-  | "wikiNotesChanged"
+  | "wikiPagesChanged"
   | "followupsChanged"
   | "backgroundTasksChanged"
   | "hookEventsChanged"

@@ -26,7 +26,7 @@ export function diffRef(payload: DiffPayload): TabRef {
   return { id: `diff:${key}`, kind: "diff", payload };
 }
 
-export function noteRef(slug: string): TabRef {
+export function wikiPageRef(slug: string): TabRef {
   return { id: `note:${slug}`, kind: "note", payload: { slug } };
 }
 
@@ -38,7 +38,7 @@ export function findingRef(findingId: string): TabRef {
   return { id: `finding:${findingId}`, kind: "finding", payload: { findingId } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "notes-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings"): TabRef {
   return { id: kind, kind, payload: null };
 }
 

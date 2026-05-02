@@ -1,7 +1,7 @@
 # Notes (the wiki)
 
 Oxplow's wiki is a per-project folder of markdown files at
-`.oxplow/notes/`, indexed in SQLite, with first-class
+`.oxplow/wiki/`, indexed in SQLite, with first-class
 backlinks. Notes are how durable understanding lands — codebase
 walkthroughs, design rationale, comparisons, recommendations,
 the "why we did it this way" stuff that doesn't belong in a
@@ -60,7 +60,7 @@ the agent's prompt when it sees patterns like "how does X
 work", "explain X", "trace X", "why does X", "what's the
 difference", "compare", "tradeoffs", "recommend". The agent
 searches existing notes first, then writes / appends to
-`.oxplow/notes/<slug>.md`, then calls `resync_note` to
+`.oxplow/wiki/<slug>.md`, then calls `resync_note` to
 re-baseline the index.
 
 This works on read-only threads too — the write guard exempts
@@ -77,7 +77,7 @@ The agent's note tools are metadata-only:
 
 There is intentionally **no** create-note or update-note MCP
 call. The agent writes bodies directly with its `Write` /
-`Edit` tools on `.oxplow/notes/<slug>.md` (much cheaper than
+`Edit` tools on `.oxplow/wiki/<slug>.md` (much cheaper than
 round-tripping full bodies through tool args). The notes
 watcher re-syncs metadata + body on every file event.
 
@@ -100,7 +100,7 @@ Rule of thumb:
 
 - **`.context/`** — durable, committed-to-git documentation of
   how a subsystem works.
-- **`.oxplow/notes/`** — exploratory wiki capture, working
+- **`.oxplow/wiki/`** — exploratory wiki capture, working
   memory, decisions, comparisons. Not committed by default.
 
 Both are markdown; both are searchable; both surface as pages

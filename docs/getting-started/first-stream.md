@@ -60,7 +60,7 @@ just stops cleanly when it's answered — there's nothing to file.
 
 Non-trivial Q&A is captured into a wiki note automatically (the
 runtime nudges the agent to do this). Look for a new file under
-`.oxplow/notes/` after the answer.
+`.oxplow/wiki/` after the answer.
 
 ## 4. Send a prompt that changes files
 

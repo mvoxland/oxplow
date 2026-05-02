@@ -43,7 +43,7 @@ export function parseGitRefTarget(target: string): string | null {
 }
 
 /**
- * Classify a markdown link href. Shared by NoteTab (wiki navigation) and
+ * Classify a markdown link href. Shared by WikiPageTab (wiki navigation) and
  * WorkItemDetail (work-item modal markdown rendering). Pure — easy to test.
  */
 export function parseMarkdownLink(rawHref: string): ParsedLink {
@@ -135,9 +135,9 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
 
 export interface MarkdownViewProps {
   body: string;
-  /** Optional internal link handler (NoteTab routes to wiki history). */
+  /** Optional internal link handler (WikiPageTab routes to wiki history). */
   onNavigateInternal?: (slug: string) => void;
-  /** Optional new-tab handler (NoteTab opens slug in another tab). */
+  /** Optional new-tab handler (WikiPageTab opens slug in another tab). */
   onOpenInNewTab?: (slug: string) => void;
   /** Optional file-link handler — invoked for `[[path/to/file]]` wikilinks. */
   onOpenFile?: (path: string, line?: number) => void;
@@ -151,7 +151,7 @@ export interface MarkdownViewProps {
    */
   onOpenExternalUrl?: (url: string) => void;
   /**
-   * Render mermaid code blocks as SVG diagrams. NoteTab uses this; the
+   * Render mermaid code blocks as SVG diagrams. WikiPageTab uses this; the
    * work-item modal disables it (default false) since work-item notes
    * tend to be short and a stray code fence shouldn't trigger rendering.
    */

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { computeBacklinks, type BacklinkContext, type BacklinkNoteEntry, type BacklinkWorkItemEntry, type BacklinkFindingEntry } from "./backlinksIndex.js";
-import { fileRef, findingRef, noteRef, workItemRef } from "./pageRefs.js";
+import { fileRef, findingRef, wikiPageRef, workItemRef } from "./pageRefs.js";
 
 const note = (slug: string, body: string): BacklinkNoteEntry => ({ slug, title: slug, body });
 
@@ -105,7 +105,7 @@ describe("computeBacklinks", () => {
       findings: [finding("5", "src/a.ts"), finding("6", "src/b.ts")],
     };
 
-    const result = computeBacklinks(noteRef("rich"), ctx);
+    const result = computeBacklinks(wikiPageRef("rich"), ctx);
     const ids = result.map((r) => r.ref.id);
     expect(ids).toContain("wi:wi-99");
     expect(ids).toContain("file:src/a.ts");

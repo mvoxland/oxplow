@@ -16,7 +16,7 @@ export function deriveDefaultLabel(ref: TabRef): string {
     case "done-work": return "Done Work";
     case "backlog": return "Backlog";
     case "archived": return "Archived";
-    case "notes-index": return "Notes";
+    case "wiki-index": return "Notes";
     case "files": return "Files";
     case "code-quality": return "Code Quality";
     case "local-history": return "Local History";

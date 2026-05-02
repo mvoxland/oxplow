@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { parseMarkdownLink, preprocessWikilinks } from "./MarkdownView.js";
 
-// parseMarkdownLink is shared by NoteTab and WorkItemDetail. NoteTab needs
+// parseMarkdownLink is shared by WikiPageTab and WorkItemDetail. WikiPageTab needs
 // to distinguish wiki-internal links (`./foo`, `bar.md`) from external
 // (`https://…`) and anchor (`#section`) links so it can route plain
 // clicks back through the wiki navigation history. WorkItemDetail just

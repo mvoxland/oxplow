@@ -155,7 +155,7 @@ mod tests {
             "work_item_events",
             "work_notes",
             "agent_turn",
-            "wiki_note",
+            "wiki_page",
             "page_visit",
             "usage_event",
             "code_quality_scan",
@@ -165,7 +165,7 @@ mod tests {
             "work_item_effort",
             "work_item_effort_file",
             "work_item_effort_turn",
-            "wiki_note_thread_update",
+            "wiki_page_thread_update",
         ];
         let expected_absent = ["hook_event", "agent_status"];
         let mut stmt = conn

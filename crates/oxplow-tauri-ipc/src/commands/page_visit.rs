@@ -165,7 +165,7 @@ pub async fn list_recently_finished(
 
     if let Some(tid) = thread_id.as_ref() {
         // Thread-scoped: only items filed against this thread, only
-        // wiki notes the thread actually touched.
+        // wiki pages the thread actually touched.
         let tid = ThreadId::from(tid.clone());
         let items = state.work_item_store.list_for_thread(&tid).await?;
         for item in items {
@@ -180,11 +180,11 @@ pub async fn list_recently_finished(
             });
         }
         let touches = state
-            .wiki_note_thread_updates
+            .wiki_page_thread_updates
             .list_for_thread(&tid, cap * 4)
             .await?;
         for touch in touches {
-            let Some(note) = state.wiki_note_store.get(&touch.slug).await? else {
+            let Some(note) = state.wiki_page_store.get(&touch.slug).await? else {
                 continue;
             };
             entries.push(FinishedEntry::Note {
@@ -208,7 +208,7 @@ pub async fn list_recently_finished(
                 t,
             });
         }
-        let notes = state.wiki_note_store.list().await?;
+        let notes = state.wiki_page_store.list().await?;
         for note in notes.into_iter().take(cap) {
             entries.push(FinishedEntry::Note {
                 slug: note.slug,
@@ -228,7 +228,7 @@ pub async fn list_recently_finished(
 }
 
 /// Hide the current "Finished" entries behind a cursor. Source rows
-/// (work items / wiki notes) are untouched; new finishes still surface
+/// (work items / wiki pages) are untouched; new finishes still surface
 /// because their timestamp is newer than the cursor. Cursor is
 /// per-thread so clearing one thread's section doesn't blank another.
 #[tauri::command]

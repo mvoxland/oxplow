@@ -2,7 +2,7 @@
 
 
 What this doc covers: the layered flow you follow whenever a feature
-needs persistence + IPC + UI, with `wiki_note` as a worked example.
+needs persistence + IPC + UI, with `wiki_page` as a worked example.
 For the actual data shapes, see [data-model.md](./data-model.md).
 
 ## The 7-layer flow
@@ -47,10 +47,10 @@ touches roughly seven files. They sit in this order:
 The component then calls the api wrapper and (if the data is reactive)
 subscribes to the relevant `*.changed` event to refetch.
 
-## Worked example: `wiki_note`
+## Worked example: `wiki_page`
 
-Concrete instance of the 7-layer flow. Look at the `wiki_note` table,
-`WikiNoteStore`, the runtime's `listWikiNotes`/`writeWikiNoteBody`
+Concrete instance of the 7-layer flow. Look at the `wiki_page` table,
+`WikiPageStore`, the runtime's `listWikiPages`/`writeWikiPageBody`
 helpers, the matching IPC contract entries, the preload bindings, the
 main-process handlers, and the UI api wrappers. Every other persisted
 feature in this codebase follows the same shape — duplicate it for new

@@ -326,7 +326,7 @@ export interface MenuGroupSnapshot {
 
 // ---- Wiki notes ----
 
-export interface WikiNoteSummary {
+export interface WikiPageSummary {
   slug: string;
   title: string;
   excerpt: string;
@@ -340,7 +340,7 @@ export interface WikiNoteSummary {
   [extra: string]: any;
 }
 
-export interface WikiNoteSearchHit {
+export interface WikiPageSearchHit {
   slug: string;
   title: string;
   snippet: string;

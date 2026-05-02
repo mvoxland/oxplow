@@ -33,7 +33,7 @@ export function setContextRefDrag(e: AnyDragEvent, ref: ContextRef): void {
   const fallback = ref.kind === "file"
     ? `@${ref.path}`
     : ref.kind === "note"
-      ? `@.oxplow/notes/${ref.slug}.md`
+      ? `@.oxplow/wiki/${ref.slug}.md`
       : `[oxplow work-item ${ref.itemId}]`;
   dt.setData("text/plain", fallback);
   dt.effectAllowed = "copy";

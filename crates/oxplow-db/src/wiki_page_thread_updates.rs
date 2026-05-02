@@ -1,10 +1,10 @@
-//! Per-thread "last touched" attribution for wiki notes.
+//! Per-thread "last touched" attribution for wiki pages.
 //!
-//! Wiki notes are global (one body per slug). Attribution is tracked
+//! Wiki pages are global (one body per slug). Attribution is tracked
 //! here so the rail's "Finished" list can surface only the notes the
 //! *current* thread authored or revised. Mirrors
 //! `src/persistence/wiki-note-thread-update-store.ts` from main.
-//! Backing table is `wiki_note_thread_update` (see V1 migration).
+//! Backing table is `wiki_page_thread_update` (see V1 migration).
 
 use rusqlite::params;
 
@@ -13,18 +13,18 @@ use oxplow_domain::{DomainError, ThreadId, Timestamp};
 use crate::database::Database;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct WikiNoteThreadUpdate {
+pub struct WikiPageThreadUpdate {
     pub thread_id: ThreadId,
     pub slug: String,
     pub last_seen_at: Timestamp,
 }
 
 #[derive(Clone)]
-pub struct SqliteWikiNoteThreadUpdateStore {
+pub struct SqliteWikiPageThreadUpdateStore {
     db: Database,
 }
 
-impl SqliteWikiNoteThreadUpdateStore {
+impl SqliteWikiPageThreadUpdateStore {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
@@ -42,7 +42,7 @@ impl SqliteWikiNoteThreadUpdateStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO wiki_note_thread_update (thread_id, slug, last_seen_at)
+                    "INSERT INTO wiki_page_thread_update (thread_id, slug, last_seen_at)
                      VALUES (?1, ?2, ?3)
                      ON CONFLICT(thread_id, slug) DO UPDATE SET
                        last_seen_at = excluded.last_seen_at",
@@ -64,14 +64,14 @@ impl SqliteWikiNoteThreadUpdateStore {
         &self,
         thread: &ThreadId,
         limit: usize,
-    ) -> Result<Vec<WikiNoteThreadUpdate>, DomainError> {
+    ) -> Result<Vec<WikiPageThreadUpdate>, DomainError> {
         let db = self.db.clone();
         let thread = thread.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
                     "SELECT thread_id, slug, last_seen_at
-                     FROM wiki_note_thread_update
+                     FROM wiki_page_thread_update
                      WHERE thread_id = ?1
                      ORDER BY last_seen_at DESC
                      LIMIT ?2",
@@ -95,7 +95,7 @@ impl SqliteWikiNoteThreadUpdateStore {
                             Box::new(e),
                         )
                     })?;
-                    out.push(WikiNoteThreadUpdate {
+                    out.push(WikiPageThreadUpdate {
                         thread_id: ThreadId::from(tid),
                         slug,
                         last_seen_at,
@@ -151,7 +151,7 @@ mod tests {
                 params![thread_id, stream_id],
             )?;
             c.execute(
-                "INSERT INTO wiki_note (slug, title, body_path, created_at, updated_at)
+                "INSERT INTO wiki_page (slug, title, body_path, created_at, updated_at)
                  VALUES ('foo','Foo','/tmp/foo.md','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')",
                 [],
             )?;
@@ -159,7 +159,7 @@ mod tests {
         })
         .unwrap();
 
-        let store = SqliteWikiNoteThreadUpdateStore::new(db);
+        let store = SqliteWikiPageThreadUpdateStore::new(db);
         let tid = ThreadId::from(thread_id.to_string());
         store
             .touch(&tid, "foo", Timestamp::from_unix_ms(1_700_000_000_000))

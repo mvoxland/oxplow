@@ -103,9 +103,9 @@ async fn list_work_items_for_thread_empty() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_wiki_notes_empty_for_fresh_project() {
+async fn list_wiki_pages_empty_for_fresh_project() {
     let app = TestApp::build();
-    let notes = commands::wiki::list_wiki_notes(app.state()).await.unwrap();
+    let notes = commands::wiki::list_wiki_pages(app.state()).await.unwrap();
     assert!(notes.is_empty());
 }
 

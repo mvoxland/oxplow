@@ -187,8 +187,8 @@ export const commands = {
 	listThreadNotes: (threadId: ThreadId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
 	listWorkItemEvents: (itemId: string | null, threadId: string | null) => typedError<WorkItemEvent[], IpcError>(__TAURI_INVOKE("list_work_item_events", { itemId, threadId })),
-	listWikiNotes: () => typedError<WikiNote[], IpcError>(__TAURI_INVOKE("list_wiki_notes")),
-	getWikiNote: (slug: string) => typedError<{
+	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
+	getWikiPage: (slug: string) => typedError<{
 	slug: string,
 	title: string,
 	body_path: string,
@@ -198,13 +198,13 @@ export const commands = {
 	related_notes: string[],
 	created_at: Timestamp,
 	updated_at: Timestamp,
-} | null, IpcError>(__TAURI_INVOKE("get_wiki_note", { slug })),
-	upsertWikiNote: (note: WikiNote) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_wiki_note", { note })),
-	deleteWikiNote: (slug: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_wiki_note", { slug })),
-	searchWikiTitles: (query: string, limit: number) => typedError<WikiNote[], IpcError>(__TAURI_INVOKE("search_wiki_titles", { query, limit })),
-	searchWikiBodies: (query: string, limit: number) => typedError<WikiNoteSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
-	readWikiNoteBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_note_body", { slug })),
-	writeWikiNoteBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_note_body", { slug, body })),
+} | null, IpcError>(__TAURI_INVOKE("get_wiki_page", { slug })),
+	upsertWikiPage: (note: WikiPage) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_wiki_page", { note })),
+	deleteWikiPage: (slug: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_wiki_page", { slug })),
+	searchWikiTitles: (query: string, limit: number) => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("search_wiki_titles", { query, limit })),
+	searchWikiBodies: (query: string, limit: number) => typedError<WikiPageSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
+	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
+	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
 	recordPageVisit: (pageKind: string, pageId: string, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, durationMs, threadId })),
 	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
 	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
@@ -1184,7 +1184,7 @@ export type VisitedPage = {
 	visit_count: number,
 };
 
-export type WikiNote = {
+export type WikiPage = {
 	slug: string,
 	title: string,
 	body_path: string,
@@ -1196,7 +1196,7 @@ export type WikiNote = {
 	updated_at: Timestamp,
 };
 
-export type WikiNoteSearchHit = {
+export type WikiPageSearchHit = {
 	slug: string,
 	title: string,
 	snippet: string,

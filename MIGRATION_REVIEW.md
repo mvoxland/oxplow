@@ -18,7 +18,7 @@ Rust crates' tests pass (102 tests, all green), but:
   commands vs. 127 IPC channels in `src/electron/main.ts`.
 - **Major store/feature areas have no Rust counterpart at all** (background
   tasks, followups, hook events, agent statuses, file snapshots, code-quality
-  scans, page visits, usage tracking, wiki notes, work-item events, work-item
+  scans, page visits, usage tracking, wiki pages, work-item events, work-item
   links, work-item efforts, threads-work-state, snapshots-effort).
 - **The original ~3,500-line `runtime.ts` orchestration is mostly absent**;
   the Rust `oxplow-runtime` crate ships only `WriteGuard` + `FilingEnforcement`
@@ -146,8 +146,8 @@ The original Electron main process registered **127 IPC channels** in
 
 **Background tasks:** `getBackgroundTask`, `listBackgroundTasks`.
 
-**Wiki notes:** `listWikiNotes`, `searchWikiNotes`, `readWikiNoteBody`,
-`writeWikiNoteBody`, `deleteWikiNote`.
+**Wiki pages:** `listWikiPages`, `searchWikiPages`, `readWikiPageBody`,
+`writeWikiPageBody`, `deleteWikiPage`.
 
 **Code quality:** `runCodeQualityScan`, `listCodeQualityScans`,
 `listCodeQualityFindings`.
@@ -163,7 +163,7 @@ subscriptions.
 
 Each of these needs a Rust handler; many also need:
 - A new domain trait + store impl (e.g., `BackgroundTaskStore`,
-  `CodeQualityFindingStore`, `UsageEventStore`, `WikiNoteStore`,
+  `CodeQualityFindingStore`, `UsageEventStore`, `WikiPageStore`,
   `PageVisitStore`, `WorkItemEffortStore`, `SnapshotStore`).
 - A migration entry in `oxplow-db`'s schema.
 - Tauri events (the original had 17+ subscription channels — `subscribeWorkItemEvents`,
@@ -191,7 +191,7 @@ Original TS persistence layer covered (and tested):
 - `file_snapshot`, `snapshot_entry`
 - `page_visit`
 - `usage_event`
-- `wiki_note`, `wiki_note_thread_update`
+- `wiki_page`, `wiki_page_thread_update`
 - `work_item_commit`, `work_item_effort`, `work_item_effort_file`,
   `work_item_effort_turn`
 - `work_item_event`, `work_note`
@@ -300,7 +300,7 @@ which is a defensible choice for a clean break. Concerns:
   path), but worth flagging in user-facing release notes.
 - **Missing tables present in TS but absent from V1**: `batch_file_change`,
   `commit_point`, `file_snapshot`, `snapshot_entry`, `page_visit`,
-  `usage_event`, `wiki_note`, `wiki_note_thread_update`, `work_item_commit`,
+  `usage_event`, `wiki_page`, `wiki_page_thread_update`, `work_item_commit`,
   `work_item_effort` and friends, `code_quality_scan`,
   `code_quality_finding`, `agent_status`, `wait_point`, `finished_seen`.
   These need to be added before their corresponding stores can be ported.

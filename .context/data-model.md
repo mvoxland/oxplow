@@ -337,11 +337,11 @@ the workspace watcher and the snapshot store. No changes to
 existing snapshots on toggle; newly ignored paths simply stop
 appearing in future dirty sets.
 
-### `wiki_note` — `WikiNoteStore` (`crates/oxplow-db/src/wiki_note_store.rs`)
+### `wiki_page` — `WikiPageStore` (`crates/oxplow-db/src/wiki_page_store.rs`)
 
 User-curated personal knowledgebase — agent-written writeups, diagrams,
 and explanations that accumulate per project. **Bodies live on disk**
-as plain markdown files at `.oxplow/notes/<slug>.md` (not committed to
+as plain markdown files at `.oxplow/wiki/<slug>.md` (not committed to
 git — this is a personal KB, not team docs). The table only holds
 metadata; the filesystem is the source of truth for content.
 
@@ -364,7 +364,7 @@ Freshness is a general indicator, not a proof:
   note is flagged `stale`.
 - `captured_refs_json` stores `{path, blobSha, mtimeMs}` for every file
   path mentioned in the note (extracted by the wiki-note-refs parser
-  inside `crates/oxplow-db/src/wiki_note_store.rs`). `computeFreshness`
+  inside `crates/oxplow-db/src/wiki_page_store.rs`). `computeFreshness`
   rehashes each referenced file; any mismatch → `stale`; any missing
   file → `very-stale`.
 
@@ -392,16 +392,16 @@ fenced blocks into inline SVG when `renderMermaid` is set. The
 same component is reused for the Plan work-item description /
 acceptance fields (`WorkItemDetail`) so headings, lists, code,
 links, and emphasis come through there too — without mermaid.
-IPC surface: `listWikiNotes`, `readWikiNoteBody`,
-`writeWikiNoteBody`, `deleteWikiNote`, `searchWikiNotes`, plus the
+IPC surface: `listWikiPages`, `readWikiPageBody`,
+`writeWikiPageBody`, `deleteWikiPage`, `searchWikiPages`, plus the
 `wiki-note.changed` event on the bus. Full-text search is backed by
-the `wiki_note_fts` FTS5 virtual table (migration v39); insert/update/
-delete triggers keep it in sync, so `WikiNoteStore.searchBodies()`
+the `wiki_page_fts` FTS5 virtual table (migration v39); insert/update/
+delete triggers keep it in sync, so `WikiPageStore.searchBodies()`
 returns ranked results with `<mark>…</mark>`-highlighted snippets.
 
-### `wiki_note_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_note_store.rs`)
+### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_store.rs`)
 
-Per-thread attribution side table for wiki note edits. Notes themselves
+Per-thread attribution side table for wiki page edits. Notes themselves
 are global (one body per slug, shared across all threads/streams), but
 the rail's "Finished" list filters by which thread last touched each
 note — mirrors how task efforts attribute via
@@ -412,21 +412,21 @@ repeated edits in the same thread upsert in place. Index on
 `(thread_id, updated_at DESC)` drives the rail query.
 
 Writers funnel through two seams, both routing through
-`Runtime.wikiNoteThreadUpdateStore.recordUpdate(slug, threadId)`:
+`Runtime.wikiPageThreadUpdateStore.recordUpdate(slug, threadId)`:
 
 - **`oxplow__resync_note` MCP** — accepts `threadId` and records the
   edit when present. The wiki-capture skill always supplies it.
 - **PostToolUse hook** in `crates/oxplow-runtime/src/lib.rs` — when
-  the agent writes a path matching `.oxplow/notes/<slug>.md` via
+  the agent writes a path matching `.oxplow/wiki/<slug>.md` via
   Write/Edit/MultiEdit, attribution is recorded immediately, no
   waiting on the watcher debounce.
 
 The notes file watcher itself does not record attribution (it has no
-thread context). `Runtime.writeWikiNoteBody` (the editor save IPC)
+thread context). `Runtime.writeWikiPageBody` (the editor save IPC)
 also intentionally skips attribution — the notes editor isn't
 thread-bound, so guessing would be worse than abstaining.
 
-`Runtime.deleteWikiNote` clears every attribution row for the slug
+`Runtime.deleteWikiPage` clears every attribution row for the slug
 when the note is deleted, so removed notes don't linger on the rail
 under their last author.
 

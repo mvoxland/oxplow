@@ -10,8 +10,8 @@ pub mod effort_store;
 mod database;
 mod stream_store;
 mod thread_store;
-pub mod wiki_note_store;
-pub mod wiki_note_thread_updates;
+pub mod wiki_page_store;
+pub mod wiki_page_thread_updates;
 mod work_item_store;
 mod work_satellite;
 
@@ -27,7 +27,7 @@ pub use analytics_stores::{
 pub use database::{Database, DbInitError};
 pub use stream_store::SqliteStreamStore;
 pub use thread_store::SqliteThreadStore;
-pub use wiki_note_store::{SqliteWikiNoteStore, WikiNote, WikiNoteSearchHit, WikiNoteStore};
-pub use wiki_note_thread_updates::{SqliteWikiNoteThreadUpdateStore, WikiNoteThreadUpdate};
+pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};
+pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};
 pub use work_item_store::SqliteWorkItemStore;
 pub use work_satellite::{SqliteWorkItemEventStore, SqliteWorkItemLinkStore, SqliteWorkNoteStore};

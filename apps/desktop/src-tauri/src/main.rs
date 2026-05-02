@@ -119,11 +119,17 @@ fn main() {
         });
     }
 
-    // Wiki notes watcher: keeps `wiki_note` rows in sync with
-    // `.oxplow/notes/<slug>.md` on disk (initial scan + debounced
+    // Wiki notes watcher: keeps `wiki_page` rows in sync with
+    // `.oxplow/wiki/<slug>.md` on disk (initial scan + debounced
     // re-syncs on change). Held alive for the life of the process.
+    //
+    // One-shot legacy migration runs synchronously before the watcher
+    // spawns: earlier versions stored bodies under `.oxplow/notes/`,
+    // and the rename to `.oxplow/wiki/` would otherwise leave
+    // existing pages stranded.
+    oxplow_app::wiki_pages::migrate_legacy_notes_dir(&state.layout.project_dir);
     {
-        let wiki_store = state.wiki_note_store.clone();
+        let wiki_store = state.wiki_page_store.clone();
         let wiki_dir = state.layout.project_dir.clone();
         let wiki_events = event_bus.clone();
         let bts = state.background_tasks.clone();
@@ -134,7 +140,7 @@ fn main() {
         });
         let task_id = task.id.clone();
         boot_runtime.spawn(async move {
-            if let Some(watcher) = oxplow_app::wiki_notes_watch::WikiNotesWatcher::spawn(
+            if let Some(watcher) = oxplow_app::wiki_pages_watch::WikiPagesWatcher::spawn(
                 wiki_dir,
                 wiki_store,
                 wiki_events,

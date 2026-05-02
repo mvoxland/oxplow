@@ -6,7 +6,7 @@ description: Capture the current code-exploration into a wiki note
 
 Take what you've learned in this turn (or the recent exploration the
 user is referring to) and capture it as a wiki note in
-`.oxplow/notes/<slug>.md`. Follow the **`oxplow-wiki-capture`** skill.
+`.oxplow/wiki/<slug>.md`. Follow the **`oxplow-wiki-capture`** skill.
 
 Concretely:
 

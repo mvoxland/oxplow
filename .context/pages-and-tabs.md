@@ -16,7 +16,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
   selected thread of the new stream. The agent terminal is always
   available per thread and survives switches.
 - A **page** is anything addressable inside a tab body — file, work item,
-  wiki note, finding, dashboard, settings, agent terminal. Pages share a
+  wiki page, finding, dashboard, settings, agent terminal. Pages share a
   common chrome (header + collapsible Backlinks panel).
 
 ## Modules
@@ -25,7 +25,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 |---|---|
 | `apps/desktop/src/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
-| `apps/desktop/src/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `noteRef(slug)`, `workItemRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
+| `apps/desktop/src/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `wikiPageRef(slug)`, `workItemRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
 | `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. Reads only semantic CSS variables (skin via theme). |
 | `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks dropdown (popover). Mounted by `Page` when context or explicit `navBar` prop is present. |
 | `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. |
@@ -44,7 +44,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `apps/desktop/src/tabs/useBacklinks.ts` | React hook that materializes a `BacklinkContext` (notes bodies + findings + work-item touched-files) from live IPC and pipes into `computeBacklinks`. Used by `WorkItemPage`, `NotePage`, `FindingPage`. |
 | `apps/desktop/src/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
 | `apps/desktop/src/pages/WorkItemPage.tsx` | Single-record page for a work item — wraps `WorkItemDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
-| `apps/desktop/src/pages/NotePage.tsx` | Single-record page for a wiki note — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get the unified chrome (title from `usePageTitle`, browser-style back/forward + star, Backlinks panel). `NoteTab` no longer renders its own header — freshness badge + Edit/Save/Revert/Delete/Create live in a thin secondary toolbar inside the body. In-tab wikilink-to-note clicks route through `PageNavigationContext.navigate(noteRef)` so they participate in tab-level history. |
+| `apps/desktop/src/pages/NotePage.tsx` | Single-record page for a wiki page — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get the unified chrome (title from `usePageTitle`, browser-style back/forward + star, Backlinks panel). `NoteTab` no longer renders its own header — freshness badge + Edit/Save/Revert/Delete/Create live in a thin secondary toolbar inside the body. In-tab wikilink-to-note clicks route through `PageNavigationContext.navigate(wikiPageRef)` so they participate in tab-level history. |
 | `apps/desktop/src/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
 | `apps/desktop/src/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
 | `apps/desktop/src/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
@@ -58,7 +58,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 ```
 "agent" | "file" | "diff" | "note" | "work-item" | "finding"
 | "tasks" | "done-work" | "backlog" | "archived"
-| "notes-index" | "files" | "code-quality"
+| "wiki-index" | "files" | "code-quality"
 | "local-history" | "git-history" | "git-dashboard" | "git-commit"
 | "uncommitted-changes" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
@@ -318,7 +318,7 @@ Reference implementations:
 - `apps/desktop/src/components/LeftPanel/FileTree.tsx` — tree row dispatches
   via `useRouteDispatch(fileRef(path), { onNavigate: (_, opts) => onOpenFile(path, opts) })`.
 - `apps/desktop/src/components/Notes/NotesPane.tsx` — `NoteRow` and `SearchRow`
-  use the hook with `noteRef(slug)` and a `() => onOpenNote(slug)`
+  use the hook with `wikiPageRef(slug)` and a `() => onOpenNote(slug)`
   fallback.
 - `apps/desktop/src/tabs/BacklinksList.tsx` — the older pattern (manual
   `ctxNav.navigate` + per-event new-tab branches). Both forms are

@@ -329,7 +329,7 @@ context" kebab/menu action; both share one path through
 - **Mention shape** (`formatContextMention`):
   - file → `@<workspace-relative path> ` (Claude reads the file
     automatically on the next prompt).
-  - note → `@.oxplow/notes/<slug>.md `.
+  - note → `@.oxplow/wiki/<slug>.md `.
   - work-item → `[oxplow work-item <id>: "<title>" (<status>)] `
     (plain-text reference; agent can fetch via
     `oxplow__get_work_item`).

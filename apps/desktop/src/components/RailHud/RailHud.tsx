@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BacklogState, FinishedEntry, ThreadWorkState, WorkItem } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, noteRef, opErrorRef, tasksRef, uncommittedChangesRef, workItemRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, workItemRef } from "../../tabs/pageRefs.js";
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
@@ -897,7 +897,7 @@ function FinishedSection({
       </div>
       <div data-testid="rail-finished" style={{ paddingBottom: 8 }}>
         {entries.map((e) => {
-          const ref = e.kind === "work-item" ? workItemRef(e.itemId) : noteRef(e.slug);
+          const ref = e.kind === "work-item" ? workItemRef(e.itemId) : wikiPageRef(e.slug);
           return (
             <button
               key={`${e.kind}:${e.kind === "work-item" ? e.itemId : e.slug}`}

@@ -7,12 +7,12 @@ describe("formatContextMention", () => {
   });
 
   test("file with nested path", () => {
-    expect(formatContextMention({ kind: "file", path: "src/ui/components/Notes/NotesPane.tsx" }))
-      .toBe("@src/ui/components/Notes/NotesPane.tsx ");
+    expect(formatContextMention({ kind: "file", path: "src/ui/components/Wiki/WikiPane.tsx" }))
+      .toBe("@src/ui/components/Wiki/WikiPane.tsx ");
   });
 
-  test("note → @.oxplow/notes/<slug>.md with trailing space", () => {
-    expect(formatContextMention({ kind: "note", slug: "auth-flow" })).toBe("@.oxplow/notes/auth-flow.md ");
+  test("note → @.oxplow/wiki/<slug>.md with trailing space", () => {
+    expect(formatContextMention({ kind: "note", slug: "auth-flow" })).toBe("@.oxplow/wiki/auth-flow.md ");
   });
 
   test("work-item → bracketed reference with id, title, status, trailing space", () => {

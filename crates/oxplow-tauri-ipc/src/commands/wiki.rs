@@ -1,41 +1,41 @@
-//! Wiki notes — file-backed knowledge base.
+//! Wiki pages — file-backed knowledge base.
 
-use oxplow_db::{WikiNote, WikiNoteSearchHit};
+use oxplow_db::{WikiPage, WikiPageSearchHit};
 
 use crate::error::IpcError;
 use crate::state::AppState;
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_wiki_notes(state: tauri::State<'_, AppState>) -> Result<Vec<WikiNote>, IpcError> {
-    Ok(state.wiki_note_store.list().await?)
+pub async fn list_wiki_pages(state: tauri::State<'_, AppState>) -> Result<Vec<WikiPage>, IpcError> {
+    Ok(state.wiki_page_store.list().await?)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn get_wiki_note(
+pub async fn get_wiki_page(
     state: tauri::State<'_, AppState>,
     slug: String,
-) -> Result<Option<WikiNote>, IpcError> {
-    Ok(state.wiki_note_store.get(&slug).await?)
+) -> Result<Option<WikiPage>, IpcError> {
+    Ok(state.wiki_page_store.get(&slug).await?)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn upsert_wiki_note(
+pub async fn upsert_wiki_page(
     state: tauri::State<'_, AppState>,
-    note: WikiNote,
+    note: WikiPage,
 ) -> Result<(), IpcError> {
-    Ok(state.wiki_note_store.upsert(&note).await?)
+    Ok(state.wiki_page_store.upsert(&note).await?)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn delete_wiki_note(
+pub async fn delete_wiki_page(
     state: tauri::State<'_, AppState>,
     slug: String,
 ) -> Result<(), IpcError> {
-    Ok(state.wiki_note_store.delete(&slug).await?)
+    Ok(state.wiki_page_store.delete(&slug).await?)
 }
 
 #[tauri::command]
@@ -44,9 +44,9 @@ pub async fn search_wiki_titles(
     state: tauri::State<'_, AppState>,
     query: String,
     limit: u32,
-) -> Result<Vec<WikiNote>, IpcError> {
+) -> Result<Vec<WikiPage>, IpcError> {
     Ok(state
-        .wiki_note_store
+        .wiki_page_store
         .search_titles(&query, limit as usize)
         .await?)
 }
@@ -57,9 +57,9 @@ pub async fn search_wiki_bodies(
     state: tauri::State<'_, AppState>,
     query: String,
     limit: u32,
-) -> Result<Vec<WikiNoteSearchHit>, IpcError> {
+) -> Result<Vec<WikiPageSearchHit>, IpcError> {
     Ok(state
-        .wiki_note_store
+        .wiki_page_store
         .search_bodies(&query, limit as usize)
         .await?)
 }
@@ -75,7 +75,7 @@ fn note_body_path(state: &tauri::State<'_, AppState>, slug: &str) -> std::path::
 
 #[tauri::command]
 #[specta::specta]
-pub async fn read_wiki_note_body(
+pub async fn read_wiki_page_body(
     state: tauri::State<'_, AppState>,
     slug: String,
 ) -> Result<String, IpcError> {
@@ -87,7 +87,7 @@ pub async fn read_wiki_note_body(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn write_wiki_note_body(
+pub async fn write_wiki_page_body(
     state: tauri::State<'_, AppState>,
     slug: String,
     body: String,

@@ -73,7 +73,7 @@ anything by flipping it back to `in_progress`.
 ## Wiki note
 
 The project's **wiki** is a folder of markdown files under
-`.oxplow/notes/`, indexed in SQLite. Notes support
+`.oxplow/wiki/`, indexed in SQLite. Notes support
 `[[wikilinks]]` for cross-references — across notes, to repo
 files (`[[src/foo.ts]]`), and to git commits (`[[abc1234]]`).
 

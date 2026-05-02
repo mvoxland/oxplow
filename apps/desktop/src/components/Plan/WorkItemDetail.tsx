@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { EffortDetail, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
-import { MarkdownView } from "../Notes/MarkdownView.js";
+import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { deleteButtonStyle, inputStyle, miniButtonStyle } from "./plan-utils.js";
 
 /**
