@@ -235,7 +235,7 @@ export function NoteTab({ stream, slug, onClosed, onNavigateInternalNote, onOpen
         ) : (
           <MarkdownView
             className="wiki-note-markdown"
-            body={stripLeadingH1(draftInitialized ? draft : body)}
+            body={draftInitialized ? draft : body}
             onNavigateInternal={onNavigateInternalNote}
             onOpenInNewTab={onOpenNoteInNewTab}
             onOpenFile={(path) => onOpenFile(path)}
@@ -245,7 +245,7 @@ export function NoteTab({ stream, slug, onClosed, onNavigateInternalNote, onOpen
           />
         )}
       </div>
-      {!notFound && !loadError && summary && summary.referenced_files.length > 0 && (
+      {!notFound && !loadError && summary && (summary.referenced_files?.length ?? 0) > 0 && (
         <BacklinksFooter
           summary={summary}
           onOpenFile={onOpenFile}
@@ -255,17 +255,6 @@ export function NoteTab({ stream, slug, onClosed, onNavigateInternalNote, onOpen
   );
 }
 
-/**
- * Drop a leading `# heading` line from the rendered note body. The
- * page chrome already shows the note title in the nav bar, so showing
- * it again as the first markdown row would duplicate the line the
- * user just read above.
- */
-function stripLeadingH1(body: string): string {
-  const match = body.match(/^\s*#\s+[^\n]*\n+/);
-  return match ? body.slice(match[0].length) : body;
-}
-
 function BacklinksFooter({
   summary,
   onOpenFile,
@@ -273,8 +262,9 @@ function BacklinksFooter({
   summary: WikiNoteSummary;
   onOpenFile: (path: string) => void;
 }) {
-  const changed = useMemo(() => new Set(summary.changed_refs), [summary.changed_refs]);
-  const deleted = useMemo(() => new Set(summary.deleted_refs), [summary.deleted_refs]);
+  const changed = useMemo(() => new Set(summary.changed_refs ?? []), [summary.changed_refs]);
+  const deleted = useMemo(() => new Set(summary.deleted_refs ?? []), [summary.deleted_refs]);
+  const referencedFiles = summary.referenced_files ?? [];
   return (
     <footer
       style={{
@@ -289,9 +279,9 @@ function BacklinksFooter({
       }}
     >
       <span>
-        Referenced file{summary.referenced_files.length === 1 ? "" : "s"} ({summary.referenced_files.length}):
+        Referenced file{referencedFiles.length === 1 ? "" : "s"} ({referencedFiles.length}):
       </span>
-      {summary.referenced_files.map((path) => {
+      {referencedFiles.map((path) => {
         const status = deleted.has(path) ? "deleted" : changed.has(path) ? "changed" : "fresh";
         const color =
           status === "deleted"
@@ -338,12 +328,15 @@ function BacklinksFooter({
 function FreshnessBadge({ note }: { note: WikiNoteSummary }) {
   const reasons = useMemo(() => {
     const r: string[] = [];
+    const changedCount = note.changed_refs?.length ?? 0;
+    const deletedCount = note.deleted_refs?.length ?? 0;
     if (note.head_advanced) r.push("HEAD advanced");
-    if (note.changed_refs.length > 0) r.push(`${note.changed_refs.length} ref${note.changed_refs.length === 1 ? "" : "s"} changed`);
-    if (note.deleted_refs.length > 0) r.push(`${note.deleted_refs.length} deleted`);
+    if (changedCount > 0) r.push(`${changedCount} ref${changedCount === 1 ? "" : "s"} changed`);
+    if (deletedCount > 0) r.push(`${deletedCount} deleted`);
     return r;
   }, [note]);
-  const title = reasons.length > 0 ? reasons.join("; ") : `${note.total_refs} referenced files`;
+  const totalRefs = note.total_refs ?? note.referenced_files?.length ?? 0;
+  const title = reasons.length > 0 ? reasons.join("; ") : `${totalRefs} referenced files`;
   return (
     <span
       title={title}
@@ -351,11 +344,11 @@ function FreshnessBadge({ note }: { note: WikiNoteSummary }) {
         fontSize: 11,
         padding: "2px 6px",
         borderRadius: 3,
-        background: FRESHNESS_COLOR[note.freshness],
+        background: FRESHNESS_COLOR[note.freshness ?? "fresh"],
         color: "#fff",
       }}
     >
-      {FRESHNESS_LABEL[note.freshness]}
+      {FRESHNESS_LABEL[note.freshness ?? "fresh"]}
     </span>
   );
 }
