@@ -18,6 +18,7 @@ pub mod config_service;
 pub mod diagnostics;
 pub mod events;
 pub mod followup;
+pub mod git_service;
 pub mod hook_ingest;
 pub mod wiki_notes;
 pub mod wiki_notes_watch;
@@ -146,6 +147,10 @@ pub struct Services {
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
+    /// Singleton git access surface — every read of git state and
+    /// every mutating git op routes through here so we can layer
+    /// caching in one place. See `git_service.rs`.
+    pub git: Arc<git_service::GitService>,
     /// Per-thread cursor for the rail's "Recently finished" section.
     /// Entries whose timestamp is `<= cursor` are filtered out. Keyed
     /// by thread id; entries with no thread (global view) live under
@@ -211,6 +216,11 @@ impl Services {
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
+        let git = git_service::GitService::spawn(
+            layout.project_dir.clone(),
+            stream_store.clone(),
+            event_bus.clone(),
+        );
 
         Ok(Self {
             config: config_arc,
@@ -248,6 +258,7 @@ impl Services {
             terminal_sessions,
             recovery: recovery_svc,
             events: event_bus,
+            git,
             finished_cleared_at: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }
@@ -307,6 +318,11 @@ impl Services {
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
         let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
+        let git = git_service::GitService::spawn(
+            layout.project_dir.clone(),
+            stream_store.clone(),
+            event_bus.clone(),
+        );
         Ok(Self {
             config: config_arc,
             db,
@@ -343,6 +359,7 @@ impl Services {
             terminal_sessions,
             recovery: recovery_svc,
             events: event_bus,
+            git,
             finished_cleared_at: Arc::new(RwLock::new(std::collections::HashMap::new())),
         })
     }
