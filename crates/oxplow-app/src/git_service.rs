@@ -43,7 +43,19 @@ struct RefreshKinds {
     statuses: bool,
     branches: bool,
     conflict: bool,
+    /// Recent commit log (top `RECENT_LOG_LIMIT`, HEAD-only).
+    log: bool,
+    /// Remote branches list (project-wide cache, but scheduled per
+    /// stream so the worker dedupes naturally).
+    remote_branches: bool,
 }
+
+/// How many commits the per-stream `recent_log` cache holds. The
+/// dashboard asks for 5; we cache extra so the same snapshot can serve
+/// the GitHistory page's first paint without a re-query.
+const RECENT_LOG_LIMIT: usize = 50;
+/// How many remote branches the project-wide cache holds.
+const RECENT_REMOTE_BRANCHES_LIMIT: usize = 50;
 
 impl RefreshKinds {
     fn all() -> Self {
@@ -51,6 +63,8 @@ impl RefreshKinds {
             statuses: true,
             branches: true,
             conflict: true,
+            log: true,
+            remote_branches: true,
         }
     }
 
@@ -58,10 +72,12 @@ impl RefreshKinds {
         self.statuses |= other.statuses;
         self.branches |= other.branches;
         self.conflict |= other.conflict;
+        self.log |= other.log;
+        self.remote_branches |= other.remote_branches;
     }
 
     fn any(&self) -> bool {
-        self.statuses || self.branches || self.conflict
+        self.statuses || self.branches || self.conflict || self.log || self.remote_branches
     }
 }
 
@@ -75,11 +91,22 @@ struct StreamSnapshot {
     status_summary: Option<WorkspaceStatusSummary>,
     branches: Option<Vec<BranchRef>>,
     conflict_state: Option<RepoConflictState>,
+    /// Top `RECENT_LOG_LIMIT` HEAD-only commits.
+    recent_log: Option<GitLogResult>,
+    /// `(base, head)` -> counts. Cleared whenever refs/statuses change.
+    /// The dashboard fans out per-stream `getAheadBehind` calls; this
+    /// memoization makes the second-and-later renders free.
+    ahead_behind: HashMap<(String, String), AheadBehind>,
     last_refreshed: Option<Instant>,
 }
 
 struct Inner {
     snapshots: HashMap<StreamId, Arc<RwLock<StreamSnapshot>>>,
+    /// Project-wide cache for `list_recent_remote_branches` (the call
+    /// is scoped to the project root, not a worktree). Holds up to
+    /// `RECENT_REMOTE_BRANCHES_LIMIT` entries; readers can serve
+    /// `limit <= cached.len()` from cache.
+    recent_remote_branches: Option<Vec<RemoteBranchEntry>>,
 }
 
 /// One entry the refresh worker is asked to handle. The worker
@@ -112,6 +139,8 @@ pub struct SnapshotChanged {
     pub statuses: bool,
     pub branches: bool,
     pub conflict: bool,
+    pub log: bool,
+    pub remote_branches: bool,
 }
 
 impl GitService {
@@ -134,6 +163,7 @@ impl GitService {
             events: events.clone(),
             inner: Arc::new(RwLock::new(Inner {
                 snapshots: HashMap::new(),
+                recent_remote_branches: None,
             })),
             refresh_tx,
             snapshot_tx,
@@ -288,6 +318,9 @@ impl GitService {
                                 statuses: true,
                                 branches: false,
                                 conflict: true,
+                                log: false,
+                                remote_branches: false,
+                                ..Default::default()
                             },
                         });
                     }
@@ -298,6 +331,9 @@ impl GitService {
                                 statuses: false,
                                 branches: true,
                                 conflict: true,
+                                log: true,
+                                remote_branches: true,
+                                ..Default::default()
                             },
                         });
                     }
@@ -318,40 +354,65 @@ impl GitService {
             }
         };
         let worktree = snapshot.read().await.worktree.clone();
+        let project_dir = self.project_dir.clone();
         let RefreshKinds {
             statuses,
             branches,
             conflict,
+            log,
+            remote_branches,
         } = kinds;
 
-        let (statuses_v, branches_v, conflict_v) = tokio::task::spawn_blocking(move || {
-            let s = if statuses {
-                let map = oxplow_git::list_git_statuses(&worktree);
-                let summary = oxplow_git::summarize_git_statuses(&map);
-                Some((map, summary))
-            } else {
-                None
-            };
-            let b = if branches {
-                Some(oxplow_git::list_branches(worktree.clone()))
-            } else {
-                None
-            };
-            let c = if conflict {
-                Some(oxplow_git::get_repo_conflict_state(&worktree))
-            } else {
-                None
-            };
-            (s, b, c)
-        })
-        .await
-        .unwrap_or((None, None, None));
+        let (statuses_v, branches_v, conflict_v, log_v, remote_branches_v) =
+            tokio::task::spawn_blocking(move || {
+                let s = if statuses {
+                    let map = oxplow_git::list_git_statuses(&worktree);
+                    let summary = oxplow_git::summarize_git_statuses(&map);
+                    Some((map, summary))
+                } else {
+                    None
+                };
+                let b = if branches {
+                    Some(oxplow_git::list_branches(worktree.clone()))
+                } else {
+                    None
+                };
+                let c = if conflict {
+                    Some(oxplow_git::get_repo_conflict_state(&worktree))
+                } else {
+                    None
+                };
+                let lg = if log {
+                    Some(oxplow_git::get_git_log(
+                        &worktree,
+                        oxplow_git::GitLogOptions {
+                            limit: Some(RECENT_LOG_LIMIT),
+                            all: false,
+                        },
+                    ))
+                } else {
+                    None
+                };
+                let rb = if remote_branches {
+                    Some(oxplow_git::list_recent_remote_branches(
+                        &project_dir,
+                        RECENT_REMOTE_BRANCHES_LIMIT,
+                    ))
+                } else {
+                    None
+                };
+                (s, b, c, lg, rb)
+            })
+            .await
+            .unwrap_or((None, None, None, None, None));
 
         let mut changed = SnapshotChanged {
             stream_id: stream_id.clone(),
             statuses: false,
             branches: false,
             conflict: false,
+            log: false,
+            remote_branches: false,
         };
         {
             let mut snap = snapshot.write().await;
@@ -359,18 +420,39 @@ impl GitService {
                 snap.statuses = Some(map);
                 snap.status_summary = Some(summary);
                 changed.statuses = true;
+                // Status changes can affect ahead/behind only if HEAD
+                // moves; a `git status` walk doesn't move HEAD, so we
+                // leave the ahead_behind cache alone here.
             }
             if let Some(b) = branches_v {
                 snap.branches = Some(b);
                 changed.branches = true;
+                // Refs moved → ahead/behind is stale.
+                snap.ahead_behind.clear();
             }
             if let Some(c) = conflict_v {
                 snap.conflict_state = Some(c);
                 changed.conflict = true;
             }
+            if let Some(l) = log_v {
+                snap.recent_log = Some(l);
+                changed.log = true;
+                // HEAD moved → ahead/behind is stale.
+                snap.ahead_behind.clear();
+            }
             snap.last_refreshed = Some(Instant::now());
         }
-        if changed.statuses || changed.branches || changed.conflict {
+        if let Some(rb) = remote_branches_v {
+            let mut inner = self.inner.write().await;
+            inner.recent_remote_branches = Some(rb);
+            changed.remote_branches = true;
+        }
+        if changed.statuses
+            || changed.branches
+            || changed.conflict
+            || changed.log
+            || changed.remote_branches
+        {
             let _ = self.snapshot_tx.send(changed);
         }
     }
@@ -390,7 +472,15 @@ impl GitService {
     /// snapshot pull so the next read is hot.
     fn announce_write(&self, stream_id: Option<&StreamId>, kinds: RefreshKinds) {
         if let Some(id) = stream_id {
-            self.schedule(id, kinds);
+            // Any branches/conflict bump implies refs may have moved,
+            // which means recent log + remote branches need a re-fetch
+            // too. Layer that in so callers don't have to remember.
+            let mut effective = kinds;
+            if kinds.branches || kinds.conflict {
+                effective.log = true;
+                effective.remote_branches = true;
+            }
+            self.schedule(id, effective);
             self.events.emit(OxplowEvent::WorkspaceChanged {
                 stream_id: id.clone(),
                 change_kind: crate::events::WorkspaceChangeKind::Updated,
@@ -518,10 +608,26 @@ impl GitService {
         base: String,
         head: String,
     ) -> AheadBehind {
+        let key = (base.clone(), head.clone());
+        if let Some(snap) = self.snapshot_for(stream_id).await {
+            let guard = snap.read().await;
+            if let Some(v) = guard.ahead_behind.get(&key) {
+                return v.clone();
+            }
+        }
         let path = self.resolve_repo_dir(stream_id).await;
-        tokio::task::spawn_blocking(move || oxplow_git::get_ahead_behind(&path, &base, &head))
-            .await
-            .expect("ahead_behind join")
+        let base_for_blocking = base.clone();
+        let head_for_blocking = head.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            oxplow_git::get_ahead_behind(&path, &base_for_blocking, &head_for_blocking)
+        })
+        .await
+        .expect("ahead_behind join");
+        if let Some(snap) = self.snapshot_for(stream_id).await {
+            let mut guard = snap.write().await;
+            guard.ahead_behind.insert(key, result.clone());
+        }
+        result
     }
 
     pub async fn change_scopes(&self, stream_id: Option<&str>) -> ChangeScopes {
@@ -547,6 +653,23 @@ impl GitService {
         stream_id: Option<&str>,
         opts: GitLogOptions,
     ) -> GitLogResult {
+        // Cache hit: HEAD-only query whose limit fits inside the
+        // pre-fetched window. The dashboard asks for limit=5; the
+        // GitHistory page's first paint asks for ~50.
+        if !opts.all {
+            let want = opts.limit.unwrap_or(usize::MAX);
+            if want <= RECENT_LOG_LIMIT {
+                if let Some(snap) = self.snapshot_for(stream_id).await {
+                    let guard = snap.read().await;
+                    if let Some(cached) = guard.recent_log.as_ref() {
+                        let take = want.min(cached.commits.len());
+                        return GitLogResult {
+                            commits: cached.commits[..take].to_vec(),
+                        };
+                    }
+                }
+            }
+        }
         let path = self.resolve_repo_dir(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_git_log(&path, opts))
             .await
@@ -645,10 +768,27 @@ impl GitService {
     }
 
     pub async fn list_recent_remote_branches(&self, limit: usize) -> Vec<RemoteBranchEntry> {
+        {
+            let inner = self.inner.read().await;
+            if let Some(cached) = inner.recent_remote_branches.as_ref() {
+                if limit <= cached.len() || cached.len() < RECENT_REMOTE_BRANCHES_LIMIT {
+                    let take = limit.min(cached.len());
+                    return cached[..take].to_vec();
+                }
+            }
+        }
         let path = self.project_dir.clone();
-        tokio::task::spawn_blocking(move || oxplow_git::list_recent_remote_branches(&path, limit))
-            .await
-            .unwrap_or_default()
+        let fetched = tokio::task::spawn_blocking(move || {
+            oxplow_git::list_recent_remote_branches(&path, RECENT_REMOTE_BRANCHES_LIMIT.max(limit))
+        })
+        .await
+        .unwrap_or_default();
+        {
+            let mut inner = self.inner.write().await;
+            inner.recent_remote_branches = Some(fetched.clone());
+        }
+        let take = limit.min(fetched.len());
+        fetched[..take].to_vec()
     }
 
     pub async fn list_existing_worktrees(&self) -> Vec<GitWorktreeEntry> {
@@ -736,7 +876,8 @@ impl GitService {
                     statuses: true,
                     branches: false,
                     conflict: false,
-                },
+                                ..Default::default()
+                            },
             );
         }
         Ok(result)
@@ -761,7 +902,8 @@ impl GitService {
                     statuses: true,
                     branches: false,
                     conflict: false,
-                },
+                                ..Default::default()
+                            },
             );
         }
         Ok(result)
@@ -799,7 +941,8 @@ impl GitService {
                     statuses: true,
                     branches: false,
                     conflict: false,
-                },
+                                ..Default::default()
+                            },
             );
         }
         Ok(result)
@@ -823,7 +966,8 @@ impl GitService {
                     statuses: true,
                     branches: false,
                     conflict: false,
-                },
+                                ..Default::default()
+                            },
             );
         }
         Ok(result)
@@ -846,7 +990,8 @@ impl GitService {
                 statuses: true,
                 branches: true,
                 conflict: true,
-            },
+                                ..Default::default()
+                            },
         );
         Ok(result)
     }
@@ -864,7 +1009,8 @@ impl GitService {
                 statuses: true,
                 branches: false,
                 conflict: false,
-            },
+                                ..Default::default()
+                            },
         );
         Ok(result)
     }
@@ -882,7 +1028,8 @@ impl GitService {
                 statuses: true,
                 branches: false,
                 conflict: false,
-            },
+                                ..Default::default()
+                            },
         );
         Ok(())
     }
@@ -937,7 +1084,8 @@ impl GitService {
                 statuses: false,
                 branches: true,
                 conflict: false,
-            },
+                                ..Default::default()
+                            },
         );
         Ok(result)
     }
@@ -957,7 +1105,8 @@ impl GitService {
                 statuses: false,
                 branches: true,
                 conflict: false,
-            },
+                                ..Default::default()
+                            },
         );
         Ok(result)
     }
@@ -1020,7 +1169,8 @@ impl GitService {
                 statuses: true,
                 branches: false,
                 conflict: false,
-            },
+                                ..Default::default()
+                            },
         );
         Ok(())
     }
@@ -1046,7 +1196,8 @@ impl GitService {
                     statuses: false,
                     branches: true,
                     conflict: true,
-                },
+                                ..Default::default()
+                            },
             );
             self.events.emit(OxplowEvent::GitRefsChanged {
                 stream_id: id,
