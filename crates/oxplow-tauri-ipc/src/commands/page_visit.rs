@@ -1,6 +1,7 @@
 use oxplow_app::OxplowEvent;
 use oxplow_db::analytics_stores::PageVisitStore as _;
 use oxplow_db::PageVisit;
+use oxplow_domain::Timestamp;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -112,41 +113,98 @@ pub async fn list_currently_open_usage(
         .collect())
 }
 
-/// Pages whose latest visit has a duration_ms set (i.e. the editor
-/// closed them). Drives the "recently finished" rail.
+/// Recently completed work items merged with recently updated wiki
+/// notes, sorted by timestamp DESC. Drives the rail's "Finished"
+/// section. Items whose timestamp is `<= finished_cleared_at` are
+/// hidden until something newer lands.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum FinishedEntry {
+    #[serde(rename = "work-item")]
+    WorkItem {
+        #[serde(rename = "itemId")]
+        item_id: String,
+        title: String,
+        t: Timestamp,
+    },
+    #[serde(rename = "note")]
+    Note {
+        slug: String,
+        title: String,
+        t: Timestamp,
+    },
+}
+
+impl FinishedEntry {
+    fn timestamp(&self) -> Timestamp {
+        match self {
+            FinishedEntry::WorkItem { t, .. } => *t,
+            FinishedEntry::Note { t, .. } => *t,
+        }
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_recently_finished(
     state: tauri::State<'_, AppState>,
     limit: u32,
-) -> Result<Vec<PageVisit>, IpcError> {
-    let recent = state.page_visit_store.list_recent(limit as usize * 4, None).await?;
-    Ok(recent
-        .into_iter()
-        .filter(|v| v.duration_ms.is_some())
-        .take(limit as usize)
-        .collect())
+) -> Result<Vec<FinishedEntry>, IpcError> {
+    let cap = limit.max(1) as usize;
+    let cleared_at = *state
+        .finished_cleared_at
+        .read()
+        .expect("finished_cleared_at rwlock");
+
+    let mut entries: Vec<FinishedEntry> = Vec::new();
+
+    // Recently `done` work items.
+    let done = state.work_item_store.list_recently_done(cap).await?;
+    for item in done {
+        let Some(t) = item.completed_at else { continue };
+        entries.push(FinishedEntry::WorkItem {
+            item_id: item.id.0,
+            title: item.title,
+            t,
+        });
+    }
+
+    // Recently created/updated wiki notes. `WikiNoteStore::list` already
+    // orders by `updated_at DESC`; truncate to `cap` so we stay bounded.
+    let notes = state.wiki_note_store.list().await?;
+    for note in notes.into_iter().take(cap) {
+        entries.push(FinishedEntry::Note {
+            slug: note.slug,
+            title: note.title,
+            t: note.updated_at,
+        });
+    }
+
+    entries.retain(|e| match cleared_at {
+        Some(cursor) => e.timestamp() > cursor,
+        None => true,
+    });
+    entries.sort_by(|a, b| b.timestamp().cmp(&a.timestamp()));
+    entries.truncate(cap);
+    Ok(entries)
 }
 
-/// Drop the duration_ms-bearing rows so they stop appearing in
-/// "recently finished".
+/// Hide the current "Finished" entries behind a cursor. Source rows
+/// (work items / wiki notes) are untouched; new finishes still surface
+/// because their timestamp is newer than the cursor.
 #[tauri::command]
 #[specta::specta]
 pub async fn clear_recently_finished(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), IpcError> {
-    let recent = state.page_visit_store.list_recent(10_000, None).await?;
-    let mut changed = false;
-    for v in recent.into_iter().filter(|v| v.duration_ms.is_some()) {
-        state
-            .page_visit_store
-            .forget_page(&v.page_kind, &v.page_id)
-            .await?;
-        changed = true;
+    {
+        let mut guard = state
+            .finished_cleared_at
+            .write()
+            .expect("finished_cleared_at rwlock");
+        *guard = Some(Timestamp::now());
     }
-    if changed {
-        state.events.emit(OxplowEvent::PageVisitChanged);
-    }
+    state.events.emit(OxplowEvent::PageVisitChanged);
     Ok(())
 }
 

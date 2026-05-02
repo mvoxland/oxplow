@@ -390,8 +390,26 @@ export function App() {
     }
   }
 
-  function handleStreamCreated(next: Stream) {
-    void getThreadState(next.id).then((state) => {
+  async function handleStreamCreated(next: Stream) {
+    setStreams((prev) => {
+      const others = prev.filter((stream) => stream.id !== next.id);
+      return [...others, next].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    });
+    setError(null);
+    setDaemonUnavailable(false);
+    logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
+    // Make the new stream current on the backend BEFORE we let the
+    // TerminalPane mount and call open_terminal_session — that command
+    // builds its session_key from `state.streams.current()`, so without
+    // this hop the new thread's terminal would dedup onto the previous
+    // stream/thread's PTY and show the wrong agent's transcript.
+    try {
+      await switchStream(next.id);
+    } catch (e) {
+      logUi("warn", "switch_stream after create failed", { streamId: next.id, error: String(e) });
+    }
+    try {
+      const state = await getThreadState(next.id);
       setThreadStates((prev) => ({ ...prev, [next.id]: state }));
       const thread = state.threads.find((candidate) => candidate.id === state.selectedThreadId);
       if (thread) {
@@ -403,17 +421,10 @@ export function App() {
           setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
         });
       }
-    }).catch((e) => {
+    } catch (e) {
       setError(String(e));
-    });
-    setStreams((prev) => {
-      const others = prev.filter((stream) => stream.id !== next.id);
-      return [...others, next].sort((a, b) => a.created_at.localeCompare(b.created_at));
-    });
+    }
     setStream(next);
-    setError(null);
-    setDaemonUnavailable(false);
-    logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
   }
 
   async function handleOpenFile(path: string) {
@@ -2605,7 +2616,12 @@ export function App() {
             opErrorsStore.clear();
             for (const id of ids) void forgetPage("op-error", `op-error:${id}`);
           }}
-          onClearFinished={() => { void clearRecentlyFinished(selectedThreadId); }}
+          onClearFinished={() => {
+            void clearRecentlyFinished(selectedThreadId)
+              .then(() => listRecentlyFinished(selectedThreadId, 5))
+              .then((entries) => { setRecentlyFinished(entries); })
+              .catch(() => {});
+          }}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
             const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";
             return {

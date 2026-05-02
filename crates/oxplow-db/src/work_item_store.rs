@@ -189,6 +189,32 @@ const SELECT_BASE: &str =
     "SELECT wi.*, COALESCE((SELECT COUNT(*) FROM work_notes wn WHERE wn.work_item_id = wi.id), 0) AS note_count
      FROM work_items wi";
 
+impl SqliteWorkItemStore {
+    /// Most-recently completed work items across every thread, ordered
+    /// by `completed_at DESC`. Drives the rail's "Recently finished"
+    /// section. `status='done'` and `deleted_at IS NULL`; rows without
+    /// a `completed_at` (legacy) are excluded so the ordering is well
+    /// defined.
+    pub async fn list_recently_done(&self, limit: usize) -> Result<Vec<WorkItem>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let sql = format!(
+                    "{} WHERE wi.status = 'done' AND wi.deleted_at IS NULL \
+                       AND wi.completed_at IS NOT NULL \
+                     ORDER BY wi.completed_at DESC LIMIT ?1",
+                    SELECT_BASE
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![limit as i64], row_to_work_item)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+}
+
 #[async_trait]
 impl WorkItemStore for SqliteWorkItemStore {
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkItem>, DomainError> {
