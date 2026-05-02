@@ -79,6 +79,7 @@ impl ThreadService {
             custom_prompt: None,
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         self.threads.upsert(&thread).await?;
         info!(thread_id = %thread.id, stream_id = %stream, "thread created");
@@ -246,6 +247,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: Timestamp::from_unix_ms(1),
             updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
         let svc = ThreadService::new(Arc::new(SqliteThreadStore::new(db)));

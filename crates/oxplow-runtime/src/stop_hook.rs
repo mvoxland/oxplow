@@ -247,6 +247,7 @@ mod tests {
             custom_prompt: None,
             created_at: now(),
             updated_at: now(),
+            archived_at: None,
         }
     }
 

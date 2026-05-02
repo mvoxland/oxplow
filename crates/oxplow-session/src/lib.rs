@@ -113,6 +113,7 @@ impl StreamService {
             custom_prompt: None,
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         if let Err(e) = self.threads.upsert(&thread).await {
             tracing::warn!(stream_id = %stream_id, error = %e, "default thread create failed");
@@ -162,6 +163,7 @@ impl StreamService {
             talking_session_id: String::new(),
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         self.streams.upsert(&stream).await?;
         self.seed_default_thread(&stream.id).await;
@@ -234,6 +236,7 @@ impl StreamService {
             talking_session_id: String::new(),
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         self.streams.upsert(&stream).await?;
         self.seed_default_thread(&stream.id).await;
@@ -294,6 +297,7 @@ impl StreamService {
             talking_session_id: String::new(),
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         self.streams.upsert(&stream).await?;
         self.seed_default_thread(&stream.id).await;
@@ -387,6 +391,67 @@ impl StreamService {
         s.updated_at = Timestamp::now();
         self.streams.upsert(&s).await?;
         Ok(s)
+    }
+
+    /// Archive a stream and every thread under it. Soft-delete via
+    /// `archived_at` — the rows stay in the DB so closed efforts,
+    /// snapshots, and page_visit attribution don't dangle, but the
+    /// rail and thread queries filter them out. If `delete_worktree`
+    /// is true and the stream is a worktree (not primary), the
+    /// on-disk worktree is also `git worktree remove --force`'d.
+    /// Primary streams cannot be archived.
+    pub async fn archive_stream(
+        &self,
+        id: &StreamId,
+        delete_worktree: bool,
+    ) -> Result<(), SessionError> {
+        let stream = self
+            .streams
+            .get(id)
+            .await?
+            .ok_or(SessionError::Storage(DomainError::NotFound))?;
+        if stream.kind == StreamKind::Primary {
+            return Err(SessionError::Storage(DomainError::Invariant(
+                "cannot archive primary stream".into(),
+            )));
+        }
+        // Archive every thread first so the rail+work surfaces drop
+        // them in lockstep with the stream.
+        let threads = self.threads.list_for_stream(id).await?;
+        for t in threads {
+            self.threads.archive(&t.id).await?;
+        }
+        self.streams.archive(id).await?;
+        // Optional on-disk teardown. Best-effort: if git refuses (dirty
+        // tree, locked, missing) the row is already archived, so the
+        // rail no longer shows it; the user can clean up the directory
+        // manually.
+        if delete_worktree {
+            let path = Path::new(&stream.worktree_path);
+            if path.exists() {
+                let _ = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&self.layout.project_dir)
+                    .arg("worktree")
+                    .arg("remove")
+                    .arg("--force")
+                    .arg(path)
+                    .output();
+            }
+            // Always run `git worktree prune` after a remove. If
+            // `remove` failed (e.g. directory was already gone, or
+            // the worktree was locked) git keeps a stale admin entry
+            // in `.git/worktrees/`; prune is what actually clears it
+            // so subsequent `git worktree add` won't trip on the
+            // ghost.
+            let _ = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&self.layout.project_dir)
+                .arg("worktree")
+                .arg("prune")
+                .output();
+        }
+        Ok(())
     }
 
     /// Delete a stream. The primary cannot be deleted — that's the
@@ -532,6 +597,47 @@ mod tests {
         assert!(svc.list_streams().await.unwrap().iter().all(|s| s.id != stream.id));
         // best-effort dir removal — verify
         assert!(!path.exists(), "worktree dir should be removed");
+    }
+
+    #[tokio::test]
+    async fn archive_primary_rejected() {
+        let (svc, _dir) = make_service();
+        let primary = svc.ensure_primary().await.unwrap();
+        let err = svc.archive_stream(&primary.id, false).await.unwrap_err();
+        assert!(matches!(
+            err,
+            SessionError::Storage(DomainError::Invariant(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn archive_drops_stream_from_list_but_keeps_dir() {
+        let (svc, dir) = make_service();
+        svc.ensure_primary().await.unwrap();
+        let stream = svc
+            .create_worktree("feat-archive", "Feat", "feat-archive", "main")
+            .await
+            .unwrap();
+        let path = dir.path().join(".oxplow/worktrees/feat-archive");
+        assert!(path.exists());
+        // delete_worktree=false: row is archived, dir remains on disk.
+        svc.archive_stream(&stream.id, false).await.unwrap();
+        assert!(svc.list_streams().await.unwrap().iter().all(|s| s.id != stream.id));
+        assert!(path.exists(), "worktree dir should remain when delete_worktree=false");
+    }
+
+    #[tokio::test]
+    async fn archive_with_delete_worktree_removes_dir() {
+        let (svc, dir) = make_service();
+        svc.ensure_primary().await.unwrap();
+        let stream = svc
+            .create_worktree("feat-arch-del", "Feat", "feat-arch-del", "main")
+            .await
+            .unwrap();
+        let path = dir.path().join(".oxplow/worktrees/feat-arch-del");
+        assert!(path.exists());
+        svc.archive_stream(&stream.id, true).await.unwrap();
+        assert!(!path.exists(), "worktree dir should be pruned when delete_worktree=true");
     }
 
     #[tokio::test]

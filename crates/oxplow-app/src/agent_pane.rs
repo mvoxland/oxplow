@@ -157,6 +157,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: Timestamp::from_unix_ms(1),
             updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
         }
     }
 

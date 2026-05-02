@@ -351,6 +351,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: ts(),
             updated_at: ts(),
+            archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
@@ -367,6 +368,7 @@ mod tests {
             custom_prompt: None,
             created_at: ts(),
             updated_at: ts(),
+            archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
         (work, t.id)

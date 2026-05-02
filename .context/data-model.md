@@ -63,6 +63,13 @@ Each stream owns:
 Streams never look outside the project root for data; see
 `architecture.md`'s "Workspace isolation rule."
 
+`archived_at` (migration v4, nullable TEXT) — soft-delete stamp set
+by the rail's "Remove…" action. `StreamStore::list` filters
+`archived_at IS NULL` so archived streams disappear from the rail
+without dropping rows that history (efforts, snapshots, page_visit)
+references. Pre-migration rows stay NULL and remain visible. Primary
+streams cannot be archived.
+
 ### `threads` — `BatchStore` (`crates/oxplow-db/src/thread_store.rs`)
 
 Units of work *within* a stream. Statuses: `active` (writer — may mutate
@@ -89,6 +96,13 @@ without code changes; `listClosed(streamId)` is the dedicated reader
 for the Closed Threads page. Migration v44 also retires the legacy
 `completed` status — any pre-existing `completed` rows are remapped to
 `queued` with `closed_at = updated_at`.
+
+`archived_at` (migration v4, nullable TEXT) — soft-delete stamp set
+when the parent stream's "Remove…" action archives every thread under
+it (separate from `closed_at`, which is the user-visible "I'm done
+with this thread" gesture). `ThreadStore::list_for_stream` filters
+`archived_at IS NULL`, so archived threads vanish from every consumer
+in lockstep with the stream that owns them.
 
 `custom_prompt` (migration v18, nullable TEXT) — per-thread standing
 instructions appended to the agent's system prompt after the stream-level

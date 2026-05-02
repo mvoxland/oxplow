@@ -22,6 +22,11 @@ pub trait StreamStore: Send + Sync {
     async fn get(&self, id: &StreamId) -> Result<Option<Stream>, DomainError>;
     async fn upsert(&self, stream: &Stream) -> Result<(), DomainError>;
     async fn delete(&self, id: &StreamId) -> Result<(), DomainError>;
+    /// Soft-delete: stamp `archived_at` so the row drops out of
+    /// `list()` but stays referenced from history (efforts, snapshots,
+    /// page_visit). Idempotent — re-archiving an already-archived row
+    /// is a no-op.
+    async fn archive(&self, id: &StreamId) -> Result<(), DomainError>;
     async fn primary(&self) -> Result<Option<Stream>, DomainError>;
     /// Returns the runtime-state pointer to the currently-selected
     /// stream id, if any. Survives restarts; null until set.
@@ -36,6 +41,9 @@ pub trait ThreadStore: Send + Sync {
     async fn get(&self, id: &ThreadId) -> Result<Option<Thread>, DomainError>;
     async fn upsert(&self, thread: &Thread) -> Result<(), DomainError>;
     async fn delete(&self, id: &ThreadId) -> Result<(), DomainError>;
+    /// Soft-delete: stamp `archived_at`. Excluded from
+    /// `list_for_stream` after this fires.
+    async fn archive(&self, id: &ThreadId) -> Result<(), DomainError>;
     /// Per-stream selected-thread pointer. None means nothing selected.
     async fn selected_for_stream(
         &self,

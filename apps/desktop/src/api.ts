@@ -422,6 +422,10 @@ export async function renameStream(streamId: string, title: string): Promise<Str
   return unwrap(await commands.renameStream({ id: streamId, title }));
 }
 
+export async function archiveStream(streamId: string, deleteWorktree: boolean): Promise<void> {
+  unwrap(await commands.archiveStream(streamId, deleteWorktree));
+}
+
 export async function renameCurrentStream(title: string): Promise<Stream> {
   const cur = unwrap(await commands.getCurrentStream());
   if (!cur) throw new Error("no current stream to rename");

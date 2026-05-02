@@ -116,6 +116,7 @@ mod tests {
             custom_prompt: None,
             created_at: Timestamp::now(),
             updated_at: Timestamp::now(),
+            archived_at: None,
         }
     }
 
