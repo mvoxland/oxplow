@@ -64,6 +64,7 @@ export function TasksPage({ onOpenPage, onMoveBacklogItemToThread, ...rest }: Ta
             {...rest}
             visibleSections={["toDo", "blocked", "done"]}
             sectionItemLimit={{ done: PREVIEW_LIMIT }}
+            sectionLabelOverrides={{ done: "Recently Done" }}
             extraSectionLinks={{ done: viewAllDone }}
             hideBacklogChip
             hideArchiveToggle

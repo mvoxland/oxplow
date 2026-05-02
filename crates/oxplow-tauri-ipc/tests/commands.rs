@@ -121,7 +121,7 @@ async fn search_wiki_titles_empty_input_returns_empty() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recent_page_visits_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::page_visit::list_recent_page_visits(app.state(), 10)
+    let v = commands::page_visit::list_recent_page_visits(app.state(), 10, None)
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -130,7 +130,7 @@ async fn list_recent_page_visits_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn top_visited_pages_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::page_visit::top_visited_pages(app.state(), 10)
+    let v = commands::page_visit::top_visited_pages(app.state(), 10, None)
         .await
         .unwrap();
     assert!(v.is_empty());

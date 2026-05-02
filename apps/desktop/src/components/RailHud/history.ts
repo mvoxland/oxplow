@@ -59,16 +59,9 @@ export const NON_TRACKED_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Kinds excluded from the rail History display (still recorded for analytics).
- *  Includes the kinds already pinned in the rail's curated "Pages" section
- *  so they don't appear twice. */
+ *  The agent terminal is always-present in the rail, so it would be noise
+ *  in History; everything else (including pages pinned in the curated
+ *  "Pages" section) is allowed through. */
 export const RAIL_HISTORY_EXCLUDE_KINDS: string[] = [
   "agent",
-  "new-stream",
-  "new-work-item",
-  "diff",
-  "git-commit",
-  "tasks",
-  "notes-index",
-  "files",
-  "git-dashboard",
 ];

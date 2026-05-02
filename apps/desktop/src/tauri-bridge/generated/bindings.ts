@@ -177,9 +177,9 @@ export const commands = {
 	searchWikiBodies: (query: string, limit: number) => typedError<WikiNoteSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
 	readWikiNoteBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_note_body", { slug })),
 	writeWikiNoteBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_note_body", { slug, body })),
-	recordPageVisit: (pageKind: string, pageId: string, durationMs: number | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, durationMs })),
-	listRecentPageVisits: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit })),
-	topVisitedPages: (limit: number) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit })),
+	recordPageVisit: (pageKind: string, pageId: string, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, durationMs, threadId })),
+	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
+	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
 	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
 	countPageVisitsByDay: (days: number) => typedError<PageVisitDay[], IpcError>(__TAURI_INVOKE("count_page_visits_by_day", { days })),
 	listFrequentUsage: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_frequent_usage", { limit })),
@@ -874,6 +874,7 @@ export type PageVisit = {
 	page_id: string,
 	visited_at: Timestamp,
 	duration_ms: number | null,
+	thread_id: string | null,
 };
 
 export type PageVisitDay = {

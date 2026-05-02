@@ -21,10 +21,11 @@ pub async fn record_page_visit(
     page_kind: String,
     page_id: String,
     duration_ms: Option<i64>,
+    thread_id: Option<String>,
 ) -> Result<PageVisit, IpcError> {
     let visit = state
         .page_visit_store
-        .record(&page_kind, &page_id, duration_ms)
+        .record(&page_kind, &page_id, duration_ms, thread_id.as_deref())
         .await?;
     state.events.emit(OxplowEvent::PageVisitChanged);
     Ok(visit)
@@ -35,8 +36,12 @@ pub async fn record_page_visit(
 pub async fn list_recent_page_visits(
     state: tauri::State<'_, AppState>,
     limit: u32,
+    thread_id: Option<String>,
 ) -> Result<Vec<PageVisit>, IpcError> {
-    Ok(state.page_visit_store.list_recent(limit as usize).await?)
+    Ok(state
+        .page_visit_store
+        .list_recent(limit as usize, thread_id.as_deref())
+        .await?)
 }
 
 #[tauri::command]
@@ -44,8 +49,12 @@ pub async fn list_recent_page_visits(
 pub async fn top_visited_pages(
     state: tauri::State<'_, AppState>,
     limit: u32,
+    thread_id: Option<String>,
 ) -> Result<Vec<VisitedPage>, IpcError> {
-    let pairs = state.page_visit_store.list_top(limit as usize).await?;
+    let pairs = state
+        .page_visit_store
+        .list_top(limit as usize, thread_id.as_deref())
+        .await?;
     Ok(pairs
         .into_iter()
         .map(|(page_kind, page_id, visit_count)| VisitedPage {
@@ -95,7 +104,7 @@ pub async fn list_currently_open_usage(
     state: tauri::State<'_, AppState>,
     limit: u32,
 ) -> Result<Vec<PageVisit>, IpcError> {
-    let recent = state.page_visit_store.list_recent(limit as usize * 4).await?;
+    let recent = state.page_visit_store.list_recent(limit as usize * 4, None).await?;
     Ok(recent
         .into_iter()
         .filter(|v| v.duration_ms.is_none())
@@ -111,7 +120,7 @@ pub async fn list_recently_finished(
     state: tauri::State<'_, AppState>,
     limit: u32,
 ) -> Result<Vec<PageVisit>, IpcError> {
-    let recent = state.page_visit_store.list_recent(limit as usize * 4).await?;
+    let recent = state.page_visit_store.list_recent(limit as usize * 4, None).await?;
     Ok(recent
         .into_iter()
         .filter(|v| v.duration_ms.is_some())
@@ -126,7 +135,7 @@ pub async fn list_recently_finished(
 pub async fn clear_recently_finished(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), IpcError> {
-    let recent = state.page_visit_store.list_recent(10_000).await?;
+    let recent = state.page_visit_store.list_recent(10_000, None).await?;
     let mut changed = false;
     for v in recent.into_iter().filter(|v| v.duration_ms.is_some()) {
         state

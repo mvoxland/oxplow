@@ -1338,10 +1338,24 @@ export async function getBranchChanges(
 ): Promise<import("./api-types.js").BranchChanges & { resolvedBaseRef: string | null }> {
   // Resolve the base ref if not given, by reading the change scopes.
   const resolved = baseRef ?? (await getChangeScopes(streamId)).branchBase ?? "main";
-  const raw = unwrap(
-    await commands.getBranchChanges(streamId, resolved),
-  ) as unknown as import("./api-types.js").BranchChanges;
-  return { ...raw, resolvedBaseRef: resolved };
+  // The Rust binding emits `change: ChangeKind`; renderer call sites
+  // (App.tsx uncommittedSummary, ProjectPanel scopedDeletions,
+  // CommitDetailSlideover, UncommittedChangesPage, GitDashboardPage)
+  // read `entry.status`. Translate here — without this the Uncommitted
+  // rail section silently hides because every f.status is undefined.
+  const raw = unwrap(await commands.getBranchChanges(streamId, resolved));
+  const files = raw.files.map((entry) => ({
+    path: entry.path,
+    status: entry.change as import("./api-types.js").GitFileStatus,
+    additions: entry.additions,
+    deletions: entry.deletions,
+  }));
+  return {
+    base_ref: raw.base_ref,
+    merge_base: raw.merge_base,
+    files,
+    resolvedBaseRef: resolved,
+  };
 }
 
 export async function readFileAtRef(
@@ -1660,6 +1674,7 @@ export async function recordPageVisit(input: PageVisitInputApi): Promise<void> {
       input.refKind,
       input.refId,
       typeof input.payload === "number" ? input.payload : null,
+      input.threadId ?? null,
     ),
   );
 }
@@ -1670,11 +1685,13 @@ export async function listRecentPageVisits(opts: {
   dedupeByRef?: boolean;
   excludeKinds?: string[];
 }): Promise<PageVisitApi[]> {
-  // Backend command only takes `limit`; thread/exclude/dedupe are
-  // applied client-side until the IPC surface grows the parameters.
-  // Over-fetch a bit so post-filtering still has enough rows.
+  // Thread filter is applied at the SQL layer; exclude/dedupe still
+  // happen client-side. Over-fetch so post-filtering has enough rows.
   const raw = await unwrap(
-    await commands.listRecentPageVisits(Math.max(opts.limit ?? 50, 50) * 4),
+    await commands.listRecentPageVisits(
+      Math.max(opts.limit ?? 50, 50) * 4,
+      opts.threadId ?? null,
+    ),
   );
   const exclude = new Set(opts.excludeKinds ?? []);
   const seen = new Set<string>();
@@ -1707,7 +1724,10 @@ export async function topVisitedPages(opts: {
   excludeKinds?: string[];
 }): Promise<TopVisitedRowApi[]> {
   const raw = await unwrap(
-    await commands.topVisitedPages(Math.max(opts.limit ?? 50, 50) * 4),
+    await commands.topVisitedPages(
+      Math.max(opts.limit ?? 50, 50) * 4,
+      opts.threadId ?? null,
+    ),
   );
   const exclude = new Set(opts.excludeKinds ?? []);
   const out: TopVisitedRowApi[] = [];
