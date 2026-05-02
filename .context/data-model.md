@@ -25,8 +25,12 @@ Each stream owns:
     `title === projectBase` (never rewritten), created exactly once at
     startup by `Services::boot()` via `StreamStore.findPrimary()`.
     Cannot be deleted (`StreamStore.deleteStream()` throws for `kind === "primary"`).
-  - **worktree**: a real git worktree under `.oxplow/worktrees/<branch>/`
-    created by `createStream()` via `ensureWorktree()`. Title defaults
+  - **worktree**: a real git worktree at
+    `<parent_of_project>/<project_basename>-<slug>/` (sibling of the
+    main repo) created by `createStream()` via `ensureWorktree()`.
+    Pre-migration rows that point at the legacy
+    `<project>/.oxplow/worktrees/<slug>/` location keep their stored
+    `worktree_path`. Title defaults
     to the branch name; the runtime rewrites the title when the branch
     switches only if the old title matched the old branch (preserves
     user renames).
@@ -41,9 +45,9 @@ Each stream owns:
   Git-level errors (dirty tree, missing branch, branch already checked
   out in another worktree) bubble through unchanged so the UI inline
   error shows git's own message.
-- a worktree path (projectDir for primary; `.oxplow/worktrees/<slug>/`
-  for worktree kind — the `<slug>` is fixed at creation and does not
-  rename on branch switch)
+- a worktree path (projectDir for primary; sibling
+  `<parent>/<project_basename>-<slug>/` for worktree kind — the
+  `<slug>` is fixed at creation and does not rename on branch switch)
 - two tmux pane targets (`working` and `talking`)
 - per-pane Claude resume session ids (so reconnecting picks up history)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)
