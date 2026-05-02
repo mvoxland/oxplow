@@ -25,7 +25,7 @@ export interface PageDirectoryEntry {
  */
 export const RAIL_PAGE_IDS: ReadonlySet<string> = new Set([
   "tasks",
-  "notes-index",
+  "wiki-index",
   "files",
   "git-dashboard",
 ]);
@@ -48,7 +48,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
       badge: opts.backlogReadyCount > 0 ? opts.backlogReadyCount : undefined,
     },
     { id: "archived", label: "▣  Archived", ref: archivedRef() },
-    { id: "notes-index", label: "📒  Notes", ref: indexRef("notes-index") },
+    { id: "wiki-index", label: "📒  Notes", ref: indexRef("wiki-index") },
     { id: "files", label: "📁  Files", ref: indexRef("files") },
     { id: "code-quality", label: "⚠  Code Quality", ref: indexRef("code-quality") },
     { id: "local-history", label: "⏱  Local History", ref: indexRef("local-history") },

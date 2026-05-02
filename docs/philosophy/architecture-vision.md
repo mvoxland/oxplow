@@ -19,7 +19,7 @@ shipped today; most is not.
 - **Local History.** Per-effort file snapshots, grouped under their
   work item, with a page that lets you compare and restore.
 - **Project wiki.** First-class markdown notes under
-  `.oxplow/notes/`, with `[[wikilinks]]` to other notes, files,
+  `.oxplow/wiki/`, with `[[wikilinks]]` to other notes, files,
   and commits, plus cross-kind backlinks.
 - **Web-style UI.** Pages, tabs per thread, browser-style
   back/forward, kebabs instead of right-click menus, drag-to-add-

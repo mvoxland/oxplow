@@ -32,7 +32,7 @@ import {
   renameThread,
   renameStream,
   subscribeOxplowEvents,
-  subscribeWikiNoteEvents,
+  subscribeWikiPageEvents,
   subscribeWorkItemEvents,
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
@@ -99,7 +99,7 @@ import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
-import { NotesIndexPage } from "./pages/NotesIndexPage.js";
+import { WikiIndexPage } from "./pages/WikiIndexPage.js";
 import { TasksPage } from "./pages/TasksPage.js";
 import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
@@ -109,7 +109,7 @@ import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
-import { NotePage } from "./pages/NotePage.js";
+import { WikiPage } from "./pages/WikiPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
 import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
@@ -117,7 +117,7 @@ import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
-import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, noteRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, wikiPageRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -1548,7 +1548,7 @@ export function App() {
   const handleOpenNote = useCallback((slug: string) => {
     const tid = selectedThread?.id ?? null;
     if (!tid) return;
-    const ref = noteRef(slug);
+    const ref = wikiPageRef(slug);
     setThreadPageTabs((prev) => {
       const existing = prev[tid] ?? [];
       if (existing.some((t) => t.id === ref.id)) return prev;
@@ -1667,7 +1667,7 @@ export function App() {
     };
     refresh();
     const offWork = subscribeWorkItemEvents("all", () => refresh());
-    const offNotes = subscribeWikiNoteEvents(() => refresh());
+    const offNotes = subscribeWikiPageEvents(() => refresh());
     return () => {
       cancelled = true;
       offWork();
@@ -1722,7 +1722,7 @@ export function App() {
       case "uncommitted-changes":
       case "hook-events":
       case "files":
-      case "notes-index":
+      case "wiki-index":
       case "tasks":
       case "done-work":
       case "backlog":
@@ -2177,13 +2177,13 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "notes-index") {
+      } else if (ref.kind === "wiki-index") {
         tabs.push({
           id: ref.id,
           label: "Notes",
           closable: true,
           render: () => (
-            <NotesIndexPage
+            <WikiIndexPage
               stream={stream}
               selectedSlug={centerActive.startsWith("note:") ? centerActive.slice("note:".length) : null}
               onOpenNote={handleOpenNote}
@@ -2293,7 +2293,7 @@ export function App() {
           label: slug,
           closable: true,
           render: () => stream ? (
-            <NotePage
+            <WikiPage
               stream={stream}
               slug={slug}
               threadWork={selectedThreadWork}

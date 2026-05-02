@@ -20,7 +20,7 @@ export type PageKind =
   | "done-work"
   | "backlog"
   | "archived"
-  | "notes-index"
+  | "wiki-index"
   | "files"
   | "code-quality"
   | "local-history"

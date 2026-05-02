@@ -1,10 +1,10 @@
 //! Wiki-note disk sync + backlinks helpers.
 //!
-//! Bodies live as `.oxplow/notes/<slug>.md`. The metadata row in
-//! `wiki_note` is derived from the file (title, file refs, related
+//! Bodies live as `.oxplow/wiki/<slug>.md`. The metadata row in
+//! `wiki_page` is derived from the file (title, file refs, related
 //! notes, body excerpt) by [`sync_from_disk`]. This module is the
 //! pure parser + sync layer; the fs watcher in
-//! [`crate::wiki_notes_watch`] drives it on file changes.
+//! [`crate::wiki_pages_watch`] drives it on file changes.
 //!
 //! Two ref shapes are extracted:
 //!
@@ -24,7 +24,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use oxplow_db::{SqliteWikiNoteStore, WikiNote};
+use oxplow_db::{SqliteWikiPageStore, WikiPage};
 use oxplow_domain::{DomainError, Timestamp};
 
 /// Both kinds of refs extracted from a note body.
@@ -32,7 +32,7 @@ use oxplow_domain::{DomainError, Timestamp};
 pub struct ParsedRefs {
     /// Workspace-relative file paths (`src/foo.ts`).
     pub file_refs: Vec<String>,
-    /// Slugs of other wiki notes (`work-item-lifecycle`).
+    /// Slugs of other wiki pages (`work-item-lifecycle`).
     pub related_notes: Vec<String>,
 }
 
@@ -74,14 +74,14 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
     }
 }
 
-/// Read `<projectDir>/.oxplow/notes/<slug>.md` and upsert the
-/// `wiki_note` row. Deletes the row if the file is gone. Idempotent.
+/// Read `<projectDir>/.oxplow/wiki/<slug>.md` and upsert the
+/// `wiki_page` row. Deletes the row if the file is gone. Idempotent.
 pub async fn sync_from_disk(
     project_dir: &Path,
-    store: &SqliteWikiNoteStore,
+    store: &SqliteWikiPageStore,
     slug: &str,
 ) -> Result<(), DomainError> {
-    let file_path = notes_dir(project_dir).join(format!("{slug}.md"));
+    let file_path = wiki_pages_dir(project_dir).join(format!("{slug}.md"));
     if !file_path.exists() {
         return store.delete(slug).await;
     }
@@ -94,7 +94,7 @@ pub async fn sync_from_disk(
     let now = Timestamp::now();
     let existing = store.get(slug).await?;
     let created_at = existing.as_ref().map(|n| n.created_at.clone()).unwrap_or(now.clone());
-    let note = WikiNote {
+    let note = WikiPage {
         slug: slug.to_string(),
         title,
         body_path: file_path.to_string_lossy().into_owned(),
@@ -112,9 +112,9 @@ pub async fn sync_from_disk(
 /// files. Run once at watcher startup.
 pub async fn scan_and_sync_all(
     project_dir: &Path,
-    store: &SqliteWikiNoteStore,
+    store: &SqliteWikiPageStore,
 ) -> Result<(), DomainError> {
-    let dir = notes_dir(project_dir);
+    let dir = wiki_pages_dir(project_dir);
     fs::create_dir_all(&dir).ok();
     let mut on_disk: BTreeSet<String> = BTreeSet::new();
     if let Ok(entries) = fs::read_dir(&dir) {
@@ -144,9 +144,9 @@ pub async fn scan_and_sync_all(
 /// over the JSON column — fine for the small sizes notes typically
 /// have. If this becomes hot, swap for an inverted-index table.
 pub async fn backlinks_for_file(
-    store: &SqliteWikiNoteStore,
+    store: &SqliteWikiPageStore,
     path: &str,
-) -> Result<Vec<WikiNote>, DomainError> {
+) -> Result<Vec<WikiPage>, DomainError> {
     let all = store.list().await?;
     Ok(all
         .into_iter()
@@ -156,9 +156,9 @@ pub async fn backlinks_for_file(
 
 /// Return all notes whose `related_notes` contains `slug`.
 pub async fn backlinks_for_note(
-    store: &SqliteWikiNoteStore,
+    store: &SqliteWikiPageStore,
     slug: &str,
-) -> Result<Vec<WikiNote>, DomainError> {
+) -> Result<Vec<WikiPage>, DomainError> {
     let all = store.list().await?;
     Ok(all
         .into_iter()
@@ -166,8 +166,33 @@ pub async fn backlinks_for_note(
         .collect())
 }
 
-pub fn notes_dir(project_dir: &Path) -> PathBuf {
-    project_dir.join(".oxplow").join("notes")
+pub fn wiki_pages_dir(project_dir: &Path) -> PathBuf {
+    project_dir.join(".oxplow").join("wiki")
+}
+
+/// One-time on-disk rename. Earlier versions of oxplow stored wiki
+/// pages at `<project>/.oxplow/notes/<slug>.md`; the rename to
+/// `wiki` (matching the schema + UI nomenclature) requires moving
+/// the directory if it exists. Idempotent and safe — if either the
+/// new dir already exists or the old one doesn't, it's a no-op.
+/// Called once at boot before any wiki-page reads/writes.
+pub fn migrate_legacy_notes_dir(project_dir: &Path) {
+    let new_dir = wiki_pages_dir(project_dir);
+    let legacy_dir = project_dir.join(".oxplow").join("notes");
+    if new_dir.exists() {
+        return;
+    }
+    if !legacy_dir.exists() {
+        return;
+    }
+    if let Err(err) = std::fs::rename(&legacy_dir, &new_dir) {
+        tracing::warn!(
+            error = %err,
+            from = %legacy_dir.display(),
+            to = %new_dir.display(),
+            "failed to migrate legacy .oxplow/notes -> .oxplow/wiki",
+        );
+    }
 }
 
 fn extract_title(body: &str, fallback: &str) -> String {

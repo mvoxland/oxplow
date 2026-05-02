@@ -340,7 +340,7 @@ async fn handle_hook(
         if let (Some(thread_id), Some(body)) =
             (envelope_for_resume.thread_id.as_ref(), body_value.as_ref())
         {
-            attribute_wiki_note_edit(&ctx, thread_id, body).await;
+            attribute_wiki_page_edit(&ctx, thread_id, body).await;
         }
     }
 
@@ -440,11 +440,11 @@ async fn pre_tool_check(
 }
 
 /// When a PostToolUse hook reports an Edit/Write/MultiEdit/NotebookEdit
-/// targeting a `.oxplow/notes/<slug>.md` path, record an entry in the
+/// targeting a `.oxplow/wiki/<slug>.md` path, record an entry in the
 /// per-thread wiki-note attribution table. Mirrors how main attributes
 /// note touches via the runtime's PostToolUse handler. Tolerant of
 /// missing fields — attribution is best-effort.
-async fn attribute_wiki_note_edit(
+async fn attribute_wiki_page_edit(
     ctx: &AppCtx,
     thread_id: &ThreadId,
     body: &serde_json::Value,
@@ -466,12 +466,12 @@ async fn attribute_wiki_note_edit(
         .or_else(|| tool_input.get("path"))
         .and_then(|v| v.as_str());
     let Some(path) = raw_path else { return };
-    let Some(slug) = wiki_note_slug_from_path(path, &ctx.services.layout.project_dir) else {
+    let Some(slug) = wiki_page_slug_from_path(path, &ctx.services.layout.project_dir) else {
         return;
     };
     if let Err(err) = ctx
         .services
-        .wiki_note_thread_updates
+        .wiki_page_thread_updates
         .touch(thread_id, &slug, oxplow_domain::Timestamp::now())
         .await
     {
@@ -480,16 +480,16 @@ async fn attribute_wiki_note_edit(
 }
 
 /// Map an Edit-tool file path to a wiki-note slug iff the path is
-/// inside `.oxplow/notes/` with a `.md` extension. Accepts absolute
+/// inside `.oxplow/wiki/` with a `.md` extension. Accepts absolute
 /// or workspace-relative paths.
-fn wiki_note_slug_from_path(raw: &str, project_dir: &Path) -> Option<String> {
+fn wiki_page_slug_from_path(raw: &str, project_dir: &Path) -> Option<String> {
     let path = Path::new(raw);
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
         project_dir.join(path)
     };
-    let notes_dir = project_dir.join(".oxplow").join("notes");
+    let notes_dir = project_dir.join(".oxplow").join("wiki");
     let rel = abs.strip_prefix(&notes_dir).ok()?;
     if rel.parent().map(|p| !p.as_os_str().is_empty()).unwrap_or(false) {
         return None; // refuses subdirectories

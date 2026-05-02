@@ -20,7 +20,7 @@ export function formatContextMention(ref: ContextRef): string {
     return `@${ref.path} `;
   }
   if (ref.kind === "note") {
-    return `@.oxplow/notes/${ref.slug}.md `;
+    return `@.oxplow/wiki/${ref.slug}.md `;
   }
   // work-item: keep the title as plain text but strip newlines and
   // collapse internal whitespace so the inserted snippet stays on one

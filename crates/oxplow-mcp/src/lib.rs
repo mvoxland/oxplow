@@ -595,55 +595,55 @@ impl OxplowMcp {
         Ok(CallToolResult::success(vec![Content::text("deleted")]))
     }
 
-    // ---------- wiki notes ----------
+    // ---------- wiki pages ----------
 
-    #[tool(description = "List all wiki notes (metadata only).")]
+    #[tool(description = "List all wiki pages (metadata only).")]
     async fn list_notes(&self) -> Result<CallToolResult, McpError> {
         let notes = self
             .services
-            .wiki_note_store
+            .wiki_page_store
             .list()
             .await
             .map_err(internal)?;
         json_result(&notes)
     }
 
-    #[tool(description = "Title/slug glob search over wiki notes.")]
+    #[tool(description = "Title/slug glob search over wiki pages.")]
     async fn search_notes(
         &self,
         params: Parameters<SearchParams>,
     ) -> Result<CallToolResult, McpError> {
         let hits = self
             .services
-            .wiki_note_store
+            .wiki_page_store
             .search_titles(&params.0.query, params.0.limit as usize)
             .await
             .map_err(internal)?;
         json_result(&hits)
     }
 
-    #[tool(description = "FTS5-backed body search over wiki notes; returns ranked snippets.")]
+    #[tool(description = "FTS5-backed body search over wiki pages; returns ranked snippets.")]
     async fn search_note_bodies(
         &self,
         params: Parameters<SearchParams>,
     ) -> Result<CallToolResult, McpError> {
         let hits = self
             .services
-            .wiki_note_store
+            .wiki_page_store
             .search_bodies(&params.0.query, params.0.limit as usize)
             .await
             .map_err(internal)?;
         json_result(&hits)
     }
 
-    #[tool(description = "Get a wiki note's metadata by slug.")]
+    #[tool(description = "Get a wiki page's metadata by slug.")]
     async fn get_note_metadata(
         &self,
         params: Parameters<SlugParams>,
     ) -> Result<CallToolResult, McpError> {
         let note = self
             .services
-            .wiki_note_store
+            .wiki_page_store
             .get(&params.0.slug)
             .await
             .map_err(internal)?;
@@ -1226,7 +1226,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Wiki notes that reference the given file path in their parsed file_refs \
+        description = "Wiki pages that reference the given file path in their parsed file_refs \
                        (from [[wikilinks]] or inline path mentions). Use this for backlinks: \
                        \"which notes discuss src/foo.ts?\""
     )]
@@ -1235,8 +1235,8 @@ impl OxplowMcp {
         params: Parameters<FindNotesForFileParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let mut hits = oxplow_app::wiki_notes::backlinks_for_file(
-            &self.services.wiki_note_store,
+        let mut hits = oxplow_app::wiki_pages::backlinks_for_file(
+            &self.services.wiki_page_store,
             &p.path,
         )
         .await
@@ -1248,15 +1248,15 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Wiki notes that reference the given note slug in their related_notes \
+        description = "Wiki pages that reference the given note slug in their related_notes \
                        (from [[other-note-slug]] wikilinks). Use for note-to-note backlinks."
     )]
     async fn find_notes_for_note(
         &self,
         params: Parameters<FindNotesForNoteParams>,
     ) -> Result<CallToolResult, McpError> {
-        let mut hits = oxplow_app::wiki_notes::backlinks_for_note(
-            &self.services.wiki_note_store,
+        let mut hits = oxplow_app::wiki_pages::backlinks_for_note(
+            &self.services.wiki_page_store,
             &params.0.slug,
         )
         .await
@@ -1357,7 +1357,7 @@ impl OxplowMcp {
         )]))
     }
 
-    #[tool(description = "Re-read a wiki note's body file and refresh the FTS index.")]
+    #[tool(description = "Re-read a wiki page's body file and refresh the FTS index.")]
     async fn resync_note(
         &self,
         params: Parameters<ResyncNoteParams>,
@@ -1365,7 +1365,7 @@ impl OxplowMcp {
         let slug = params.0.slug;
         let mut note = self
             .services
-            .wiki_note_store
+            .wiki_page_store
             .get(&slug)
             .await
             .map_err(internal)?
@@ -1383,7 +1383,7 @@ impl OxplowMcp {
         note.body_size_bytes = body.len() as i64;
         note.updated_at = oxplow_domain::Timestamp::now();
         self.services
-            .wiki_note_store
+            .wiki_page_store
             .upsert(&note)
             .await
             .map_err(internal)?;

@@ -76,8 +76,8 @@ pub enum OxplowEvent {
         item_id: Option<WorkItemId>,
         thread_id: Option<ThreadId>,
     },
-    /// Wiki notes (creation, body update, deletion).
-    WikiNotesChanged,
+    /// Wiki pages (creation, body update, deletion).
+    WikiPagesChanged,
     /// Followups for a thread.
     FollowupsChanged { thread_id: ThreadId },
     /// Background task progress.
@@ -191,6 +191,6 @@ mod tests {
     async fn emit_with_no_subscribers_is_noop() {
         let bus = EventBus::new();
         // Should not panic / error.
-        bus.emit(OxplowEvent::WikiNotesChanged);
+        bus.emit(OxplowEvent::WikiPagesChanged);
     }
 }

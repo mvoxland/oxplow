@@ -100,14 +100,14 @@ that don't support recursive mode.
 
 `crates/oxplow-fs-watch/src/lib.rs` — not really a git watcher, but lives next
 to the others because it wraps `fs.watch` the same way. Watches
-`.oxplow/notes/` for `.md` file create/change/delete, debounces
-~200ms per slug, and calls `syncNoteFromDisk` → `WikiNoteStore.upsert`
+`.oxplow/wiki/` for `.md` file create/change/delete, debounces
+~200ms per slug, and calls `syncNoteFromDisk` → `WikiPageStore.upsert`
 (or `deleteBySlug`). Captures current HEAD (`readWorktreeHeadSha`)
 and per-reference blob SHA-256 hashes as the freshness baseline.
 
 Every write is treated identically — agent and user edits both
 re-baseline freshness — so the watcher is the single sync path for
-`wiki_note` metadata. See `data-model.md` → `wiki_note`.
+`wiki_page` metadata. See `data-model.md` → `wiki_page`.
 
 ### Why three
 
@@ -123,11 +123,11 @@ that don't touch source files.
 
 ### Boot is async
 
-`WorkspaceWatchRegistry::spawn` and `WikiNotesWatcher::spawn` run as
+`WorkspaceWatchRegistry::spawn` and `WikiPagesWatcher::spawn` run as
 background tasks reported through `BackgroundTaskStore` (kinds `Git`
 and `NotesResync`). The desktop boot path does not block on either —
 the renderer paints first, and the `BackgroundTaskIndicator` shows
-"Starting workspace watchers" / "Initial wiki notes scan" rows until
+"Starting workspace watchers" / "Initial wiki pages scan" rows until
 each scan settles. Filesystem events start arriving once the cache
 walk completes.
 

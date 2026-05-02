@@ -78,7 +78,7 @@ pub fn build_write_guard_response(
     if let (Some(project_dir), Some(tool_input)) = (context.project_dir, context.tool_input) {
         if let Some(abs) = extract_abs_target_path(tool_input, project_dir) {
             let oxplow_dir = project_dir.join(".oxplow");
-            let notes_dir = oxplow_dir.join("notes");
+            let notes_dir = oxplow_dir.join("wiki");
             let inside_project = is_inside(&abs, project_dir);
             let inside_oxplow = is_inside(&abs, &oxplow_dir);
             let inside_notes = is_inside(&abs, &notes_dir);
@@ -241,8 +241,8 @@ mod tests {
     fn write_to_notes_dir_allowed() {
         let t = read_only_thread();
         let project = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(project.path().join(".oxplow/notes")).unwrap();
-        let target = project.path().join(".oxplow/notes/captured.md");
+        std::fs::create_dir_all(project.path().join(".oxplow/wiki")).unwrap();
+        let target = project.path().join(".oxplow/wiki/captured.md");
         std::fs::write(&target, "").unwrap();
         let input = json!({"file_path": target.to_str().unwrap()});
         let result = build_write_guard_response(

@@ -23,7 +23,7 @@
  */
 
 import type { TabRef } from "./tabState.js";
-import { fileRef, findingRef, noteRef, workItemRef } from "./pageRefs.js";
+import { fileRef, findingRef, wikiPageRef, workItemRef } from "./pageRefs.js";
 
 export interface BacklinkNoteEntry {
   slug: string;
@@ -158,7 +158,7 @@ export function computeBacklinks(target: TabRef, ctx: BacklinkContext): Backlink
 
       for (const note of ctx.notes) {
         if (noteMentionsPath(note, path)) {
-          pushUnique(out, seen, { ref: noteRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
+          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
         }
       }
       for (const item of ctx.workItems) {
@@ -187,7 +187,7 @@ export function computeBacklinks(target: TabRef, ctx: BacklinkContext): Backlink
 
       for (const note of ctx.notes) {
         if (noteMentionsId(note, itemId)) {
-          pushUnique(out, seen, { ref: noteRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
+          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
         }
       }
       for (const f of ctx.findings) {
@@ -216,7 +216,7 @@ export function computeBacklinks(target: TabRef, ctx: BacklinkContext): Backlink
       }
       for (const note of ctx.notes) {
         if (noteMentionsPath(note, f.path) || noteMentionsId(note, `finding:${f.id}`)) {
-          pushUnique(out, seen, { ref: noteRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
+          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
         }
       }
       return out;

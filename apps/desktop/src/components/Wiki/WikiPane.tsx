@@ -1,26 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   listRecentUsage,
-  listWikiNotes,
-  searchWikiNotes,
+  listWikiPages,
+  searchWikiPages,
   subscribeUsageEvents,
-  subscribeWikiNoteEvents,
-  writeWikiNoteBody,
+  subscribeWikiPageEvents,
+  writeWikiPageBody,
   type Stream,
   type UsageRollup,
-  type WikiNoteSearchHit,
-  type WikiNoteSummary,
+  type WikiPageSearchHit,
+  type WikiPageSummary,
 } from "../../api.js";
 import { logUi } from "../../logger.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { ContextMenu } from "../ContextMenu.js";
-import { deleteWikiNote } from "../../api.js";
+import { deleteWikiPage } from "../../api.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
-import { noteRef } from "../../tabs/pageRefs.js";
+import { wikiPageRef } from "../../tabs/pageRefs.js";
 
-type FreshnessStatus = WikiNoteSummary["freshness"];
+type FreshnessStatus = WikiPageSummary["freshness"];
 
 const FRESHNESS_COLOR: Record<FreshnessStatus, string> = {
   "fresh": "var(--freshness-fresh)",
@@ -36,11 +36,11 @@ interface Props {
   onOpenNote: (slug: string) => void;
 }
 
-export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
-  const [notes, setNotes] = useState<WikiNoteSummary[]>([]);
+export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
+  const [notes, setNotes] = useState<WikiPageSummary[]>([]);
   const [recentUsage, setRecentUsage] = useState<UsageRollup[]>([]);
   const [query, setQuery] = useState("");
-  const [searchHits, setSearchHits] = useState<WikiNoteSearchHit[] | null>(null);
+  const [searchHits, setSearchHits] = useState<WikiPageSearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [newSlugDraft, setNewSlugDraft] = useState<string | null>(null);
   const [newSlugError, setNewSlugError] = useState<string | null>(null);
@@ -58,9 +58,9 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
       return;
     }
     try {
-      setNotes(await listWikiNotes(streamId));
+      setNotes(await listWikiPages(streamId));
     } catch (error) {
-      logUi("error", "listWikiNotes failed", { error: String(error) });
+      logUi("error", "listWikiPages failed", { error: String(error) });
     }
   }, [streamId]);
 
@@ -80,7 +80,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
   useEffect(() => { void refreshUsage(); }, [refreshUsage]);
 
   useEffect(() => {
-    const unsub = subscribeWikiNoteEvents(() => { void refreshNotes(); });
+    const unsub = subscribeWikiPageEvents(() => { void refreshNotes(); });
     return unsub;
   }, [refreshNotes]);
 
@@ -101,10 +101,10 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
     setSearching(true);
     const handle = setTimeout(async () => {
       try {
-        const hits = await searchWikiNotes(streamId, trimmed, 30);
+        const hits = await searchWikiPages(streamId, trimmed, 30);
         setSearchHits(hits);
       } catch (error) {
-        logUi("error", "searchWikiNotes failed", { error: String(error) });
+        logUi("error", "searchWikiPages failed", { error: String(error) });
         setSearchHits([]);
       } finally {
         setSearching(false);
@@ -139,7 +139,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
       return;
     }
     try {
-      await writeWikiNoteBody(streamId, slug, `# ${slug}\n\n`);
+      await writeWikiPageBody(streamId, slug, `# ${slug}\n\n`);
       setNewSlugDraft(null);
       setNewSlugError(null);
       onOpenNote(slug);
@@ -179,8 +179,8 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
           enabled: !!streamId,
           run: async () => {
             if (!streamId) return;
-            try { await deleteWikiNote(streamId, contextMenu.slug); } catch (error) {
-              logUi("error", "deleteWikiNote failed", { error: String(error) });
+            try { await deleteWikiPage(streamId, contextMenu.slug); } catch (error) {
+              logUi("error", "deleteWikiPage failed", { error: String(error) });
             }
             setContextMenu(null);
           },
@@ -189,7 +189,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
     : [];
 
   const notesBySlug = useMemo(() => {
-    const map = new Map<string, WikiNoteSummary>();
+    const map = new Map<string, WikiPageSummary>();
     for (const n of notes) map.set(n.slug, n);
     return map;
   }, [notes]);
@@ -201,7 +201,7 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
         if (!note) return null;
         return { note, last_at: u.last_at, count: u.count };
       })
-      .filter((x): x is { note: WikiNoteSummary; last_at: string; count: number } => x !== null);
+      .filter((x): x is { note: WikiPageSummary; last_at: string; count: number } => x !== null);
   }, [recentUsage, notesBySlug]);
 
   const visitedSlugs = useMemo(() => new Set(visited.map((v) => v.note.slug)), [visited]);
@@ -303,12 +303,12 @@ export function NotesPane({ stream, selectedSlug, onOpenNote }: Props) {
             onOpenNote={onOpenNote}
             onOpenMenu={(rect, hit) => {
               const summary = notesBySlug.get(hit.slug);
-              openMenuForNote(rect, summary ?? { slug: hit.slug, title: hit.title } as WikiNoteSummary);
+              openMenuForNote(rect, summary ?? { slug: hit.slug, title: hit.title } as WikiPageSummary);
             }}
           />
         ) : notes.length === 0 ? (
           <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>
-            No notes yet. Click "+ New" or create a file at <code>.oxplow/notes/*.md</code>.
+            No notes yet. Click "+ New" or create a file at <code>.oxplow/wiki/*.md</code>.
           </div>
         ) : (
           <>
@@ -419,12 +419,12 @@ function SearchResults({
   onOpenNote,
   onOpenMenu,
 }: {
-  hits: WikiNoteSearchHit[] | null;
+  hits: WikiPageSearchHit[] | null;
   searching: boolean;
-  notesBySlug: Map<string, WikiNoteSummary>;
+  notesBySlug: Map<string, WikiPageSummary>;
   selectedSlug: string | null;
   onOpenNote: (slug: string) => void;
-  onOpenMenu: (rect: DOMRect, hit: WikiNoteSearchHit) => void;
+  onOpenMenu: (rect: DOMRect, hit: WikiPageSearchHit) => void;
 }) {
   if (hits === null && searching) {
     return <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>Searching…</div>;
@@ -458,14 +458,14 @@ function SearchRow({
   onOpenNote,
   onOpenMenu,
 }: {
-  hit: WikiNoteSearchHit;
-  summary: WikiNoteSummary | null;
+  hit: WikiPageSearchHit;
+  summary: WikiPageSummary | null;
   selected: boolean;
   onOpenNote: (slug: string) => void;
   onOpenMenu: (rect: DOMRect) => void;
 }) {
   const freshness = summary?.freshness ?? "fresh";
-  const { handlers } = useRouteDispatch(noteRef(hit.slug), {
+  const { handlers } = useRouteDispatch(wikiPageRef(hit.slug), {
     onNavigate: () => onOpenNote(hit.slug),
   });
   return (
@@ -531,13 +531,13 @@ function NoteRow({
   onOpenNote,
   onOpenMenu,
 }: {
-  note: WikiNoteSummary;
+  note: WikiPageSummary;
   selected: boolean;
   rightLabel?: string;
   onOpenNote: (slug: string) => void;
-  onOpenMenu: (rect: DOMRect, note: WikiNoteSummary) => void;
+  onOpenMenu: (rect: DOMRect, note: WikiPageSummary) => void;
 }) {
-  const { handlers } = useRouteDispatch(noteRef(note.slug), {
+  const { handlers } = useRouteDispatch(wikiPageRef(note.slug), {
     onNavigate: () => onOpenNote(note.slug),
   });
   return (

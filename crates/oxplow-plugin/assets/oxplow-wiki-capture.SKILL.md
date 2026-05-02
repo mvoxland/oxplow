@@ -1,11 +1,11 @@
 ---
 name: oxplow-wiki-capture
-description: Capturing non-trivial exploratory Q&A into wiki notes — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_notes, search_notes, search_note_bodies, find_notes_for_file, get_note_metadata, resync_note, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_notes, search_notes, search_note_bodies, find_notes_for_file, get_note_metadata, resync_note, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
-# Wiki notes — exploratory capture
+# Wiki pages — exploratory capture
 
-The per-project wiki at `.oxplow/notes/<slug>.md` is where durable
+The per-project wiki at `.oxplow/wiki/<slug>.md` is where durable
 understanding lives: how subsystems work, why a design landed, the
 tradeoffs of an approach, recommendations, comparisons, follow-up
 analyses. **It is NOT codebase-only** — any non-trivial exploratory
@@ -43,7 +43,7 @@ otherwise fire.
 
 ## On a read-only thread
 
-The write guard exempts `.oxplow/notes/<slug>.md` — capture exactly
+The write guard exempts `.oxplow/wiki/<slug>.md` — capture exactly
 the same way as on the writer thread. Don't punt the user's
 exploration answer just because you can't edit code; the wiki is
 where exploration goes regardless of writer status.
@@ -96,7 +96,7 @@ Files referenced: `src/foo.ts`, `src/bar/baz.ts`
   - `[[src/foo.ts:42]]` — file at line 42
   - `[[src/foo.ts|the foo helper]]` — custom display text
   - `[[abc1234]]` or `[[git:abc1234]]` — git commit (SHA, 7-40 hex)
-  - `[[some-other-note]]` — link to another wiki note by slug
+  - `[[some-other-note]]` — link to another wiki page by slug
 - Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]]
   calls `onDrop` after validating the target."
 
@@ -105,7 +105,7 @@ Files referenced: `src/foo.ts`, `src/bar/baz.ts`
 1. Resolve the path: call `mcp__oxplow__get_note_metadata` (existing
    note) or `mcp__oxplow__list_notes` and use the returned `path`.
    For a brand-new slug, the path is
-   `<projectDir>/.oxplow/notes/<slug>.md`.
+   `<projectDir>/.oxplow/wiki/<slug>.md`.
 2. Use the **Write** tool to write/replace the file. (For appends to
    an existing note, Read first, then Write the merged body.)
 3. Call `mcp__oxplow__resync_note` with the slug so the freshness
@@ -196,6 +196,6 @@ gating requirement; everything inside is forwarded to mermaid as-is.
 
 If this turn dispatched query subagents (`oxplow__delegate_query` →
 `record_query_finding`), call `mcp__oxplow__get_thread_notes` and
-incorporate their findings into the wiki note rather than discarding
+incorporate their findings into the wiki page rather than discarding
 them. Subagent notes are otherwise invisible — the wiki is where they
 become durable.

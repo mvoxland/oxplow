@@ -21,7 +21,7 @@ import {
   gitCommitRef,
   gitDashboardRef,
   indexRef,
-  noteRef,
+  wikiPageRef,
   uncommittedChangesRef,
   workItemRef,
 } from "./pageRefs.js";
@@ -70,7 +70,7 @@ function notesMentioningPaths(paths: Iterable<string>, ctx: BacklinkContext): Ba
   for (const note of ctx.notes) {
     for (const path of paths) {
       if (note.body.includes(path)) {
-        out.push({ ref: noteRef(note.slug), label: note.title || note.slug, subtitle: "note" });
+        out.push({ ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" });
         break;
       }
     }
@@ -85,7 +85,7 @@ function notesMentioningSha(sha: string, ctx: BacklinkContext): BacklinkEntry[] 
   const out: BacklinkEntry[] = [];
   for (const note of ctx.notes) {
     if (note.body.includes(sha) || note.body.includes(short)) {
-      out.push({ ref: noteRef(note.slug), label: note.title || note.slug, subtitle: "note" });
+      out.push({ ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" });
     }
   }
   return out;
@@ -106,7 +106,7 @@ export function gitDashboardBacklinks(_payload: unknown, ctx: AppBacklinkContext
   if (ctx.currentBranch) {
     for (const note of ctx.notes) {
       if (note.body.includes(ctx.currentBranch)) {
-        out.push({ ref: noteRef(note.slug), label: note.title || note.slug, subtitle: "note" });
+        out.push({ ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" });
       }
     }
   }

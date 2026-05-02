@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CommitDetail, GitLogCommit, Stream, ThreadWorkState } from "../api.js";
-import { getBranchChanges, getCommitDetail, getGitLog, listCodeQualityFindings, listWikiNotes, readWikiNoteBody, listWorkItemEfforts } from "../api.js";
+import { getBranchChanges, getCommitDetail, getGitLog, listCodeQualityFindings, listWikiPages, readWikiPageBody, listWorkItemEfforts } from "../api.js";
 import type { BacklinkContext, BacklinkEntry, BacklinkFindingEntry, BacklinkNoteEntry, BacklinkWorkItemEntry } from "./backlinksIndex.js";
 import { computeBacklinks } from "./backlinksIndex.js";
 import { APP_PAGE_BACKLINKS } from "./appPageBacklinks.js";
@@ -75,11 +75,11 @@ export function useBacklinks(
       setCtx((prev) => ({ ...prev, findings }));
     });
 
-    void listWikiNotes(stream.id).then(async (summaries) => {
+    void listWikiPages(stream.id).then(async (summaries) => {
       const notes: BacklinkNoteEntry[] = [];
       for (const summary of summaries) {
         try {
-          const body = await readWikiNoteBody(stream.id, summary.slug);
+          const body = await readWikiPageBody(stream.id, summary.slug);
           notes.push({ slug: summary.slug, title: summary.title, body });
         } catch {
           // skip

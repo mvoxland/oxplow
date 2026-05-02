@@ -470,14 +470,14 @@ intermediate `ready` step.
 queries (definition, references, hover) the agent can use without
 shelling out.
 
-`buildWikiNoteMcpTools` (`crates/oxplow-mcp/src/lib.rs`) surfaces the
-per-project wiki (`wiki_note` table + `.oxplow/notes/*.md` files — see
+`buildWikiPageMcpTools` (`crates/oxplow-mcp/src/lib.rs`) surfaces the
+per-project wiki (`wiki_page` table + `.oxplow/wiki/*.md` files — see
 `data-model.md`). Tools are metadata-only: `list_notes`,
 `get_note_metadata`, `resync_note`, `search_notes` (title),
 `search_note_bodies` (content), `find_notes_for_file` (backlinks),
 `delete_note`. **There is intentionally no create/update tool** —
 the agent writes bodies directly with its Write/Edit tools on
-`.oxplow/notes/<slug>.md` (far cheaper than round-tripping full
+`.oxplow/wiki/<slug>.md` (far cheaper than round-tripping full
 bodies through MCP args). The notes watcher re-syncs metadata + body
 on every file event; `resync_note` forces an immediate re-baseline
 when the agent wants freshness pinned to the current HEAD without
@@ -503,7 +503,7 @@ rewrites `[[ ]]` into clickable links — SHA-shaped targets become
 `gitcommit:` links that dispatch through `onOpenCommit`; file-shaped
 targets become `file:` links that open in an editor tab via
 `onOpenFile`; bare slugs route to wiki navigation. The reference
-parser (in `crates/oxplow-db/src/wiki_note_store.rs`) already picks
+parser (in `crates/oxplow-db/src/wiki_page_store.rs`) already picks
 paths out of `[[ ]]` because the bracket characters fall outside its
 lookbehind,
 so backlinks/freshness work without parser changes. The
@@ -527,7 +527,7 @@ in-progress changes.
   absolute path. Containment checks live alongside the write guard
   in `crates/oxplow-runtime/` and reuse `AppLayout` from
   `crates/oxplow-app/src/lib.rs`.
-- **Wiki-notes carve-out.** Writes to `.oxplow/notes/<slug>.md` are
+- **Wiki-notes carve-out.** Writes to `.oxplow/wiki/<slug>.md` are
   allowed even on non-writer threads — the per-project wiki is not
   committed to git and doesn't collide with the writer's in-progress
   code, so capture is safe from any thread. Other `.oxplow/` paths

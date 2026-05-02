@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapshot, Stream, ThreadWorkState, TopVisitedRowApi, WikiNoteSummary, WorkItem } from "../api.js";
+import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapshot, Stream, ThreadWorkState, TopVisitedRowApi, WikiPageSummary, WorkItem } from "../api.js";
 import {
   countPageVisitsByDay,
   listCodeQualityFindings,
   listSnapshots,
-  listWikiNotes,
+  listWikiPages,
   subscribePageVisitEvents,
   topVisitedPages,
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { findingRef, indexRef, noteRef, workItemRef } from "../tabs/pageRefs.js";
+import { findingRef, indexRef, wikiPageRef, workItemRef } from "../tabs/pageRefs.js";
 
 export type DashboardVariant = "planning" | "review" | "quality" | "visits";
 
@@ -113,14 +113,14 @@ function EmptyHint({ children }: { children: ReactNode }) {
 }
 
 function useRecentNotes(stream: Stream | null) {
-  const [notes, setNotes] = useState<WikiNoteSummary[]>([]);
+  const [notes, setNotes] = useState<WikiPageSummary[]>([]);
   useEffect(() => {
     if (!stream) {
       setNotes([]);
       return;
     }
     let cancelled = false;
-    void listWikiNotes(stream.id).then((rows) => {
+    void listWikiPages(stream.id).then((rows) => {
       if (!cancelled) {
         const sorted = [...rows].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
         setNotes(sorted);
@@ -219,7 +219,7 @@ function PlanningSections({
             key={note.slug}
             label={note.title || note.slug}
             subtitle={note.freshness}
-            onClick={() => onOpenPage(noteRef(note.slug))}
+            onClick={() => onOpenPage(wikiPageRef(note.slug))}
           />
         ))}
       </Section>

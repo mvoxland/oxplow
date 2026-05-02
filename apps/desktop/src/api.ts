@@ -1027,40 +1027,40 @@ export async function localBlame(
   ) as unknown as LocalBlameEntry[];
 }
 
-export type WikiNoteSummary = import("./api-types.js").WikiNoteSummary;
-export type WikiNoteSearchHit = import("./api-types.js").WikiNoteSearchHit;
+export type WikiPageSummary = import("./api-types.js").WikiPageSummary;
+export type WikiPageSearchHit = import("./api-types.js").WikiPageSearchHit;
 export type UsageRollup = import("./tauri-bridge/generated/bindings.js").UsageRollup;
 
-export async function listWikiNotes(_streamId: string): Promise<WikiNoteSummary[]> {
-  return unwrap(await commands.listWikiNotes()) as unknown as WikiNoteSummary[];
+export async function listWikiPages(_streamId: string): Promise<WikiPageSummary[]> {
+  return unwrap(await commands.listWikiPages()) as unknown as WikiPageSummary[];
 }
 
-export async function readWikiNoteBody(_streamId: string, slug: string): Promise<string> {
-  return unwrap(await commands.readWikiNoteBody(slug));
+export async function readWikiPageBody(_streamId: string, slug: string): Promise<string> {
+  return unwrap(await commands.readWikiPageBody(slug));
 }
 
-export async function writeWikiNoteBody(_streamId: string, slug: string, body: string): Promise<void> {
-  unwrap(await commands.writeWikiNoteBody(slug, body));
+export async function writeWikiPageBody(_streamId: string, slug: string, body: string): Promise<void> {
+  unwrap(await commands.writeWikiPageBody(slug, body));
 }
 
-export async function deleteWikiNote(_streamId: string, slug: string): Promise<void> {
-  unwrap(await commands.deleteWikiNote(slug));
+export async function deleteWikiPage(_streamId: string, slug: string): Promise<void> {
+  unwrap(await commands.deleteWikiPage(slug));
 }
 
-export function subscribeWikiNoteEvents(onEvent: () => void): () => void {
+export function subscribeWikiPageEvents(onEvent: () => void): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.kind === "wikiNotesChanged") onEvent();
+    if (event.kind === "wikiPagesChanged") onEvent();
   });
 }
 
-export async function searchWikiNotes(
+export async function searchWikiPages(
   _streamId: string,
   query: string,
   limit?: number,
-): Promise<WikiNoteSearchHit[]> {
+): Promise<WikiPageSearchHit[]> {
   return unwrap(
     await commands.searchWikiTitles(query, limit ?? 50),
-  ) as unknown as WikiNoteSearchHit[];
+  ) as unknown as WikiPageSearchHit[];
 }
 
 export async function recordUsage(input: {
@@ -1769,7 +1769,7 @@ function deriveDefaultLabelFromKind(kind: string, id: string): string {
   switch (kind) {
     case "tasks": return "Tasks";
     case "files": return "Files";
-    case "notes-index": return "Notes";
+    case "wiki-index": return "Notes";
     case "git-dashboard": return "Git";
     case "git-history": return "Git History";
     case "git-commit": return "Git Commit";
@@ -1807,7 +1807,7 @@ async function resolveRefLabels<T extends { refKind: string; refId: string; labe
   const noteIds = rows.filter((r) => r.refKind === "note" || r.refKind === "wiki-note");
   if (noteIds.length > 0) {
     try {
-      const notes = await listWikiNotes("");
+      const notes = await listWikiPages("");
       notesByIdent = new Map();
       for (const n of notes) {
         notesByIdent.set(n.slug, n.title);
