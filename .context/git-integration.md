@@ -131,6 +131,67 @@ the renderer paints first, and the `BackgroundTaskIndicator` shows
 each scan settles. Filesystem events start arriving once the cache
 walk completes.
 
+## GitService — the singleton
+
+Every read of git state and every mutating git op routes through
+`oxplow_app::git_service::GitService`, held on `Services` as
+`Arc<GitService>`. There is one of these for the whole app, not one
+per stream. It owns:
+
+- A per-stream snapshot cache (`HashMap<StreamId, StreamSnapshot>`)
+  of the slow-to-recompute slices: `WorkspaceStatusSummary`, the
+  `path → GitFileStatus` map, the branch list, and
+  `RepoConflictState`. `None` slots mean "not yet hydrated"; a read
+  falls back to a live query and writes the result back.
+- A debounced refresh worker (200ms window) fed by an unbounded
+  mpsc. The worker coalesces consecutive tasks for the same stream
+  into a single git walk.
+- A bus listener that translates `OxplowEvent::WorkspaceChanged` /
+  `GitRefsChanged` into refresh tasks: workspace events refresh
+  statuses + conflict state; refs events refresh branches + conflict
+  state.
+- An internal `broadcast::Sender<SnapshotChanged>` for in-process
+  consumers that want fine-grained cache update events; renderer
+  clients keep using the existing `OxplowEvent` channel.
+
+`GitService::register(stream_id, worktree)` and `deregister(stream_id)`
+are called from the stream lifecycle commands (`create_worktree`,
+`adopt_worktree`, `delete_stream`, `archive_stream`) so the snapshot
+map stays in sync with the stream list. At boot, `GitService::spawn`
+seeds itself from `streams.list()` asynchronously — readers against
+unseeded streams just take the live-query path until the seed lands.
+
+### What's cached vs. pass-through
+
+Cached today: `status_summary`, `statuses`, `branches_for`,
+`conflict_state`. Pass-through (no cache yet, but routed through the
+service so caching can be layered in later without touching call
+sites): `git_log`, `commit_detail`, `commits_ahead_of`, `blame`,
+`local_blame`, `list_file_commits`, `read_file_at_ref`, `branch_changes`,
+`change_scopes`, `ahead_behind`, `search_workspace_text`,
+`list_all_refs`, `list_recent_remote_branches`,
+`list_existing_worktrees`, `list_adoptable_worktrees`,
+`detect_default_branch`. Workspace-file ops
+(`list_workspace_entries` / `read_workspace_file` /
+`write_workspace_file` / etc.) also go through the service.
+
+### Mutating ops auto-refresh
+
+`commit_all`, `add_path`, `restore_path`, `fetch`, `pull`,
+`pull_remote_into_current`, `push`, `push_current_to`, `merge`,
+`rebase`, `rename_branch`, `delete_branch`, `append_to_gitignore` are
+all pass-through wrappers around `oxplow_git::*` that, on success:
+
+1. Schedule a snapshot refresh of the affected slices (full refresh
+   for merge/rebase/pull/fetch; just statuses for add/restore;
+   branches+conflict for branch ops; etc.).
+2. Emit `OxplowEvent::WorkspaceChanged` and/or `GitRefsChanged` so
+   the renderer's existing subscribers update without waiting for the
+   fs-watch debounce window.
+
+This is why hitting "Pull" in the UI doesn't sit on the watcher's
+~250ms debounce before the rail catches up.
+
 ## Runtime git operations
 
 All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:

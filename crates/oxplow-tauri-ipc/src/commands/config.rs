@@ -71,17 +71,14 @@ pub async fn get_workspace_context(
 ) -> Result<WorkspaceContext, IpcError> {
     let project = state.layout.project_dir.clone();
     let project_str = project.to_string_lossy().into_owned();
-    let (default_branch, is_git_repo) = tokio::task::spawn_blocking(move || {
-        let is = oxplow_git::is_git_repo(&project);
-        let db = if is {
-            oxplow_git::detect_default_branch(&project)
-        } else {
-            None
-        };
-        (db, is)
-    })
-    .await
-    .map_err(|e| IpcError::internal(e.to_string()))?;
+    let is_git_repo = tokio::task::spawn_blocking(move || oxplow_git::is_git_repo(&project))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?;
+    let default_branch = if is_git_repo {
+        state.git.detect_default_branch().await
+    } else {
+        None
+    };
     Ok(WorkspaceContext {
         project_dir: project_str,
         default_branch,

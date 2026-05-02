@@ -38,6 +38,10 @@ pub async fn create_worktree(
         .streams
         .create_worktree(&req.slug, req.title, req.branch, req.branch_source)
         .await?;
+    state
+        .git
+        .register(&stream.id, std::path::PathBuf::from(&stream.worktree_path))
+        .await;
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(stream)
 }
@@ -62,6 +66,10 @@ pub async fn adopt_worktree(
         .streams
         .adopt_worktree(std::path::PathBuf::from(&req.path), req.title)
         .await?;
+    state
+        .git
+        .register(&stream.id, std::path::PathBuf::from(&stream.worktree_path))
+        .await;
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(stream)
 }
@@ -73,6 +81,7 @@ pub async fn delete_stream(
     id: StreamId,
 ) -> Result<(), IpcError> {
     state.streams.delete_stream(&id).await?;
+    state.git.deregister(&id).await;
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(())
 }
@@ -105,6 +114,7 @@ pub async fn archive_stream(
         ));
     }
     state.streams.archive_stream(&id, delete_worktree).await?;
+    state.git.deregister(&id).await;
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(())
 }
