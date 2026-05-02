@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ComponentProps } from "react";
-import type { ThreadWorkState, WorkItemStatus } from "../../api.js";
+import type { ThreadWorkState } from "../../api.js";
 import { PlanPane } from "./PlanPane.js";
 import {
   TasksFilterBar,
@@ -12,17 +12,12 @@ import {
 type PlanPaneProps = ComponentProps<typeof PlanPane>;
 
 /**
- * Composed list shell for the Tasks page: filter bar above + PlanPane
- * below. Holds the filter state, persists it to localStorage, and
- * applies search/priority filters by preprocessing `threadWork.items`
- * before handing them to PlanPane. Status filter and `showClosed`
- * toggle drive PlanPane's existing `onlyStatuses` / `excludeStatuses`
- * props so the PlanPane internals don't need to know about the
- * filter bar.
- *
- * Owns state that the previous PlanPane-only shell hid behind a
- * kebab toggle (hide auto-filed) so the user-visible knobs sit in
- * one place.
+ * Composed list shell for the Tasks page: priority filter bar above
+ * + PlanPane below. Holds the filter state, persists it to local-
+ * storage, and preprocesses `threadWork.items` by priority before
+ * handing it to PlanPane. The section split (To Do / Blocked / Done
+ * preview) replaces what the search/status/hide-auto/show-closed
+ * controls used to provide.
  */
 export function TasksList(props: Omit<PlanPaneProps, "hideAuto" | "onlyStatuses" | "excludeStatuses">) {
   const [filters, setFiltersState] = useState<TasksFilters>(() => loadTasksFilters());
@@ -31,9 +26,7 @@ export function TasksList(props: Omit<PlanPaneProps, "hideAuto" | "onlyStatuses"
 
   const filteredThreadWork = useMemo<ThreadWorkState | null>(() => {
     if (!props.threadWork) return null;
-    if (filters.search.trim().length === 0 && filters.priorities.size === 0) {
-      return props.threadWork;
-    }
+    if (filters.priorities.size === 0) return props.threadWork;
     const filteredItems = applyTasksFilters(props.threadWork.items, filters);
     const allowedIds = new Set(filteredItems.map((i) => i.id));
     return {
@@ -46,29 +39,38 @@ export function TasksList(props: Omit<PlanPaneProps, "hideAuto" | "onlyStatuses"
     };
   }, [props.threadWork, filters]);
 
-  const onlyStatuses: WorkItemStatus[] | undefined = filters.statuses.size > 0
-    ? [...filters.statuses]
-    : undefined;
-  // Don't exclude "done" here: the Tasks page renders a dedicated
-  // Done preview section, and stripping done rows before sectioning
-  // leaves that section permanently empty. The showClosed toggle now
-  // governs only the terminal-and-hidden states (canceled/archived).
-  const excludeStatuses: WorkItemStatus[] | undefined = filters.showClosed
-    ? undefined
-    : ["canceled", "archived"];
-
   // visibleSections in props takes precedence — Tasks page passes
   // ["toDo", "blocked", "done"] and we don't override.
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+    <div
+      data-tasks-roomy
+      style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+    >
+      {/* Tasks-page-only spacing overrides. Promotes the section
+          headers from sidebar-density (11px uppercase) to wiki-page
+          headings, and gives rows real breathing room. Scoped to
+          [data-tasks-roomy] so the same WorkGroupList component still
+          renders compactly on Plan Work / Done Work / Archived. */}
+      <style>{`
+        [data-tasks-roomy] [data-testid^="plan-section-header-"] {
+          padding: 24px 24px 12px !important;
+          font-size: 18px !important;
+          font-weight: 600 !important;
+          text-transform: none !important;
+          letter-spacing: 0 !important;
+          color: var(--text-primary) !important;
+          background: transparent !important;
+          border-top: none !important;
+          border-bottom: 1px solid var(--border-subtle) !important;
+          position: static !important;
+        }
+      `}</style>
       <TasksFilterBar filters={filters} onChange={setFilters} />
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "auto" }}>
         <PlanPane
           {...props}
           threadWork={filteredThreadWork}
-          hideAuto={filters.hideAuto}
-          onlyStatuses={onlyStatuses}
-          excludeStatuses={excludeStatuses}
+          excludeStatuses={["canceled", "archived"]}
         />
       </div>
     </div>

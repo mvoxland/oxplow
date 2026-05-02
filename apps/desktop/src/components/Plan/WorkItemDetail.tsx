@@ -1,30 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import type { EffortDetail, WorkItem, WorkItemPriority, WorkItemStatus, WorkNote } from "../../api.js";
+import type { EffortDetail, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { MarkdownView } from "../Notes/MarkdownView.js";
 import { deleteButtonStyle, inputStyle, miniButtonStyle } from "./plan-utils.js";
 
 /**
- * One entry in the merged Activity timeline rendered inside the work-item
- * modal. Notes (`add_work_note` / `complete_task` summaries) and efforts
- * (start/close windows + changed-file lists) are interleaved into a single
- * chronological list so reviewers see everything that happened on this
- * item in one place — no separate "Notes" / "Efforts" subsections.
- *
- * The list is newest-first. For closed efforts we sort on `ended_at` (the
- * effort *finishing* is the user-visible event); the active effort sorts
- * on `started_at` and gets `active: true` so the renderer can flag it
- * with a subtle "in progress" badge.
+ * One entry in the work-item Activity timeline. Each effort
+ * (in_progress → done/blocked/canceled cycle) carries a free-form
+ * `summary` field that the runtime fills in via `complete_task`, so
+ * efforts double as the "what happened on this item" log. Per-item
+ * notes were retired — they recorded the same thing.
  */
 export type ActivityRow =
-  | { kind: "note"; id: string; timestamp: string; note: WorkNote }
-  | { kind: "effort"; id: string; timestamp: string; active: boolean; detail: EffortDetail };
+  { kind: "effort"; id: string; timestamp: string; active: boolean; detail: EffortDetail };
 
-export function buildActivityTimeline(notes: WorkNote[], efforts: EffortDetail[]): ActivityRow[] {
+export function buildActivityTimeline(efforts: EffortDetail[]): ActivityRow[] {
   const rows: ActivityRow[] = [];
-  for (const note of notes) {
-    rows.push({ kind: "note", id: note.id, timestamp: note.created_at, note });
-  }
   for (const detail of efforts) {
     const active = !detail.effort.ended_at;
     const timestamp = detail.effort.ended_at ?? detail.effort.started_at;
@@ -172,23 +163,21 @@ export function WorkItemDetail({
  * badge — no callout box.
  */
 export function ActivityTimeline({
-  notes,
   efforts,
   formatTimestamp,
   onOpenFile,
   onShowInHistory,
 }: {
-  notes: WorkNote[];
   efforts: EffortDetail[];
   formatTimestamp(iso: string): string;
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(snapshotId: string): void;
 }) {
-  const rows = buildActivityTimeline(notes, efforts);
+  const rows = buildActivityTimeline(efforts);
   if (rows.length === 0) {
     return (
       <div style={{ color: "var(--muted)", fontSize: 12, fontStyle: "italic" }}>
-        No activity yet — moving this item to "in progress" starts an effort, and notes will land here.
+        No activity yet — moving this item to "in progress" starts an effort.
       </div>
     );
   }
@@ -197,9 +186,7 @@ export function ActivityTimeline({
       data-testid="work-item-activity"
       style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 8, background: "var(--bg-1)" }}
     >
-      {rows.map((row) => row.kind === "note" ? (
-        <ActivityNoteRow key={`note-${row.id}`} note={row.note} formatTimestamp={formatTimestamp} />
-      ) : (
+      {rows.map((row) => (
         <ActivityEffortRow
           key={`effort-${row.id}`}
           detail={row.detail}
@@ -209,23 +196,6 @@ export function ActivityTimeline({
           onShowInHistory={onShowInHistory}
         />
       ))}
-    </div>
-  );
-}
-
-function ActivityNoteRow({ note, formatTimestamp }: { note: WorkNote; formatTimestamp(iso: string): string }) {
-  return (
-    <div style={{ fontSize: 12, borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
-      <div style={{ display: "flex", gap: 6, marginBottom: 2, alignItems: "baseline" }}>
-        <span style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>Note</span>
-        <span style={{ fontWeight: 600, color: "var(--accent)" }}>{note.author}</span>
-        <span style={{ color: "var(--muted)", fontSize: 11 }}>{formatTimestamp(note.created_at)}</span>
-      </div>
-      {note.body.length > 0 ? (
-        <MarkdownView body={note.body} maxHeight={320} />
-      ) : (
-        <div style={{ color: "var(--muted)", fontStyle: "italic" }}>(empty)</div>
-      )}
     </div>
   );
 }

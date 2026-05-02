@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { EffortDetail, Stream, Thread, ThreadWorkState, WorkItem, WorkItemPriority, WorkItemStatus, WorkNote } from "../api.js";
+import type { EffortDetail, Stream, Thread, ThreadWorkState, WorkItem, WorkItemPriority, WorkItemStatus } from "../api.js";
 import {
-  getWorkNotes,
   listWorkItemEfforts,
   subscribeOxplowEvents,
   updateWorkItem,
@@ -59,7 +58,6 @@ export function WorkItemPage({
 }: WorkItemPageProps) {
   const item = items.find((i) => i.id === itemId) ?? null;
   const backlinkEntries = useBacklinks(workItemRef(itemId), stream, threadWork);
-  const [notes, setNotes] = useState<WorkNote[]>([]);
   const [efforts, setEfforts] = useState<EffortDetail[]>([]);
   // Slideover state lives on this host page (the brief calls for it).
   // Single instance — opening another snapshot replaces the current one.
@@ -116,9 +114,6 @@ export function WorkItemPage({
   useEffect(() => {
     if (!item) return;
     let cancelled = false;
-    void getWorkNotes(item.id).then((rows) => {
-      if (!cancelled) setNotes(rows);
-    });
     void listWorkItemEfforts(item.id).then((rows) => {
       if (!cancelled) setEfforts(rows);
     });
@@ -126,9 +121,6 @@ export function WorkItemPage({
       if (event.type !== "work-item.changed") return;
       const targetId = (event as unknown as { itemId?: string }).itemId;
       if (targetId !== item.id) return;
-      void getWorkNotes(item.id).then((rows) => {
-        if (!cancelled) setNotes(rows);
-      });
       void listWorkItemEfforts(item.id).then((rows) => {
         if (!cancelled) setEfforts(rows);
       });
@@ -200,7 +192,6 @@ export function WorkItemPage({
             Activity
           </div>
           <ActivityTimeline
-            notes={notes}
             efforts={efforts}
             formatTimestamp={(iso) => new Date(iso).toLocaleString()}
             onOpenFile={onOpenFile}

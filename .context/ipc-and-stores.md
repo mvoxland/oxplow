@@ -318,10 +318,6 @@ state.
   `sort_index` to streams. Emits `stream.changed` (kind: "reordered").
   `listStreams` now orders by `sort_index, rowid` instead of
   `created_at, rowid`.
-- `getWorkNotes(itemId)` — returns `WorkNote[]` sorted by `created_at ASC`
-  for the given work item. Read-only; called when the edit modal opens to
-  populate the read-only Notes section. No stream/thread context needed.
-
 Both follow the standard 7-layer IPC flow (migration → store →
 runtime → ipc-contract → preload → main → ui/api).
 

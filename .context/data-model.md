@@ -168,32 +168,30 @@ a thread or demoted back — there is no copy across tables. Caps:
 `category` 200 chars, `tags` 500 chars total. Pass `null` through
 `updateWorkItem` / `updateBacklogItem` to clear; omit to keep.
 
-### `work_note` — `WorkItemStore.getWorkNotes()` / `listThreadNotes()` (`crates/oxplow-db/src/work_item_store.rs`)
+### `work_note` — thread-scoped notes only (`crates/oxplow-db/src/work_satellite.rs`)
 
-Structured notes, either item-scoped or thread-scoped. Each row has `id`,
-nullable `work_item_id`, nullable `thread_id`, `body`, `author` (free-form
-string, e.g. "agent", "user", "explore-subagent"), and `created_at`. A
-CHECK enforces that **exactly one** of `work_item_id` / `thread_id` is
-non-NULL. Created via migration v17 (item-scoped rows) and broadened in
-migration v25 to allow thread-scoped rows (nullable `work_item_id`, new
-`thread_id` column).
+Structured per-thread notes. Each row has `id`, nullable
+`work_item_id` (kept for legacy rows), nullable `thread_id`, `body`,
+`author` (free-form string, e.g. "agent", "user",
+"explore-subagent"), and `created_at`. A CHECK still enforces that
+**exactly one** of `work_item_id` / `thread_id` is non-NULL.
 
-- **Item-scoped rows** (`work_item_id` set, `thread_id` NULL) back
-  `getWorkNotes(itemId)` returning rows sorted by `created_at ASC`. The UI
-  calls this via the `getWorkNotes(itemId)` IPC method when the edit modal
-  opens; the modal renders a read-only "Notes" section. Agent and user
-  note writes today still also fan out through `work_item_events`
-  (event_type = 'note') — `work_note` is the dedicated query-friendly
-  table for structured note display.
+**Item-scoped writes were retired** — `work_item_effort.summary` is
+the canonical record of what shipped on a task, so a parallel
+per-item note table for the same purpose was duplicative. The
+`add_work_note` MCP tool, the `add_work_note` / `list_work_notes`
+IPC commands, and the work-item modal's "Notes" timeline section
+were removed alongside this. Pre-existing item-scoped rows stay in
+the table but no surface reads or writes them.
 
-- **Thread-scoped rows** (`thread_id` set, `work_item_id` NULL) are the
-  landing spot for `oxplow__delegate_query` Explore-subagent findings. The
-  delegate tool pre-allocates a row with empty body (via
-  `addThreadNote`), passes the id into the subagent prompt, and the
-  subagent fills the body by calling `oxplow__record_query_finding` (store
-  method `updateThreadNoteBody`). The orchestrator reads them back via
-  `oxplow__get_thread_notes` / `listThreadNotes(threadId, limit)` —
-  reverse-chronological, capped at 100.
+Thread-scoped rows (`thread_id` set, `work_item_id` NULL) are the
+landing spot for `oxplow__delegate_query` Explore-subagent findings.
+The delegate tool pre-allocates a row with empty body (via
+`addThreadNote`), passes the id into the subagent prompt, and the
+subagent fills the body by calling `oxplow__record_query_finding`
+(store method `updateThreadNoteBody`). The orchestrator reads them
+back via `oxplow__list_thread_notes` / `listThreadNotes(threadId)` —
+reverse-chronological, capped at 100.
 
 ### `work_item_effort` — `WorkItemEffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 

@@ -713,7 +713,6 @@ fn build_in_progress_audit_reason(items: &[oxplow_domain::WorkItem]) -> String {
         "AUDIT: this turn is closing with {} work item(s) still `in_progress`:\n{}\n\n\
          Before stopping, walk each one:\n\
          - Done? → `mcp__oxplow__complete_task` with `touchedFiles`.\n\
-         - Paused mid-execution? → `mcp__oxplow__add_work_note` so the next turn knows where you left off (suppresses this nudge).\n\
          - Stale or no longer the right shape? → `mcp__oxplow__update_work_item` to ready/blocked/done.\n\
          - Waiting on the user? → `mcp__oxplow__await_user`.\n\n\
          An `in_progress` row with finished work parked in it looks stuck to the user.",

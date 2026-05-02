@@ -125,7 +125,7 @@ import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { deriveDefaultLabel, NON_TRACKED_KINDS } from "./components/RailHud/history.js";
-import { forgetPage, recordPageVisit } from "./api.js";
+import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
@@ -1932,6 +1932,9 @@ export function App() {
                   paneTarget={selectedThread.pane_target}
                   visible={effectiveCenterActive === "agent"}
                   transportMode={agentTransportMode}
+                  onUserInterrupt={() => {
+                    void recordUserInterrupt(selectedThread.id, stream?.id ?? null);
+                  }}
                 />
               </div>
             </div>

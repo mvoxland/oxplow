@@ -1,25 +1,13 @@
-//! Work-item / thread notes (the in-app comment thread on a work
-//! item or the thread-scoped capture pad).
+//! Thread-scoped notes (the per-thread capture pad backing the
+//! Explore-subagent findings flow). Per-work-item notes were retired
+//! — work_item_effort.summary already records what shipped on a
+//! task, so a separate note table for the same purpose was duplicative.
 
 use oxplow_domain::stores::{WorkItemEventStore, WorkNoteStore};
 use oxplow_domain::{NoteId, ThreadId, WorkItemEvent, WorkItemId, WorkNote};
 
 use crate::error::IpcError;
 use crate::state::AppState;
-
-#[tauri::command]
-#[specta::specta]
-pub async fn add_work_note(
-    state: tauri::State<'_, AppState>,
-    work_item_id: WorkItemId,
-    body: String,
-    author: String,
-) -> Result<WorkNote, IpcError> {
-    Ok(state
-        .work_note_store
-        .add_for_item(&work_item_id, &body, &author)
-        .await?)
-}
 
 #[tauri::command]
 #[specta::specta]
@@ -33,15 +21,6 @@ pub async fn add_thread_note(
         .work_note_store
         .add_for_thread(&thread_id, &body, &author)
         .await?)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_work_notes(
-    state: tauri::State<'_, AppState>,
-    work_item_id: WorkItemId,
-) -> Result<Vec<WorkNote>, IpcError> {
-    Ok(state.work_note_store.list_for_item(&work_item_id).await?)
 }
 
 #[tauri::command]

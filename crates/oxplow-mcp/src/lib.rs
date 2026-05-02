@@ -81,13 +81,6 @@ pub struct UpsertWorkItemParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddWorkNoteParams {
-    pub work_item_id: String,
-    pub body: String,
-    pub author: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddThreadNoteParams {
     pub thread_id: String,
     pub body: String,
@@ -482,22 +475,13 @@ impl OxplowMcp {
         Ok(CallToolResult::success(vec![Content::text("deleted")]))
     }
 
-    // ---------- work notes ----------
-
-    #[tool(description = "Add a work note attached to a specific work item.")]
-    async fn add_work_note(
-        &self,
-        params: Parameters<AddWorkNoteParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let id = WorkItemId::from(params.0.work_item_id);
-        let note = self
-            .services
-            .work_note_store
-            .add_for_item(&id, &params.0.body, &params.0.author)
-            .await
-            .map_err(internal)?;
-        json_result(&note)
-    }
+    // ---------- thread notes ----------
+    //
+    // Per-work-item notes (`add_work_note` / `list_work_notes`) were
+    // retired: `work_item_effort.summary` already carries "what
+    // shipped on this item", so a parallel note table for the same
+    // purpose was duplicative. Thread-scoped notes stay — they back
+    // the Explore-subagent findings flow.
 
     #[tool(description = "Add a thread-scoped note (not attached to any item).")]
     async fn add_thread_note(
@@ -512,21 +496,6 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&note)
-    }
-
-    #[tool(description = "List notes for a work item.")]
-    async fn list_work_notes(
-        &self,
-        params: Parameters<WorkItemIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let id = WorkItemId::from(params.0.id);
-        let notes = self
-            .services
-            .work_note_store
-            .list_for_item(&id)
-            .await
-            .map_err(internal)?;
-        json_result(&notes)
     }
 
     #[tool(description = "List thread-scoped notes.")]
@@ -1222,21 +1191,8 @@ impl OxplowMcp {
             .await
             .map_err(|e| internal(e.to_string()))?;
 
-        // Pull recent notes for the brief — same shape as main's
-        // dispatch_work_item: reviewer-facing context already lives
-        // on the row, but recent notes carry hand-offs from prior
-        // attempts.
-        let notes = self
-            .services
-            .work_note_store
-            .list_for_item(&updated.id)
-            .await
-            .map_err(internal)?;
-        let recent_notes: Vec<&oxplow_domain::WorkNote> = notes.iter().rev().take(5).collect();
-
         let prompt = compose_dispatch_brief(
             &updated,
-            &recent_notes,
             params.0.extra_context.as_deref().unwrap_or(""),
         );
         self.emit_work_items_changed(updated.thread_id.clone());
@@ -1583,14 +1539,15 @@ fn compose_delegate_query_prompt(
 
 /// Compose the brief the orchestrator passes to the general-purpose
 /// Agent tool to dispatch a work item to a subagent. Pure so it's
-/// testable; mirrors main's `composeDispatchBrief`.
+/// testable.
 ///
-/// The output preserves the same sections main shipped: identity,
-/// description, AC, recent notes, optional extra context, and the
-/// closing reminder pointing at the subagent-protocol skill.
+/// Sections: identity, description, AC, optional extra context, and
+/// the closing reminder pointing at the subagent-protocol skill.
+/// Per-item notes used to render here too but were retired —
+/// work_item_effort.summary already records what shipped on prior
+/// attempts; reviewers see it from the work-item activity timeline.
 fn compose_dispatch_brief(
     item: &oxplow_domain::WorkItem,
-    recent_notes: &[&oxplow_domain::WorkNote],
     extra_context: &str,
 ) -> String {
     let mut out: Vec<String> = vec![
@@ -1610,17 +1567,6 @@ fn compose_dispatch_brief(
             out.push(ac.to_string());
             out.push(String::new());
         }
-    }
-    if !recent_notes.is_empty() {
-        out.push("## Recent notes (newest first)".into());
-        for note in recent_notes {
-            out.push(format!(
-                "- [{}] {}",
-                note.author,
-                note.body.lines().next().unwrap_or("").trim()
-            ));
-        }
-        out.push(String::new());
     }
     if !extra_context.is_empty() {
         out.push("## Extra context".into());
