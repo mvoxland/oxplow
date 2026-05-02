@@ -1494,6 +1494,14 @@ export async function readWorkspaceFile(streamId: string, path: string): Promise
   return unwrap(await commands.readWorkspaceFile(streamId || null, path));
 }
 
+export async function getWorkspaceStatusSummary(
+  streamId: string,
+): Promise<WorkspaceStatusSummary> {
+  return unwrap(
+    await commands.getWorkspaceStatusSummary(streamId || null),
+  ) as unknown as WorkspaceStatusSummary;
+}
+
 export async function writeWorkspaceFile(
   streamId: string,
   path: string,
