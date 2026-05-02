@@ -498,12 +498,11 @@ Append-only event log of in-app page navigations. One row per visit
 recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
 `new-work-item`).
 
-Columns: `id`, `t` (ISO), `stream_id?`, `thread_id?`, `ref_kind`,
-`ref_id`, `payload_json` (serialized `TabRef.payload`), `label`,
-`source?` (`rail|tab-click|quick-open|in-tab-nav|command`).
-
-Indexes on `t DESC`, `ref_id`, `(thread_id, t DESC)`, `(ref_kind, t
-DESC)`. Aggregates derived by query, not stored:
+Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
+`duration_ms?`, `thread_id?` (added in v3 — nullable so legacy rows and
+boot-screen visits with no active thread still record). Indexes on
+`visited_at DESC`, `(page_kind, page_id)`, and
+`(thread_id, visited_at DESC)`. Aggregates derived by query:
 
 - `listRecent({threadId,limit,dedupeByRef,excludeKinds})` — drives the
   rail History (with `dedupeByRef`).
