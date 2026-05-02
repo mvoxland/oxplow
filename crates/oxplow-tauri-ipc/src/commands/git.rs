@@ -324,17 +324,6 @@ pub async fn list_existing_worktrees(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_sibling_worktrees(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<GitWorktreeEntry>, IpcError> {
-    let path = project_dir(&state);
-    Ok(tokio::task::spawn_blocking(move || oxplow_git::list_sibling_worktrees(&path))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))?)
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn list_adoptable_worktrees(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GitWorktreeEntry>, IpcError> {

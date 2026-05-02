@@ -22,7 +22,7 @@ pub use effort_store::{
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
     PageVisitStore, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,
-    SqliteUsageStore, UsageEvent,
+    SqliteUsageStore, UsageEvent, UsageRollup,
 };
 pub use database::{Database, DbInitError};
 pub use stream_store::SqliteStreamStore;

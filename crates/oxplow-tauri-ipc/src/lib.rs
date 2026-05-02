@@ -100,6 +100,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // usage
         commands::usage::record_usage,
         commands::usage::list_recent_usage,
+        commands::usage::list_recent_usage_rollup,
         // code quality
         commands::code_quality::list_code_quality_scans,
         commands::code_quality::list_code_quality_findings,
@@ -137,7 +138,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::git::read_file_at_ref,
         commands::git::search_workspace_text,
         commands::git::list_existing_worktrees,
-        commands::git::list_sibling_worktrees,
         commands::git::list_adoptable_worktrees,
         commands::git::git_blame,
         commands::git::local_blame,

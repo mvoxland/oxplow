@@ -86,7 +86,6 @@ import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { DiffPage } from "./pages/DiffPage.js";
-import { WikiActivityBar } from "./components/Notes/WikiActivityBar.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
@@ -1167,6 +1166,31 @@ export function App() {
     return unsubscribe;
   }, []);
 
+  // Refresh the stream list whenever the cross-store bus signals a
+  // streams.changed (creation, archive via Remove…, rename, reorder).
+  // If the currently-selected stream disappeared from the list (e.g.
+  // it was just archived), fall back to the primary so the rail
+  // doesn't render against a stale id.
+  useEffect(() => {
+    const unsubscribe = subscribeOxplowEvents((event) => {
+      if (event.kind !== "streamsChanged") return;
+      void listStreams()
+        .then((updated) => {
+          setStreams(updated);
+          setStream((prev) => {
+            if (!prev) return prev;
+            if (updated.some((s) => s.id === prev.id)) return prev;
+            const primary = updated.find((s) => s.kind === "primary");
+            return primary ?? updated[0] ?? null;
+          });
+        })
+        .catch((error) => {
+          logUi("warn", "failed to refresh streams after streamsChanged", { error: String(error) });
+        });
+    });
+    return unsubscribe;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const reload = () => {
@@ -1883,12 +1907,6 @@ export function App() {
         render: () =>
           selectedThread ? (
             <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-              <WikiActivityBar
-                streamId={stream?.id ?? null}
-                onOpenNote={handleOpenNote}
-                onOpenFile={(path) => { void handleOpenFile(path); }}
-                onOpenWorkItem={handleRequestEditWorkItem}
-              />
               <div style={{ flex: 1, minHeight: 0 }}>
                 {/* Key on thread.id so switching to a different thread
                  *  remounts the terminal — pane_target alone collides

@@ -80,24 +80,6 @@ pub fn list_existing_worktrees(repo_root: impl AsRef<Path>) -> Vec<GitWorktreeEn
     out
 }
 
-/// Worktrees that are siblings of `repo_root` (under the same parent
-/// dir). Used by the streams page to surface "other worktrees" for
-/// quick switching.
-pub fn list_sibling_worktrees(repo_root: impl AsRef<Path>) -> Vec<GitWorktreeEntry> {
-    let repo_root = repo_root.as_ref();
-    let parent = match repo_root.parent() {
-        Some(p) => p.to_path_buf(),
-        None => return vec![],
-    };
-    list_existing_worktrees(repo_root)
-        .into_iter()
-        .filter(|e| {
-            let p = std::path::Path::new(&e.path);
-            p != repo_root && p.starts_with(&parent)
-        })
-        .collect()
-}
-
 /// Existing worktrees on disk that aren't yet registered as oxplow
 /// streams. Caller filters against the StreamStore. Path comparison
 /// is canonicalized so `/var/...` vs `/private/var/...` (macOS) and

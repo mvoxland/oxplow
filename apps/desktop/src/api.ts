@@ -622,12 +622,6 @@ export async function listAdoptableWorktrees(): Promise<
   return unwrap(await commands.listAdoptableWorktrees());
 }
 
-export async function listSiblingWorktrees(
-  _streamId: string,
-): Promise<import("./tauri-bridge/index.js").GitWorktreeEntry[]> {
-  return unwrap(await commands.listSiblingWorktrees());
-}
-
 export async function checkoutStreamBranch(streamId: string, branch: string): Promise<Stream> {
   return unwrap(await commands.checkoutStreamBranch(streamId, branch));
 }
@@ -1035,7 +1029,7 @@ export async function localBlame(
 
 export type WikiNoteSummary = import("./api-types.js").WikiNoteSummary;
 export type WikiNoteSearchHit = import("./api-types.js").WikiNoteSearchHit;
-export type UsageRollup = import("./api-types.js").UsageRollup;
+export type UsageRollup = import("./tauri-bridge/generated/bindings.js").UsageRollup;
 
 export async function listWikiNotes(_streamId: string): Promise<WikiNoteSummary[]> {
   return unwrap(await commands.listWikiNotes()) as unknown as WikiNoteSummary[];
@@ -1087,10 +1081,22 @@ export async function listRecentUsage(input: {
   since?: string;
 }): Promise<UsageRollup[]> {
   return unwrap(
-    await commands.listRecentUsage(input.limit ?? 50),
-  ) as unknown as UsageRollup[];
+    await commands.listRecentUsageRollup(
+      input.kind,
+      input.streamId ?? null,
+      input.limit ?? 50,
+    ),
+  );
 }
 
+// `list_frequent_usage` on the Rust side currently returns PageVisit
+// rows (count-ordered page-visit aggregates), not usage-event rollups
+// — different table, different shape. No renderer code calls this
+// helper today; keep the surface but route it through the same rollup
+// endpoint as listRecentUsage so the type matches what the existing
+// callers expect when one shows up. Order-by-count would need a
+// dedicated `list_frequent_usage_rollup` Rust command; not building
+// that until there's a caller to motivate it.
 export async function listFrequentUsage(input: {
   kind: string;
   streamId?: string | null;
@@ -1099,8 +1105,12 @@ export async function listFrequentUsage(input: {
   since?: string;
 }): Promise<UsageRollup[]> {
   return unwrap(
-    await commands.listFrequentUsage(input.limit ?? 50),
-  ) as unknown as UsageRollup[];
+    await commands.listRecentUsageRollup(
+      input.kind,
+      input.streamId ?? null,
+      input.limit ?? 50,
+    ),
+  );
 }
 
 export type CodeQualityTool = import("./api-types.js").CodeQualityTool;

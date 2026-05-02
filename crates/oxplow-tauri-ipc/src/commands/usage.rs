@@ -1,5 +1,5 @@
 use oxplow_app::OxplowEvent;
-use oxplow_db::UsageEvent;
+use oxplow_db::{UsageEvent, UsageRollup};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -70,4 +70,22 @@ pub async fn list_recent_usage(
     limit: u32,
 ) -> Result<Vec<UsageEvent>, IpcError> {
     Ok(state.usage_store.list_recent(limit as usize).await?)
+}
+
+/// Per-key rollup of recent usage events of a single `kind`. Returns
+/// the most-recently-touched keys (file paths, note slugs, work-item
+/// ids, …) along with how many times each has been touched. Drives
+/// "recent files" / "recent notes" affordances in the renderer.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_recent_usage_rollup(
+    state: tauri::State<'_, AppState>,
+    kind: String,
+    stream_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<UsageRollup>, IpcError> {
+    Ok(state
+        .usage_store
+        .list_recent_rollup(&kind, stream_id.as_deref(), limit as usize)
+        .await?)
 }
