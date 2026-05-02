@@ -26,6 +26,14 @@ export const commands = {
 	adoptWorktree: (req: AdoptWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("adopt_worktree", { req })),
 	deleteStream: (id: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_stream", { id })),
 	/**
+	 *  Soft-delete a stream and every thread under it via `archived_at`.
+	 *  Refuses if any thread in the stream has a pane currently in the
+	 *  `Running` state — the user must wait for the agent to settle (or
+	 *  stop it) before removing the stream. When `delete_worktree` is
+	 *  true the on-disk worktree directory is also removed.
+	 */
+	archiveStream: (id: StreamId, deleteWorktree: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("archive_stream", { id, deleteWorktree })),
+	/**
 	 *  Returns the primary stream — the project root. Useful for any UI
 	 *  path that needs to know "what does the user think of as 'this'
 	 *  project?" without enumerating the full list.
@@ -45,6 +53,14 @@ export const commands = {
 	talking_session_id: string,
 	created_at: Timestamp,
 	updated_at: Timestamp,
+	/**
+	 *  Set when the stream was archived via the rail's "Remove…"
+	 *  action. Archived streams are filtered out of `StreamStore::list`
+	 *  so they disappear from the rail; the row stays in the DB so
+	 *  history references (efforts, snapshots, page_visit) don't
+	 *  dangle.
+	 */
+	archived_at: Timestamp | null,
 } | null, IpcError>(__TAURI_INVOKE("get_primary_stream")),
 	// Currently-selected stream (None falls back to primary in the UI).
 	getCurrentStream: () => typedError<{
@@ -62,6 +78,14 @@ export const commands = {
 	talking_session_id: string,
 	created_at: Timestamp,
 	updated_at: Timestamp,
+	/**
+	 *  Set when the stream was archived via the rail's "Remove…"
+	 *  action. Archived streams are filtered out of `StreamStore::list`
+	 *  so they disappear from the rail; the row stays in the DB so
+	 *  history references (efforts, snapshots, page_visit) don't
+	 *  dangle.
+	 */
+	archived_at: Timestamp | null,
 } | null, IpcError>(__TAURI_INVOKE("get_current_stream")),
 	switchStream: (id: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("switch_stream", { id })),
 	renameStream: (req: RenameStreamRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("rename_stream", { req })),
@@ -100,6 +124,12 @@ export const commands = {
 	custom_prompt: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
+	/**
+	 *  Set when the thread was archived as part of its stream's
+	 *  "Remove…" action. Archived threads are filtered out of
+	 *  `ThreadStore::list_for_stream`.
+	 */
+	archived_at: Timestamp | null,
 } | null, IpcError>(__TAURI_INVOKE("get_thread", { threadId })),
 	upsertThread: (thread: Thread) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_thread", { thread })),
 	deleteThread: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_thread", { threadId })),
@@ -1000,6 +1030,14 @@ export type Stream = {
 	talking_session_id: string,
 	created_at: Timestamp,
 	updated_at: Timestamp,
+	/**
+	 *  Set when the stream was archived via the rail's "Remove…"
+	 *  action. Archived streams are filtered out of `StreamStore::list`
+	 *  so they disappear from the rail; the row stays in the DB so
+	 *  history references (efforts, snapshots, page_visit) don't
+	 *  dangle.
+	 */
+	archived_at: Timestamp | null,
 };
 
 export type StreamId = string;
@@ -1036,6 +1074,12 @@ export type Thread = {
 	custom_prompt: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
+	/**
+	 *  Set when the thread was archived as part of its stream's
+	 *  "Remove…" action. Archived threads are filtered out of
+	 *  `ThreadStore::list_for_stream`.
+	 */
+	archived_at: Timestamp | null,
 };
 
 export type ThreadId = string;

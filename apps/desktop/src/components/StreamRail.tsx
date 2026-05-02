@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { checkoutStreamBranch, listBranches, type BranchRef, type Stream } from "../api.js";
+import { archiveStream, checkoutStreamBranch, listBranches, type BranchRef, type Stream } from "../api.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
@@ -44,6 +44,11 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
   const [switchBranchRef, setSwitchBranchRef] = useState<string>("");
   const [switchBranchError, setSwitchBranchError] = useState<string | null>(null);
   const [switchBranchBusy, setSwitchBranchBusy] = useState(false);
+  // Remove flow state
+  const [removeStream, setRemoveStream] = useState<Stream | null>(null);
+  const [removeWorktree, setRemoveWorktree] = useState(false);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   // Primary is always the leftmost tab regardless of persisted sort_index.
   const orderedStreams = useMemo(() => {
@@ -70,6 +75,26 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
       setSwitchBranchError(String(e));
     } finally {
       setLoadingBranches(false);
+    }
+  }
+
+  function openRemoveStream(target: Stream) {
+    setRemoveStream(target);
+    setRemoveWorktree(false);
+    setRemoveError(null);
+  }
+
+  async function handleRemoveStream() {
+    if (!removeStream) return;
+    try {
+      setRemoveBusy(true);
+      setRemoveError(null);
+      await archiveStream(removeStream.id, removeWorktree);
+      setRemoveStream(null);
+    } catch (e) {
+      setRemoveError(String(e));
+    } finally {
+      setRemoveBusy(false);
     }
   }
 
@@ -234,6 +259,8 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                 <Kebab
                   items={buildStreamMenu(candidate, {
                     gitEnabled,
+                    isPrimary,
+                    isWorking: status === "working",
                     onRename: () => {
                       if (!onRenameStream) return;
                       setRenamingId(candidate.id);
@@ -242,6 +269,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                     onSettings: () => onOpenStreamSettings?.(candidate.id),
                     onAddStream: () => onOpenNewStreamPage?.(),
                     onAddThread: () => onRequestCreateThread?.(),
+                    onRemove: () => openRemoveStream(candidate),
                     canRename: !!onRenameStream,
                     canSettings: !!onOpenStreamSettings,
                     canAddThread: !!onRequestCreateThread,
@@ -264,6 +292,54 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           </button>
         </span>
       </div>
+      <Slideover
+        open={!!removeStream}
+        onClose={() => { if (!removeBusy) setRemoveStream(null); }}
+        title={removeStream ? `Remove stream — ${removeStream.title}` : "Remove stream"}
+        testId="stream-remove-slideover"
+        footer={(
+          <>
+            <button type="button" onClick={() => setRemoveStream(null)} style={buttonStyle} disabled={removeBusy}>Cancel</button>
+            <button
+              type="button"
+              data-testid="stream-remove-confirm"
+              onClick={() => { void handleRemoveStream(); }}
+              style={{ ...primaryButtonStyle, background: "#b32a2a" }}
+              disabled={removeBusy}
+            >
+              {removeBusy ? "Removing…" : "Remove"}
+            </button>
+          </>
+        )}
+      >
+        {removeStream ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 12 }}>
+            <p style={{ margin: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              The stream and every thread under it will be archived (hidden from the rail). History — closed efforts, snapshots, and visit logs — stays intact.
+            </p>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                data-testid="stream-remove-delete-worktree"
+                checked={removeWorktree}
+                onChange={(e) => setRemoveWorktree(e.target.checked)}
+                disabled={removeBusy || removeStream.kind !== "worktree"}
+              />
+              <span>
+                Also delete the on-disk worktree
+                {removeStream.kind === "worktree" ? (
+                  <span style={{ color: "var(--text-secondary)" }}> ({removeStream.worktree_path})</span>
+                ) : (
+                  <span style={{ color: "var(--text-secondary)" }}> — primary stream has no worktree to delete</span>
+                )}
+              </span>
+            </label>
+            {removeError ? (
+              <div style={{ color: "#ff6b6b", whiteSpace: "pre-wrap" }}>{removeError}</div>
+            ) : null}
+          </div>
+        ) : null}
+      </Slideover>
       <Slideover
         open={!!switchBranchStream}
         onClose={() => setSwitchBranchStream(null)}
@@ -376,21 +452,35 @@ const renameInputStyle: CSSProperties = {
 
 function buildStreamMenu(_stream: Stream, opts: {
   gitEnabled: boolean;
+  isPrimary: boolean;
+  isWorking: boolean;
   onRename(): void;
   onSwitchBranch(): void;
   onSettings(): void;
   onAddStream(): void;
   onAddThread(): void;
+  onRemove(): void;
   canRename: boolean;
   canSettings: boolean;
   canAddThread: boolean;
 }): MenuItem[] {
-  return [
+  const items: MenuItem[] = [
     { id: "stream.rename", label: "Rename…", enabled: opts.canRename, run: opts.onRename },
     { id: "stream.switch-branch", label: "Switch branch…", enabled: opts.gitEnabled, run: opts.onSwitchBranch },
     { id: "stream.settings", label: "Settings", enabled: opts.canSettings, run: opts.onSettings },
     { id: "stream.add-stream", label: "Add stream", enabled: opts.gitEnabled, run: opts.onAddStream },
     { id: "stream.add-thread", label: "Add thread", enabled: opts.canAddThread, run: opts.onAddThread },
   ];
+  if (!opts.isPrimary) {
+    items.push({
+      id: "stream.remove",
+      label: "Remove…",
+      // Disable while any thread in this stream has a running agent —
+      // the IPC also rejects, but disabling avoids a useless prompt.
+      enabled: !opts.isWorking,
+      run: opts.onRemove,
+    });
+  }
+  return items;
 }
 

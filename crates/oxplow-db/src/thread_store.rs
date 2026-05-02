@@ -54,6 +54,7 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     let summary: String = row.get("summary")?;
     let summary_updated_at: Option<String> = row.get("summary_updated_at")?;
     let closed_at: Option<String> = row.get("closed_at")?;
+    let archived_at: Option<String> = row.get("archived_at")?;
     let custom_prompt: Option<String> = row.get("custom_prompt")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
@@ -80,6 +81,10 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         custom_prompt,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
         updated_at: string_to_ts(&updated_at).map_err(map_err)?,
+        archived_at: archived_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(map_err)?,
     })
 }
 
@@ -91,7 +96,9 @@ impl ThreadStore for SqliteThreadStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM threads WHERE stream_id = ?1 ORDER BY sort_index ASC, created_at ASC",
+                    "SELECT * FROM threads \
+                     WHERE stream_id = ?1 AND archived_at IS NULL \
+                     ORDER BY sort_index ASC, created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![stream.as_str()], row_to_thread)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -169,6 +176,25 @@ impl ThreadStore for SqliteThreadStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute("DELETE FROM threads WHERE id = ?1", params![id.as_str()])?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn archive(&self, id: &ThreadId) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id = id.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let now = ts_to_string(Timestamp::now());
+                conn.execute(
+                    "UPDATE threads SET archived_at = COALESCE(archived_at, ?2),
+                                          updated_at = ?2
+                     WHERE id = ?1",
+                    params![id.as_str(), now],
+                )?;
                 Ok(())
             })
         })
@@ -254,6 +280,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: ts(),
             updated_at: ts(),
+            archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
         (SqliteThreadStore::new(db), s.id)
@@ -274,6 +301,7 @@ mod tests {
             custom_prompt: None,
             created_at: ts(),
             updated_at: ts(),
+            archived_at: None,
         }
     }
 
@@ -372,6 +400,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: ts(),
             updated_at: ts(),
+            archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
         let t = thread(s.id.clone());

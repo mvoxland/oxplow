@@ -77,6 +77,38 @@ pub async fn delete_stream(
     Ok(())
 }
 
+/// Soft-delete a stream and every thread under it via `archived_at`.
+/// Refuses if any thread in the stream has a pane currently in the
+/// `Running` state — the user must wait for the agent to settle (or
+/// stop it) before removing the stream. When `delete_worktree` is
+/// true the on-disk worktree directory is also removed.
+#[tauri::command]
+#[specta::specta]
+pub async fn archive_stream(
+    state: tauri::State<'_, AppState>,
+    id: StreamId,
+    delete_worktree: bool,
+) -> Result<(), IpcError> {
+    use oxplow_domain::stores::{AgentStatusStore, ThreadStore};
+    use oxplow_domain::AgentStatusState;
+    let thread_store = oxplow_db::SqliteThreadStore::new(state.db.clone());
+    let threads = thread_store.list_for_stream(&id).await?;
+    let statuses = state.thread_runtime.list_all().await?;
+    let busy = threads.iter().any(|t| {
+        statuses
+            .iter()
+            .any(|s| s.thread_id == t.id && s.state == AgentStatusState::Running)
+    });
+    if busy {
+        return Err(IpcError::invalid(
+            "cannot archive: an agent is still running in one of this stream's threads",
+        ));
+    }
+    state.streams.archive_stream(&id, delete_worktree).await?;
+    state.events.emit(OxplowEvent::StreamsChanged);
+    Ok(())
+}
+
 /// Returns the primary stream — the project root. Useful for any UI
 /// path that needs to know "what does the user think of as 'this'
 /// project?" without enumerating the full list.

@@ -35,6 +35,12 @@ pub struct Stream {
     pub talking_session_id: String,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    /// Set when the stream was archived via the rail's "Remove…"
+    /// action. Archived streams are filtered out of `StreamStore::list`
+    /// so they disappear from the rail; the row stays in the DB so
+    /// history references (efforts, snapshots, page_visit) don't
+    /// dangle.
+    pub archived_at: Option<Timestamp>,
 }
 
 #[cfg(test)]
@@ -59,6 +65,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Stream = serde_json::from_str(&json).unwrap();

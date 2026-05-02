@@ -52,6 +52,10 @@ pub struct Thread {
     pub custom_prompt: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    /// Set when the thread was archived as part of its stream's
+    /// "Remove…" action. Archived threads are filtered out of
+    /// `ThreadStore::list_for_stream`.
+    pub archived_at: Option<Timestamp>,
 }
 
 #[cfg(test)]
@@ -75,6 +79,7 @@ mod tests {
             custom_prompt: None,
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         let json = serde_json::to_string(&t).unwrap();
         let back: Thread = serde_json::from_str(&json).unwrap();

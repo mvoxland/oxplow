@@ -419,6 +419,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: Timestamp::from_unix_ms(1),
             updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
@@ -435,6 +436,7 @@ mod tests {
             custom_prompt: None,
             created_at: Timestamp::from_unix_ms(1),
             updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
         (WorkItemService::new(store), t.id)

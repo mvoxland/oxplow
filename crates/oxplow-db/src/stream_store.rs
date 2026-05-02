@@ -55,11 +55,13 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
     let talking_session_id: String = row.get("talking_session_id")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
+    let archived_at: Option<String> = row.get("archived_at")?;
+    let map_err = |e: DomainError| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    };
     Ok(Stream {
         id: StreamId::from(id),
-        kind: str_to_kind(&kind).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-        })?,
+        kind: str_to_kind(&kind).map_err(map_err)?,
         title,
         summary,
         branch,
@@ -70,12 +72,12 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
         talking_pane,
         working_session_id,
         talking_session_id,
-        created_at: string_to_ts(&created_at).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-        })?,
-        updated_at: string_to_ts(&updated_at).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-        })?,
+        created_at: string_to_ts(&created_at).map_err(map_err)?,
+        updated_at: string_to_ts(&updated_at).map_err(map_err)?,
+        archived_at: archived_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(map_err)?,
     })
 }
 
@@ -86,7 +88,9 @@ impl StreamStore for SqliteStreamStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM streams ORDER BY \
+                    "SELECT * FROM streams \
+                     WHERE archived_at IS NULL \
+                     ORDER BY \
                      CASE kind WHEN 'primary' THEN 0 ELSE 1 END, created_at ASC",
                 )?;
                 let rows = stmt.query_map([], row_to_stream)?;
@@ -175,6 +179,25 @@ impl StreamStore for SqliteStreamStore {
         .unwrap()
     }
 
+    async fn archive(&self, id: &StreamId) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id = id.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let now = ts_to_string(Timestamp::now());
+                conn.execute(
+                    "UPDATE streams SET archived_at = COALESCE(archived_at, ?2),
+                                          updated_at = ?2
+                     WHERE id = ?1",
+                    params![id.as_str(), now],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     async fn current_id(&self) -> Result<Option<StreamId>, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
@@ -252,6 +275,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: ts(),
             updated_at: ts(),
+            archived_at: None,
         }
     }
 

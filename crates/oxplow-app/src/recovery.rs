@@ -90,6 +90,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         SqliteStreamStore::new(db.clone()).upsert(&s).await.unwrap();
         let t = Thread {
@@ -106,6 +107,7 @@ mod tests {
             custom_prompt: None,
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         let turns = Arc::new(SqliteAgentTurnStore::new(db.clone()));

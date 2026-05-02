@@ -258,6 +258,7 @@ mod tests {
             talking_session_id: String::new(),
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
         let t = Thread {
@@ -274,6 +275,7 @@ mod tests {
             custom_prompt: None,
             created_at: now,
             updated_at: now,
+            archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
         let registry = Arc::new(ThreadRuntimeRegistry::with_default_capacity());
