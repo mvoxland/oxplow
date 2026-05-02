@@ -219,14 +219,11 @@ export const commands = {
 	 *  been closed yet). The renderer already filters to its own tab list.
 	 */
 	listCurrentlyOpenUsage: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_currently_open_usage", { limit })),
+	listRecentlyFinished: (limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { limit })),
 	/**
-	 *  Pages whose latest visit has a duration_ms set (i.e. the editor
-	 *  closed them). Drives the "recently finished" rail.
-	 */
-	listRecentlyFinished: (limit: number) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recently_finished", { limit })),
-	/**
-	 *  Drop the duration_ms-bearing rows so they stop appearing in
-	 *  "recently finished".
+	 *  Hide the current "Finished" entries behind a cursor. Source rows
+	 *  (work items / wiki notes) are untouched; new finishes still surface
+	 *  because their timestamp is newer than the cursor.
 	 */
 	clearRecentlyFinished: () => typedError<null, IpcError>(__TAURI_INVOKE("clear_recently_finished")),
 	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
@@ -699,6 +696,14 @@ export type FileSnapshot = {
 	captured_at: Timestamp,
 	oversize: boolean,
 };
+
+/**
+ *  Recently completed work items merged with recently updated wiki
+ *  notes, sorted by timestamp DESC. Drives the rail's "Finished"
+ *  section. Items whose timestamp is `<= finished_cleared_at` are
+ *  hidden until something newer lands.
+ */
+export type FinishedEntry = { kind: "work-item"; itemId: string; title: string; t: Timestamp } | { kind: "note"; slug: string; title: string; t: Timestamp };
 
 export type Followup = {
 	id: string,

@@ -2598,7 +2598,12 @@ export function App() {
             opErrorsStore.clear();
             for (const id of ids) void forgetPage("op-error", `op-error:${id}`);
           }}
-          onClearFinished={() => { void clearRecentlyFinished(selectedThreadId); }}
+          onClearFinished={() => {
+            void clearRecentlyFinished(selectedThreadId)
+              .then(() => listRecentlyFinished(selectedThreadId, 5))
+              .then((entries) => { setRecentlyFinished(entries); })
+              .catch(() => {});
+          }}
           bookmarks={bookmarksStore.bookmarks(selectedThreadId, stream?.id ?? null).map((b) => {
             const scopeBadge = b.scope === "thread" ? "T" : b.scope === "stream" ? "S" : "G";
             return {

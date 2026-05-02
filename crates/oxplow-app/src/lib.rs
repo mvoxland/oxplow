@@ -146,6 +146,11 @@ pub struct Services {
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
+    /// Cursor for the rail's "Recently finished" section. Items whose
+    /// timestamp is `<= finished_cleared_at` are filtered out. In-memory
+    /// only — clearing the section is a UX gesture, not a destructive
+    /// op, and re-appearing after a restart is fine.
+    pub finished_cleared_at: Arc<RwLock<Option<oxplow_domain::Timestamp>>>,
 }
 
 impl Services {
@@ -240,6 +245,7 @@ impl Services {
             terminal_sessions,
             recovery: recovery_svc,
             events: event_bus,
+            finished_cleared_at: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -334,6 +340,7 @@ impl Services {
             terminal_sessions,
             recovery: recovery_svc,
             events: event_bus,
+            finished_cleared_at: Arc::new(RwLock::new(None)),
         })
     }
 }
