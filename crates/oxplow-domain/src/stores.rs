@@ -144,6 +144,10 @@ pub trait AgentTurnStore: Send + Sync {
     ) -> Result<(), DomainError>;
     async fn get(&self, id: &AgentTurnId) -> Result<Option<AgentTurn>, DomainError>;
     async fn list_open(&self, thread: &ThreadId) -> Result<Vec<AgentTurn>, DomainError>;
+    /// Every open agent_turn across every thread. Used by daemon
+    /// recovery on boot to close orphans the previous process left
+    /// behind.
+    async fn list_all_open(&self) -> Result<Vec<AgentTurn>, DomainError>;
     async fn list_for_thread(
         &self,
         thread: &ThreadId,

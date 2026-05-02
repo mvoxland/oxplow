@@ -55,12 +55,28 @@ The fastest loop avoids rebuilding the Rust shell unless Rust code
 changed. Run two long-lived processes:
 
 ```
-# terminal 1 — frontend dev server (HMR, ~150ms reloads on TS save)
-cd apps/desktop && bun run dev
+  # Option A (default): tauri-cli dev. One command, one terminal.
+  # Starts Vite, builds + runs the debug binary, watches Rust and TS,
+  # auto-restarts the window on Rust changes. Use this unless you have
+  # a reason not to.
+  bun run tauri:dev                       # from repo root (defined in top-level package.json)
 
-# terminal 2 — Rust shell, rebuilt only when Rust changes
-cargo build -p oxplow-desktop
-./bin/oxplow
+  # Option B: split-process dev — escape hatch when A's auto-rebuild
+  # is in your way (e.g. you want to decide when Rust rebuilds, or
+  # tauri-cli's watcher is misbehaving). Same debug binary, same Vite,
+  # just driven manually.
+  #
+  # terminal 1 — frontend dev server (HMR, ~150ms reloads on TS save)
+  cd apps/desktop && bun run dev          # vite on :5173
+
+  # terminal 2 — debug binary; talks to the running vite server above
+  cargo build -p oxplow-desktop && ./bin/oxplow
+
+  # Option C: production-style binary (no Vite running; embeds dist/).
+  # Requires --release because debug Tauri builds always use devUrl —
+  # plain `cargo build` + ./bin/oxplow gives a blank window.
+  bun run --cwd apps/desktop build
+  cargo build --release -p oxplow-desktop && ./bin/oxplow
 ```
 
 Then iterate:

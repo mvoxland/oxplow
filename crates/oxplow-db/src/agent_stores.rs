@@ -1,16 +1,14 @@
-//! Stores for hook_event, agent_status, agent_turn.
-//!
-//! Each table gets a thin sqlite-backed `Store` impl mirroring the
-//! pattern used by stream_store / thread_store.
+//! Sqlite-backed `AgentTurnStore`. (hook_event and agent_status used
+//! to live here too; they're now in-memory in
+//! `oxplow_app::thread_runtime::ThreadRuntimeRegistry` since the data
+//! is per-instance transient and was being reset on every boot
+//! anyway.)
 
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore, HookEventStore};
-use oxplow_domain::{
-    AgentStatus, AgentStatusState, AgentTurn, AgentTurnId, DomainError, HookEvent, HookEventId,
-    HookKind, StreamId, ThreadId, Timestamp, WorkItemId,
-};
+use oxplow_domain::stores::AgentTurnStore;
+use oxplow_domain::{AgentTurn, AgentTurnId, DomainError, ThreadId, Timestamp, WorkItemId};
 
 use crate::database::Database;
 
@@ -25,274 +23,6 @@ fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
 
 fn map_err_text(e: DomainError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-}
-
-// -- HookEvent ---------------------------------------------------------
-
-fn hook_kind_to_str(k: HookKind) -> &'static str {
-    match k {
-        HookKind::UserPromptSubmit => "user_prompt_submit",
-        HookKind::PreToolUse => "pre_tool_use",
-        HookKind::PostToolUse => "post_tool_use",
-        HookKind::Stop => "stop",
-        HookKind::SubagentStop => "subagent_stop",
-        HookKind::Interrupt => "interrupt",
-        HookKind::AgentBoot => "agent_boot",
-    }
-}
-
-fn str_to_hook_kind(s: &str) -> Result<HookKind, DomainError> {
-    Ok(match s {
-        "user_prompt_submit" => HookKind::UserPromptSubmit,
-        "pre_tool_use" => HookKind::PreToolUse,
-        "post_tool_use" => HookKind::PostToolUse,
-        "stop" => HookKind::Stop,
-        "subagent_stop" => HookKind::SubagentStop,
-        "interrupt" => HookKind::Interrupt,
-        "agent_boot" => HookKind::AgentBoot,
-        other => return Err(DomainError::Invalid(format!("unknown hook kind: {other}"))),
-    })
-}
-
-fn row_to_hook(row: &rusqlite::Row<'_>) -> rusqlite::Result<HookEvent> {
-    let id: String = row.get("id")?;
-    let thread_id: Option<String> = row.get("thread_id")?;
-    let stream_id: Option<String> = row.get("stream_id")?;
-    let kind: String = row.get("kind")?;
-    let session_id: Option<String> = row.get("session_id")?;
-    let payload_json: String = row.get("payload_json")?;
-    let received_at: String = row.get("received_at")?;
-    Ok(HookEvent {
-        id: HookEventId::from(id),
-        thread_id: thread_id.map(ThreadId::from),
-        stream_id: stream_id.map(StreamId::from),
-        kind: str_to_hook_kind(&kind).map_err(map_err_text)?,
-        session_id,
-        payload_json,
-        received_at: string_to_ts(&received_at).map_err(map_err_text)?,
-    })
-}
-
-#[derive(Clone)]
-pub struct SqliteHookEventStore {
-    db: Database,
-}
-
-impl SqliteHookEventStore {
-    pub fn new(db: Database) -> Self {
-        Self { db }
-    }
-}
-
-#[async_trait]
-impl HookEventStore for SqliteHookEventStore {
-    async fn append(&self, event: &HookEvent) -> Result<(), DomainError> {
-        let db = self.db.clone();
-        let event = event.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                conn.execute(
-                    "INSERT INTO hook_event (id, thread_id, stream_id, kind, session_id, payload_json, received_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        event.id.as_str(),
-                        event.thread_id.as_ref().map(|t| t.as_str()),
-                        event.stream_id.as_ref().map(|s| s.as_str()),
-                        hook_kind_to_str(event.kind),
-                        event.session_id,
-                        event.payload_json,
-                        ts_to_string(event.received_at),
-                    ],
-                )?;
-                Ok(())
-            })
-        })
-        .await
-        .unwrap()
-    }
-
-    async fn list_recent(
-        &self,
-        thread: Option<&ThreadId>,
-        limit: usize,
-    ) -> Result<Vec<HookEvent>, DomainError> {
-        let db = self.db.clone();
-        let thread = thread.cloned();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| match thread {
-                Some(t) => {
-                    let mut stmt = conn.prepare(
-                        "SELECT * FROM hook_event WHERE thread_id = ?1 ORDER BY received_at DESC LIMIT ?2",
-                    )?;
-                    let rows = stmt.query_map(params![t.as_str(), limit as i64], row_to_hook)?;
-                    rows.collect()
-                }
-                None => {
-                    let mut stmt = conn.prepare(
-                        "SELECT * FROM hook_event ORDER BY received_at DESC LIMIT ?1",
-                    )?;
-                    let rows = stmt.query_map(params![limit as i64], row_to_hook)?;
-                    rows.collect()
-                }
-            })
-        })
-        .await
-        .unwrap()
-    }
-
-    async fn list_by_kind(
-        &self,
-        kind: HookKind,
-        limit: usize,
-    ) -> Result<Vec<HookEvent>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM hook_event WHERE kind = ?1 ORDER BY received_at DESC LIMIT ?2",
-                )?;
-                let rows =
-                    stmt.query_map(params![hook_kind_to_str(kind), limit as i64], row_to_hook)?;
-                rows.collect()
-            })
-        })
-        .await
-        .unwrap()
-    }
-}
-
-// -- AgentStatus -------------------------------------------------------
-
-fn state_to_str(s: AgentStatusState) -> &'static str {
-    match s {
-        AgentStatusState::Idle => "idle",
-        AgentStatusState::Running => "running",
-        AgentStatusState::AwaitingUser => "awaiting_user",
-        AgentStatusState::Stopped => "stopped",
-        AgentStatusState::Error => "error",
-    }
-}
-
-fn str_to_state(s: &str) -> Result<AgentStatusState, DomainError> {
-    Ok(match s {
-        "idle" => AgentStatusState::Idle,
-        "running" => AgentStatusState::Running,
-        "awaiting_user" => AgentStatusState::AwaitingUser,
-        "stopped" => AgentStatusState::Stopped,
-        "error" => AgentStatusState::Error,
-        other => return Err(DomainError::Invalid(format!("unknown agent state: {other}"))),
-    })
-}
-
-fn row_to_status(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentStatus> {
-    let thread_id: String = row.get("thread_id")?;
-    let pane_target: String = row.get("pane_target")?;
-    let state: String = row.get("state")?;
-    let detail: Option<String> = row.get("detail")?;
-    let updated_at: String = row.get("updated_at")?;
-    Ok(AgentStatus {
-        thread_id: ThreadId::from(thread_id),
-        pane_target,
-        state: str_to_state(&state).map_err(map_err_text)?,
-        detail,
-        updated_at: string_to_ts(&updated_at).map_err(map_err_text)?,
-    })
-}
-
-#[derive(Clone)]
-pub struct SqliteAgentStatusStore {
-    db: Database,
-}
-
-impl SqliteAgentStatusStore {
-    pub fn new(db: Database) -> Self {
-        Self { db }
-    }
-}
-
-#[async_trait]
-impl AgentStatusStore for SqliteAgentStatusStore {
-    async fn upsert(
-        &self,
-        thread: &ThreadId,
-        pane_target: &str,
-        state: AgentStatusState,
-        detail: Option<String>,
-    ) -> Result<AgentStatus, DomainError> {
-        let db = self.db.clone();
-        let thread = thread.clone();
-        let pane_target = pane_target.to_string();
-        let now = Timestamp::now();
-        let now_str = ts_to_string(now);
-        let thread_for_sql = thread.clone();
-        let pane_for_sql = pane_target.clone();
-        let detail_for_sql = detail.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                conn.execute(
-                    "INSERT INTO agent_status (thread_id, pane_target, state, detail, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5)
-                     ON CONFLICT(thread_id, pane_target) DO UPDATE SET
-                        state = excluded.state,
-                        detail = excluded.detail,
-                        updated_at = excluded.updated_at",
-                    params![
-                        thread_for_sql.as_str(),
-                        pane_for_sql,
-                        state_to_str(state),
-                        detail_for_sql,
-                        now_str,
-                    ],
-                )?;
-                Ok(())
-            })
-        })
-        .await
-        .unwrap()?;
-        Ok(AgentStatus {
-            thread_id: thread,
-            pane_target,
-            state,
-            detail,
-            updated_at: now,
-        })
-    }
-
-    async fn get(
-        &self,
-        thread: &ThreadId,
-        pane_target: &str,
-    ) -> Result<Option<AgentStatus>, DomainError> {
-        let db = self.db.clone();
-        let thread = thread.clone();
-        let pane_target = pane_target.to_string();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM agent_status WHERE thread_id = ?1 AND pane_target = ?2",
-                )?;
-                let mut rows = stmt
-                    .query_map(params![thread.as_str(), pane_target], row_to_status)?;
-                Ok(rows.next().transpose()?)
-            })
-        })
-        .await
-        .unwrap()
-    }
-
-    async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                let mut stmt = conn
-                    .prepare("SELECT * FROM agent_status ORDER BY updated_at DESC")?;
-                let rows = stmt.query_map([], row_to_status)?;
-                rows.collect()
-            })
-        })
-        .await
-        .unwrap()
-    }
 }
 
 // -- AgentTurn ---------------------------------------------------------
@@ -414,6 +144,22 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         .unwrap()
     }
 
+    async fn list_all_open(&self) -> Result<Vec<AgentTurn>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM agent_turn WHERE ended_at IS NULL
+                     ORDER BY started_at DESC",
+                )?;
+                let rows = stmt.query_map([], row_to_turn)?;
+                rows.collect()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     async fn list_for_thread(
         &self,
         thread: &ThreadId,
@@ -443,7 +189,7 @@ mod tests {
     use crate::stream_store::SqliteStreamStore;
     use crate::thread_store::SqliteThreadStore;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamKind, Thread, ThreadStatus};
+    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 
     async fn fixture() -> (Database, ThreadId) {
         let db = Database::in_memory();
@@ -484,42 +230,6 @@ mod tests {
         };
         threads.upsert(&t).await.unwrap();
         (db, t.id)
-    }
-
-    #[tokio::test]
-    async fn hook_event_round_trips_and_lists_recent() {
-        let (db, tid) = fixture().await;
-        let store = SqliteHookEventStore::new(db);
-        let ev = HookEvent {
-            id: HookEventId::new(),
-            thread_id: Some(tid.clone()),
-            stream_id: None,
-            kind: HookKind::Stop,
-            session_id: Some("sess-1".into()),
-            payload_json: r#"{"foo":1}"#.into(),
-            received_at: Timestamp::now(),
-        };
-        store.append(&ev).await.unwrap();
-        let recent = store.list_recent(Some(&tid), 10).await.unwrap();
-        assert_eq!(recent.len(), 1);
-        assert_eq!(recent[0].kind, HookKind::Stop);
-    }
-
-    #[tokio::test]
-    async fn agent_status_upsert_replaces_existing() {
-        let (db, tid) = fixture().await;
-        let store = SqliteAgentStatusStore::new(db);
-        store
-            .upsert(&tid, "working", AgentStatusState::Running, None)
-            .await
-            .unwrap();
-        store
-            .upsert(&tid, "working", AgentStatusState::Idle, Some("done".into()))
-            .await
-            .unwrap();
-        let got = store.get(&tid, "working").await.unwrap().unwrap();
-        assert_eq!(got.state, AgentStatusState::Idle);
-        assert_eq!(got.detail.as_deref(), Some("done"));
     }
 
     #[tokio::test]

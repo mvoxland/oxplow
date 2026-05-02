@@ -90,6 +90,7 @@ pub fn write_plugin(
     project_dir: &Path,
     hook_base_url: &str,
     mcp_endpoint_url: &str,
+    hook_token: &str,
 ) -> Result<PluginPaths, PluginError> {
     let plugin_dir = project_dir.join(PLUGIN_DIR_REL);
     let manifest_dir = plugin_dir.join(".claude-plugin");
@@ -117,7 +118,7 @@ pub fn write_plugin(
     write_json(&hooks, &hooks_body)?;
 
     let mcp_config = plugin_dir.join("mcp-config.json");
-    let mcp_body = build_mcp_config(mcp_endpoint_url);
+    let mcp_body = build_mcp_config(mcp_endpoint_url, hook_token);
     write_json(&mcp_config, &mcp_body)?;
 
     let agent_guide = plugin_dir.join("AGENT_GUIDE.md");
@@ -186,14 +187,21 @@ fn build_hooks_json(hook_base_url: &str) -> serde_json::Value {
     json!({ "hooks": serde_json::Value::Object(hooks) })
 }
 
-fn build_mcp_config(mcp_endpoint_url: &str) -> serde_json::Value {
+fn build_mcp_config(mcp_endpoint_url: &str, hook_token: &str) -> serde_json::Value {
+    // Bake the literal token into the file. Claude Code's MCP config
+    // schema does not env-var-interpolate `headers` (unlike hooks,
+    // which opt in via `allowedEnvVars`), so `"Bearer $VAR"` would be
+    // sent verbatim and the control plane would 401. The file lives
+    // under `.oxplow/runtime/claude-plugin/` (gitignored) and is
+    // rewritten per `open_terminal_session`, so it tracks the current
+    // boot's token.
     json!({
         "mcpServers": {
             "oxplow": {
                 "type": "http",
                 "url": mcp_endpoint_url,
                 "headers": {
-                    "Authorization": "Bearer $OXPLOW_HOOK_TOKEN",
+                    "Authorization": format!("Bearer {hook_token}"),
                 },
             },
         },
@@ -219,6 +227,7 @@ mod tests {
             tmp.path(),
             "http://127.0.0.1:51823/hook",
             "http://127.0.0.1:51823/mcp",
+            "test-token",
         )
         .unwrap();
         assert!(paths.manifest.exists());
@@ -244,18 +253,32 @@ mod tests {
 
     #[test]
     fn mcp_config_uses_http_transport() {
-        let v = build_mcp_config("http://127.0.0.1:8/mcp");
+        let v = build_mcp_config("http://127.0.0.1:8/mcp", "tok");
         assert_eq!(v["mcpServers"]["oxplow"]["type"], "http");
         assert_eq!(v["mcpServers"]["oxplow"]["url"], "http://127.0.0.1:8/mcp");
     }
 
     #[test]
+    fn mcp_config_inlines_literal_bearer_token() {
+        // Regression: Claude Code does not env-var-interpolate MCP
+        // header values, so the token must land in the file as a
+        // literal string — not "Bearer $OXPLOW_HOOK_TOKEN".
+        let v = build_mcp_config("http://x/mcp", "abc123");
+        assert_eq!(
+            v["mcpServers"]["oxplow"]["headers"]["Authorization"],
+            "Bearer abc123"
+        );
+    }
+
+    #[test]
     fn write_plugin_is_idempotent() {
         let tmp = TempDir::new().unwrap();
-        write_plugin(tmp.path(), "http://h/hook", "http://h/mcp").unwrap();
+        write_plugin(tmp.path(), "http://h/hook", "http://h/mcp", "t1").unwrap();
         // Second call must not error.
-        let p = write_plugin(tmp.path(), "http://h2/hook", "http://h2/mcp").unwrap();
+        let p = write_plugin(tmp.path(), "http://h2/hook", "http://h2/mcp", "t2").unwrap();
         let body = fs::read_to_string(&p.hooks).unwrap();
         assert!(body.contains("http://h2/hook"));
+        let mcp_body = fs::read_to_string(&p.mcp_config).unwrap();
+        assert!(mcp_body.contains("Bearer t2"));
     }
 }

@@ -39,7 +39,7 @@ use tokio::net::TcpListener;
 use tracing::{info, warn};
 
 use oxplow_app::{HookEnvelope, Services};
-use oxplow_domain::stores::{AgentTurnStore, HookEventStore, ThreadStore, WorkItemStore};
+use oxplow_domain::stores::{AgentTurnStore, ThreadStore, WorkItemStore};
 use oxplow_domain::{HookKind, StreamId, ThreadId, WorkItemStatus};
 use oxplow_runtime::filing::{
     build_filing_enforcement_pre_tool_deny, FilingEnforcementContext,

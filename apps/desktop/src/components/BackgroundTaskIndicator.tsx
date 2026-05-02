@@ -96,11 +96,12 @@ export function BackgroundTaskIndicator() {
   }, [open]);
 
   const running = tasks.filter((t) => t.status === "running");
-  if (tasks.length === 0) return null;
+  useEffect(() => {
+    if (running.length === 0 && open) setOpen(false);
+  }, [running.length, open]);
+  if (running.length === 0) return null;
 
-  // Pick the "primary" row — the longest-running running task, or the
-  // most recent ended one if nothing's currently running.
-  const primary = running[0] ?? tasks[tasks.length - 1];
+  const primary = running[0];
   const summaryLabel = running.length > 1
     ? `${running.length} tasks running`
     : primary.label;
@@ -161,15 +162,9 @@ export function BackgroundTaskIndicator() {
           }}>
             Background tasks ({running.length} running)
           </div>
-          {tasks.length === 0 ? (
-            <div style={{ padding: 8, color: "var(--muted)", fontSize: 12 }}>
-              No tasks.
-            </div>
-          ) : (
-            tasks.map((task) => (
-              <BackgroundTaskRow key={task.id} task={task} />
-            ))
-          )}
+          {running.map((task) => (
+            <BackgroundTaskRow key={task.id} task={task} />
+          ))}
         </div>
       )}
     </>

@@ -284,7 +284,18 @@ export function applyStatusFilter(
 
 export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[] {
   if (!threadWork) return [];
-  const all = [...threadWork.waiting, ...threadWork.inProgress, ...threadWork.done];
+  // ThreadWorkState splits items into bucketed lists by status:
+  //   inProgress → InProgress, items → Ready, waiting → Blocked,
+  //   done → Done/Canceled/Archived, epics → kind=Epic.
+  // All four status buckets must flow into the group; omitting `items`
+  // (Ready) drops every "to do" row from the Tasks page even though
+  // the right-pane summary counts them.
+  const all = [
+    ...(threadWork.waiting ?? []),
+    ...(threadWork.inProgress ?? []),
+    ...(threadWork.items ?? []),
+    ...(threadWork.done ?? []),
+  ];
 
   const epicChildrenMap = new Map<string, WorkItem[]>();
   const epicIdSet = new Set(threadWork.epics.map((e) => e.id));

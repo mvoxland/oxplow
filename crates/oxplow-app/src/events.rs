@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::sync::broadcast;
 
-use oxplow_domain::{StreamId, ThreadId, WorkItemId};
+use oxplow_domain::{AgentStatusState, StreamId, ThreadId, WorkItemId};
 
 /// fs-watch classification mirrored onto the wire so the renderer can
 /// distinguish create / modify / delete / rename without re-stating
@@ -55,7 +55,7 @@ pub enum CodeQualityScanPhase {
 /// refetches the affected bucket on receipt rather than trying to
 /// reconcile diffs from the payload.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum OxplowEvent {
     /// Any stream row changed (created, renamed, deleted, panes
     /// updated). Renderer refetches `list_streams`.
@@ -84,10 +84,15 @@ pub enum OxplowEvent {
     BackgroundTasksChanged,
     /// A new hook event landed; renderer refreshes the hook log.
     HookEventsChanged,
-    /// Per-thread per-pane agent status changed.
+    /// Per-thread per-pane agent status changed. `state` carries the
+    /// derived status so the renderer can update without a refetch
+    /// round-trip — sources that don't have it pre-derived (e.g.
+    /// PreToolUse/PostToolUse, where the renderer used to refetch and
+    /// re-derive) compute it inline before emitting.
     AgentStatusChanged {
         thread_id: ThreadId,
         pane_target: String,
+        state: AgentStatusState,
     },
     /// agent_turn opened or closed.
     AgentTurnsChanged { thread_id: ThreadId },

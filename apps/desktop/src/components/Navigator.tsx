@@ -187,7 +187,7 @@ export function Navigator({
         }}
       >
         <div
-          style={{ flex: 1, overflowY: "auto", paddingTop: STRIP_PADDING_Y }}
+          style={{ flex: 1, overflowY: "auto", paddingTop: 0 }}
         >
           {rows.map((row, idx) => {
             if (row.kind === "gap") {
@@ -211,6 +211,7 @@ export function Navigator({
                   key={`s-${row.stream.id}`}
                   letter={firstLetter(row.stream.title)}
                   isStream
+                  isFirstStream={row.stream.id === orderedStreams[0]?.id}
                   isWriter={false}
                   selected={false}
                   status={undefined}
@@ -256,7 +257,7 @@ export function Navigator({
             zIndex: 30,
           }}
         >
-          <div style={{ flex: 1, overflowY: "auto", paddingTop: STRIP_PADDING_Y }}>
+          <div style={{ flex: 1, overflowY: "auto", paddingTop: 0 }}>
             {rows.map((row, idx) => {
               if (row.kind === "gap") {
                 return <div key={`o-gap-${row.afterStreamId}-${idx}`} style={{ height: GAP_HEIGHT }} />;
@@ -288,6 +289,7 @@ export function Navigator({
                     letter={firstLetter(row.stream.title)}
                     label={row.stream.title}
                     isStream
+                    isFirstStream={row.stream.id === orderedStreams[0]?.id}
                     isWriter={false}
                     selected={false}
                     status={undefined}
@@ -390,6 +392,7 @@ export function Navigator({
 function StripRow({
   letter,
   isStream,
+  isFirstStream = false,
   isWriter,
   selected,
   status,
@@ -397,6 +400,7 @@ function StripRow({
 }: {
   letter: string;
   isStream: boolean;
+  isFirstStream?: boolean;
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
@@ -438,7 +442,9 @@ function StripRow({
             ? "var(--surface-app)"
             : "transparent",
         borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
-        borderTop: isStream ? "2px solid var(--border-strong)" : "1px solid transparent",
+        borderTop: isStream && !isFirstStream
+          ? "2px solid var(--border-strong)"
+          : "1px solid transparent",
         borderBottom: "1px solid transparent",
         position: "relative",
         transition: "background 120ms ease",
@@ -455,6 +461,7 @@ function OverlayRow({
   letter,
   label,
   isStream,
+  isFirstStream = false,
   isWriter,
   selected,
   status,
@@ -468,6 +475,7 @@ function OverlayRow({
   letter: string;
   label: string;
   isStream: boolean;
+  isFirstStream?: boolean;
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
@@ -516,7 +524,9 @@ function OverlayRow({
             ? "var(--surface-app)"
             : "transparent",
         borderLeft: selected ? "3px solid var(--accent)" : "3px solid transparent",
-        borderTop: isStream ? "2px solid var(--border-strong)" : "1px solid transparent",
+        borderTop: isStream && !isFirstStream
+          ? "2px solid var(--border-strong)"
+          : "1px solid transparent",
         borderBottom: "1px solid transparent",
         paddingRight: 6,
         transition: "background 120ms ease",

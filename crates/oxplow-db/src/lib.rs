@@ -15,9 +15,7 @@ pub mod wiki_note_thread_updates;
 mod work_item_store;
 mod work_satellite;
 
-pub use agent_stores::{
-    SqliteAgentStatusStore, SqliteAgentTurnStore, SqliteHookEventStore,
-};
+pub use agent_stores::SqliteAgentTurnStore;
 pub use effort_store::{
     EffortFile, EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffort, WorkItemEffortStore,
 };

@@ -17,7 +17,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use oxplow_app::{CreateWorkItemInput, Services, UpdateWorkItemChanges};
+use oxplow_app::{CreateWorkItemInput, OxplowEvent, Services, UpdateWorkItemChanges};
 use oxplow_domain::stores::{
     AgentStatusStore, HookEventStore, ThreadStore, WorkItemEventStore, WorkItemLinkStore,
     WorkItemStore, WorkNoteStore,
@@ -133,9 +133,16 @@ pub struct SubsystemDocParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CreateWorkItemMcpParams {
-    /// Optional thread to attach the new item to. Omit to create on
-    /// the project-wide backlog.
+    /// Thread to attach the new item to. Required unless `backlog`
+    /// is set to `true` — filing onto the project-wide backlog must
+    /// be an explicit choice, since a thread-detached row trips
+    /// filing-enforcement on the next edit.
     pub thread_id: Option<String>,
+    /// Set to `true` to file the item onto the project-wide backlog
+    /// (no thread attachment). Mutually exclusive with `thread_id`.
+    /// Default `false`: a missing `thread_id` is an error.
+    #[serde(default)]
+    pub backlog: bool,
     pub title: String,
     pub description: Option<String>,
     /// One observable criterion per line. Authoritative completion
@@ -291,6 +298,17 @@ impl OxplowMcp {
         }
     }
 
+    /// Emit `WorkItemsChanged` so the renderer (which is a separate
+    /// process from the MCP server) refetches and reflects the
+    /// mutation. The Tauri command layer emits its own events; MCP
+    /// has to do the same or UI state silently goes stale after every
+    /// agent-driven change.
+    fn emit_work_items_changed(&self, thread_id: Option<oxplow_domain::ThreadId>) {
+        self.services
+            .events
+            .emit(OxplowEvent::WorkItemsChanged { thread_id });
+    }
+
     // ---------- liveness / version ----------
 
     #[tool(description = "Liveness check: returns \"pong\".")]
@@ -408,6 +426,7 @@ impl OxplowMcp {
             .reorder(thread.as_ref(), &ids)
             .await
             .map_err(internal)?;
+        self.emit_work_items_changed(thread);
         json_result(&serde_json::json!({ "ok": true }))
     }
 
@@ -438,6 +457,7 @@ impl OxplowMcp {
             .upsert(&item)
             .await
             .map_err(internal)?;
+        self.emit_work_items_changed(item.thread_id.clone());
         json_result(&item)
     }
 
@@ -447,11 +467,18 @@ impl OxplowMcp {
         params: Parameters<WorkItemIdParams>,
     ) -> Result<CallToolResult, McpError> {
         let id = WorkItemId::from(params.0.id);
+        let item = self
+            .services
+            .work_item_store
+            .get(&id)
+            .await
+            .map_err(internal)?;
         self.services
             .work_item_store
             .soft_delete(&id)
             .await
             .map_err(internal)?;
+        self.emit_work_items_changed(item.and_then(|i| i.thread_id));
         Ok(CallToolResult::success(vec![Content::text("deleted")]))
     }
 
@@ -714,17 +741,36 @@ impl OxplowMcp {
 
     #[tool(
         description = "Create a new work item. Allocates id + sort_index, fires creation event. \
-                       Pass `status: \"in_progress\"` to start the work in the same call (filing-\
-                       enforcement requires an in_progress row to exist before edits land). Pass \
-                       `status: \"done\"` (or `blocked`) with `touched_files` to file a row for \
-                       already-shipped work — the runtime synthesizes the in_progress→target \
-                       effort so Local History attributes the writes."
+                       `thread_id` is required unless `backlog: true` is set (a thread-detached \
+                       row trips filing-enforcement on the next edit, so backlog filing must be \
+                       an explicit choice). Pass `status: \"in_progress\"` to start the work in \
+                       the same call (filing-enforcement requires an in_progress row to exist \
+                       before edits land). Pass `status: \"done\"` (or `blocked`) with \
+                       `touched_files` to file a row for already-shipped work — the runtime \
+                       synthesizes the in_progress→target effort so Local History attributes \
+                       the writes."
     )]
     async fn create_work_item(
         &self,
         params: Parameters<CreateWorkItemMcpParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
+        match (p.thread_id.as_deref(), p.backlog) {
+            (Some(_), true) => {
+                return Err(McpError::invalid_params(
+                    "create_work_item: pass `thread_id` OR `backlog: true`, not both",
+                    None,
+                ));
+            }
+            (None, false) => {
+                return Err(McpError::invalid_params(
+                    "create_work_item: `thread_id` is required (or set `backlog: true` to file \
+                     onto the project-wide backlog)",
+                    None,
+                ));
+            }
+            _ => {}
+        }
         let thread = p.thread_id.clone().map(ThreadId::from);
         let kind = match p.kind.as_deref() {
             Some(k) => Some(parse_kind(k)?),
@@ -790,6 +836,7 @@ impl OxplowMcp {
                 }
             }
         }
+        self.emit_work_items_changed(item.thread_id.clone());
         json_result(&item)
     }
 
@@ -873,6 +920,7 @@ impl OxplowMcp {
                 }
             }
         }
+        self.emit_work_items_changed(updated.thread_id.clone());
         json_result(&updated)
     }
 
@@ -925,6 +973,7 @@ impl OxplowMcp {
                 }
             }
         }
+        self.emit_work_items_changed(item.thread_id.clone());
         json_result(&item)
     }
 
@@ -935,17 +984,19 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         let link_type = parse_link_type(&p.link_type)?;
+        let thread = ThreadId::from(p.thread_id);
         let link = self
             .services
             .work_item_link_store
             .create(
-                &ThreadId::from(p.thread_id),
+                &thread,
                 &WorkItemId::from(p.from_id),
                 &WorkItemId::from(p.to_id),
                 link_type,
             )
             .await
             .map_err(internal)?;
+        self.emit_work_items_changed(Some(thread));
         json_result(&link)
     }
 
@@ -972,6 +1023,14 @@ impl OxplowMcp {
                 .await
                 .map_err(|e| internal(e.to_string()))?;
             updated.push(row);
+        }
+        let mut threads: std::collections::HashSet<Option<oxplow_domain::ThreadId>> =
+            std::collections::HashSet::new();
+        for row in &updated {
+            threads.insert(row.thread_id.clone());
+        }
+        for tid in threads {
+            self.emit_work_items_changed(tid);
         }
         json_result(&updated)
     }
@@ -1091,6 +1150,7 @@ impl OxplowMcp {
                 .map_err(|e| internal(e.to_string()))?;
             children_out.push(row);
         }
+        self.emit_work_items_changed(thread.clone());
         let bundle = serde_json::json!({ "epic": epic, "children": children_out });
         Ok(CallToolResult::success(vec![Content::text(
             bundle.to_string(),
@@ -1179,6 +1239,7 @@ impl OxplowMcp {
             &recent_notes,
             params.0.extra_context.as_deref().unwrap_or(""),
         );
+        self.emit_work_items_changed(updated.thread_id.clone());
         json_result(&serde_json::json!({
             "ok": true,
             "prompt": prompt,

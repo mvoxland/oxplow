@@ -1,5 +1,6 @@
+use oxplow_app::agent_status_derive::derive_thread_status;
 use oxplow_app::HookEnvelope;
-use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore, HookEventStore};
+use oxplow_domain::stores::AgentTurnStore;
 use oxplow_domain::{AgentStatus, AgentTurn, HookEvent, HookKind, ThreadId};
 
 use crate::error::IpcError;
@@ -53,7 +54,22 @@ pub async fn list_hook_events_by_kind(
 pub async fn list_agent_statuses(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<AgentStatus>, IpcError> {
-    Ok(state.agent_status_store.list_all().await?)
+    // Derive each thread's working/waiting state by replaying its
+    // hook event log instead of trusting the agent_status row. The
+    // sidecar table can drift (a missed Stop, a mis-routed Subagent
+    // Stop, a stale boot row) — the hook log is what Claude Code
+    // actually emitted, so deriving from it self-heals against
+    // ingest-pipeline bugs. Mirrors `src/session/agent-status.ts`
+    // on main, which has the proven state machine for this.
+    let mut statuses = state.agent_status_store.list_all().await?;
+    for s in &mut statuses {
+        let events = state
+            .hook_event_store
+            .list_recent(Some(&s.thread_id), 200)
+            .await?;
+        s.state = derive_thread_status(&events);
+    }
+    Ok(statuses)
 }
 
 #[tauri::command]
@@ -77,3 +93,7 @@ pub async fn list_recent_agent_turns(
         .list_for_thread(&thread_id, limit.unwrap_or(50))
         .await?)
 }
+
+// Derivation logic + its unit tests live in
+// oxplow_app::agent_status_derive — list_agent_statuses just wires
+// the store calls together.

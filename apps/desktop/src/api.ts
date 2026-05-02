@@ -53,8 +53,8 @@ function adaptBackgroundTask(t: any): any {
   }
   return {
     ...t,
-    startedAt: t.started_at ? Date.parse(t.started_at) : Date.now(),
-    endedAt: t.ended_at ? Date.parse(t.ended_at) : null,
+    startedAt: typeof t.started_at === "number" ? t.started_at : Date.now(),
+    endedAt: typeof t.ended_at === "number" ? t.ended_at : null,
     result,
   };
 }
@@ -1354,7 +1354,23 @@ export async function readFileAtRef(
 }
 
 export async function listWorkItemEfforts(itemId: string): Promise<EffortDetail[]> {
-  return unwrap(await commands.listWorkItemEfforts(itemId)) as unknown as EffortDetail[];
+  // The Tauri command returns flat `WorkItemEffort` rows. Consumers
+  // (WorkItemPage activity timeline, useBacklinks, WorkItemDetail)
+  // expect the richer `EffortDetail` shape with snapshots + changed
+  // paths + counts. Wrap each row defensively so a missing detail
+  // doesn't crash the page (the previous lying cast caused
+  // "undefined is not an object (evaluating 'd.effort.end_snapshot_id')"
+  // when the renderer reached for `.effort` on a flat row). Snapshots
+  // and file lists default to empty until a backend command exists to
+  // populate them.
+  const rows = unwrap(await commands.listWorkItemEfforts(itemId)) as unknown as WorkItemEffort[];
+  return rows.map((effort) => ({
+    effort,
+    start_snapshot: null,
+    end_snapshot: null,
+    changed_paths: [],
+    counts: { created: 0, updated: 0, deleted: 0 },
+  }));
 }
 
 export async function listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]> {
@@ -1681,7 +1697,7 @@ export async function listRecentPageVisits(opts: {
     });
     if (out.length >= (opts.limit ?? 50)) break;
   }
-  return out;
+  return resolveRefLabels(out);
 }
 
 export async function topVisitedPages(opts: {
@@ -1707,7 +1723,7 @@ export async function topVisitedPages(opts: {
     });
     if (out.length >= (opts.limit ?? 50)) break;
   }
-  return out;
+  return resolveRefLabels(out);
 }
 
 function deriveDefaultLabelFromKind(kind: string, id: string): string {
@@ -1725,6 +1741,51 @@ function deriveDefaultLabelFromKind(kind: string, id: string): string {
     case "file": return id.split("/").pop() ?? id;
     default: return id;
   }
+}
+
+/// Fetch human titles for the work-item / wiki-note refs in a list of
+/// page-visit-shaped rows. The backend page_visits table doesn't carry
+/// labels yet, so for each work-item/note ref we look up the row by
+/// id and substitute its title when found. Falls back to the ref-kind
+/// default (which for unknown kinds returns the raw id) when the
+/// underlying row has been deleted or the lookup fails.
+async function resolveRefLabels<T extends { refKind: string; refId: string; label: string }>(
+  rows: T[],
+): Promise<T[]> {
+  const workItemIds = Array.from(
+    new Set(
+      rows
+        .filter((r) => r.refKind === "work-item" || r.refKind === "wi")
+        .map((r) => r.refId),
+    ),
+  );
+  const titleById = new Map<string, string>();
+  if (workItemIds.length > 0) {
+    const summaries = await getWorkItemSummaries(workItemIds);
+    for (const s of summaries) titleById.set(s.id, s.title);
+  }
+  let notesByIdent: Map<string, string> | null = null;
+  const noteIds = rows.filter((r) => r.refKind === "note" || r.refKind === "wiki-note");
+  if (noteIds.length > 0) {
+    try {
+      const notes = await listWikiNotes("");
+      notesByIdent = new Map();
+      for (const n of notes) {
+        notesByIdent.set(n.slug, n.title);
+      }
+    } catch {
+      notesByIdent = null;
+    }
+  }
+  return rows.map((r) => {
+    if ((r.refKind === "work-item" || r.refKind === "wi") && titleById.has(r.refId)) {
+      return { ...r, label: titleById.get(r.refId)! };
+    }
+    if ((r.refKind === "note" || r.refKind === "wiki-note") && notesByIdent?.has(r.refId)) {
+      return { ...r, label: notesByIdent.get(r.refId)! };
+    }
+    return r;
+  });
 }
 
 export async function countPageVisitsByDay(opts: {
@@ -1765,20 +1826,20 @@ export function subscribeAgentStatus(
   streamId: string | "all",
   onEvent: (entry: AgentStatusEntry) => void,
 ): () => void {
-  // The backend `AgentStatusChanged` event payload carries only
-  // { threadId, paneTarget } — not the new state — so we refetch the
-  // current status snapshot and forward the matching entry. The event
-  // kind is camelCase (`agentStatusChanged`), matching OxplowEventKind.
+  // The backend `AgentStatusChanged` event payload carries the
+  // derived state directly, so the renderer can update without a
+  // refetch round-trip. Map the AgentStatusState enum to the 2-state
+  // working/waiting indicator the same way listAgentStatuses() does.
   return subscribeOxplowEvents((event) => {
     if (event.kind !== "agentStatusChanged") return;
     const threadId = event.threadId as string | undefined;
-    if (!threadId) return;
-    void listAgentStatuses().then((entries) => {
-      const match = entries.find((e) => e.threadId === threadId);
-      if (!match) return;
-      if (streamId !== "all" && match.streamId !== streamId) return;
-      onEvent(match);
-    });
+    const rawState = event.state as string | undefined;
+    if (!threadId || !rawState) return;
+    const status: AgentStatus = rawState === "running" ? "working" : "waiting";
+    // streamId filter is a no-op — the event doesn't carry stream
+    // attribution. The single caller in App.tsx subscribes with "all".
+    void streamId;
+    onEvent({ streamId: "", threadId, status });
   });
 }
 
