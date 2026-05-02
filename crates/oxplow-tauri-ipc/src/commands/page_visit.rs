@@ -1,7 +1,8 @@
 use oxplow_app::OxplowEvent;
 use oxplow_db::analytics_stores::PageVisitStore as _;
 use oxplow_db::PageVisit;
-use oxplow_domain::Timestamp;
+use oxplow_domain::stores::WorkItemStore as _;
+use oxplow_domain::{ThreadId, Timestamp, WorkItemStatus};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -148,36 +149,73 @@ impl FinishedEntry {
 #[specta::specta]
 pub async fn list_recently_finished(
     state: tauri::State<'_, AppState>,
+    thread_id: Option<String>,
     limit: u32,
 ) -> Result<Vec<FinishedEntry>, IpcError> {
     let cap = limit.max(1) as usize;
-    let cleared_at = *state
+    let cursor_key = thread_id.clone().unwrap_or_default();
+    let cleared_at = state
         .finished_cleared_at
         .read()
-        .expect("finished_cleared_at rwlock");
+        .expect("finished_cleared_at rwlock")
+        .get(&cursor_key)
+        .copied();
 
     let mut entries: Vec<FinishedEntry> = Vec::new();
 
-    // Recently `done` work items.
-    let done = state.work_item_store.list_recently_done(cap).await?;
-    for item in done {
-        let Some(t) = item.completed_at else { continue };
-        entries.push(FinishedEntry::WorkItem {
-            item_id: item.id.0,
-            title: item.title,
-            t,
-        });
-    }
-
-    // Recently created/updated wiki notes. `WikiNoteStore::list` already
-    // orders by `updated_at DESC`; truncate to `cap` so we stay bounded.
-    let notes = state.wiki_note_store.list().await?;
-    for note in notes.into_iter().take(cap) {
-        entries.push(FinishedEntry::Note {
-            slug: note.slug,
-            title: note.title,
-            t: note.updated_at,
-        });
+    if let Some(tid) = thread_id.as_ref() {
+        // Thread-scoped: only items filed against this thread, only
+        // wiki notes the thread actually touched.
+        let tid = ThreadId::from(tid.clone());
+        let items = state.work_item_store.list_for_thread(&tid).await?;
+        for item in items {
+            if item.status != WorkItemStatus::Done {
+                continue;
+            }
+            let Some(t) = item.completed_at else { continue };
+            entries.push(FinishedEntry::WorkItem {
+                item_id: item.id.0,
+                title: item.title,
+                t,
+            });
+        }
+        let touches = state
+            .wiki_note_thread_updates
+            .list_for_thread(&tid, cap * 4)
+            .await?;
+        for touch in touches {
+            let Some(note) = state.wiki_note_store.get(&touch.slug).await? else {
+                continue;
+            };
+            entries.push(FinishedEntry::Note {
+                slug: note.slug,
+                title: note.title,
+                // Use the per-thread timestamp so a different thread
+                // editing the same note doesn't promote this thread's
+                // entry.
+                t: touch.last_seen_at,
+            });
+        }
+    } else {
+        // No thread context — fall back to a global view (used for
+        // initial paint before a thread is selected).
+        let done = state.work_item_store.list_recently_done(cap).await?;
+        for item in done {
+            let Some(t) = item.completed_at else { continue };
+            entries.push(FinishedEntry::WorkItem {
+                item_id: item.id.0,
+                title: item.title,
+                t,
+            });
+        }
+        let notes = state.wiki_note_store.list().await?;
+        for note in notes.into_iter().take(cap) {
+            entries.push(FinishedEntry::Note {
+                slug: note.slug,
+                title: note.title,
+                t: note.updated_at,
+            });
+        }
     }
 
     entries.retain(|e| match cleared_at {
@@ -191,19 +229,20 @@ pub async fn list_recently_finished(
 
 /// Hide the current "Finished" entries behind a cursor. Source rows
 /// (work items / wiki notes) are untouched; new finishes still surface
-/// because their timestamp is newer than the cursor.
+/// because their timestamp is newer than the cursor. Cursor is
+/// per-thread so clearing one thread's section doesn't blank another.
 #[tauri::command]
 #[specta::specta]
 pub async fn clear_recently_finished(
     state: tauri::State<'_, AppState>,
+    thread_id: Option<String>,
 ) -> Result<(), IpcError> {
-    {
-        let mut guard = state
-            .finished_cleared_at
-            .write()
-            .expect("finished_cleared_at rwlock");
-        *guard = Some(Timestamp::now());
-    }
+    let key = thread_id.unwrap_or_default();
+    state
+        .finished_cleared_at
+        .write()
+        .expect("finished_cleared_at rwlock")
+        .insert(key, Timestamp::now());
     state.events.emit(OxplowEvent::PageVisitChanged);
     Ok(())
 }
