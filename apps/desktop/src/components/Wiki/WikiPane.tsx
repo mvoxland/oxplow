@@ -33,10 +33,10 @@ const SECTION_INITIAL_LIMIT = 8;
 interface Props {
   stream: Stream | null;
   selectedSlug: string | null;
-  onOpenNote: (slug: string) => void;
+  onOpenWikiPage: (slug: string) => void;
 }
 
-export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
+export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
   const [notes, setNotes] = useState<WikiPageSummary[]>([]);
   const [recentUsage, setRecentUsage] = useState<UsageRollup[]>([]);
   const [query, setQuery] = useState("");
@@ -135,24 +135,24 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
       return;
     }
     if (notes.some((n) => n.slug === slug)) {
-      setNewSlugError(`A note with slug "${slug}" already exists.`);
+      setNewSlugError(`A wiki page with slug "${slug}" already exists.`);
       return;
     }
     try {
       await writeWikiPageBody(streamId, slug, `# ${slug}\n\n`);
       setNewSlugDraft(null);
       setNewSlugError(null);
-      onOpenNote(slug);
+      onOpenWikiPage(slug);
     } catch (error) {
-      setNewSlugError(`Failed to create note: ${String(error)}`);
+      setNewSlugError(`Failed to create wiki page: ${String(error)}`);
     }
-  }, [streamId, notes, newSlugDraft, onOpenNote]);
+  }, [streamId, notes, newSlugDraft, onOpenWikiPage]);
 
   useEffect(() => {
     if (newSlugDraft !== null) newSlugInputRef.current?.focus();
   }, [newSlugDraft]);
 
-  function openMenuForNote(rect: DOMRect | null, note: { slug: string; title: string }) {
+  function openMenuForWikiPage(rect: DOMRect | null, note: { slug: string; title: string }) {
     setContextMenu({
       slug: note.slug,
       title: note.title,
@@ -163,7 +163,7 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
 
   const contextMenuItems = contextMenu
     ? [
-        { id: "notes.open", label: "Open", enabled: true, run: () => { onOpenNote(contextMenu.slug); setContextMenu(null); } },
+        { id: "notes.open", label: "Open", enabled: true, run: () => { onOpenWikiPage(contextMenu.slug); setContextMenu(null); } },
         {
           id: "notes.add-to-agent",
           label: "Add to agent context",
@@ -214,7 +214,7 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
   if (!streamId) {
     return (
       <div style={{ padding: 12, color: "var(--text-muted)" }}>
-        Select a stream to view its notes.
+        Select a stream to view its wiki pages.
       </div>
     );
   }
@@ -232,8 +232,8 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
         borderBottom: "1px solid var(--border-subtle)",
         gap: 6,
       }}>
-        <span style={{ fontSize: 12, opacity: 0.7 }}>Notes ({notes.length})</span>
-        <button type="button" onClick={beginNew} title="New note" disabled={newSlugDraft !== null}>+ New</button>
+        <span style={{ fontSize: 12, opacity: 0.7 }}>Wiki pages ({notes.length})</span>
+        <button type="button" onClick={beginNew} title="New wiki page" disabled={newSlugDraft !== null}>+ New</button>
       </div>
 
       <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
@@ -243,7 +243,7 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Escape") setQuery(""); }}
           placeholder="Search titles + bodies"
-          data-testid="notes-search-input"
+          data-testid="wiki-pages-search-input"
           style={{
             width: "100%",
             boxSizing: "border-box",
@@ -268,7 +268,7 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
             ref={newSlugInputRef}
             type="text"
             value={newSlugDraft}
-            placeholder="note-slug"
+            placeholder="wiki-page-slug"
             onChange={(e) => { setNewSlugDraft(e.target.value); setNewSlugError(null); }}
             onKeyDown={(e) => {
               if (e.key === "Enter") { e.preventDefault(); void submitNew(); }
@@ -300,15 +300,15 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
             searching={searching}
             notesBySlug={notesBySlug}
             selectedSlug={selectedSlug}
-            onOpenNote={onOpenNote}
+            onOpenWikiPage={onOpenWikiPage}
             onOpenMenu={(rect, hit) => {
               const summary = notesBySlug.get(hit.slug);
-              openMenuForNote(rect, summary ?? { slug: hit.slug, title: hit.title } as WikiPageSummary);
+              openMenuForWikiPage(rect, summary ?? { slug: hit.slug, title: hit.title } as WikiPageSummary);
             }}
           />
         ) : notes.length === 0 ? (
           <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>
-            No notes yet. Click "+ New" or create a file at <code>.oxplow/wiki/*.md</code>.
+            No wiki pages yet. Click "+ New" or create a file at <code>.oxplow/wiki/*.md</code>.
           </div>
         ) : (
           <>
@@ -324,15 +324,15 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
                     note={v.note}
                     selected={v.note.slug === selectedSlug}
                     rightLabel={formatRelative(v.last_at)}
-                    onOpenNote={onOpenNote}
-                    onOpenMenu={(rect, note) => openMenuForNote(rect, note)}
+                    onOpenWikiPage={onOpenWikiPage}
+                    onOpenMenu={(rect, note) => openMenuForWikiPage(rect, note)}
                   />
                 ))}
               />
             )}
             {modified.length > 0 && (
               <Section
-                title={visited.length > 0 ? "Recently modified" : "Notes"}
+                title={visited.length > 0 ? "Recently modified" : "Wiki pages"}
                 count={modified.length}
                 showAll={showAllModified}
                 onToggleShowAll={() => setShowAllModified((v) => !v)}
@@ -342,8 +342,8 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
                     note={n}
                     selected={n.slug === selectedSlug}
                     rightLabel={formatRelative(n.updated_at)}
-                    onOpenNote={onOpenNote}
-                    onOpenMenu={(rect, note) => openMenuForNote(rect, note)}
+                    onOpenWikiPage={onOpenWikiPage}
+                    onOpenMenu={(rect, note) => openMenuForWikiPage(rect, note)}
                   />
                 ))}
               />
@@ -351,7 +351,7 @@ export function WikiPane({ stream, selectedSlug, onOpenNote }: Props) {
             {visited.length > 0 && modified.length > SECTION_INITIAL_LIMIT && !showAllRest && (
               <div style={{ padding: "6px 10px" }}>
                 <button type="button" style={{ fontSize: 11 }} onClick={() => setShowAllRest(true)}>
-                  All notes ({notes.length})
+                  All wiki pages ({notes.length})
                 </button>
               </div>
             )}
@@ -416,14 +416,14 @@ function SearchResults({
   searching,
   notesBySlug,
   selectedSlug,
-  onOpenNote,
+  onOpenWikiPage,
   onOpenMenu,
 }: {
   hits: WikiPageSearchHit[] | null;
   searching: boolean;
   notesBySlug: Map<string, WikiPageSummary>;
   selectedSlug: string | null;
-  onOpenNote: (slug: string) => void;
+  onOpenWikiPage: (slug: string) => void;
   onOpenMenu: (rect: DOMRect, hit: WikiPageSearchHit) => void;
 }) {
   if (hits === null && searching) {
@@ -443,7 +443,7 @@ function SearchResults({
           hit={hit}
           summary={notesBySlug.get(hit.slug) ?? null}
           selected={hit.slug === selectedSlug}
-          onOpenNote={onOpenNote}
+          onOpenWikiPage={onOpenWikiPage}
           onOpenMenu={(rect) => onOpenMenu(rect, hit)}
         />
       ))}
@@ -455,18 +455,18 @@ function SearchRow({
   hit,
   summary,
   selected,
-  onOpenNote,
+  onOpenWikiPage,
   onOpenMenu,
 }: {
   hit: WikiPageSearchHit;
   summary: WikiPageSummary | null;
   selected: boolean;
-  onOpenNote: (slug: string) => void;
+  onOpenWikiPage: (slug: string) => void;
   onOpenMenu: (rect: DOMRect) => void;
 }) {
   const freshness = summary?.freshness ?? "fresh";
   const { handlers } = useRouteDispatch(wikiPageRef(hit.slug), {
-    onNavigate: () => onOpenNote(hit.slug),
+    onNavigate: () => onOpenWikiPage(hit.slug),
   });
   return (
     <div
@@ -528,17 +528,17 @@ function NoteRow({
   note,
   selected,
   rightLabel,
-  onOpenNote,
+  onOpenWikiPage,
   onOpenMenu,
 }: {
   note: WikiPageSummary;
   selected: boolean;
   rightLabel?: string;
-  onOpenNote: (slug: string) => void;
+  onOpenWikiPage: (slug: string) => void;
   onOpenMenu: (rect: DOMRect, note: WikiPageSummary) => void;
 }) {
   const { handlers } = useRouteDispatch(wikiPageRef(note.slug), {
-    onNavigate: () => onOpenNote(note.slug),
+    onNavigate: () => onOpenWikiPage(note.slug),
   });
   return (
     <div

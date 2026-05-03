@@ -371,7 +371,7 @@ panicking `state.unwrap()` is at runtime in dev.
 ### 5.3 `oxplow-mcp` is also under-tested for its size
 - 10 tests / 1,161 LOC. The smoke suite covers
   ping/app_version/list_streams/list_backlog/get/upsert/
-  delete_work_item/list_notes per STATUS.md. The other 30+ MCP tools
+  delete_work_item/list_wiki_pages per STATUS.md. The other 30+ MCP tools
   (subsystem docs, code-quality scans, blame, hook events, snapshots,
   wiki refs, etc.) are unexercised.
 

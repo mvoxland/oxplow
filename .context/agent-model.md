@@ -262,7 +262,7 @@ cons", "should I", "best way", "is it better", "advice on",
 "recommend", "rationale behind"). Either match injects a
 `<wiki-capture-hint>` block into `additionalContext`. The hint points
 the agent at the `oxplow-wiki-capture` skill (search existing notes →
-append-or-create → `mcp__oxplow__resync_note`) and notes that the
+append-or-create → `mcp__oxplow__resync_wiki_page`) and notes that the
 write-guard wiki carve-out applies, so capture works on read-only
 threads too. Fix/feature/yes-ack prompts pay no token cost — the
 builder returns `null`. The Stop hook no longer carries a
@@ -472,14 +472,14 @@ shelling out.
 
 `buildWikiPageMcpTools` (`crates/oxplow-mcp/src/lib.rs`) surfaces the
 per-project wiki (`wiki_page` table + `.oxplow/wiki/*.md` files — see
-`data-model.md`). Tools are metadata-only: `list_notes`,
-`get_note_metadata`, `resync_note`, `search_notes` (title),
-`search_note_bodies` (content), `find_notes_for_file` (backlinks),
-`delete_note`. **There is intentionally no create/update tool** —
+`data-model.md`). Tools are metadata-only: `list_wiki_pages`,
+`get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages` (title),
+`search_wiki_page_bodies` (content), `find_wiki_pages_for_file` (backlinks),
+`delete_wiki_page`. **There is intentionally no create/update tool** —
 the agent writes bodies directly with its Write/Edit tools on
 `.oxplow/wiki/<slug>.md` (far cheaper than round-tripping full
 bodies through MCP args). The notes watcher re-syncs metadata + body
-on every file event; `resync_note` forces an immediate re-baseline
+on every file event; `resync_wiki_page` forces an immediate re-baseline
 when the agent wants freshness pinned to the current HEAD without
 waiting for the debounce.
 

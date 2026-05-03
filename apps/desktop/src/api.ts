@@ -1777,7 +1777,7 @@ function deriveDefaultLabelFromKind(kind: string, id: string): string {
   switch (kind) {
     case "tasks": return "Tasks";
     case "files": return "Files";
-    case "wiki-index": return "Notes";
+    case "wiki-index": return "Wiki";
     case "git-dashboard": return "Git";
     case "git-history": return "Git History";
     case "git-commit": return "Git Commit";

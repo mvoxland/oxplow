@@ -156,7 +156,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       const streamRows: StreamRow[] = await Promise.all(
         otherStreams.map(async (other) => {
           const uncommitted = await time(
-            `status_summary(${other.slug ?? other.id})`,
+            `status_summary(${other.title || other.id})`,
             getWorkspaceStatusSummary(other.id),
           ).catch(() => null);
           const otherBranch = other.branch || null;

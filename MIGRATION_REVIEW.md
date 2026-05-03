@@ -246,14 +246,14 @@ Ported:
 
 Original tool surface (from `src/mcp/mcp-tools.ts` etc.):
 `add_followup`, `add_work_note`, `await_user`, `complete_task`,
-`create_work_item`, `delegate_query`, `delete_note`, `delete_work_item`,
-`dispatch_work_item`, `file_epic_with_children`, `find_notes_for_file`,
-`fork_thread`, `get_note_metadata`, `get_subsystem_doc`, `get_thread_context`,
+`create_work_item`, `delegate_query`, `delete_wiki_page`, `delete_work_item`,
+`dispatch_work_item`, `file_epic_with_children`, `find_wiki_pages_for_file`,
+`fork_thread`, `get_wiki_page_metadata`, `get_subsystem_doc`, `get_thread_context`,
 `get_thread_notes`, `get_work_item`, `link_work_items`, `list_followups`,
-`list_notes`, `list_ready_work`, `list_thread_work`, `lsp_definition`,
+`list_wiki_pages`, `list_ready_work`, `list_thread_work`, `lsp_definition`,
 `lsp_diagnostics`, `lsp_hover`, `lsp_references`, `read_work_options`,
 `record_query_finding`, `remove_followup`, `reorder_work_items`,
-`resync_note`, `search_note_bodies`, `search_notes`,
+`resync_wiki_page`, `search_wiki_page_bodies`, `search_wiki_pages`,
 `transition_work_items`, `update_work_item`.
 
 Plus the `lsp-mcp-tools.ts` (LSP-bridging tools) and

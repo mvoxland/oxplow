@@ -14,7 +14,7 @@ in case any of these regress; delete when comfortable.
 | 6 | `read_work_options` MCP tool                                    | done   |
 | 7 | `delegate_query` + `record_query_finding` MCP tools             | done   |
 | 8 | `reorder_work_items` MCP tool                                   | done   |
-| 9 | Wiki-note refs parser + backlinks (`find_notes_for_file`/`for_note`) | done   |
+| 9 | Wiki-note refs parser + backlinks (`find_wiki_pages_for_file`/`for_note`) | done   |
 | 10 | Per-thread wiki-note attribution (`wiki_page_thread_update`)    | done   |
 | 11 | Wiki-notes fs watcher                                           | done   |
 
