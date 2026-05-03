@@ -582,9 +582,9 @@ export async function getWorkspaceContext(): Promise<WorkspaceContext> {
 }
 
 export async function createStream(input:
-  | { title: string; summary?: string; source: "existing"; ref: string }
-  | { title: string; summary?: string; source: "new"; branch: string; startPointRef: string }
-  | { title: string; summary?: string; source: "worktree"; worktreePath: string },
+  | { title: string; source: "existing"; ref: string }
+  | { title: string; source: "new"; branch: string; startPointRef: string }
+  | { title: string; source: "worktree"; worktreePath: string },
 ): Promise<Stream> {
   const slug = slugifyTitle(input.title);
   switch (input.source) {
