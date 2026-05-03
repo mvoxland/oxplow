@@ -106,25 +106,13 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       setLoading(false);
       return;
     }
-    const tStart = performance.now();
-    const time = async <T,>(label: string, p: Promise<T>): Promise<T> => {
-      const t = performance.now();
-      try {
-        const r = await p;
-        console.log(`[dashboard] ${label} ${(performance.now() - t).toFixed(0)}ms`);
-        return r;
-      } catch (e) {
-        console.log(`[dashboard] ${label} threw after ${(performance.now() - t).toFixed(0)}ms`);
-        throw e;
-      }
-    };
     try {
       setError(null);
       const [statusSummary, log, remoteBranches, streams] = await Promise.all([
-        time("status_summary(current)", getWorkspaceStatusSummary(streamId)),
-        time("git_log(current,5)", getGitLog(streamId, { limit: RECENT_LIMIT, all: false })),
-        time("recent_remote_branches", listRecentRemoteBranches(streamId, 20)),
-        time("list_streams", listStreams()),
+        getWorkspaceStatusSummary(streamId),
+        getGitLog(streamId, { limit: RECENT_LIMIT, all: false }),
+        listRecentRemoteBranches(streamId, 20),
+        listStreams(),
       ]);
       const branch = stream?.branch ?? log.currentBranch ?? null;
       const headCommit = log.commits[0] ?? null;
@@ -140,10 +128,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       let aheadUpstream = 0;
       let behindUpstream = 0;
       if (upstreamRef) {
-        const counts = await time(
-          `ahead_behind(upstream=${upstreamRef})`,
-          getAheadBehind(streamId, upstreamRef),
-        );
+        const counts = await getAheadBehind(streamId, upstreamRef);
         aheadUpstream = counts.ahead;
         behindUpstream = counts.behind;
       }
@@ -155,22 +140,15 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
       const otherStreams = streams.filter((s) => s.id !== streamId);
       const streamRows: StreamRow[] = await Promise.all(
         otherStreams.map(async (other) => {
-          const uncommitted = await time(
-            `status_summary(${other.title || other.id})`,
-            getWorkspaceStatusSummary(other.id),
-          ).catch(() => null);
+          const uncommitted = await getWorkspaceStatusSummary(other.id).catch(() => null);
           const otherBranch = other.branch || null;
           if (!otherBranch || !branch || otherBranch === branch) {
             return { stream: other, branch: otherBranch, ahead: 0, behind: 0, uncommitted };
           }
-          const counts = await time(
-            `ahead_behind(${branch}..${otherBranch})`,
-            getAheadBehind(streamId, branch, otherBranch),
-          );
+          const counts = await getAheadBehind(streamId, branch, otherBranch);
           return { stream: other, branch: otherBranch, ahead: counts.ahead, behind: counts.behind, uncommitted };
         }),
       );
-      console.log(`[dashboard] TOTAL ${(performance.now() - tStart).toFixed(0)}ms`);
       setData({
         branchHeader: {
           branch,
