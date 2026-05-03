@@ -25,6 +25,7 @@ export type ParsedLink =
   | { kind: "external" }
   | { kind: "internal"; slug: string }
   | { kind: "file"; path: string; line?: number }
+  | { kind: "directory"; path: string }
   | { kind: "git-commit"; sha: string };
 
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
@@ -60,6 +61,11 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
       return { kind: "file", path: lineMatch[1]!, line: Number(lineMatch[2]) };
     }
     return { kind: "file", path: raw };
+  }
+  if (rawHref.startsWith("dir:")) {
+    const raw = rawHref.slice("dir:".length).replace(/\/+$/, "");
+    if (!raw) return { kind: "empty" };
+    return { kind: "directory", path: raw };
   }
   if (rawHref.startsWith("gitcommit:")) {
     const sha = rawHref.slice("gitcommit:".length);
@@ -124,6 +130,18 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
         const shortDisplay = label ? display : sha.slice(0, 7);
         return `[${shortDisplay}](gitcommit:${sha})`;
       }
+      // Directory form: explicit `dir:` prefix (mirrors `git:`).
+      // Trailing slash on the path is tolerated and stripped.
+      if (target.startsWith("dir:")) {
+        const dir = target.slice(4).trim().replace(/\/+$/, "");
+        if (dir) {
+          // When no label was supplied, default to showing the bare
+          // path (without the `dir:` prefix) so the rendered link
+          // reads as a directory rather than a URL-shaped token.
+          const dirDisplay = label ? display : dir;
+          return `[${dirDisplay}](dir:${dir})`;
+        }
+      }
       if (looksLikeFilePath(target)) {
         return `[${display}](file:${target})`;
       }
@@ -141,6 +159,8 @@ export interface MarkdownViewProps {
   onOpenInNewTab?: (slug: string) => void;
   /** Optional file-link handler — invoked for `[[path/to/file]]` wikilinks. */
   onOpenFile?: (path: string, line?: number) => void;
+  /** Optional directory-link handler — invoked for `[[path/to/dir/]]` wikilinks. */
+  onOpenDirectory?: (path: string) => void;
   /** Optional git-commit-link handler — invoked for `[[<sha>]]` / `[[git:<sha>]]` wikilinks. */
   onOpenCommit?: (sha: string) => void;
   /**
@@ -181,6 +201,7 @@ export function MarkdownView({
   onNavigateInternal,
   onOpenInNewTab,
   onOpenFile,
+  onOpenDirectory,
   onOpenCommit,
   onOpenExternalUrl,
   renderMermaid = false,
@@ -206,6 +227,10 @@ export function MarkdownView({
       onOpenFile?.(parsed.path, parsed.line);
       return;
     }
+    if (parsed.kind === "directory") {
+      onOpenDirectory?.(parsed.path);
+      return;
+    }
     if (parsed.kind === "git-commit") {
       onOpenCommit?.(parsed.sha);
       return;
@@ -215,7 +240,7 @@ export function MarkdownView({
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
     else if (onNavigateInternal) onNavigateInternal(parsed.slug);
     // No handlers? Silently ignore — work-item notes don't have wiki nav.
-  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl]);
+  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
 
   const buildLinkMenu = useCallback((href: string): MenuItem[] => {
     const parsed = parseMarkdownLink(href);
@@ -247,6 +272,14 @@ export function MarkdownView({
       items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
       return items;
     }
+    if (parsed.kind === "directory") {
+      const items: MenuItem[] = [];
+      if (onOpenDirectory) {
+        items.push({ id: "open-dir", label: "Open directory", enabled: true, run: () => onOpenDirectory(parsed.path) });
+      }
+      items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
+      return items;
+    }
     if (parsed.kind === "git-commit") {
       const items: MenuItem[] = [];
       if (onOpenCommit) {
@@ -256,7 +289,7 @@ export function MarkdownView({
       return items;
     }
     return [];
-  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl]);
+  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
 
   // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.

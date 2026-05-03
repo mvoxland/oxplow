@@ -57,12 +57,14 @@ Each stream owns:
   The UI enforces **primary-first** regardless of sort_index (the
   primary tab can't be dragged and nothing can drop before it). Emits a
   `stream.changed` event (kind: "reordered") so the UI can refresh.
-- a `custom_prompt` column (migration v18, nullable TEXT) — per-stream
+- a `custom_prompt` column (migration V6, nullable TEXT) — per-stream
   standing instructions appended to the agent's system prompt after the
-  global `agentPromptAppend` section. Set via `setStreamPrompt(streamId,
-  prompt)` on `StreamStore`; IPC-exposed as `setStreamPrompt(streamId,
-  prompt)`. Emits a `stream.changed` event (kind: "prompt-changed") so
-  the UI re-fetches the full stream list.
+  global `agentPromptAppend` section. Set via the `set_stream_prompt`
+  IPC command (`apps/desktop/src/api.ts`'s `setStreamPrompt`). Emits a
+  `StreamsChanged` event so the UI re-fetches the full stream list.
+  V6 also dropped a legacy `summary` column that was carried over from
+  the TS schema and never displayed; the prompt feature briefly
+  piggybacked on that slot before getting its own column.
 
 Streams never look outside the project root for data; see
 `architecture.md`'s "Workspace isolation rule."
@@ -367,6 +369,18 @@ Freshness is a general indicator, not a proof:
   inside `crates/oxplow-db/src/wiki_page_store.rs`). `computeFreshness`
   rehashes each referenced file; any mismatch → `stale`; any missing
   file → `very-stale`.
+
+Parsed wikilink targets are split across three JSON columns by the
+parser in `crates/oxplow-app/src/wiki_pages.rs`:
+
+- `file_refs_json` — `[[src/foo.ts]]` / `[[src/foo.ts:42]]` style
+  references (workspace-relative file paths).
+- `dir_refs_json` (migration V7) — `[[dir:src/components]]` style
+  references. The `dir:` prefix is the explicit directory marker
+  (mirrors `git:` for commit refs); a trailing `/` on the path is
+  tolerated and stripped on store. `backlinks_for_dir` is the
+  symmetric reader to `backlinks_for_file`.
+- `related_notes_json` — `[[some-other-slug]]` cross-note links.
 
 MCP tools (`crates/oxplow-mcp/src/lib.rs`) are metadata-only —
 `list_wiki_pages`, `get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages`

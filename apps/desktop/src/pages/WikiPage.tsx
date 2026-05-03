@@ -14,6 +14,7 @@ export interface WikiPageProps {
   onClosed(): void;
   onOpenWikiPage(slug: string): void;
   onOpenFile(path: string): void;
+  onOpenDirectory?(path: string): void;
   onOpenPage(ref: TabRef): void;
   onOpenCommit?(sha: string): void;
   onOpenExternalUrl?(url: string): void;
@@ -25,7 +26,7 @@ export interface WikiPageProps {
  * the bookmark toggle. In-tab wikilink clicks route through the
  * navigation context so they participate in tab-level history.
  */
-export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, onOpenFile, onOpenPage, onOpenCommit, onOpenExternalUrl }: WikiPageProps) {
+export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, onOpenFile, onOpenDirectory, onOpenPage, onOpenCommit, onOpenExternalUrl }: WikiPageProps) {
   const nav = useOptionalPageNavigation();
   const backlinkEntries = useBacklinks(wikiPageRef(slug), stream, threadWork);
   const backlinks = {
@@ -51,6 +52,7 @@ export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, o
           onNavigateInternalWikiPage={(nextSlug) => nav ? nav.navigate(wikiPageRef(nextSlug)) : onOpenWikiPage(nextSlug)}
           onOpenWikiPageInNewTab={onOpenWikiPage}
           onOpenFile={onOpenFile}
+          onOpenDirectory={onOpenDirectory}
           onOpenCommit={onOpenCommit}
           onOpenExternalUrl={onOpenExternalUrl}
         />
