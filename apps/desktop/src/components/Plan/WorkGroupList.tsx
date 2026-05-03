@@ -847,10 +847,6 @@ function EpicInlineRow({
         const range = event.shiftKey && !toggle;
         if (toggle || range) { onSelect?.(item.id, { toggle, range }); return; }
         onSelect?.(item.id);
-      }}
-      onDoubleClick={(event) => {
-        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-        onSelect?.(item.id);
         onRequestEdit?.(item);
       }}
       style={{
@@ -1121,11 +1117,6 @@ function InlineItemRow({
           onSelect?.(item.id, { toggle, range });
           return;
         }
-        // Plain click: select only. Double-click (or Enter) opens the edit modal.
-        onSelect?.(item.id);
-      }}
-      onDoubleClick={(event) => {
-        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
         onSelect?.(item.id);
         onRequestEdit?.(item);
       }}
