@@ -1,24 +1,20 @@
-//! Subprocess driver for the lizard / jscpd code-quality scanners.
+//! Code-quality scanners.
 //!
-//! Mirrors the original `src/subprocess/code-quality.ts`:
-//! - `run_lizard`: shells out to `lizard --csv`, parses the CSV into one
-//!   finding per metric (complexity, function-length, parameter-count).
-//! - `run_jscpd`: shells out to `jscpd --reporters json`, reads the
-//!   resulting `jscpd-report.json`, emits one finding per duplicated
-//!   block instance.
-//!
-//! Both detect "tool not on PATH" with a typed error so the renderer
-//! can surface "install lizard with `pip install lizard`" etc.
+//! - `run_lizard`: in-process metrics via `oxplow_code_metrics`. The
+//!   name is kept for callsite continuity; nothing shells out anymore.
+//! - `run_jscpd`: still shells out to `jscpd` (Phase 2 will replace).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+use oxplow_code_metrics::FunctionMetrics;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 use tokio::process::Command;
 #[cfg(test)]
 use tracing::warn;
+use walkdir::WalkDir;
 
 #[derive(Debug, Error)]
 pub enum CodeQualityError {
@@ -51,7 +47,7 @@ pub struct CodeQualityFinding {
 pub struct RunOptions {
     /// Subset of repo-relative paths. Empty = scan whole repo.
     pub files: Vec<String>,
-    /// Subprocess timeout. Defaults to 60s.
+    /// Reserved for future use (was the lizard subprocess timeout).
     pub timeout: Option<std::time::Duration>,
 }
 
@@ -65,81 +61,116 @@ fn map_spawn_err(err: std::io::Error, tool: &str) -> CodeQualityError {
     }
 }
 
-/// Run lizard against the project. One finding per (function,
-/// metric); the renderer groups by `extra.functionName`.
+/// Build the file list to analyze: either the explicit list, or every
+/// supported file under `project_dir`. Skips dotdirs (`.git`,
+/// `.cargo`, …) and the usual build/dep folders.
+fn collect_supported_files(project_dir: &Path, opts: &RunOptions) -> Vec<PathBuf> {
+    if !opts.files.is_empty() {
+        return opts
+            .files
+            .iter()
+            .map(|p| project_dir.join(p))
+            .filter(|p| oxplow_code_metrics::is_supported_path(p))
+            .collect();
+    }
+    let skip = ["target", "node_modules", "dist", "build", ".git"];
+    WalkDir::new(project_dir)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            if e.depth() == 0 {
+                return true;
+            }
+            if name.starts_with('.') && e.file_type().is_dir() {
+                return false;
+            }
+            !(e.file_type().is_dir() && skip.contains(&name.as_ref()))
+        })
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+        .filter(|p| oxplow_code_metrics::is_supported_path(p))
+        .collect()
+}
+
+fn metrics_to_findings(
+    project_dir: &Path,
+    metrics: Vec<FunctionMetrics>,
+) -> Vec<CodeQualityFinding> {
+    let mut out = Vec::with_capacity(metrics.len() * 3);
+    for m in metrics {
+        // m.path may be absolute (we built it from `project_dir.join`).
+        // Re-derive the repo-relative form so the panel matches the
+        // path strings the rest of the system speaks.
+        let path = match Path::new(&m.path).strip_prefix(project_dir) {
+            Ok(rel) => rel.to_string_lossy().to_string(),
+            Err(_) => m.path.clone(),
+        };
+        let extra = format!(
+            r#"{{"functionName":{}}}"#,
+            serde_json::to_string(&m.name).unwrap_or_else(|_| "\"\"".into())
+        );
+        if m.complexity > 0 {
+            out.push(CodeQualityFinding {
+                path: path.clone(),
+                start_line: m.start_line,
+                end_line: m.end_line,
+                kind: "complexity".into(),
+                metric_value: m.complexity as f64,
+                extra_json: Some(extra.clone()),
+            });
+        }
+        if m.length > 0 {
+            out.push(CodeQualityFinding {
+                path: path.clone(),
+                start_line: m.start_line,
+                end_line: m.end_line,
+                kind: "function-length".into(),
+                metric_value: m.length as f64,
+                extra_json: Some(extra.clone()),
+            });
+        }
+        if m.parameter_count > 0 {
+            out.push(CodeQualityFinding {
+                path,
+                start_line: m.start_line,
+                end_line: m.end_line,
+                kind: "parameter-count".into(),
+                metric_value: m.parameter_count as f64,
+                extra_json: Some(extra),
+            });
+        }
+    }
+    out
+}
+
+/// Native, in-process replacement for the lizard CLI. Same name,
+/// same signature, same finding shape.
 pub async fn run_lizard(
     project_dir: &Path,
     opts: RunOptions,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
-    let mut args: Vec<String> = vec!["--csv".to_string()];
-    if opts.files.is_empty() {
-        args.push(project_dir.to_string_lossy().into_owned());
-    } else {
-        args.extend(opts.files.iter().cloned());
-    }
-    let timeout = opts.timeout.unwrap_or(std::time::Duration::from_secs(60));
-    let proc = Command::new("lizard")
-        .args(&args)
-        .current_dir(project_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| map_spawn_err(e, "lizard"))?;
-    let output = match tokio::time::timeout(timeout, proc.wait_with_output()).await {
-        Ok(Ok(o)) => o,
-        Ok(Err(e)) => return Err(CodeQualityError::Io(e)),
-        Err(_) => return Err(CodeQualityError::Timeout),
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_lizard_csv(&stdout))
-}
-
-/// Parse lizard's `--csv` output. Columns:
-///   nloc, ccn, token, parameter_count, length, location, file, function, length(line)
-/// We emit up to three findings per function row: complexity (ccn),
-/// function-length (length), parameter-count (parameter_count).
-pub fn parse_lizard_csv(raw: &str) -> Vec<CodeQualityFinding> {
-    let mut out = Vec::new();
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
+    let project = project_dir.to_path_buf();
+    // The metric pass is CPU-bound; punt to a blocking pool so we
+    // don't stall the tokio runtime on large repos.
+    let findings = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
+        let files = collect_supported_files(&project, &opts);
+        let mut metrics = Vec::new();
+        for path in files {
+            let source = match std::fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(_) => continue, // unreadable / binary — skip
+            };
+            metrics.extend(oxplow_code_metrics::analyze_file(
+                &path.to_string_lossy(),
+                &source,
+            ));
         }
-        let cols: Vec<&str> = trimmed.split(',').collect();
-        if cols.len() < 9 {
-            continue;
-        }
-        // CSV format from lizard --csv:
-        //   1   2   3       4                5       6        7    8         9
-        //   nloc ccn token  parameter_count  length  location file function  start_line
-        let ccn: f64 = cols[1].trim().parse().unwrap_or(0.0);
-        let parameters: f64 = cols[3].trim().parse().unwrap_or(0.0);
-        let length: f64 = cols[4].trim().parse().unwrap_or(0.0);
-        let file = cols[6].trim().to_string();
-        let function = cols[7].trim().to_string();
-        let start_line: u32 = cols[8].trim().parse().unwrap_or(0);
-        let end_line = start_line + length as u32;
-
-        let mk = |kind: &str, value: f64| CodeQualityFinding {
-            path: file.clone(),
-            start_line,
-            end_line,
-            kind: kind.into(),
-            metric_value: value,
-            extra_json: Some(format!(r#"{{"functionName":{:?}}}"#, function)),
-        };
-        if ccn > 0.0 {
-            out.push(mk("complexity", ccn));
-        }
-        if length > 0.0 {
-            out.push(mk("function-length", length));
-        }
-        if parameters > 0.0 {
-            out.push(mk("parameter-count", parameters));
-        }
-    }
-    out
+        Ok(metrics_to_findings(&project, metrics))
+    })
+    .await
+    .map_err(|e| CodeQualityError::Parse(format!("metrics task: {e}")))??;
+    Ok(findings)
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,7 +196,8 @@ struct JscpdFile {
 }
 
 /// Run jscpd against the project. Two findings per duplicate (one
-/// per peer location).
+/// per peer location). Phase 2 will replace this with a native
+/// tree-sitter winnowing detector.
 pub async fn run_jscpd(
     project_dir: &Path,
     opts: RunOptions,
@@ -200,8 +232,6 @@ pub async fn run_jscpd(
     let report_path: PathBuf = out_dir.path().join("jscpd-report.json");
     let raw = match std::fs::read_to_string(&report_path) {
         Ok(s) => s,
-        // jscpd writes no report when zero duplicates are found in
-        // some versions; treat as empty.
         Err(_) => return Ok(vec![]),
     };
     parse_jscpd_report(&raw)
@@ -244,20 +274,31 @@ pub fn parse_jscpd_report(raw: &str) -> Result<Vec<CodeQualityFinding>, CodeQual
 mod tests {
     use super::*;
 
-    #[test]
-    fn parse_lizard_csv_emits_three_findings_per_function() {
-        let raw = "10,5,40,2,8,foo (8),src/x.rs,foo,12";
-        let findings = parse_lizard_csv(raw);
-        assert_eq!(findings.len(), 3);
+    #[tokio::test]
+    async fn run_lizard_emits_findings_for_a_supported_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("sample.rs");
+        std::fs::write(
+            &file,
+            r#"
+fn classify(x: i32) -> &'static str {
+    if x > 0 { "pos" } else if x < 0 { "neg" } else { "zero" }
+}
+"#,
+        )
+        .unwrap();
+        let findings = run_lizard(dir.path(), RunOptions::default()).await.unwrap();
         assert!(findings.iter().any(|f| f.kind == "complexity"));
         assert!(findings.iter().any(|f| f.kind == "function-length"));
         assert!(findings.iter().any(|f| f.kind == "parameter-count"));
     }
 
-    #[test]
-    fn parse_lizard_csv_skips_zero_rows() {
-        let raw = "0,0,0,0,0,foo (0),src/x.rs,foo,1";
-        assert!(parse_lizard_csv(raw).is_empty());
+    #[tokio::test]
+    async fn run_lizard_skips_unsupported_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("README.md"), "# heading").unwrap();
+        let findings = run_lizard(dir.path(), RunOptions::default()).await.unwrap();
+        assert!(findings.is_empty());
     }
 
     #[test]
@@ -276,19 +317,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_lizard_returns_tool_missing_when_absent() {
-        // Force the tool name to something definitely missing by
-        // delegating into a renamed binary check. Skip on systems
-        // where `lizard-no-such-binary` somehow exists.
-        let result = run_with_renamed_binary("lizard-no-such-binary").await;
+    async fn run_jscpd_returns_tool_missing_when_absent() {
+        let result = run_with_renamed_binary("jscpd-no-such-binary").await;
         match result {
             Err(CodeQualityError::ToolMissing { tool }) => {
-                assert_eq!(tool, "lizard-no-such-binary");
+                assert_eq!(tool, "jscpd-no-such-binary");
             }
-            // Skip if a binary with that name actually exists.
             other => {
                 let _ = other;
-                warn!("lizard-no-such-binary unexpectedly resolved; skipping assertion");
+                warn!("jscpd-no-such-binary unexpectedly resolved; skipping assertion");
             }
         }
     }

@@ -246,20 +246,17 @@ export const commands = {
 	listCodeQualityScans: (limit: number) => typedError<CodeQualityScan[], IpcError>(__TAURI_INVOKE("list_code_quality_scans", { limit })),
 	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
 	/**
-	 *  Run a fresh lizard or jscpd scan, persist its findings, and
-	 *  return the scan id. Tool name is one of `"lizard"` / `"jscpd"`.
+	 *  Run a fresh metrics or duplication scan, persist findings, and
+	 *  return the scan id. Tool name is one of `"lizard"` (in-process
+	 *  metrics) / `"jscpd"` (subprocess; replaced in Phase 2).
 	 *  `scope` is a free-form label (typically `"workspace"`).
 	 */
 	runCodeQualityScan: (tool: string, scope: string, files: string[] | null) => typedError<number, IpcError>(__TAURI_INVOKE("run_code_quality_scan", { tool, scope, files })),
 	/**
-	 *  Run lizard against base- and head-side contents of a set of files
-	 *  to compute per-function metadata for the Change Analysis dashboard.
-	 * 
-	 *  Strategy: write each `(path, side)` pair into a temp directory at
-	 *  `<tmp>/<side>/<path>` so the file extension is preserved (lizard's
-	 *  language detection is extension-driven), invoke `lizard --csv` once
-	 *  over the temp root, then route findings back by parsing the
-	 *  `side` segment of the temp path.
+	 *  Compute per-function metadata for the Change Analysis dashboard,
+	 *  for both sides of the diff. Pure in-process call: walks each
+	 *  (path, content) pair through tree-sitter, no subprocess, no
+	 *  tempdir, no install dependency.
 	 */
 	analyzeFunctionsAtRefs: (files: AnalyzeFileSpec[]) => typedError<AnalyzeFunctionsResult, IpcError>(__TAURI_INVOKE("analyze_functions_at_refs", { files })),
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
@@ -531,8 +528,9 @@ export type AnalyzeFileSpec = {
 export type AnalyzeFunctionsResult = {
 	sides: AnalyzedFileSide[],
 	/**
-	 *  `Some(msg)` when lizard isn't on PATH; the renderer surfaces an
-	 *  inline install hint and treats `sides` as empty.
+	 *  Always `None` now that the implementation is in-process. Kept
+	 *  for renderer back-compat — will be removed once the UI stops
+	 *  branching on it.
 	 */
 	tool_missing: string | null,
 };
@@ -544,7 +542,7 @@ export type AnalyzedFileSide = {
 	functions: AnalyzedFunction[],
 };
 
-// Function metadata produced by lizard for one (path, side) pair.
+// Function metadata for one (path, side) pair.
 export type AnalyzedFunction = {
 	name: string,
 	start_line: number,

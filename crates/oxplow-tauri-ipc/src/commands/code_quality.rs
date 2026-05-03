@@ -1,13 +1,11 @@
 use oxplow_app::code_quality_runner::{
-    parse_lizard_csv, run_jscpd, run_lizard, CodeQualityFinding as RunnerFinding, RunOptions,
+    run_jscpd, run_lizard, CodeQualityFinding as RunnerFinding, RunOptions,
 };
 use oxplow_app::{CodeQualityScanPhase, OxplowEvent};
+use oxplow_code_metrics::{analyze_file, FunctionMetrics};
 use oxplow_db::{CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use std::path::PathBuf;
-use std::process::Stdio;
-use tokio::process::Command;
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -30,8 +28,9 @@ pub async fn list_code_quality_findings(
     Ok(state.code_quality_store.list_findings(scan_id).await?)
 }
 
-/// Run a fresh lizard or jscpd scan, persist its findings, and
-/// return the scan id. Tool name is one of `"lizard"` / `"jscpd"`.
+/// Run a fresh metrics or duplication scan, persist findings, and
+/// return the scan id. Tool name is one of `"lizard"` (in-process
+/// metrics) / `"jscpd"` (subprocess; replaced in Phase 2).
 /// `scope` is a free-form label (typically `"workspace"`).
 #[tauri::command]
 #[specta::specta]
@@ -142,7 +141,7 @@ pub struct AnalyzeFileSpec {
     pub head_content: Option<String>,
 }
 
-/// Function metadata produced by lizard for one (path, side) pair.
+/// Function metadata for one (path, side) pair.
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzedFunction {
     pub name: String,
@@ -164,19 +163,16 @@ pub struct AnalyzedFileSide {
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzeFunctionsResult {
     pub sides: Vec<AnalyzedFileSide>,
-    /// `Some(msg)` when lizard isn't on PATH; the renderer surfaces an
-    /// inline install hint and treats `sides` as empty.
+    /// Always `None` now that the implementation is in-process. Kept
+    /// for renderer back-compat — will be removed once the UI stops
+    /// branching on it.
     pub tool_missing: Option<String>,
 }
 
-/// Run lizard against base- and head-side contents of a set of files
-/// to compute per-function metadata for the Change Analysis dashboard.
-///
-/// Strategy: write each `(path, side)` pair into a temp directory at
-/// `<tmp>/<side>/<path>` so the file extension is preserved (lizard's
-/// language detection is extension-driven), invoke `lizard --csv` once
-/// over the temp root, then route findings back by parsing the
-/// `side` segment of the temp path.
+/// Compute per-function metadata for the Change Analysis dashboard,
+/// for both sides of the diff. Pure in-process call: walks each
+/// (path, content) pair through tree-sitter, no subprocess, no
+/// tempdir, no install dependency.
 #[tauri::command]
 #[specta::specta]
 pub async fn analyze_functions_at_refs(
@@ -188,122 +184,103 @@ pub async fn analyze_functions_at_refs(
             tool_missing: None,
         });
     }
-    let tmp = tempfile::tempdir().map_err(|e| IpcError::internal(e.to_string()))?;
-    let root = tmp.path().to_path_buf();
-
-    // Write all (path, side) pairs into the tempdir, mirroring the
-    // repo-relative path so lizard sees the original extension.
-    for spec in &files {
-        for (side, content) in [
-            ("base", spec.base_content.as_deref()),
-            ("head", spec.head_content.as_deref()),
-        ] {
-            let Some(text) = content else { continue };
-            let dest: PathBuf = root.join(side).join(&spec.path);
-            if let Some(parent) = dest.parent() {
-                if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                    return Err(IpcError::internal(e.to_string()));
-                }
-            }
-            if let Err(e) = tokio::fs::write(&dest, text).await {
-                return Err(IpcError::internal(e.to_string()));
-            }
-        }
-    }
-
-    // Invoke lizard once over the temp root.
-    let proc = Command::new("lizard")
-        .args(["--csv", root.to_string_lossy().as_ref()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn();
-    let proc = match proc {
-        Ok(p) => p,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(AnalyzeFunctionsResult {
-                sides: Vec::new(),
-                tool_missing: Some("lizard".to_string()),
-            });
-        }
-        Err(err) => return Err(IpcError::internal(err.to_string())),
-    };
-    let output = proc
-        .wait_with_output()
+    let sides = tokio::task::spawn_blocking(move || analyze_sides(files))
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))?;
-    let csv = String::from_utf8_lossy(&output.stdout).to_string();
-    let raw: Vec<RunnerFinding> = parse_lizard_csv(&csv);
-
-    // Group findings by (side, path) and collapse the three
-    // per-function rows (complexity / function-length / parameter-count)
-    // into a single AnalyzedFunction record.
-    use std::collections::BTreeMap;
-    let root_str = root.to_string_lossy().to_string();
-    type Bucket = BTreeMap<(String, String, String, u32), AnalyzedFunction>;
-    let mut bucket: Bucket = BTreeMap::new();
-    for f in raw {
-        // f.path is the absolute path lizard saw; strip the temp root
-        // prefix and split off the leading "base/" or "head/" segment.
-        let stripped = match f.path.strip_prefix(&root_str) {
-            Some(s) => s.trim_start_matches('/').trim_start_matches('\\'),
-            None => continue,
-        };
-        let mut parts = stripped.splitn(2, |c: char| c == '/' || c == '\\');
-        let side = parts.next().unwrap_or("").to_string();
-        let rel_path = parts.next().unwrap_or("").to_string();
-        if rel_path.is_empty() || (side != "base" && side != "head") {
-            continue;
-        }
-        let function_name = function_name_from_extra(f.extra_json.as_deref()).unwrap_or_default();
-        let key = (side.clone(), rel_path.clone(), function_name.clone(), f.start_line);
-        let entry = bucket.entry(key).or_insert(AnalyzedFunction {
-            name: function_name,
-            start_line: f.start_line,
-            length: 0,
-            complexity: 0.0,
-            parameter_count: 0,
-            nloc: 0,
-        });
-        match f.kind.as_str() {
-            "complexity" => entry.complexity = f.metric_value,
-            "function-length" => entry.length = f.metric_value as u32,
-            "parameter-count" => entry.parameter_count = f.metric_value as u32,
-            _ => {}
-        }
-    }
-
-    // Re-bucket into per-(side, path) AnalyzedFileSide rows.
-    let mut sides_map: BTreeMap<(String, String), Vec<AnalyzedFunction>> = BTreeMap::new();
-    for ((side, path, _name, _start), func) in bucket {
-        sides_map.entry((side, path)).or_default().push(func);
-    }
-
-    // Suppress unused-import warning when no scan-store path runs.
-    let _ = std::any::type_name::<RunOptions>();
-
-    let mut sides: Vec<AnalyzedFileSide> = sides_map
-        .into_iter()
-        .map(|((side, path), functions)| AnalyzedFileSide {
-            path,
-            side,
-            functions,
-        })
-        .collect();
-    // Stable order: by path, then side.
-    sides.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.side.cmp(&b.side)));
-
+        .map_err(|e| IpcError::internal(format!("analyze task: {e}")))?;
     Ok(AnalyzeFunctionsResult {
         sides,
         tool_missing: None,
     })
 }
 
-fn function_name_from_extra(extra: Option<&str>) -> Option<String> {
-    let raw = extra?;
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    value
-        .get("functionName")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+fn analyze_sides(files: Vec<AnalyzeFileSpec>) -> Vec<AnalyzedFileSide> {
+    let mut out = Vec::new();
+    for spec in files {
+        if let Some(content) = spec.base_content.as_deref() {
+            out.push(AnalyzedFileSide {
+                path: spec.path.clone(),
+                side: "base".into(),
+                functions: to_analyzed(analyze_file(&spec.path, content)),
+            });
+        }
+        if let Some(content) = spec.head_content.as_deref() {
+            out.push(AnalyzedFileSide {
+                path: spec.path.clone(),
+                side: "head".into(),
+                functions: to_analyzed(analyze_file(&spec.path, content)),
+            });
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.side.cmp(&b.side)));
+    out
+}
+
+fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
+    metrics
+        .into_iter()
+        .map(|m| AnalyzedFunction {
+            name: m.name,
+            start_line: m.start_line,
+            length: m.length,
+            complexity: m.complexity as f64,
+            parameter_count: m.parameter_count,
+            // We don't compute non-comment line count separately;
+            // approximate as length. Renderer treats it as informational.
+            nloc: m.length,
+        })
+        .collect()
+}
+
+#[allow(dead_code)]
+fn _runner_finding_kept_in_scope(_: RunnerFinding) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn analyze_functions_returns_function_for_each_side() {
+        let files = vec![AnalyzeFileSpec {
+            path: "src/foo.rs".into(),
+            base_content: Some("fn a() {}".into()),
+            head_content: Some(
+                "fn a() { if true { 1; } }".into(),
+            ),
+        }];
+        let result = analyze_functions_at_refs(files).await.unwrap();
+        assert_eq!(result.tool_missing, None);
+        assert_eq!(result.sides.len(), 2);
+        let head = result
+            .sides
+            .iter()
+            .find(|s| s.side == "head")
+            .unwrap();
+        assert_eq!(head.functions.len(), 1);
+        assert!(head.functions[0].complexity >= 2.0);
+    }
+
+    #[tokio::test]
+    async fn analyze_functions_handles_added_file() {
+        let files = vec![AnalyzeFileSpec {
+            path: "src/new.py".into(),
+            base_content: None,
+            head_content: Some("def f(x):\n    return x\n".into()),
+        }];
+        let result = analyze_functions_at_refs(files).await.unwrap();
+        assert_eq!(result.sides.len(), 1);
+        assert_eq!(result.sides[0].side, "head");
+    }
+
+    #[tokio::test]
+    async fn analyze_functions_skips_unsupported_languages() {
+        let files = vec![AnalyzeFileSpec {
+            path: "README.md".into(),
+            base_content: Some("# old".into()),
+            head_content: Some("# new".into()),
+        }];
+        let result = analyze_functions_at_refs(files).await.unwrap();
+        // We still emit empty sides so the caller can see "we looked".
+        assert_eq!(result.sides.len(), 2);
+        assert!(result.sides[0].functions.is_empty());
+    }
 }
