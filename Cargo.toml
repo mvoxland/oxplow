@@ -12,6 +12,7 @@ members = [
     "crates/oxplow-tmux",
     "crates/oxplow-pty",
     "crates/oxplow-lsp",
+    "crates/oxplow-lsp-installer",
     "crates/oxplow-mcp",
     "crates/oxplow-app",
     "crates/oxplow-tauri-ipc",
@@ -72,6 +73,14 @@ bytes = "1.8"
 # LSP / JSON-RPC
 lsp-types = "0.97"
 
+# HTTP / archive (LSP installer)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+flate2 = "1.0"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+sha2 = "0.10"
+hex = "0.4"
+
 # MCP
 rmcp = { version = "0.16", features = ["server", "transport-io", "macros"] }
 
@@ -96,6 +105,7 @@ oxplow-runtime = { path = "crates/oxplow-runtime" }
 oxplow-tmux = { path = "crates/oxplow-tmux" }
 oxplow-pty = { path = "crates/oxplow-pty" }
 oxplow-lsp = { path = "crates/oxplow-lsp" }
+oxplow-lsp-installer = { path = "crates/oxplow-lsp-installer" }
 oxplow-mcp = { path = "crates/oxplow-mcp" }
 oxplow-app = { path = "crates/oxplow-app" }
 oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }

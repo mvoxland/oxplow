@@ -220,7 +220,7 @@ export const commands = {
 	listRecentlyFinished: (threadId: string | null, limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { threadId, limit })),
 	/**
 	 *  Hide the current "Finished" entries behind a cursor. Source rows
-	 *  (work items / wiki notes) are untouched; new finishes still surface
+	 *  (work items / wiki pages) are untouched; new finishes still surface
 	 *  because their timestamp is newer than the cursor. Cursor is
 	 *  per-thread so clearing one thread's section doesn't blank another.
 	 */
@@ -411,6 +411,15 @@ export const commands = {
 	 *  already-closed clients (returns `INVALID` rather than panicking).
 	 */
 	closeLspClient: (clientId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_lsp_client", { clientId })),
+	/**
+	 *  Download + install a Mason package by name, register the resulting
+	 *  binary with `LspSessionManager`, and persist it to the manifest so
+	 *  subsequent boots pick it up. Blocks for the duration of the
+	 *  download — the renderer should surface a progress affordance.
+	 */
+	installLspPackage: (packageName: string) => typedError<InstalledLspPackage, IpcError>(__TAURI_INVOKE("install_lsp_package", { packageName })),
+	// List all Mason packages currently installed for this project.
+	listInstalledLspPackages: () => typedError<InstalledLspPackage[], IpcError>(__TAURI_INVOKE("list_installed_lsp_packages")),
 	/**
 	 *  Open a renderer-attached terminal session.
 	 * 
@@ -815,6 +824,13 @@ export type HookKind =
  *  observes traffic for it.
  */
 "agent_boot";
+
+export type InstalledLspPackage = {
+	name: string,
+	version: string,
+	language_ids: string[],
+	binary: string,
+};
 
 /**
  *  Frontend-facing error envelope.

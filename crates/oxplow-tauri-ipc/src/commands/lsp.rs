@@ -1,7 +1,35 @@
 use oxplow_app::lsp_clients::LspClientError;
+use oxplow_app::lsp_installer::{InstalledManifestEntry, LspInstallerError};
+use serde::Serialize;
+use specta::Type;
 
 use crate::error::IpcError;
 use crate::state::AppState;
+
+impl From<LspInstallerError> for IpcError {
+    fn from(value: LspInstallerError) -> Self {
+        IpcError::internal(value.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct InstalledLspPackage {
+    pub name: String,
+    pub version: String,
+    pub language_ids: Vec<String>,
+    pub binary: String,
+}
+
+impl From<InstalledManifestEntry> for InstalledLspPackage {
+    fn from(value: InstalledManifestEntry) -> Self {
+        Self {
+            name: value.name,
+            version: value.version,
+            language_ids: value.language_ids,
+            binary: value.binary.to_string_lossy().to_string(),
+        }
+    }
+}
 
 impl From<LspClientError> for IpcError {
     fn from(value: LspClientError) -> Self {
@@ -67,4 +95,28 @@ pub async fn close_lsp_client(
 ) -> Result<(), IpcError> {
     state.lsp_clients.close(&client_id).await?;
     Ok(())
+}
+
+/// Download + install a Mason package by name, register the resulting
+/// binary with `LspSessionManager`, and persist it to the manifest so
+/// subsequent boots pick it up. Blocks for the duration of the
+/// download — the renderer should surface a progress affordance.
+#[tauri::command]
+#[specta::specta]
+pub async fn install_lsp_package(
+    state: tauri::State<'_, AppState>,
+    package_name: String,
+) -> Result<InstalledLspPackage, IpcError> {
+    let entry = state.lsp_installer.install(&package_name).await?;
+    Ok(entry.into())
+}
+
+/// List all Mason packages currently installed for this project.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_installed_lsp_packages(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<InstalledLspPackage>, IpcError> {
+    let entries = state.lsp_installer.list_installed().await?;
+    Ok(entries.into_iter().map(Into::into).collect())
 }

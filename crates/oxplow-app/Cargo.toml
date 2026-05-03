@@ -17,6 +17,7 @@ oxplow-runtime = { workspace = true }
 oxplow-tmux = { workspace = true }
 oxplow-pty = { workspace = true }
 oxplow-lsp = { workspace = true }
+oxplow-lsp-installer = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tokio-stream = "0.1"

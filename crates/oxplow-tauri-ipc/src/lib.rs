@@ -195,6 +195,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::lsp::open_lsp_client,
         commands::lsp::send_lsp_message,
         commands::lsp::close_lsp_client,
+        commands::lsp::install_lsp_package,
+        commands::lsp::list_installed_lsp_packages,
         // terminal
         commands::terminal::open_terminal_session,
         commands::terminal::send_terminal_message,
