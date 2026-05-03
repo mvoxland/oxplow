@@ -179,6 +179,16 @@ The set of languages eligible for LSP is determined by
 loads extra LSP servers from `oxplow.yaml` on startup
 (`config.lspServers` → `registerLanguageServer` per server).
 
+When the LSP bridge fails to open a server for the current file's
+language, `EditorPane` checks
+`apps/desktop/src/lspSuggestions.ts` for a Mason package mapping. If a
+suggestion exists, the LSP status banner in the editor's lower-right
+shows an "Install <package>" button that calls `installLspPackage`
+(an IPC into `oxplow-app::lsp_installer`). The install runs against
+the Mason registry (`mason-org/mason-registry`) and lands the binary
+in `.oxplow/lsp/<name>/`; on success the cached `LspClient` for that
+language is dropped so the next request retries with the new binary.
+
 LSP is also exposed to **agents** via `buildLspMcpTools`
 (`crates/oxplow-mcp/src/lib.rs`) so they can run definition/reference queries
 without shelling out.
