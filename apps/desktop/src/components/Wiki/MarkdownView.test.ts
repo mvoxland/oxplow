@@ -144,3 +144,27 @@ test("parseMarkdownLink: gitcommit: scheme", () => {
 test("parseMarkdownLink: gitcommit: with empty target", () => {
   expect(parseMarkdownLink("gitcommit:")).toEqual({ kind: "empty" });
 });
+
+test("parseMarkdownLink: dir: scheme strips trailing slash", () => {
+  expect(parseMarkdownLink("dir:src/components")).toEqual({ kind: "directory", path: "src/components" });
+  expect(parseMarkdownLink("dir:src/components/")).toEqual({ kind: "directory", path: "src/components" });
+});
+
+test("parseMarkdownLink: dir: with empty target", () => {
+  expect(parseMarkdownLink("dir:")).toEqual({ kind: "empty" });
+});
+
+test("preprocessWikilinks: dir: prefix rewrites to dir: href", () => {
+  expect(preprocessWikilinks("see [[dir:src/components]] for the buttons"))
+    .toBe("see [src/components](dir:src/components) for the buttons");
+});
+
+test("preprocessWikilinks: dir: prefix tolerates trailing slash on the path", () => {
+  expect(preprocessWikilinks("[[dir:src/components/]]"))
+    .toBe("[src/components](dir:src/components)");
+});
+
+test("preprocessWikilinks: dir: prefix with custom display label", () => {
+  expect(preprocessWikilinks("[[dir:src/components|the components folder]]"))
+    .toBe("[the components folder](dir:src/components)");
+});

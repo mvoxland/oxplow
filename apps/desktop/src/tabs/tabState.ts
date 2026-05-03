@@ -12,6 +12,7 @@
 export type PageKind =
   | "agent"
   | "file"
+  | "directory"
   | "diff"
   | "note"
   | "work-item"
