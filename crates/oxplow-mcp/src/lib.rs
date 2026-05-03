@@ -1375,7 +1375,7 @@ impl OxplowMcp {
             .layout
             .project_dir
             .join(".oxplow")
-            .join("notes")
+            .join("wiki")
             .join(format!("{slug}.md"));
         let body = std::fs::read_to_string(&body_path).unwrap_or_default();
         // Refresh excerpt + size; upsert re-syncs the FTS mirror.

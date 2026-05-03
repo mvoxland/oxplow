@@ -2180,7 +2180,7 @@ export function App() {
       } else if (ref.kind === "wiki-index") {
         tabs.push({
           id: ref.id,
-          label: "Notes",
+          label: "Wiki",
           closable: true,
           render: () => (
             <WikiIndexPage

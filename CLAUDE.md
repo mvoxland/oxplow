@@ -141,6 +141,14 @@ able to accept one and push back on another. Test: if a reasonable
 reviewer would want to check them independently, they're separate
 rows.
 
+**Multiple independent asks in a single prompt → multiple tasks.**
+When the user packs two or more independent things into one message
+(e.g. "fix X. ALSO: do Y", "do A, then B"), file a separate work item
+for each one before starting work — even if you'll do them in the same
+turn. They are independent concerns by definition; a reviewer must be
+able to accept one and reject the other. Don't lump them under a
+single "do everything the user asked" task.
+
 **Every new ask gets its own item.** When the user sends a new request
 mid-turn, file a new work item rather than silently expanding the
 current item's scope. The exception: if the new ask is genuinely a
