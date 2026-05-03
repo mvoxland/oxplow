@@ -312,6 +312,12 @@ impl GitService {
             loop {
                 match rx.recv().await {
                     Ok(OxplowEvent::WorkspaceChanged { stream_id, .. }) => {
+                        // Synchronously invalidate so the next reader
+                        // recomputes from disk — without this, the
+                        // frontend's debounced refresh can race the
+                        // backend's async do_refresh and read the stale
+                        // cached value.
+                        svc.invalidate_statuses(&stream_id).await;
                         let _ = svc.refresh_tx.send(RefreshTask {
                             stream_id,
                             kinds: RefreshKinds {
@@ -325,13 +331,14 @@ impl GitService {
                         });
                     }
                     Ok(OxplowEvent::GitRefsChanged { stream_id }) => {
+                        // HEAD moving (commit, checkout, reset) changes
+                        // the worktree's diff vs HEAD even when files
+                        // don't change, so the cached status_summary
+                        // must be invalidated and recomputed too.
+                        svc.invalidate_statuses(&stream_id).await;
                         let _ = svc.refresh_tx.send(RefreshTask {
                             stream_id,
                             kinds: RefreshKinds {
-                                // HEAD moving (commit, checkout, reset)
-                                // changes the worktree's diff vs HEAD even
-                                // when files don't change, so the cached
-                                // status_summary must be recomputed too.
                                 statuses: true,
                                 branches: true,
                                 conflict: true,
@@ -347,6 +354,24 @@ impl GitService {
                 }
             }
         });
+    }
+
+    /// Drop the cached status map / summary for `stream_id` so the next
+    /// reader recomputes from disk. Called from the event-bus listener
+    /// the moment a workspace or refs change is observed; the async
+    /// pre-warm (via `do_refresh`) still runs in parallel to repopulate
+    /// the cache before the next reader arrives.
+    async fn invalidate_statuses(&self, stream_id: &StreamId) {
+        let snapshot = {
+            let inner = self.inner.read().await;
+            match inner.snapshots.get(stream_id) {
+                Some(s) => s.clone(),
+                None => return,
+            }
+        };
+        let mut snap = snapshot.write().await;
+        snap.statuses = None;
+        snap.status_summary = None;
     }
 
     async fn do_refresh(&self, stream_id: &StreamId, kinds: RefreshKinds) {
