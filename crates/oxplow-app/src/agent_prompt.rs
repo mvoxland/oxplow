@@ -65,6 +65,10 @@ pub fn assemble_system_prompt(
             out.push_str("\n\n");
         }
     }
+    if let Some(prompt) = stream.custom_prompt.as_deref().filter(|p| !p.is_empty()) {
+        out.push_str(prompt);
+        out.push_str("\n\n");
+    }
     if !config.agent_prompt_append.is_empty() {
         out.push_str(&config.agent_prompt_append);
         out.push_str("\n");
@@ -97,7 +101,6 @@ mod tests {
             id: StreamId::from("s-1"),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
-            summary: String::new(),
             branch: "main".into(),
             branch_ref: "refs/heads/main".into(),
             branch_source: "main".into(),
@@ -106,6 +109,7 @@ mod tests {
             talking_pane: String::new(),
             working_session_id: String::new(),
             talking_session_id: String::new(),
+            custom_prompt: None,
             created_at: Timestamp::from_unix_ms(1),
             updated_at: Timestamp::from_unix_ms(1),
             archived_at: None,

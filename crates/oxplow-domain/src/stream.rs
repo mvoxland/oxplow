@@ -25,7 +25,6 @@ pub struct Stream {
     pub id: StreamId,
     pub kind: StreamKind,
     pub title: String,
-    pub summary: String,
     pub branch: String,
     pub branch_ref: String,
     pub branch_source: String,
@@ -34,6 +33,9 @@ pub struct Stream {
     pub talking_pane: String,
     pub working_session_id: String,
     pub talking_session_id: String,
+    /// Standing instructions appended to every agent system prompt
+    /// when this stream is active. `None` (or empty) clears it.
+    pub custom_prompt: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     /// Set when the stream was archived via the rail's "Remove…"
@@ -55,7 +57,6 @@ mod tests {
             id: StreamId::from("s-primary"),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
-            summary: String::new(),
             branch: "main".into(),
             branch_ref: "refs/heads/main".into(),
             branch_source: "main".into(),
@@ -64,6 +65,7 @@ mod tests {
             talking_pane: String::new(),
             working_session_id: String::new(),
             talking_session_id: String::new(),
+            custom_prompt: None,
             created_at: now,
             updated_at: now,
             archived_at: None,
