@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+/**
+ * react-markdown's defaultUrlTransform only allows
+ * http/https/ircs/mailto/xmpp; our internal schemes (`file:`, `dir:`,
+ * `gitcommit:`) get stripped to empty strings, which makes the click
+ * handler see `kind: "empty"` and no-op. Pass our schemes through
+ * untouched and defer everything else to the default sanitizer.
+ */
+const APP_SCHEMES = /^(file|dir|gitcommit):/i;
+function urlTransform(value: string): string {
+  if (APP_SCHEMES.test(value)) return value;
+  return defaultUrlTransform(value);
+}
 import { Kebab } from "../Kebab.js";
 import type { MenuItem } from "../../menu.js";
 
@@ -333,6 +346,7 @@ export function MarkdownView({
     <div ref={ref} className={wrapperClassName} style={wrapperStyle}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={urlTransform}
         components={{
           a: ({ node, ...props }) => {
             const href = (props.href as string | undefined) ?? "";
