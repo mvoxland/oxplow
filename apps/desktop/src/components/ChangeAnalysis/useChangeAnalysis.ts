@@ -183,20 +183,21 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
         setFunctions(diffFunctions(indexSides(sides)));
       }
 
-      // Duplication: read latest jscpd scan + its findings, filter to
-      // changed files. No fresh scan unless the user clicks Refresh.
+      // Duplication: read latest duplication scan + its findings,
+      // filter to changed files. No fresh scan unless the user clicks
+      // Refresh.
       const scans = await listCodeQualityScans({ streamId, limit: 50 });
-      const latestJscpd = scans.find(
-        (s) => s.tool === "jscpd" && s.status === "done",
+      const latestDup = scans.find(
+        (s) => s.tool === "duplication" && s.status === "done",
       );
-      if (latestJscpd) {
+      if (latestDup) {
         const findings = await listCodeQualityFindings({
           streamId,
-          scanId: latestJscpd.id,
+          scanId: latestDup.id,
         });
         const changed = new Set(fileList.map((f) => f.path));
         const filtered = findings.filter((f) => changed.has(f.path));
-        const scanAgeMs = scanAgeFor(latestJscpd);
+        const scanAgeMs = scanAgeFor(latestDup);
         if (reqId === reqIdRef.current) {
           setDuplication({ findings: filtered, scanAgeMs });
         }
@@ -231,7 +232,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   useEffect(() => {
     if (!streamId) return;
     return subscribeCodeQualityEvents(streamId, (event) => {
-      if (event.tool !== "jscpd" || event.status !== "done") return;
+      if (event.tool !== "duplication" || event.status !== "done") return;
       void refresh();
     });
   }, [streamId, refresh]);
@@ -240,7 +241,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     if (!streamId) return;
     setScanning(true);
     try {
-      await runCodeQualityScan({ streamId, tool: "jscpd", scope: "diff" });
+      await runCodeQualityScan({ streamId, tool: "duplication", scope: "diff" });
     } finally {
       setScanning(false);
     }

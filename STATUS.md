@@ -15,7 +15,7 @@ change that flips a row.
 | Snapshots + content-addressed blob store | ✅ working | `crates/oxplow-app/src/blob_store.rs`; `restore_file_from_snapshot` end-to-end. |
 | Hook event ingest + agent-turn lifecycle | ✅ working | `oxplow-runtime`. |
 | Agent panes (tmux orchestration) | ✅ working | `oxplow-tmux` with copy-mode helpers. |
-| Code-quality scans | ✅ working | lizard + jscpd subprocess; findings store. |
+| Code-quality scans | ✅ working | In-process metrics + duplication detection (tree-sitter); findings store. |
 | LSP session manager + 4 LSP MCP tools | ✅ working | `oxplow-lsp`; `oxplow-app::lsp_sessions`. |
 | Daemon recovery on boot | ✅ working | `oxplow-app::recovery`. |
 | MCP server | ✅ working | 38 tools via rmcp. |

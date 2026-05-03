@@ -1,10 +1,14 @@
 //! Code-quality scanners.
 //!
-//! Both `run_lizard` and `run_jscpd` are now in-process. The names
-//! are kept so the rest of the system (store, IPC, panel UI) doesn't
-//! need to change — tool selection still maps to two distinct
-//! analysis pipelines (per-function metrics / duplicate-block
-//! detection).
+//! Two analysis pipelines, both running in-process:
+//!
+//! - [`run_metrics_scan`] — per-function metrics (complexity, length,
+//!   parameter count) via `oxplow-code-metrics`.
+//! - [`run_duplication_scan`] — token-stream duplicate-block detection
+//!   via `oxplow-code-dup`.
+//!
+//! The store + IPC contract refer to these by the analysis-kind names
+//! `"metrics"` and `"duplication"`.
 
 use std::path::{Path, PathBuf};
 
@@ -17,14 +21,10 @@ use walkdir::WalkDir;
 
 #[derive(Debug, Error)]
 pub enum CodeQualityError {
-    #[error("`{tool}` not found on PATH")]
-    ToolMissing { tool: String },
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("parse: {0}")]
     Parse(String),
-    #[error("subprocess timed out")]
-    Timeout,
 }
 
 /// One finding the renderer surfaces in the code-quality panel.
@@ -37,8 +37,8 @@ pub struct CodeQualityFinding {
     /// `"duplicate-block"`.
     pub kind: String,
     pub metric_value: f64,
-    /// Free-form JSON for tool-specific metadata. The store persists
-    /// this as a string column.
+    /// Free-form JSON for analysis-specific metadata. The store
+    /// persists this as a string column.
     pub extra_json: Option<String>,
 }
 
@@ -46,7 +46,7 @@ pub struct CodeQualityFinding {
 pub struct RunOptions {
     /// Subset of repo-relative paths. Empty = scan whole repo.
     pub files: Vec<String>,
-    /// Reserved for future use (was the lizard subprocess timeout).
+    /// Reserved for future use.
     pub timeout: Option<std::time::Duration>,
 }
 
@@ -133,9 +133,11 @@ fn metrics_to_findings(
     out
 }
 
-/// Native, in-process replacement for the lizard CLI. Same name,
-/// same signature, same finding shape.
-pub async fn run_lizard(
+/// Per-function metrics scan: walks every supported file under
+/// `project_dir` (or the explicit file list), computes complexity /
+/// length / parameter count via tree-sitter, and fans the records
+/// out to one [`CodeQualityFinding`] per metric.
+pub async fn run_metrics_scan(
     project_dir: &Path,
     opts: RunOptions,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
@@ -162,11 +164,10 @@ pub async fn run_lizard(
     Ok(findings)
 }
 
-/// Native, in-process replacement for the jscpd CLI. Runs the
-/// tree-sitter-based winnowing detector across every supported file
-/// and emits two findings per duplicate pair (one per side), keeping
-/// the same shape downstream consumers expect.
-pub async fn run_jscpd(
+/// Duplicate-block scan: runs the tree-sitter winnowing detector
+/// across every supported file and emits two findings per duplicate
+/// pair (one per side).
+pub async fn run_duplication_scan(
     project_dir: &Path,
     opts: RunOptions,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
@@ -192,7 +193,7 @@ pub async fn run_jscpd(
         Ok(blocks_to_findings(blocks))
     })
     .await
-    .map_err(|e| CodeQualityError::Parse(format!("dup task: {e}")))??;
+    .map_err(|e| CodeQualityError::Parse(format!("duplication task: {e}")))??;
     Ok(findings)
 }
 
@@ -232,7 +233,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn run_lizard_emits_findings_for_a_supported_file() {
+    async fn metrics_scan_emits_findings_for_a_supported_file() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("sample.rs");
         std::fs::write(
@@ -244,22 +245,26 @@ fn classify(x: i32) -> &'static str {
 "#,
         )
         .unwrap();
-        let findings = run_lizard(dir.path(), RunOptions::default()).await.unwrap();
+        let findings = run_metrics_scan(dir.path(), RunOptions::default())
+            .await
+            .unwrap();
         assert!(findings.iter().any(|f| f.kind == "complexity"));
         assert!(findings.iter().any(|f| f.kind == "function-length"));
         assert!(findings.iter().any(|f| f.kind == "parameter-count"));
     }
 
     #[tokio::test]
-    async fn run_lizard_skips_unsupported_files() {
+    async fn metrics_scan_skips_unsupported_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("README.md"), "# heading").unwrap();
-        let findings = run_lizard(dir.path(), RunOptions::default()).await.unwrap();
+        let findings = run_metrics_scan(dir.path(), RunOptions::default())
+            .await
+            .unwrap();
         assert!(findings.is_empty());
     }
 
     #[tokio::test]
-    async fn run_jscpd_emits_paired_findings_for_duplicates() {
+    async fn duplication_scan_emits_paired_findings_for_duplicates() {
         let dir = tempfile::tempdir().unwrap();
         let body = r#"
 fn helper(items: Vec<i32>) -> Vec<i32> {
@@ -278,16 +283,22 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 "#;
         std::fs::write(dir.path().join("a.rs"), body).unwrap();
         std::fs::write(dir.path().join("b.rs"), body).unwrap();
-        let findings = run_jscpd(dir.path(), RunOptions::default()).await.unwrap();
+        let findings = run_duplication_scan(dir.path(), RunOptions::default())
+            .await
+            .unwrap();
         let dups: Vec<_> = findings
             .iter()
             .filter(|f| f.kind == "duplicate-block")
             .collect();
-        assert!(dups.len() >= 2, "expected at least one paired duplicate, got {:?}", findings);
+        assert!(
+            dups.len() >= 2,
+            "expected at least one paired duplicate, got {:?}",
+            findings
+        );
     }
 
     #[tokio::test]
-    async fn run_jscpd_emits_nothing_for_unique_files() {
+    async fn duplication_scan_emits_nothing_for_unique_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("a.rs"),
@@ -299,7 +310,9 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             "fn unrelated() { println!(\"hi\"); }",
         )
         .unwrap();
-        let findings = run_jscpd(dir.path(), RunOptions::default()).await.unwrap();
+        let findings = run_duplication_scan(dir.path(), RunOptions::default())
+            .await
+            .unwrap();
         assert!(findings.is_empty());
     }
 }

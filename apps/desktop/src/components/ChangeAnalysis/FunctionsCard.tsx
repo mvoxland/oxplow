@@ -16,8 +16,7 @@ export function FunctionsCard({ functions, onOpenFile }: FunctionsCardProps) {
       <div style={header}>Functions</div>
       {empty ? (
         <div style={muted}>
-          No function-level changes detected (lizard may not be installed, or the changes are
-          outside lizard-supported languages).
+          No function-level changes detected (the changed files may be in unsupported languages).
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

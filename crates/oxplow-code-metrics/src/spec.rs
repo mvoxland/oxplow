@@ -11,8 +11,7 @@
 //!
 //! Decision-point sets follow McCabe's classic definition: every
 //! `if`, `else if`, `case`, `catch`, `for`, `while`, `&&`, `||`, plus
-//! ternary expressions. We deliberately stay coarse — it's the same
-//! definition lizard uses.
+//! ternary expressions.
 
 use tree_sitter::Language as TsLanguage;
 
@@ -66,7 +65,7 @@ impl Language {
     }
 }
 
-/// Cheap path-extension check. Mirrors lizard's heuristic.
+/// Cheap path-extension check.
 pub fn language_for_path(path: &str) -> Option<Language> {
     let ext = path.rsplit('.').next()?;
     Some(match ext.to_ascii_lowercase().as_str() {

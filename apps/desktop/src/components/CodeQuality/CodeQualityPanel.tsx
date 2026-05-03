@@ -17,7 +17,7 @@ interface Props {
   onOpenFile?: (path: string, opts?: { newTab?: boolean }) => void;
 }
 
-const TOOLS: CodeQualityTool[] = ["lizard", "jscpd"];
+const TOOLS: CodeQualityTool[] = ["metrics", "duplication"];
 
 export function CodeQualityPanel({ stream, onOpenFile }: Props) {
   const [activeScope, setActiveScope] = useState<CodeQualityScope>("codebase");
@@ -238,8 +238,8 @@ function ToolFilter({
       style={{ padding: "3px 6px" }}
     >
       <option value="all">all tools</option>
-      <option value="lizard">lizard</option>
-      <option value="jscpd">jscpd</option>
+      <option value="metrics">metrics</option>
+      <option value="duplication">duplication</option>
     </select>
   );
 }

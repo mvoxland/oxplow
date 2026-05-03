@@ -400,7 +400,7 @@ export interface FinishedEntry {
 
 // ---- Code quality ----
 
-export type CodeQualityTool = "lizard" | "jscpd";
+export type CodeQualityTool = "metrics" | "duplication";
 export type CodeQualityScope = "workspace" | "stream" | "codebase" | "diff";
 export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
 export type CodeQualityFindingKind = "complexity" | "duplication" | "duplicate-block";

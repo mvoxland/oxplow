@@ -118,8 +118,8 @@ export function indexSides(sides: SideEntry[]): SidedFunctionMap {
       target.set(side.path, perFile);
     }
     for (const fn of side.functions) {
-      // If lizard reports the same function name twice (overloads, nested
-      // closures), keep the first to keep the diff stable.
+      // If the analyzer reports the same function name twice (overloads,
+      // nested closures), keep the first to keep the diff stable.
       if (!perFile.has(fn.name)) perFile.set(fn.name, fn);
     }
   }

@@ -1,6 +1,4 @@
-//! Cross-file token-stream duplicate-block detector.
-//!
-//! Replaces the jscpd subprocess. The pipeline:
+//! Cross-file token-stream duplicate-block detector. The pipeline:
 //!
 //! 1. **Tokenize** each file by walking the tree-sitter AST and
 //!    emitting a normalized token per leaf node (identifiers, numeric
@@ -14,8 +12,8 @@
 //!    contiguous run of matching fingerprints between the two files.
 //! 6. **Filter** runs whose line span is shorter than `min_lines`.
 //!
-//! Tunables are exposed on `DupOptions`. Defaults (K=20, W=4, min=5)
-//! roughly match jscpd's default sensitivity.
+//! Tunables are exposed on `DupOptions` (K=20, W=4, min_lines=5 by
+//! default).
 
 use std::collections::HashMap;
 
