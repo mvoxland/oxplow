@@ -328,7 +328,11 @@ impl GitService {
                         let _ = svc.refresh_tx.send(RefreshTask {
                             stream_id,
                             kinds: RefreshKinds {
-                                statuses: false,
+                                // HEAD moving (commit, checkout, reset)
+                                // changes the worktree's diff vs HEAD even
+                                // when files don't change, so the cached
+                                // status_summary must be recomputed too.
+                                statuses: true,
                                 branches: true,
                                 conflict: true,
                                 log: true,
