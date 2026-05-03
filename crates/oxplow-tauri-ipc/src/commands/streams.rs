@@ -191,9 +191,7 @@ pub async fn set_stream_prompt(
         .get(&req.id)
         .await?
         .ok_or_else(IpcError::not_found)?;
-    // Stream doesn't yet have a custom_prompt column on the new schema;
-    // route it through the summary slot (which is unused otherwise).
-    s.summary = req.prompt.unwrap_or_default();
+    s.custom_prompt = req.prompt.filter(|p| !p.is_empty());
     s.updated_at = oxplow_domain::Timestamp::now();
     store.upsert(&s).await?;
     state.events.emit(OxplowEvent::StreamsChanged);

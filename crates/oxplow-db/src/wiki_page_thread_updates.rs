@@ -135,11 +135,11 @@ mod tests {
         let thread_id = "b-1";
         db.with_conn(|c| {
             c.execute(
-                "INSERT INTO streams (id, kind, title, summary, branch, branch_ref, branch_source,
+                "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
                                       worktree_path, working_pane, talking_pane,
                                       working_session_id, talking_session_id,
                                       created_at, updated_at)
-                 VALUES (?,'primary','t','','main','refs/heads/main','main','/tmp','','','','',
+                 VALUES (?,'primary','t','main','refs/heads/main','main','/tmp','','','','',
                          '2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')",
                 params![stream_id],
             )?;

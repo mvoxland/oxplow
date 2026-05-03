@@ -96,7 +96,6 @@ export interface NewStreamPageProps {
 export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: NewStreamPageProps) {
   const [mode, setMode] = useState<NewStreamMode>("existing");
   const [title, setTitle] = useState(defaultTitle ?? "");
-  const [summary, setSummary] = useState("");
   const [selectedRef, setSelectedRef] = useState("");
   const [selectedRefLabel, setSelectedRefLabel] = useState("");
   const [newBranch, setNewBranch] = useState("");
@@ -174,21 +173,18 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
         mode === "existing"
           ? await createStream({
               title: title.trim(),
-              summary: summary.trim(),
               source: "existing",
               ref: selectedRef,
             })
           : mode === "new"
             ? await createStream({
                 title: title.trim(),
-                summary: summary.trim(),
                 source: "new",
                 branch: newBranch.trim(),
                 startPointRef,
               })
             : await createStream({
                 title: title.trim(),
-                summary: summary.trim(),
                 source: "worktree",
                 worktreePath,
               });
@@ -237,14 +233,6 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
             data-testid="new-stream-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            style={inputStyle}
-          />
-        </Field>
-        <Field label="Summary">
-          <input
-            data-testid="new-stream-summary"
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
             style={inputStyle}
           />
         </Field>
