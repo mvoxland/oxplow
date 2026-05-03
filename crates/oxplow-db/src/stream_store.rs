@@ -44,7 +44,6 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
     let id: String = row.get("id")?;
     let kind: String = row.get("kind")?;
     let title: String = row.get("title")?;
-    let summary: String = row.get("summary")?;
     let branch: String = row.get("branch")?;
     let branch_ref: String = row.get("branch_ref")?;
     let branch_source: String = row.get("branch_source")?;
@@ -53,6 +52,7 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
     let talking_pane: String = row.get("talking_pane")?;
     let working_session_id: String = row.get("working_session_id")?;
     let talking_session_id: String = row.get("talking_session_id")?;
+    let custom_prompt: Option<String> = row.get("custom_prompt")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
     let archived_at: Option<String> = row.get("archived_at")?;
@@ -63,7 +63,6 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
         id: StreamId::from(id),
         kind: str_to_kind(&kind).map_err(map_err)?,
         title,
-        summary,
         branch,
         branch_ref,
         branch_source,
@@ -72,6 +71,7 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
         talking_pane,
         working_session_id,
         talking_session_id,
+        custom_prompt,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
         updated_at: string_to_ts(&updated_at).map_err(map_err)?,
         archived_at: archived_at
@@ -125,14 +125,14 @@ impl StreamStore for SqliteStreamStore {
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT INTO streams (
-                        id, kind, title, summary, branch, branch_ref, branch_source,
+                        id, kind, title, branch, branch_ref, branch_source,
                         worktree_path, working_pane, talking_pane,
-                        working_session_id, talking_session_id, created_at, updated_at
+                        working_session_id, talking_session_id, custom_prompt,
+                        created_at, updated_at
                      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                      ON CONFLICT(id) DO UPDATE SET
                         kind = excluded.kind,
                         title = excluded.title,
-                        summary = excluded.summary,
                         branch = excluded.branch,
                         branch_ref = excluded.branch_ref,
                         branch_source = excluded.branch_source,
@@ -141,12 +141,12 @@ impl StreamStore for SqliteStreamStore {
                         talking_pane = excluded.talking_pane,
                         working_session_id = excluded.working_session_id,
                         talking_session_id = excluded.talking_session_id,
+                        custom_prompt = excluded.custom_prompt,
                         updated_at = excluded.updated_at",
                     params![
                         stream.id.as_str(),
                         kind_to_str(stream.kind),
                         stream.title,
-                        stream.summary,
                         stream.branch,
                         stream.branch_ref,
                         stream.branch_source,
@@ -155,6 +155,7 @@ impl StreamStore for SqliteStreamStore {
                         stream.talking_pane,
                         stream.working_session_id,
                         stream.talking_session_id,
+                        stream.custom_prompt,
                         ts_to_string(stream.created_at),
                         ts_to_string(stream.updated_at),
                     ],
@@ -264,7 +265,6 @@ mod tests {
             id: StreamId::from("s-primary"),
             kind: StreamKind::Primary,
             title: "oxplow".into(),
-            summary: String::new(),
             branch: "main".into(),
             branch_ref: "refs/heads/main".into(),
             branch_source: "main".into(),
@@ -273,6 +273,7 @@ mod tests {
             talking_pane: String::new(),
             working_session_id: String::new(),
             talking_session_id: String::new(),
+            custom_prompt: None,
             created_at: ts(),
             updated_at: ts(),
             archived_at: None,

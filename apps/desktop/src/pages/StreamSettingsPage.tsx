@@ -25,10 +25,10 @@ export function StreamSettingsPage({ stream, onClose, onSaved }: StreamSettingsP
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setPrompt(stream?.summary ?? "");
+    setPrompt(stream?.custom_prompt ?? "");
     setError(null);
     setSavedMessage(null);
-  }, [stream?.id, stream?.summary]);
+  }, [stream?.id, stream?.custom_prompt]);
 
   async function handleSave() {
     if (!stream) return;

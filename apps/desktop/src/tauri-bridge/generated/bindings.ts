@@ -42,7 +42,6 @@ export const commands = {
 	id: StreamId,
 	kind: StreamKind,
 	title: string,
-	summary: string,
 	branch: string,
 	branch_ref: string,
 	branch_source: string,
@@ -51,6 +50,11 @@ export const commands = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	/**
+	 *  Standing instructions appended to every agent system prompt
+	 *  when this stream is active. `None` (or empty) clears it.
+	 */
+	custom_prompt: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
 	/**
@@ -67,7 +71,6 @@ export const commands = {
 	id: StreamId,
 	kind: StreamKind,
 	title: string,
-	summary: string,
 	branch: string,
 	branch_ref: string,
 	branch_source: string,
@@ -76,6 +79,11 @@ export const commands = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	/**
+	 *  Standing instructions appended to every agent system prompt
+	 *  when this stream is active. `None` (or empty) clears it.
+	 */
+	custom_prompt: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
 	/**
@@ -1045,7 +1053,6 @@ export type Stream = {
 	id: StreamId,
 	kind: StreamKind,
 	title: string,
-	summary: string,
 	branch: string,
 	branch_ref: string,
 	branch_source: string,
@@ -1054,6 +1061,11 @@ export type Stream = {
 	talking_pane: string,
 	working_session_id: string,
 	talking_session_id: string,
+	/**
+	 *  Standing instructions appended to every agent system prompt
+	 *  when this stream is active. `None` (or empty) clears it.
+	 */
+	custom_prompt: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
 	/**
