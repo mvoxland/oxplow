@@ -8,6 +8,7 @@ import {
 import { logUi } from "../../logger.js";
 import type { DiffRequest } from "../Diff/diff-request.js";
 import { Slideover } from "../Slideover.js";
+import { FileTree, type FileTreeItem } from "../FileTree/FileTree.js";
 
 /**
  * Pure helper exported for unit tests: builds the Slideover header
@@ -138,34 +139,35 @@ export function CommitDetailBody({
           <span style={{ marginLeft: 6, color: "var(--severity-ok, #86efac)" }}>+{totalAdditions}</span>
           <span style={{ marginLeft: 4, color: "var(--severity-critical, #f87171)" }}>−{totalDeletions}</span>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {detail.files.map((file) => {
+        <FileTree
+          testId="commit-files"
+          items={detail.files.map((file): FileTreeItem<typeof file> => {
             const realPath = file.path.includes(" → ") ? file.path.split(" → ")[1]! : file.path;
-            return (
-              <div
-                key={file.path}
-                title={`${file.path}\nDouble-click to open diff`}
-                onDoubleClick={() => {
-                  if (!onOpenDiff) return;
-                  const left = detail.parents[0] ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-                  onOpenDiff({
-                    path: realPath,
-                    leftRef: left,
-                    rightKind: { ref: detail.sha },
-                    baseLabel: detail.parents[0] ? detail.parents[0].slice(0, 7) : "(root)",
-                  });
-                }}
-                data-testid={`commit-slideover-file-${realPath}`}
-                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, cursor: "pointer" }}
-              >
-                <span style={{ ...statusBadgeStyle, color: statusColor(file.status) }}>{statusLabel(file.status)}</span>
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{realPath}</span>
-                {file.additions > 0 ? <span style={{ color: "var(--severity-ok, #86efac)" }}>+{file.additions}</span> : null}
-                {file.deletions > 0 ? <span style={{ color: "var(--severity-critical, #f87171)" }}>−{file.deletions}</span> : null}
-              </div>
-            );
+            return { path: realPath, data: file };
           })}
-        </div>
+          renderItem={({ path, data: file }) => (
+            <div
+              title={`${file.path}\nDouble-click to open diff`}
+              onDoubleClick={() => {
+                if (!onOpenDiff) return;
+                const left = detail.parents[0] ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+                onOpenDiff({
+                  path,
+                  leftRef: left,
+                  rightKind: { ref: detail.sha },
+                  baseLabel: detail.parents[0] ? detail.parents[0].slice(0, 7) : "(root)",
+                });
+              }}
+              data-testid={`commit-slideover-file-${path}`}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, cursor: "pointer", flex: 1, minWidth: 0 }}
+            >
+              <span style={{ ...statusBadgeStyle, color: statusColor(file.status) }}>{statusLabel(file.status)}</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{path.split("/").pop()}</span>
+              {file.additions > 0 ? <span style={{ color: "var(--severity-ok, #86efac)" }}>+{file.additions}</span> : null}
+              {file.deletions > 0 ? <span style={{ color: "var(--severity-critical, #f87171)" }}>−{file.deletions}</span> : null}
+            </div>
+          )}
+        />
       </div>
     </div>
   );
