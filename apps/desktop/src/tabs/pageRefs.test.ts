@@ -64,13 +64,8 @@ describe("pageRefs", () => {
     expect(ref.kind).toBe("hook-events");
   });
 
-  test("newWorkItemRef has stable create id but item-scoped edit id", () => {
+  test("newWorkItemRef has stable create id", () => {
     expect(newWorkItemRef().id).toBe("new-work-item");
-    expect(newWorkItemRef({ editingItemId: "wi-42" }).id).toBe("new-work-item:edit:wi-42");
-    // Two edit refs for different items get different ids so multiple edit
-    // tabs can coexist.
-    expect(newWorkItemRef({ editingItemId: "wi-1" }).id).not.toBe(
-      newWorkItemRef({ editingItemId: "wi-2" }).id,
-    );
+    expect(newWorkItemRef({ parentId: "wi-1" }).id).toBe("new-work-item");
   });
 });

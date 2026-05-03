@@ -127,7 +127,19 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               }}
             >
               {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
-              <span>{tab.label}</span>
+              <span
+                title={tab.label}
+                style={{
+                  maxWidth: 180,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  display: "inline-block",
+                  verticalAlign: "middle",
+                }}
+              >
+                {tab.label}
+              </span>
               {tab.contextMenu && tab.contextMenu.length > 0 ? (
                 <span onClick={(e) => e.stopPropagation()}>
                   <Kebab items={tab.contextMenu} testId={`center-tab-kebab-${tab.id}`} size={14} />
