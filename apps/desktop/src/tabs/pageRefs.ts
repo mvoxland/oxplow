@@ -13,6 +13,13 @@ export function fileRef(path: string): TabRef {
   return { id: `file:${path}`, kind: "file", payload: { path } };
 }
 
+export function directoryRef(path: string): TabRef {
+  // Trailing slash is normalized away — `[[src/]]` and `[[src]]` (when
+  // ever the parser admits the latter) collapse to one tab.
+  const bare = path.replace(/\/+$/, "");
+  return { id: `dir:${bare}`, kind: "directory", payload: { path: bare } };
+}
+
 export interface DiffPayload {
   path: string;
   fromRef?: string | null;

@@ -95,10 +95,16 @@ Files referenced: `src/foo.ts`, `src/bar/baz.ts`
   - `[[src/foo.ts]]` — file
   - `[[src/foo.ts:42]]` — file at line 42
   - `[[src/foo.ts|the foo helper]]` — custom display text
+  - `[[dir:src/components]]` — directory (opens a directory page
+    listing the folder contents). The `dir:` prefix is the explicit
+    directory marker, mirroring `git:` for commits — no heuristic.
+    A trailing `/` on the path is tolerated (`[[dir:src/components/]]`)
+    but not required.
   - `[[abc1234]]` or `[[git:abc1234]]` — git commit (SHA, 7-40 hex)
   - `[[some-other-note]]` — link to another wiki page by slug
 - Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]]
-  calls `onDrop` after validating the target."
+  calls `onDrop` after validating the target. See [[dir:src/ui/components]]
+  for the rest of that surface."
 
 ## Write mechanics
 

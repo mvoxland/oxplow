@@ -21,6 +21,7 @@ pub struct WikiPage {
     pub body_excerpt: String,
     pub body_size_bytes: i64,
     pub file_refs: Vec<String>,
+    pub dir_refs: Vec<String>,
     pub related_notes: Vec<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -62,6 +63,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiPage> {
     let body_size_bytes: i64 = row.get("body_size_bytes")?;
     let file_refs_json: String = row.get("file_refs_json")?;
     let related_notes_json: String = row.get("related_notes_json")?;
+    let dir_refs_json: String = row.get("dir_refs_json").unwrap_or_else(|_| "[]".to_string());
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
     let map_err = |e: DomainError| {
@@ -69,6 +71,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiPage> {
     };
     let file_refs: Vec<String> = serde_json::from_str(&file_refs_json).unwrap_or_default();
     let related_notes: Vec<String> = serde_json::from_str(&related_notes_json).unwrap_or_default();
+    let dir_refs: Vec<String> = serde_json::from_str(&dir_refs_json).unwrap_or_default();
     Ok(WikiPage {
         slug,
         title,
@@ -76,6 +79,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiPage> {
         body_excerpt,
         body_size_bytes,
         file_refs,
+        dir_refs,
         related_notes,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
         updated_at: string_to_ts(&updated_at).map_err(map_err)?,
@@ -122,11 +126,14 @@ impl SqliteWikiPageStore {
                     .unwrap_or_else(|_| "[]".to_string());
                 let related_notes_json = serde_json::to_string(&note.related_notes)
                     .unwrap_or_else(|_| "[]".to_string());
+                let dir_refs_json = serde_json::to_string(&note.dir_refs)
+                    .unwrap_or_else(|_| "[]".to_string());
                 conn.execute(
                     "INSERT INTO wiki_page (
                         slug, title, body_path, body_excerpt, body_size_bytes,
-                        file_refs_json, related_notes_json, created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                        file_refs_json, related_notes_json, dir_refs_json,
+                        created_at, updated_at
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                      ON CONFLICT(slug) DO UPDATE SET
                         title = excluded.title,
                         body_path = excluded.body_path,
@@ -134,6 +141,7 @@ impl SqliteWikiPageStore {
                         body_size_bytes = excluded.body_size_bytes,
                         file_refs_json = excluded.file_refs_json,
                         related_notes_json = excluded.related_notes_json,
+                        dir_refs_json = excluded.dir_refs_json,
                         updated_at = excluded.updated_at",
                     params![
                         note.slug,
@@ -143,6 +151,7 @@ impl SqliteWikiPageStore {
                         note.body_size_bytes,
                         file_refs_json,
                         related_notes_json,
+                        dir_refs_json,
                         ts_to_string(note.created_at),
                         ts_to_string(note.updated_at),
                     ],
@@ -301,6 +310,7 @@ mod tests {
             body_excerpt: excerpt.into(),
             body_size_bytes: excerpt.len() as i64,
             file_refs: vec![],
+            dir_refs: vec![],
             related_notes: vec![],
             created_at: now(),
             updated_at: now(),
