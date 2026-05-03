@@ -97,6 +97,7 @@ import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
+import { ChangeAnalysisPage } from "./pages/ChangeAnalysisPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { DirectoryPage } from "./pages/DirectoryPage.js";
@@ -1728,6 +1729,7 @@ export function App() {
       case "git-dashboard":
       case "git-commit":
       case "uncommitted-changes":
+      case "change-analysis":
       case "hook-events":
       case "files":
       case "wiki-index":
@@ -2127,6 +2129,21 @@ export function App() {
           render: () => (
             <UncommittedChangesPage
               stream={stream}
+              onOpenPage={navOpen}
+              onOpenFile={navOpenFile}
+            />
+          ),
+        });
+      } else if (ref.kind === "change-analysis") {
+        const target = (ref.payload as { target?: string } | null)?.target ?? "working";
+        tabs.push({
+          id: ref.id,
+          label: target === "working" ? "Analysis: Uncommitted" : `Analysis: ${target.slice(0, 7)}`,
+          closable: true,
+          render: () => (
+            <ChangeAnalysisPage
+              stream={stream}
+              target={target}
               onOpenPage={navOpen}
               onOpenFile={navOpenFile}
             />

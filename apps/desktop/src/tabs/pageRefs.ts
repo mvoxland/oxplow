@@ -88,6 +88,21 @@ export function uncommittedChangesRef(): TabRef {
   return { id: "uncommitted-changes", kind: "uncommitted-changes", payload: null };
 }
 
+/**
+ * Change Analysis Dashboard — composite read-only view of a set of
+ * changes. `target` is either the literal string "working" (uncommitted
+ * working-tree state) or a commit SHA.
+ */
+export type ChangeAnalysisTarget = "working" | string;
+
+export function changeAnalysisRef(target: ChangeAnalysisTarget): TabRef {
+  return {
+    id: `change-analysis:${target}`,
+    kind: "change-analysis",
+    payload: { target },
+  };
+}
+
 /** Single git commit page — bookmark-/history-friendly version of the
  *  commit slideover. Id format: `git-commit:<sha>`. */
 export function gitCommitRef(sha: string): TabRef {
