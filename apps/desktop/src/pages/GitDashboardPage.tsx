@@ -23,7 +23,7 @@ import {
 import { AgentStatusDot } from "../components/AgentStatusDot.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, opErrorRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, indexRef, opErrorRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";
@@ -368,7 +368,7 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
               streamId={streamId}
               log={data.recentLog}
               onSelectCommit={handleSelectCommit}
-              onViewFullHistory={() => onRevealCommit(data.recentLog.commits[0]?.sha ?? "")}
+              onViewFullHistory={() => onOpenPage(indexRef("git-history"))}
             />
 
             <StreamsCard
