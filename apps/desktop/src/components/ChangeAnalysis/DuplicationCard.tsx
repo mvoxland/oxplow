@@ -19,7 +19,7 @@ export function DuplicationCard({ duplication, onOpenFile }: DuplicationCardProp
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {duplication.scanAgeMs == null
-              ? "no jscpd scan yet"
+              ? "no duplication scan yet"
               : `last scan: ${formatAge(duplication.scanAgeMs)} ago`}
           </span>
           <button
@@ -35,8 +35,8 @@ export function DuplicationCard({ duplication, onOpenFile }: DuplicationCardProp
       </div>
       {dupes.length === 0 ? (
         <div style={muted}>
-          No duplicate-block findings touch the changed files. Run a fresh jscpd scan if results
-          look stale.
+          No duplicate-block findings touch the changed files. Run a fresh duplication scan if
+          results look stale.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

@@ -480,28 +480,31 @@ refresh on cross-window visits without polling.
 
 ### `code_quality_scan` + `code_quality_finding` — `CodeQualityStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
-Deterministic, language-agnostic findings sourced from external CLIs
-(`lizard` and `jscpd`). Two tables, one store, one runtime method
-(`runCodeQualityScan`). The store doesn't run subprocesses itself —
-the runtime calls `crates/oxplow-app/src/code_quality_runner.rs` and hands
-normalized findings back via `completeScan`.
+Deterministic, language-agnostic findings produced in-process by
+two tree-sitter analyzers (`metrics` and `duplication`). Two
+tables, one store, one runtime method (`runCodeQualityScan`). The
+store doesn't run analyzers itself — the runtime calls
+`crates/oxplow-app/src/code_quality_runner.rs` and hands normalized
+findings back via `completeScan`. The legacy values `'lizard'` and
+`'jscpd'` are migrated to `'metrics'` / `'duplication'` by V8.
 
-`code_quality_scan` rows: `id, stream_id, tool ('lizard' | 'jscpd'),
-scope ('codebase' | 'diff'), base_ref (nullable, set when scope =
-'diff'), status ('running' | 'completed' | 'failed'), error_message,
-started_at, completed_at`. One row per CLI invocation per
-`(stream, tool, scope)` combination. Index on
+`code_quality_scan` rows: `id, stream_id, tool ('metrics' |
+'duplication'), scope ('codebase' | 'diff'), base_ref (nullable, set
+when scope = 'diff'), status ('running' | 'completed' | 'failed'),
+error_message, started_at, completed_at`. One row per analyzer
+invocation per `(stream, tool, scope)` combination. Index on
 `(stream_id, tool, started_at DESC)` makes "latest scan per tool"
 cheap.
 
 `code_quality_finding` rows: `id, scan_id, path, start_line, end_line,
 kind ('complexity' | 'function-length' | 'parameter-count' |
-'duplicate-block'), metric_value (REAL), extra_json`. Lizard emits
-three findings per function (one per metric kind) with
-`extra.functionName` for grouping. jscpd emits two findings per
-duplicate-pair (one per side) with `extra.peerPath` /
-`extra.peerStartLine` / `extra.peerEndLine` so the UI can render
-"duplicates X lines from Y:Lstart-Lend" without re-querying.
+'duplicate-block'), metric_value (REAL), extra_json`. The metrics
+analyzer emits three findings per function (one per metric kind)
+with `extra.functionName` for grouping. The duplication analyzer
+emits two findings per duplicate-pair (one per side) with
+`extra.peerPath` / `extra.peerStartLine` / `extra.peerEndLine` so
+the UI can render "duplicates X lines from Y:Lstart-Lend" without
+re-querying.
 
 Retention is store-driven, not schema-driven: each `completeScan`
 prunes old scans for the same `(stream, tool, scope)` triple beyond

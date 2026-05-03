@@ -5,16 +5,13 @@ analysis kinds run directly inside the Rust process via tree-sitter
 — no subprocess, no Python or Node dependency, nothing for the user
 to install.
 
-The store and IPC contract still speak in two "tools" (`lizard` and
-`jscpd`) because that's the dimension users actually pick from in
-the panel: per-function metrics or duplicated-code findings. The
-names are historical (we used to shell out to those CLIs) and the
-finding shape is unchanged for backwards compatibility — only the
-runner internals changed.
+The store and IPC contract speak in two analysis kinds — `metrics`
+and `duplication` — which is the dimension users pick from in the
+panel.
 
 ## What gets measured
 
-**Per-function metrics** (tool name `"lizard"`) — handled by
+**Per-function metrics** (tool name `"metrics"`) — handled by
 `oxplow-code-metrics`. For each function in each scanned file we
 emit three findings:
 
@@ -29,10 +26,9 @@ Languages: Rust, TypeScript (incl. TSX), JavaScript, Python, Go,
 Java, C, C++. Adding a language is one entry in
 `crates/oxplow-code-metrics/src/spec.rs` listing the function /
 parameter / decision-point AST node names plus a grammar loader.
-Files in unsupported languages are silently skipped (matches the
-old lizard behavior).
+Files in unsupported languages are silently skipped.
 
-**Duplicate blocks** (tool name `"jscpd"`) — handled by
+**Duplicate blocks** (tool name `"duplication"`) — handled by
 `oxplow-code-dup`. Pipeline:
 
 1. Walk the tree-sitter AST of each file, emitting a normalized
@@ -66,7 +62,7 @@ interface CodeQualityFinding {
 }
 ```
 
-Both runners (`run_lizard` / `run_jscpd` in
+Both runners (`run_metrics_scan` / `run_duplication_scan` in
 `crates/oxplow-app/src/code_quality_runner.rs`) produce this shape
 directly. The store and the panel UI are tool-agnostic — adding a
 third analysis kind only requires defining its `kind` strings.
@@ -105,9 +101,6 @@ not appear in the Code Quality panel or share scan IDs. Callers
 that want persistent rollups should use `runCodeQualityScan`
 instead.
 
-The result still carries an `Option<String> tool_missing` field
-for renderer back-compat, but the new pipeline always returns
-`None`. The frontend's `lizardMissing` handling has been removed.
 
 ## Adding a third analysis kind
 

@@ -169,7 +169,7 @@ CREATE TABLE usage_event (
 );
 CREATE INDEX idx_usage_event_time ON usage_event(occurred_at DESC);
 
--- Code-quality scan + finding tables (lizard / jscpd).
+-- Code-quality scan + finding tables.
 CREATE TABLE code_quality_scan (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tool TEXT NOT NULL,

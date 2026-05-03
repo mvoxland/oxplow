@@ -1,5 +1,5 @@
 use oxplow_app::code_quality_runner::{
-    run_jscpd, run_lizard, CodeQualityFinding as RunnerFinding, RunOptions,
+    run_duplication_scan, run_metrics_scan, RunOptions,
 };
 use oxplow_app::{CodeQualityScanPhase, OxplowEvent};
 use oxplow_code_metrics::{analyze_file, FunctionMetrics};
@@ -28,10 +28,11 @@ pub async fn list_code_quality_findings(
     Ok(state.code_quality_store.list_findings(scan_id).await?)
 }
 
-/// Run a fresh metrics or duplication scan, persist findings, and
-/// return the scan id. Tool name is one of `"lizard"` (in-process
-/// metrics) / `"jscpd"` (subprocess; replaced in Phase 2).
-/// `scope` is a free-form label (typically `"workspace"`).
+/// Run a fresh code-quality scan, persist findings, and return the
+/// scan id. `tool` selects the analysis kind: `"metrics"` for
+/// per-function complexity/length/parameters, `"duplication"` for
+/// duplicate-block detection. `scope` is a free-form label
+/// (typically `"workspace"` or `"diff"`).
 #[tauri::command]
 #[specta::specta]
 pub async fn run_code_quality_scan(
@@ -57,8 +58,8 @@ pub async fn run_code_quality_scan(
         phase: CodeQualityScanPhase::Started,
     });
     let findings_result = match tool.as_str() {
-        "lizard" => run_lizard(&project, opts).await,
-        "jscpd" => run_jscpd(&project, opts).await,
+        "metrics" => run_metrics_scan(&project, opts).await,
+        "duplication" => run_duplication_scan(&project, opts).await,
         other => {
             state
                 .code_quality_store
@@ -163,34 +164,23 @@ pub struct AnalyzedFileSide {
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzeFunctionsResult {
     pub sides: Vec<AnalyzedFileSide>,
-    /// Always `None` now that the implementation is in-process. Kept
-    /// for renderer back-compat — will be removed once the UI stops
-    /// branching on it.
-    pub tool_missing: Option<String>,
 }
 
 /// Compute per-function metadata for the Change Analysis dashboard,
 /// for both sides of the diff. Pure in-process call: walks each
-/// (path, content) pair through tree-sitter, no subprocess, no
-/// tempdir, no install dependency.
+/// (path, content) pair through tree-sitter.
 #[tauri::command]
 #[specta::specta]
 pub async fn analyze_functions_at_refs(
     files: Vec<AnalyzeFileSpec>,
 ) -> Result<AnalyzeFunctionsResult, IpcError> {
     if files.is_empty() {
-        return Ok(AnalyzeFunctionsResult {
-            sides: Vec::new(),
-            tool_missing: None,
-        });
+        return Ok(AnalyzeFunctionsResult { sides: Vec::new() });
     }
     let sides = tokio::task::spawn_blocking(move || analyze_sides(files))
         .await
         .map_err(|e| IpcError::internal(format!("analyze task: {e}")))?;
-    Ok(AnalyzeFunctionsResult {
-        sides,
-        tool_missing: None,
-    })
+    Ok(AnalyzeFunctionsResult { sides })
 }
 
 fn analyze_sides(files: Vec<AnalyzeFileSpec>) -> Vec<AnalyzedFileSide> {
@@ -231,9 +221,6 @@ fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
         .collect()
 }
 
-#[allow(dead_code)]
-fn _runner_finding_kept_in_scope(_: RunnerFinding) {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,7 +235,6 @@ mod tests {
             ),
         }];
         let result = analyze_functions_at_refs(files).await.unwrap();
-        assert_eq!(result.tool_missing, None);
         assert_eq!(result.sides.len(), 2);
         let head = result
             .sides

@@ -1,7 +1,5 @@
-//! Native code-quality metrics built directly on tree-sitter.
-//!
-//! Replaces the lizard subprocess with an in-process implementation
-//! that walks the AST and emits per-function metrics:
+//! Native, in-process per-function code metrics built directly on
+//! tree-sitter. Walks the AST and emits per-function records:
 //!
 //! - **complexity** — cyclomatic complexity number (CCN). Counts
 //!   decision-point nodes inside each function body.
@@ -13,7 +11,7 @@
 //! plus a `LanguageSpec` with the relevant tree-sitter node names.
 //!
 //! Files in unsupported languages are silently skipped (the caller
-//! sees no findings for them; behaviour matches lizard).
+//! sees no findings for them).
 
 use std::path::Path;
 

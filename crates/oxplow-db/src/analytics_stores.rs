@@ -970,7 +970,7 @@ mod tests {
     #[tokio::test]
     async fn code_quality_scan_lifecycle() {
         let store = SqliteCodeQualityStore::new(Database::in_memory());
-        let id = store.create_scan("lizard", "workspace").await.unwrap();
+        let id = store.create_scan("metrics", "workspace").await.unwrap();
         store
             .append_finding(
                 id,
