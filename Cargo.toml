@@ -19,6 +19,7 @@ members = [
     "crates/oxplow-plugin",
     "crates/oxplow-control-plane",
     "crates/oxplow-code-metrics",
+    "crates/oxplow-code-dup",
 ]
 
 [workspace.package]
@@ -109,6 +110,7 @@ tree-sitter-cpp = "0.23"
 # Internal
 oxplow-domain = { path = "crates/oxplow-domain" }
 oxplow-code-metrics = { path = "crates/oxplow-code-metrics" }
+oxplow-code-dup = { path = "crates/oxplow-code-dup" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-config = { path = "crates/oxplow-config" }
 oxplow-fs-watch = { path = "crates/oxplow-fs-watch" }

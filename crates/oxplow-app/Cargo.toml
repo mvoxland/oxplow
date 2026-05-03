@@ -19,6 +19,7 @@ oxplow-pty = { workspace = true }
 oxplow-lsp = { workspace = true }
 oxplow-lsp-installer = { workspace = true }
 oxplow-code-metrics = { workspace = true }
+oxplow-code-dup = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tokio-stream = "0.1"

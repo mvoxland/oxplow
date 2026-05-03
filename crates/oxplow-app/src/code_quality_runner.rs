@@ -1,19 +1,18 @@
 //! Code-quality scanners.
 //!
-//! - `run_lizard`: in-process metrics via `oxplow_code_metrics`. The
-//!   name is kept for callsite continuity; nothing shells out anymore.
-//! - `run_jscpd`: still shells out to `jscpd` (Phase 2 will replace).
+//! Both `run_lizard` and `run_jscpd` are now in-process. The names
+//! are kept so the rest of the system (store, IPC, panel UI) doesn't
+//! need to change — tool selection still maps to two distinct
+//! analysis pipelines (per-function metrics / duplicate-block
+//! detection).
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
+use oxplow_code_dup::{detect_duplicates, DupOptions};
 use oxplow_code_metrics::FunctionMetrics;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
-use tokio::process::Command;
-#[cfg(test)]
-use tracing::warn;
 use walkdir::WalkDir;
 
 #[derive(Debug, Error)]
@@ -49,16 +48,6 @@ pub struct RunOptions {
     pub files: Vec<String>,
     /// Reserved for future use (was the lizard subprocess timeout).
     pub timeout: Option<std::time::Duration>,
-}
-
-fn map_spawn_err(err: std::io::Error, tool: &str) -> CodeQualityError {
-    if err.kind() == std::io::ErrorKind::NotFound {
-        CodeQualityError::ToolMissing {
-            tool: tool.into(),
-        }
-    } else {
-        CodeQualityError::Io(err)
-    }
 }
 
 /// Build the file list to analyze: either the explicit list, or every
@@ -173,101 +162,69 @@ pub async fn run_lizard(
     Ok(findings)
 }
 
-#[derive(Debug, Deserialize)]
-struct JscpdReport {
-    duplicates: Vec<JscpdDuplicate>,
-}
-
-#[derive(Debug, Deserialize)]
-struct JscpdDuplicate {
-    #[serde(rename = "firstFile")]
-    first_file: JscpdFile,
-    #[serde(rename = "secondFile")]
-    second_file: JscpdFile,
-    #[serde(default)]
-    lines: u32,
-}
-
-#[derive(Debug, Deserialize)]
-struct JscpdFile {
-    name: String,
-    start: u32,
-    end: u32,
-}
-
-/// Run jscpd against the project. Two findings per duplicate (one
-/// per peer location). Phase 2 will replace this with a native
-/// tree-sitter winnowing detector.
+/// Native, in-process replacement for the jscpd CLI. Runs the
+/// tree-sitter-based winnowing detector across every supported file
+/// and emits two findings per duplicate pair (one per side), keeping
+/// the same shape downstream consumers expect.
 pub async fn run_jscpd(
     project_dir: &Path,
     opts: RunOptions,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
-    let out_dir = tempfile::tempdir()?;
-    let mut args: Vec<String> = vec![
-        "--reporters".into(),
-        "json".into(),
-        "--silent".into(),
-        "--output".into(),
-        out_dir.path().to_string_lossy().into_owned(),
-    ];
-    if !opts.files.is_empty() {
-        args.push("--pattern".into());
-        args.push(opts.files.join(","));
-    }
-    args.push(project_dir.to_string_lossy().into_owned());
-    let timeout = opts.timeout.unwrap_or(std::time::Duration::from_secs(60));
-    let proc = Command::new("jscpd")
-        .args(&args)
-        .current_dir(project_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| map_spawn_err(e, "jscpd"))?;
-    match tokio::time::timeout(timeout, proc.wait_with_output()).await {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => return Err(CodeQualityError::Io(e)),
-        Err(_) => return Err(CodeQualityError::Timeout),
-    }
-    let report_path: PathBuf = out_dir.path().join("jscpd-report.json");
-    let raw = match std::fs::read_to_string(&report_path) {
-        Ok(s) => s,
-        Err(_) => return Ok(vec![]),
-    };
-    parse_jscpd_report(&raw)
+    let project = project_dir.to_path_buf();
+    let findings = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
+        let paths = collect_supported_files(&project, &opts);
+        // Read all sources up front; the dup detector wants
+        // (path, content) pairs.
+        let mut inputs: Vec<(String, String)> = Vec::with_capacity(paths.len());
+        for path in paths {
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            // Re-derive repo-relative path so peer references in the
+            // findings match the panel's other rows.
+            let rel = match path.strip_prefix(&project) {
+                Ok(rel) => rel.to_string_lossy().to_string(),
+                Err(_) => path.to_string_lossy().to_string(),
+            };
+            inputs.push((rel, source));
+        }
+        let blocks = detect_duplicates(inputs, DupOptions::default());
+        Ok(blocks_to_findings(blocks))
+    })
+    .await
+    .map_err(|e| CodeQualityError::Parse(format!("dup task: {e}")))??;
+    Ok(findings)
 }
 
-pub fn parse_jscpd_report(raw: &str) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
-    let report: JscpdReport = serde_json::from_str(raw)
-        .map_err(|e| CodeQualityError::Parse(format!("jscpd report: {e}")))?;
-    let mut out = Vec::with_capacity(report.duplicates.len() * 2);
-    for dup in report.duplicates {
-        let extra = format!(
+fn blocks_to_findings(blocks: Vec<oxplow_code_dup::DuplicateBlock>) -> Vec<CodeQualityFinding> {
+    let mut out = Vec::with_capacity(blocks.len() * 2);
+    for b in blocks {
+        let extra_a = format!(
             r#"{{"peer":{{"path":{:?},"startLine":{},"endLine":{}}}}}"#,
-            dup.second_file.name, dup.second_file.start, dup.second_file.end
+            b.b_path, b.b_start_line, b.b_end_line
         );
         out.push(CodeQualityFinding {
-            path: dup.first_file.name.clone(),
-            start_line: dup.first_file.start,
-            end_line: dup.first_file.end,
+            path: b.a_path.clone(),
+            start_line: b.a_start_line,
+            end_line: b.a_end_line,
             kind: "duplicate-block".into(),
-            metric_value: dup.lines as f64,
-            extra_json: Some(extra),
+            metric_value: b.line_count as f64,
+            extra_json: Some(extra_a),
         });
-        let extra2 = format!(
+        let extra_b = format!(
             r#"{{"peer":{{"path":{:?},"startLine":{},"endLine":{}}}}}"#,
-            dup.first_file.name, dup.first_file.start, dup.first_file.end
+            b.a_path, b.a_start_line, b.a_end_line
         );
         out.push(CodeQualityFinding {
-            path: dup.second_file.name,
-            start_line: dup.second_file.start,
-            end_line: dup.second_file.end,
+            path: b.b_path,
+            start_line: b.b_start_line,
+            end_line: b.b_end_line,
             kind: "duplicate-block".into(),
-            metric_value: dup.lines as f64,
-            extra_json: Some(extra2),
+            metric_value: b.line_count as f64,
+            extra_json: Some(extra_b),
         });
     }
-    Ok(out)
+    out
 }
 
 #[cfg(test)]
@@ -301,43 +258,48 @@ fn classify(x: i32) -> &'static str {
         assert!(findings.is_empty());
     }
 
-    #[test]
-    fn parse_jscpd_report_emits_two_findings_per_duplicate() {
-        let raw = serde_json::json!({
-            "duplicates": [{
-                "firstFile": { "name": "a.rs", "start": 1, "end": 10 },
-                "secondFile": { "name": "b.rs", "start": 20, "end": 29 },
-                "lines": 10,
-            }]
-        })
-        .to_string();
-        let findings = parse_jscpd_report(&raw).unwrap();
-        assert_eq!(findings.len(), 2);
-        assert_eq!(findings[0].kind, "duplicate-block");
+    #[tokio::test]
+    async fn run_jscpd_emits_paired_findings_for_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = r#"
+fn helper(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 {
+            out.push(item * 2);
+        } else if item < 0 {
+            out.push(item * -1);
+        } else {
+            out.push(0);
+        }
+    }
+    out
+}
+"#;
+        std::fs::write(dir.path().join("a.rs"), body).unwrap();
+        std::fs::write(dir.path().join("b.rs"), body).unwrap();
+        let findings = run_jscpd(dir.path(), RunOptions::default()).await.unwrap();
+        let dups: Vec<_> = findings
+            .iter()
+            .filter(|f| f.kind == "duplicate-block")
+            .collect();
+        assert!(dups.len() >= 2, "expected at least one paired duplicate, got {:?}", findings);
     }
 
     #[tokio::test]
-    async fn run_jscpd_returns_tool_missing_when_absent() {
-        let result = run_with_renamed_binary("jscpd-no-such-binary").await;
-        match result {
-            Err(CodeQualityError::ToolMissing { tool }) => {
-                assert_eq!(tool, "jscpd-no-such-binary");
-            }
-            other => {
-                let _ = other;
-                warn!("jscpd-no-such-binary unexpectedly resolved; skipping assertion");
-            }
-        }
-    }
-
-    async fn run_with_renamed_binary(
-        cmd: &str,
-    ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
-        let proc = Command::new(cmd)
-            .stdin(Stdio::null())
-            .spawn()
-            .map_err(|e| map_spawn_err(e, cmd))?;
-        let _ = proc.wait_with_output().await?;
-        Ok(vec![])
+    async fn run_jscpd_emits_nothing_for_unique_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.rs"),
+            "fn add(a: i32, b: i32) -> i32 { a + b }",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.rs"),
+            "fn unrelated() { println!(\"hi\"); }",
+        )
+        .unwrap();
+        let findings = run_jscpd(dir.path(), RunOptions::default()).await.unwrap();
+        assert!(findings.is_empty());
     }
 }
