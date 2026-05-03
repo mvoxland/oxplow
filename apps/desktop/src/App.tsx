@@ -99,6 +99,7 @@ import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
+import { DirectoryPage } from "./pages/DirectoryPage.js";
 import { WikiIndexPage } from "./pages/WikiIndexPage.js";
 import { TasksPage } from "./pages/TasksPage.js";
 import { DoneWorkPage } from "./pages/DoneWorkPage.js";
@@ -117,7 +118,7 @@ import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
-import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -1589,6 +1590,12 @@ export function App() {
     handleOpenPageRef.current?.(gitCommitRef(sha));
   }, []);
 
+  /** Open the DirectoryPage for a wikilink-resolved workspace dir. */
+  const handleOpenDirectory = useCallback((path: string) => {
+    if (!path) return;
+    handleOpenPageRef.current?.(directoryRef(path));
+  }, []);
+
   const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
     if (!stream) return;
     const orderedFiles: string[] = [];
@@ -1710,6 +1717,7 @@ export function App() {
         return;
       }
       case "note":
+      case "directory":
       case "work-item":
       case "finding":
       case "dashboard":
@@ -2301,11 +2309,27 @@ export function App() {
               onClosed={() => closePageTab(ref.id)}
               onOpenWikiPage={handleOpenNote}
               onOpenFile={(p) => { void handleOpenFile(p); }}
+              onOpenDirectory={handleOpenDirectory}
               onOpenPage={noteNavOpen}
               onOpenCommit={handleOpenCommit}
               onOpenExternalUrl={handleOpenExternalUrl}
             />
           ) : null,
+        });
+      } else if (ref.kind === "directory") {
+        const dirPath = (ref.payload as { path?: string } | null)?.path ?? "";
+        const dirNavOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
+        tabs.push({
+          id: ref.id,
+          label: dirPath || "/",
+          closable: true,
+          render: () => (
+            <DirectoryPage
+              stream={stream}
+              path={dirPath}
+              onOpenPage={dirNavOpen}
+            />
+          ),
         });
       } else if (ref.kind === "work-item") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";

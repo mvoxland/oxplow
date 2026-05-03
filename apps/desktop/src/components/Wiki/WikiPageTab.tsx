@@ -36,6 +36,9 @@ interface Props {
   onNavigateInternalWikiPage: (slug: string) => void;
   onOpenWikiPageInNewTab: (slug: string) => void;
   onOpenFile: (path: string) => void;
+  /** Optional handler for directory wikilink clicks — opens the
+   *  DirectoryPage tab listing the folder contents. */
+  onOpenDirectory?: (path: string) => void;
   /** Optional handler for git-commit wikilink clicks — opens the
    *  GitCommitPage for the SHA. */
   onOpenCommit?: (sha: string) => void;
@@ -45,7 +48,7 @@ interface Props {
   onOpenExternalUrl?: (url: string) => void;
 }
 
-export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage, onOpenWikiPageInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl }: Props) {
+export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage, onOpenWikiPageInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl }: Props) {
   const [summary, setSummary] = useState<WikiPageSummary | null>(null);
   const [body, setBody] = useState<string>("");
   const [editing, setEditing] = useState(false);
@@ -239,6 +242,7 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
             onNavigateInternal={onNavigateInternalWikiPage}
             onOpenInNewTab={onOpenWikiPageInNewTab}
             onOpenFile={(path) => onOpenFile(path)}
+            onOpenDirectory={onOpenDirectory}
             onOpenCommit={onOpenCommit}
             onOpenExternalUrl={onOpenExternalUrl}
             renderMermaid

@@ -27,11 +27,17 @@ use std::path::{Path, PathBuf};
 use oxplow_db::{SqliteWikiPageStore, WikiPage};
 use oxplow_domain::{DomainError, Timestamp};
 
-/// Both kinds of refs extracted from a note body.
+/// Refs extracted from a note body.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedRefs {
     /// Workspace-relative file paths (`src/foo.ts`).
     pub file_refs: Vec<String>,
+    /// Workspace-relative directory paths (`src/components`). Source
+    /// form in markdown is `[[dir:src/components]]` — the `dir:`
+    /// prefix is the explicit directory marker (mirrors `git:` for
+    /// commit refs). A trailing `/` on the path is tolerated and
+    /// stripped.
+    pub dir_refs: Vec<String>,
     /// Slugs of other wiki pages (`work-item-lifecycle`).
     pub related_notes: Vec<String>,
 }
@@ -42,12 +48,22 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
         return ParsedRefs::default();
     }
     let mut files = BTreeSet::new();
+    let mut dirs = BTreeSet::new();
     let mut notes = BTreeSet::new();
 
     // 1. [[wikilinks]] first — they take priority, and we want to
     //    avoid double-counting an inline path that's also wrapped.
     for cap in find_wikilinks(body) {
         let interior = cap.split('|').next().unwrap_or(cap).trim();
+        if interior.is_empty() {
+            continue;
+        }
+        // Directory form: trailing slash. Check before stripping the
+        // `:line` anchor (a directory wikilink wouldn't carry one).
+        if let Some(dir) = looks_like_dir(interior) {
+            dirs.insert(dir);
+            continue;
+        }
         // Strip trailing `:line` anchor (numeric or symbol).
         let bare = interior.split(':').next().unwrap_or(interior);
         if bare.is_empty() {
@@ -70,6 +86,7 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
 
     ParsedRefs {
         file_refs: files.into_iter().collect(),
+        dir_refs: dirs.into_iter().collect(),
         related_notes: notes.into_iter().collect(),
     }
 }
@@ -101,6 +118,7 @@ pub async fn sync_from_disk(
         body_excerpt,
         body_size_bytes,
         file_refs: refs.file_refs,
+        dir_refs: refs.dir_refs,
         related_notes: refs.related_notes,
         created_at,
         updated_at: now,
@@ -151,6 +169,21 @@ pub async fn backlinks_for_file(
     Ok(all
         .into_iter()
         .filter(|n| n.file_refs.iter().any(|r| r == path))
+        .collect())
+}
+
+/// Return all notes whose `dir_refs` contains `path` (the path is the
+/// directory form *without* the trailing slash, matching how
+/// [`parse_refs`] stores it).
+pub async fn backlinks_for_dir(
+    store: &SqliteWikiPageStore,
+    path: &str,
+) -> Result<Vec<WikiPage>, DomainError> {
+    let needle = path.trim_end_matches('/');
+    let all = store.list().await?;
+    Ok(all
+        .into_iter()
+        .filter(|n| n.dir_refs.iter().any(|r| r == needle))
         .collect())
 }
 
@@ -236,6 +269,24 @@ fn find_wikilinks(body: &str) -> Vec<&str> {
         i += 1;
     }
     out
+}
+
+/// If `s` is a directory wikilink target (`dir:<path>`), return the
+/// stripped path. Otherwise return None. The `dir:` prefix is the
+/// explicit directory marker — mirrors `git:` for commit refs.
+fn looks_like_dir(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    let raw = trimmed.strip_prefix("dir:")?.trim_start();
+    let bare = raw.trim_end_matches('/');
+    if bare.is_empty() || bare.contains('\n') || bare.contains('|') {
+        return None;
+    }
+    // Reject double-slash sequences (`//`), absolute paths, and URL
+    // tails — directory refs are always workspace-relative.
+    if bare.starts_with('/') || bare.contains("//") {
+        return None;
+    }
+    Some(bare.to_string())
 }
 
 fn looks_like_file(s: &str) -> bool {
@@ -346,6 +397,41 @@ mod tests {
     fn parse_strips_display_text() {
         let refs = parse_refs("[[src/foo.ts|the foo helper]]");
         assert_eq!(refs.file_refs, vec!["src/foo.ts"]);
+    }
+
+    #[test]
+    fn parse_extracts_directory_refs() {
+        let refs = parse_refs("see [[dir:src/components]] for the buttons");
+        assert_eq!(refs.dir_refs, vec!["src/components"]);
+        assert!(refs.file_refs.is_empty());
+        assert!(refs.related_notes.is_empty());
+    }
+
+    #[test]
+    fn parse_directory_ref_with_label() {
+        let refs = parse_refs("[[dir:src/components|the components folder]]");
+        assert_eq!(refs.dir_refs, vec!["src/components"]);
+    }
+
+    #[test]
+    fn parse_directory_ref_tolerates_trailing_slash() {
+        let refs = parse_refs("[[dir:src/foo/]]");
+        assert_eq!(refs.dir_refs, vec!["src/foo"]);
+    }
+
+    #[test]
+    fn parse_directory_ref_dedupes() {
+        let refs = parse_refs("[[dir:src/foo]] then [[dir:src/foo]] and [[dir:src/bar/baz]]");
+        assert_eq!(refs.dir_refs, vec!["src/bar/baz", "src/foo"]);
+    }
+
+    #[test]
+    fn parse_keeps_file_form_without_dir_prefix() {
+        // Regression: `[[src/foo.ts]]` must remain a file ref even
+        // after the directory branch was added.
+        let refs = parse_refs("[[src/foo.ts]]");
+        assert_eq!(refs.file_refs, vec!["src/foo.ts"]);
+        assert!(refs.dir_refs.is_empty());
     }
 
     #[test]
