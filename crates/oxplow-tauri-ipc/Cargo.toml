@@ -26,6 +26,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 specta = { workspace = true }
 tempfile = { workspace = true }
+oxplow-code-metrics = { workspace = true }
 
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }

@@ -40,8 +40,6 @@ export interface ChangeAnalysisState {
   totals: { additions: number; deletions: number };
   pivots: FilePivots;
   functions: FunctionsBuckets;
-  /** Set when lizard is missing on PATH so the UI can surface an install hint. */
-  lizardMissing: boolean;
   duplication: {
     findings: CodeQualityFindingRow[];
     scanAgeMs: number | null;
@@ -111,7 +109,6 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   const { streamId, target } = input;
   const [files, setFiles] = useState<BranchChangeEntry[]>(EMPTY_FILES);
   const [functions, setFunctions] = useState<FunctionsBuckets>(EMPTY_BUCKETS);
-  const [lizardMissing, setLizardMissing] = useState(false);
   const [duplication, setDuplication] = useState<{
     findings: CodeQualityFindingRow[];
     scanAgeMs: number | null;
@@ -168,30 +165,22 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
       const analysis = await commands.analyzeFunctionsAtRefs(specs);
       if (reqId !== reqIdRef.current) return;
       if (analysis.status === "error") {
-        // Surface lizard or io errors but don't break the rest of the page.
         setError(typeof analysis.error === "string" ? analysis.error : "Function analysis failed.");
         setFunctions(EMPTY_BUCKETS);
-        setLizardMissing(false);
       } else {
         const result = analysis.data;
-        if (result.tool_missing) {
-          setLizardMissing(true);
-          setFunctions(EMPTY_BUCKETS);
-        } else {
-          setLizardMissing(false);
-          const sides = result.sides.map((s) => ({
-            path: s.path,
-            side: s.side,
-            functions: s.functions.map((fn) => ({
-              name: fn.name,
-              paramCount: fn.parameter_count,
-              complexity: fn.complexity,
-              length: fn.length,
-              startLine: fn.start_line,
-            })),
-          }));
-          setFunctions(diffFunctions(indexSides(sides)));
-        }
+        const sides = result.sides.map((s) => ({
+          path: s.path,
+          side: s.side,
+          functions: s.functions.map((fn) => ({
+            name: fn.name,
+            paramCount: fn.parameter_count,
+            complexity: fn.complexity,
+            length: fn.length,
+            startLine: fn.start_line,
+          })),
+        }));
+        setFunctions(diffFunctions(indexSides(sides)));
       }
 
       // Duplication: read latest jscpd scan + its findings, filter to
@@ -277,7 +266,6 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     totals,
     pivots,
     functions,
-    lizardMissing,
     duplication: {
       findings: duplication.findings,
       scanAgeMs: duplication.scanAgeMs,

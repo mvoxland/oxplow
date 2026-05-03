@@ -18,6 +18,7 @@ members = [
     "crates/oxplow-tauri-ipc",
     "crates/oxplow-plugin",
     "crates/oxplow-control-plane",
+    "crates/oxplow-code-metrics",
 ]
 
 [workspace.package]
@@ -94,8 +95,20 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 
+# Code metrics (tree-sitter-based)
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+
 # Internal
 oxplow-domain = { path = "crates/oxplow-domain" }
+oxplow-code-metrics = { path = "crates/oxplow-code-metrics" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-config = { path = "crates/oxplow-config" }
 oxplow-fs-watch = { path = "crates/oxplow-fs-watch" }
