@@ -29,6 +29,7 @@ export type PageKind =
   | "git-dashboard"
   | "git-commit"
   | "uncommitted-changes"
+  | "change-analysis"
   | "hook-events"
   | "subsystem-docs"
   | "settings"

@@ -8,7 +8,7 @@ import {
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { indexRef, opErrorRef } from "../tabs/pageRefs.js";
+import { changeAnalysisRef, indexRef, opErrorRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 
 export interface UncommittedChangesPageProps {
@@ -243,14 +243,24 @@ export function UncommittedChangesPage({ stream, onOpenPage, onOpenFile }: Uncom
             <section data-testid="uncommitted-tree" style={card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontWeight: 600 }}>Changed files</div>
-                <button
-                  type="button"
-                  data-testid="uncommitted-open-files-page"
-                  onClick={() => onOpenPage(indexRef("files"))}
-                  style={linkButton}
-                >
-                  Open file tree →
-                </button>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button
+                    type="button"
+                    data-testid="uncommitted-analyze-changes"
+                    onClick={() => onOpenPage(changeAnalysisRef("working"))}
+                    style={linkButton}
+                  >
+                    Analyze Changes →
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="uncommitted-open-files-page"
+                    onClick={() => onOpenPage(indexRef("files"))}
+                    style={linkButton}
+                  >
+                    Open file tree →
+                  </button>
+                </div>
               </div>
               {summary.total === 0 ? (
                 <div style={muted}>Working tree is clean.</div>

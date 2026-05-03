@@ -203,6 +203,7 @@ export const commands = {
 	body_excerpt: string,
 	body_size_bytes: number,
 	file_refs: string[],
+	dir_refs: string[],
 	related_notes: string[],
 	created_at: Timestamp,
 	updated_at: Timestamp,
@@ -250,6 +251,17 @@ export const commands = {
 	 *  `scope` is a free-form label (typically `"workspace"`).
 	 */
 	runCodeQualityScan: (tool: string, scope: string, files: string[] | null) => typedError<number, IpcError>(__TAURI_INVOKE("run_code_quality_scan", { tool, scope, files })),
+	/**
+	 *  Run lizard against base- and head-side contents of a set of files
+	 *  to compute per-function metadata for the Change Analysis dashboard.
+	 * 
+	 *  Strategy: write each `(path, side)` pair into a temp directory at
+	 *  `<tmp>/<side>/<path>` so the file extension is preserved (lizard's
+	 *  language detection is extension-driven), invoke `lizard --csv` once
+	 *  over the temp root, then route findings back by parsing the
+	 *  `side` segment of the temp path.
+	 */
+	analyzeFunctionsAtRefs: (files: AnalyzeFileSpec[]) => typedError<AnalyzeFunctionsResult, IpcError>(__TAURI_INVOKE("analyze_functions_at_refs", { files })),
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
 	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
 	getSnapshot: (id: number) => typedError<{
@@ -504,6 +516,42 @@ export type AgentTurnId = string;
 export type AheadBehind = {
 	ahead: number,
 	behind: number,
+};
+
+/**
+ *  One file's content at one side of the diff. `content == None` means
+ *  the file did not exist on that side (e.g. add/delete).
+ */
+export type AnalyzeFileSpec = {
+	path: string,
+	base_content: string | null,
+	head_content: string | null,
+};
+
+export type AnalyzeFunctionsResult = {
+	sides: AnalyzedFileSide[],
+	/**
+	 *  `Some(msg)` when lizard isn't on PATH; the renderer surfaces an
+	 *  inline install hint and treats `sides` as empty.
+	 */
+	tool_missing: string | null,
+};
+
+export type AnalyzedFileSide = {
+	path: string,
+	// `"base"` or `"head"`.
+	side: string,
+	functions: AnalyzedFunction[],
+};
+
+// Function metadata produced by lizard for one (path, side) pair.
+export type AnalyzedFunction = {
+	name: string,
+	start_line: number,
+	length: number,
+	complexity: number,
+	parameter_count: number,
+	nloc: number,
 };
 
 export type AppVersion = {
@@ -1219,6 +1267,7 @@ export type WikiPage = {
 	body_excerpt: string,
 	body_size_bytes: number,
 	file_refs: string[],
+	dir_refs: string[],
 	related_notes: string[],
 	created_at: Timestamp,
 	updated_at: Timestamp,

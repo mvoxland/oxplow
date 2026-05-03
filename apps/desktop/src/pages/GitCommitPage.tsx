@@ -6,7 +6,7 @@ import type { DiffRequest } from "../components/Diff/diff-request.js";
 import { CommitDetailBody, buildCommitSlideoverTitle } from "../components/History/CommitDetailSlideover.js";
 import { Page } from "../tabs/Page.js";
 import { useBacklinks } from "../tabs/useBacklinks.js";
-import { gitCommitRef } from "../tabs/pageRefs.js";
+import { changeAnalysisRef, gitCommitRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import type { TabRef } from "../tabs/tabState.js";
 
@@ -59,6 +59,25 @@ export function GitCommitPage({ stream, sha, subject = "", threadWork, onOpenDif
   return (
     <Page testId="page-git-commit" title={headerTitle} kind="commit" backlinks={backlinks}>
       <div style={{ padding: "12px 16px" }}>
+        {sha ? (
+          <div style={{ marginBottom: 8 }}>
+            <button
+              type="button"
+              data-testid="git-commit-analyze"
+              onClick={() => onOpenPage(changeAnalysisRef(sha))}
+              style={{
+                padding: 0,
+                background: "transparent",
+                border: "none",
+                color: "var(--text-link, #2563eb)",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              Analyze Changes →
+            </button>
+          </div>
+        ) : null}
         {!sha ? (
           <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>No commit selected.</div>
         ) : loading && !detail ? (

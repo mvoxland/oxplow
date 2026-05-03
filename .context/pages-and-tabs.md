@@ -40,6 +40,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `apps/desktop/src/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", recent remote branches with per-row pull/push. All ref-mutating actions confirm the exact `git` command before running. Routed via `gitDashboardRef()`. |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
 | `apps/desktop/src/pages/UncommittedChangesPage.tsx` | Stats-focused view of working-tree changes: M/A/D/R/U + total +/-, collapsible folder tree with per-folder rollup of files / +/-, Commit-all action. Distinct from `FilesPage` which is the full project file tree. Routed via `uncommittedChangesRef()`. |
+| `apps/desktop/src/pages/ChangeAnalysisPage.tsx` | Composite read-only "shape of the change" dashboard. Targets working tree (`change-analysis:working`) or a specific commit (`change-analysis:<sha>`). Computes file pivots (extension / directory / status), function buckets (added/deleted/sig-changed/body-changed via `analyze_functions_at_refs` IPC running lizard on before/after content), jscpd duplication filtered to changed files (with Refresh that triggers `runCodeQualityScan({ tool: "jscpd", scope: "diff" })`), and a tests heuristic (`isTestPath` in `components/ChangeAnalysis/analysisHelpers.ts`). All data assembled on demand via `useChangeAnalysis`; no new tables. Routed via `changeAnalysisRef("working" \| sha)`. |
 | `apps/desktop/src/tabs/backlinksIndex.ts` | Pure cross-kind backlinks indexer. `computeBacklinks(target, ctx)` returns `BacklinkEntry[]` linking notes ↔ files ↔ work items ↔ findings. Inputs are plain data slices (notes, work items with `touched_files`, findings) — no IPC, no side effects, fully unit-tested. |
 | `apps/desktop/src/tabs/useBacklinks.ts` | React hook that materializes a `BacklinkContext` (notes bodies + findings + work-item touched-files) from live IPC and pipes into `computeBacklinks`. Used by `WorkItemPage`, `NotePage`, `FindingPage`. |
 | `apps/desktop/src/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
@@ -60,7 +61,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | "tasks" | "done-work" | "backlog" | "archived"
 | "wiki-index" | "files" | "code-quality"
 | "local-history" | "git-history" | "git-dashboard" | "git-commit"
-| "uncommitted-changes" | "hook-events" | "subsystem-docs"
+| "uncommitted-changes" | "change-analysis" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
 | "new-stream" | "new-work-item"
 | "stream-settings" | "thread-settings"
@@ -85,6 +86,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | git-dashboard | `git-dashboard` | `git-dashboard` |
 | git-commit | `git-commit:<sha>` | `git-commit:abc1234567890` |
 | uncommitted-changes | `uncommitted-changes` | `uncommitted-changes` |
+| change-analysis | `change-analysis:<target>` (`target` is `working` or a commit SHA) | `change-analysis:working`, `change-analysis:abc1234` |
 | dashboard | `dashboard:<variant>` | `dashboard:planning` |
 | new-stream | `new-stream` | `new-stream` |
 | new-work-item | `new-work-item` | `new-work-item` |

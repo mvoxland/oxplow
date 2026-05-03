@@ -97,6 +97,27 @@ overwriting the other.
 No migration needed; the existing tables don't care which tool
 produced a finding as long as the `kind` is recognized.
 
+## `analyze_functions_at_refs` — before/after lizard for Change Analysis
+
+The Change Analysis Dashboard (`apps/desktop/src/pages/ChangeAnalysisPage.tsx`)
+needs per-function metadata for each changed file at *both* the base and
+head sides of a diff so it can bucket functions into added / deleted /
+signature-changed / body-changed. The IPC command
+`analyze_functions_at_refs` (in `crates/oxplow-tauri-ipc/src/commands/code_quality.rs`)
+takes a list of `{ path, base_content, head_content }` specs, writes
+each side to `<tmp>/<side>/<path>` so lizard's extension-driven
+language detection still works, runs `lizard --csv` once over the temp
+root, then routes findings back to `(side, path, function)` tuples.
+
+This is **not** persisted — every call re-runs lizard against the
+provided contents. It's also **separate from the scan store**: results
+do not appear in the Code Quality panel or share scan IDs. Callers
+that want persistent rollups should use `runCodeQualityScan` instead.
+
+If lizard isn't on PATH, the command returns `{ tool_missing: "lizard",
+sides: [] }` rather than erroring, so the renderer can show an inline
+install hint without losing the rest of the dashboard.
+
 ## Tool installation
 
 Tools are user-installed and assumed to be on `PATH`. `lizard`
