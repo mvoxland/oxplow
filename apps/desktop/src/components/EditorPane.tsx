@@ -5,6 +5,8 @@ import type { LocalBlameEntry, Stream } from "../api.js";
 import { desktopBridge, localBlame, readFileAtRef } from "../api.js";
 import { isLspCandidateLanguage, languageForPath } from "../editor-language.js";
 import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigationTarget } from "../lsp.js";
+import { getSuggestedLspPackage } from "../lspSuggestions.js";
+import { installLspPackage } from "../api.js";
 import { logUi } from "../logger.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
@@ -61,6 +63,8 @@ export function EditorPane({
   const diagnosticsDisposersRef = useRef<(() => void)[]>([]);
   const markerOwnerRef = useRef(`oxplow-lsp-${stream.id}`);
   const [lspStatus, setLspStatus] = useState<string | null>(null);
+  const [lspInstallSuggestion, setLspInstallSuggestion] = useState<{ language: string; pkg: string } | null>(null);
+  const [lspInstalling, setLspInstalling] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [blameMenu, setBlameMenu] = useState<{ x: number; y: number; sha: string; authorMail: string } | null>(null);
   const [blame, setBlame] = useState<{ path: string; entries: LocalBlameEntry[] } | null>(null);
@@ -512,6 +516,12 @@ export function EditorPane({
         const currentLanguage = languageForPath(filePathRef.current);
         if (!isLspCandidateLanguage(currentLanguage) || currentLanguage !== languageId) return;
         setLspStatus(message);
+        if (message && /LSP unavailable/i.test(message)) {
+          const pkg = getSuggestedLspPackage(languageId);
+          setLspInstallSuggestion(pkg ? { language: languageId, pkg } : null);
+        } else if (!message) {
+          setLspInstallSuggestion(null);
+        }
       }));
       lspClientsRef.current.set(languageId, client);
     }
@@ -597,7 +607,41 @@ export function EditorPane({
             }}
           />
         ) : null}
-        {filePath && lspStatus ? <div style={lspStatusStyle}>{lspStatus}</div> : null}
+        {filePath && lspStatus ? (
+          <div style={lspStatusStyle}>
+            <span>{lspStatus}</span>
+            {lspInstallSuggestion ? (
+              <button
+                type="button"
+                disabled={lspInstalling}
+                onClick={async () => {
+                  if (!lspInstallSuggestion) return;
+                  const pkg = lspInstallSuggestion.pkg;
+                  const lang = lspInstallSuggestion.language;
+                  setLspInstalling(true);
+                  try {
+                    await installLspPackage(pkg);
+                    setLspStatus(`Installed ${pkg} — reopen file to start the server`);
+                    setLspInstallSuggestion(null);
+                    // Drop the cached client so the next open re-tries.
+                    const stale = lspClientsRef.current.get(lang);
+                    if (stale) {
+                      stale.dispose();
+                      lspClientsRef.current.delete(lang);
+                    }
+                  } catch (err) {
+                    setLspStatus(`Install failed: ${err instanceof Error ? err.message : String(err)}`);
+                  } finally {
+                    setLspInstalling(false);
+                  }
+                }}
+                style={lspInstallButtonStyle}
+              >
+                {lspInstalling ? `Installing ${lspInstallSuggestion.pkg}…` : `Install ${lspInstallSuggestion.pkg}`}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {!filePath ? (
           <div style={emptyStyle}>
             <div>Select a file from the sidebar to open it here.</div>
@@ -931,8 +975,20 @@ const lspStatusStyle: CSSProperties = {
   background: "rgba(23, 23, 23, 0.92)",
   color: "var(--muted)",
   fontSize: 12,
-  pointerEvents: "none",
   zIndex: 5,
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+};
+
+const lspInstallButtonStyle: CSSProperties = {
+  fontSize: 11,
+  padding: "2px 6px",
+  borderRadius: 3,
+  border: "1px solid var(--border)",
+  background: "var(--surface-card)",
+  color: "var(--text-primary)",
+  cursor: "pointer",
 };
 
 function registerGoToDefinitionAction(monaco: any, editor: any, run: () => Promise<void>) {

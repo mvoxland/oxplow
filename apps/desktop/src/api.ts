@@ -382,6 +382,8 @@ export interface WorkspaceIndexedFile {
 }
 
 import type { WorkspaceStatusSummary } from "./tauri-bridge/index.js";
+import type { InstalledLspPackage } from "./tauri-bridge/generated/bindings.js";
+export type { InstalledLspPackage };
 export type { WorkspaceStatusSummary };
 
 export interface WorkspaceContext {
@@ -2016,6 +2018,14 @@ export function desktopBridge(): DesktopBridge {
  * renderer; non-allowed URLs return `{ ok: false }` so callers can
  * show a refusal toast.
  */
+export async function installLspPackage(packageName: string): Promise<InstalledLspPackage> {
+  return unwrap(await commands.installLspPackage(packageName));
+}
+
+export async function listInstalledLspPackages(): Promise<InstalledLspPackage[]> {
+  return unwrap(await commands.listInstalledLspPackages());
+}
+
 export async function openExternalUrl(url: string): Promise<{ ok: boolean; reason?: string }> {
   try {
     unwrap(await commands.openExternalUrl(url));

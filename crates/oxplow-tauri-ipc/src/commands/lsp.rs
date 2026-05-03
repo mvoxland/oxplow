@@ -1,5 +1,6 @@
 use oxplow_app::lsp_clients::LspClientError;
 use oxplow_app::lsp_installer::{InstalledManifestEntry, LspInstallerError};
+use oxplow_app::{BackgroundTaskKind, StartInput};
 use serde::Serialize;
 use specta::Type;
 
@@ -107,8 +108,23 @@ pub async fn install_lsp_package(
     state: tauri::State<'_, AppState>,
     package_name: String,
 ) -> Result<InstalledLspPackage, IpcError> {
-    let entry = state.lsp_installer.install(&package_name).await?;
-    Ok(entry.into())
+    let task = state.background_tasks.start(StartInput {
+        kind: BackgroundTaskKind::Lsp,
+        label: format!("Install language server: {package_name}"),
+        detail: Some("downloading from mason-registry".into()),
+        progress: None,
+    });
+    match state.lsp_installer.install(&package_name).await {
+        Ok(entry) => {
+            state.background_tasks.complete(&task.id, None);
+            Ok(entry.into())
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            state.background_tasks.fail(&task.id, msg.clone(), None);
+            Err(e.into())
+        }
+    }
 }
 
 /// List all Mason packages currently installed for this project.
