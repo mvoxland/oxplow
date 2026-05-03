@@ -117,7 +117,7 @@ import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
-import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, wikiPageRef, streamSettingsRef, threadSettingsRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -2211,8 +2211,9 @@ export function App() {
           onMoveItemToBacklog: handleMoveItemToBacklog,
           editRequest: planEditRequest,
           registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
-          onOpenNewWorkItemPage: (payload: { parentId?: string | null; editingItemId?: string | null }) =>
+          onOpenNewWorkItemPage: (payload: { parentId?: string | null }) =>
             navOpen(newWorkItemRef(payload)),
+          onOpenWorkItemPage: (itemId: string) => navOpen(workItemRef(itemId)),
         };
         const labelByKind: Record<string, string> = {
           "tasks": "Tasks",
@@ -2325,7 +2326,7 @@ export function App() {
         const matching = items.find((i) => i.id === itemId);
         tabs.push({
           id: ref.id,
-          label: matching ? matching.title.slice(0, 40) : itemId,
+          label: matching ? matching.title : itemId,
           closable: true,
           render: () => (
             <WorkItemPage
@@ -2420,27 +2421,10 @@ export function App() {
           parentId?: string | null;
           initialCategory?: string | null;
           initialPriority?: string | null;
-          editingItemId?: string | null;
         } | null) ?? {};
-        const editingItemId = payload.editingItemId ?? null;
-        // Look up the live work item from the loaded thread state. The
-        // edit page mutates against this id; if the item isn't loaded
-        // (e.g. it lives in a different thread) we fall through to
-        // create-mode rather than rendering a broken edit page.
-        const allItems = selectedThreadWork
-          ? [
-              ...selectedThreadWork.epics,
-              ...selectedThreadWork.waiting,
-              ...selectedThreadWork.inProgress,
-              ...selectedThreadWork.done,
-            ]
-          : [];
-        const editingItem = editingItemId
-          ? allItems.find((i) => i.id === editingItemId) ?? null
-          : null;
         tabs.push({
           id: ref.id,
-          label: editingItem ? "Edit work item" : "New work item",
+          label: "New work item",
           closable: true,
           render: () => (
             <NewWorkItemPage
@@ -2450,7 +2434,6 @@ export function App() {
                 initialPriority: payload.initialPriority ?? null,
               }}
               epics={selectedThreadWork?.epics ?? []}
-              editingItem={editingItem}
               onClose={() => closePageTab(ref.id)}
               onSubmit={async (input) => {
                 await handleCreateWorkItem({
@@ -2462,9 +2445,6 @@ export function App() {
                   status: input.status ?? "ready",
                   priority: input.priority ?? "medium",
                 });
-              }}
-              onUpdate={async (itemId, changes) => {
-                await handleUpdateWorkItem(itemId, changes);
               }}
             />
           ),
