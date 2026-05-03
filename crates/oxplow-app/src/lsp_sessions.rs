@@ -38,9 +38,41 @@ struct SessionKey {
     language: String,
 }
 
+/// Runtime registry of language servers installed via the Mason
+/// installer. These layer on top of `oxplow.yaml`'s `lspServers` —
+/// installer-installed servers are picked up only when no yaml entry
+/// matches the language.
+#[derive(Clone, Default)]
+pub struct InstalledServers {
+    inner: Arc<std::sync::RwLock<Vec<LspServerConfig>>>,
+}
+
+impl InstalledServers {
+    pub fn register(&self, cfg: LspServerConfig) {
+        if let Ok(mut g) = self.inner.write() {
+            g.retain(|c| c.language_id != cfg.language_id);
+            g.push(cfg);
+        }
+    }
+
+    pub fn list(&self) -> Vec<LspServerConfig> {
+        self.inner.read().map(|g| g.clone()).unwrap_or_default()
+    }
+
+    fn find(&self, language: &str) -> Option<LspServerConfig> {
+        self.inner
+            .read()
+            .ok()?
+            .iter()
+            .find(|s| s.language_id == language)
+            .cloned()
+    }
+}
+
 #[derive(Clone)]
 pub struct LspSessionManager {
     config: Arc<std::sync::RwLock<OxplowConfig>>,
+    installed: InstalledServers,
     sessions: Arc<Mutex<HashMap<SessionKey, Arc<LspProxy>>>>,
 }
 
@@ -48,16 +80,22 @@ impl LspSessionManager {
     pub fn new(config: Arc<std::sync::RwLock<OxplowConfig>>) -> Self {
         Self {
             config,
+            installed: InstalledServers::default(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
+    pub fn installed_servers(&self) -> &InstalledServers {
+        &self.installed
+    }
+
     fn find_server_config(&self, language: &str) -> Option<LspServerConfig> {
-        let cfg = self.config.read().ok()?;
-        cfg.lsp_servers
-            .iter()
-            .find(|s| s.language_id == language)
-            .cloned()
+        if let Ok(cfg) = self.config.read() {
+            if let Some(s) = cfg.lsp_servers.iter().find(|s| s.language_id == language) {
+                return Some(s.clone());
+            }
+        }
+        self.installed.find(language)
     }
 
     /// Get or spawn the LspProxy for `(stream_id, language)`.
@@ -158,5 +196,41 @@ mod tests {
             .err()
             .expect("should error");
         assert!(matches!(err, LspSessionError::NoConfig(lang) if lang == "tsx"));
+    }
+
+    #[test]
+    fn installed_servers_override_take_effect() {
+        let mgr = LspSessionManager::new(empty_config());
+        mgr.installed_servers().register(LspServerConfig {
+            language_id: "rust".into(),
+            extensions: vec!["rs".into()],
+            command: "/tmp/fake/rust-analyzer".into(),
+            args: vec![],
+        });
+        let cfg = mgr.find_server_config("rust").expect("registered server");
+        assert_eq!(cfg.command, "/tmp/fake/rust-analyzer");
+        assert!(mgr.find_server_config("python").is_none());
+    }
+
+    #[test]
+    fn yaml_config_wins_over_installed_for_same_language() {
+        let cfg = empty_config();
+        cfg.write().unwrap().lsp_servers.push(LspServerConfig {
+            language_id: "rust".into(),
+            extensions: vec!["rs".into()],
+            command: "yaml-rust-analyzer".into(),
+            args: vec![],
+        });
+        let mgr = LspSessionManager::new(cfg);
+        mgr.installed_servers().register(LspServerConfig {
+            language_id: "rust".into(),
+            extensions: vec!["rs".into()],
+            command: "installed-rust-analyzer".into(),
+            args: vec![],
+        });
+        assert_eq!(
+            mgr.find_server_config("rust").unwrap().command,
+            "yaml-rust-analyzer"
+        );
     }
 }

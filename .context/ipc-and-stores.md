@@ -266,6 +266,13 @@ UI). Active producers:
 - **LSP cold start** — `LspSessionManager` (`crates/oxplow-app/src/lsp_sessions.rs` over `crates/oxplow-lsp/src/proxy.rs`) takes
   optional `onInitializeStart` / `onInitializeEnd` hooks. The runtime
   wires them to `start`/`complete`. Indeterminate.
+- **LSP install** — `crates/oxplow-app/src/lsp_installer.rs` wraps
+  `crates/oxplow-lsp-installer/` (Mason-registry-backed). `install_lsp_package`
+  IPC downloads a release asset, drops it under `.oxplow/lsp/<name>/`,
+  and registers the binary with `LspSessionManager`'s
+  `InstalledServers` overlay. Manifest at `.oxplow/lsp/installed.json`
+  replays into the session manager on boot. Indeterminate; not yet
+  bridged to BackgroundTaskStore (TODO).
 - **Notes wiki resync** — `NotesWatcher.start` (`crates/oxplow-fs-watch/src/lib.rs`)
   takes `onScanStart` / `onScanProgress` / `onScanEnd` callbacks. The
   runtime registers a row only when `total >= 5` (smaller dirs aren't

@@ -23,6 +23,7 @@ pub mod hook_ingest;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
 pub mod lsp_clients;
+pub mod lsp_installer;
 pub mod lsp_sessions;
 pub mod terminal_sessions;
 pub mod recovery;
@@ -143,6 +144,7 @@ pub struct Services {
     pub agent_panes: agent_pane::AgentPaneService,
     pub blobs: blob_store::BlobStore,
     pub lsp_sessions: lsp_sessions::LspSessionManager,
+    pub lsp_installer: lsp_installer::LspInstallerService,
     pub lsp_clients: lsp_clients::LspClientRegistry,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     pub recovery: recovery::RecoveryService,
@@ -212,6 +214,11 @@ impl Services {
         // is paid on first request, not at boot.
         let config_arc = Arc::new(RwLock::new(config));
         let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
+        let lsp_installer_svc =
+            lsp_installer::LspInstallerService::new(&layout.state_dir, lsp.clone());
+        if let Err(e) = futures::executor::block_on(lsp_installer_svc.replay_into_sessions()) {
+            tracing::warn!(?e, "lsp installer manifest replay failed");
+        }
         let lsp_clients = lsp_clients::LspClientRegistry::new(config_arc.clone());
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
@@ -257,6 +264,7 @@ impl Services {
             agent_panes,
             blobs,
             lsp_sessions: lsp,
+            lsp_installer: lsp_installer_svc,
             lsp_clients,
             terminal_sessions,
             recovery: recovery_svc,
@@ -317,6 +325,11 @@ impl Services {
         let agent_panes = agent_pane::AgentPaneService::new(tmux.clone());
         let config_arc = Arc::new(RwLock::new(config));
         let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
+        let lsp_installer_svc =
+            lsp_installer::LspInstallerService::new(&layout.state_dir, lsp.clone());
+        if let Err(e) = futures::executor::block_on(lsp_installer_svc.replay_into_sessions()) {
+            tracing::warn!(?e, "lsp installer manifest replay failed");
+        }
         let lsp_clients = lsp_clients::LspClientRegistry::new(config_arc.clone());
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
@@ -362,6 +375,7 @@ impl Services {
             agent_panes,
             blobs,
             lsp_sessions: lsp,
+            lsp_installer: lsp_installer_svc,
             lsp_clients,
             terminal_sessions,
             recovery: recovery_svc,
