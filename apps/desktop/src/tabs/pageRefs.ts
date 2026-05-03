@@ -106,10 +106,6 @@ export interface NewWorkItemPayload {
   initialCategory?: string | null;
   /** Optional default priority. */
   initialPriority?: string | null;
-  /** When present, the page renders in edit mode against this item: it
-   *  loads the existing values, retitles the page to "Edit work item",
-   *  and submits via `updateWorkItem` instead of `createWorkItem`. */
-  editingItemId?: string | null;
 }
 
 export function newStreamRef(): TabRef {
@@ -122,17 +118,6 @@ export function newWorkItemRef(payload: NewWorkItemPayload = {}): TabRef {
   // form re-mounting in place; the page reads its initial values on
   // mount, so callers wanting different defaults should `closeTab`
   // before opening with new payload.
-  //
-  // Edit-mode tabs use an item-scoped id so a user can have several
-  // edit tabs open at once (one per item) without colliding with the
-  // create tab.
-  if (payload.editingItemId) {
-    return {
-      id: `new-work-item:edit:${payload.editingItemId}`,
-      kind: "new-work-item",
-      payload,
-    };
-  }
   return { id: "new-work-item", kind: "new-work-item", payload };
 }
 

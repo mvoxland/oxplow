@@ -74,12 +74,13 @@ interface Props {
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
   registerOpenCreate?(fn: () => void): void;
-  /** Route the "new task" / "+ Task on epic" buttons (and the edit-
-   *  double-click flow) to a NewWorkItemPage tab instead of the inline
-   *  modal. When omitted, the legacy modal path stays in place (used by
-   *  tests and standalone usages). When `editingItemId` is set the page
-   *  opens in edit mode against that item. */
-  onOpenNewWorkItemPage?(payload: { parentId?: string | null; editingItemId?: string | null }): void;
+  /** Route the "new task" / "+ Task on epic" buttons to a NewWorkItemPage
+   *  tab. When omitted, the legacy modal path stays in place (used by
+   *  tests and standalone usages). */
+  onOpenNewWorkItemPage?(payload: { parentId?: string | null }): void;
+  /** Route a row click / Enter to the read+edit WorkItemPage tab for that
+   *  item. When omitted, row clicks still select but no page opens. */
+  onOpenWorkItemPage?(itemId: string): void;
   /** When true, agent-authored work items are filtered out of the visible
    *  groups. Mirrors the legacy `plan-toggle-hide-auto` toggle from the
    *  pre-IA-redesign Plan pane. Epics are always kept so their children
@@ -142,6 +143,7 @@ export function PlanPane({
   editRequest,
   registerOpenCreate,
   onOpenNewWorkItemPage,
+  onOpenWorkItemPage,
   hideAuto = false,
   visibleSections,
   sectionItemLimit,
@@ -369,10 +371,11 @@ export function PlanPane({
   }, [registerOpenCreate]);
 
   const openEditModal = (item: WorkItem) => {
-    // Edit flow now routes through a NewWorkItemPage tab in edit mode;
-    // the in-file NewWorkItemModal was deleted in the IA-redesign cleanup.
+    // Row clicks (and Enter on the keyboard-selected row) open the
+    // canonical Task page (WorkItemPage) which renders a readable view
+    // with inline editing via WorkItemDetail.
     setSelectedId(item.id);
-    onOpenNewWorkItemPage?.({ parentId: item.parent_id, editingItemId: item.id });
+    onOpenWorkItemPage?.(item.id);
   };
 
   useEffect(() => {
