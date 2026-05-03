@@ -64,12 +64,12 @@ pub async fn search_wiki_bodies(
         .await?)
 }
 
-fn note_body_path(state: &tauri::State<'_, AppState>, slug: &str) -> std::path::PathBuf {
+fn wiki_page_body_path(state: &tauri::State<'_, AppState>, slug: &str) -> std::path::PathBuf {
     state
         .layout
         .project_dir
         .join(".oxplow")
-        .join("notes")
+        .join("wiki")
         .join(format!("{slug}.md"))
 }
 
@@ -79,7 +79,7 @@ pub async fn read_wiki_page_body(
     state: tauri::State<'_, AppState>,
     slug: String,
 ) -> Result<String, IpcError> {
-    let path = note_body_path(&state, &slug);
+    let path = wiki_page_body_path(&state, &slug);
     tokio::task::spawn_blocking(move || std::fs::read_to_string(&path).unwrap_or_default())
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
@@ -92,7 +92,7 @@ pub async fn write_wiki_page_body(
     slug: String,
     body: String,
 ) -> Result<(), IpcError> {
-    let path = note_body_path(&state, &slug);
+    let path = wiki_page_body_path(&state, &slug);
     tokio::task::spawn_blocking(move || {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
