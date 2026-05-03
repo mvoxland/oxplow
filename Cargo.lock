@@ -2828,6 +2828,7 @@ dependencies = [
  "futures",
  "git2",
  "indexmap 2.14.0",
+ "oxplow-code-dup",
  "oxplow-code-metrics",
  "oxplow-config",
  "oxplow-db",
@@ -2853,6 +2854,22 @@ dependencies = [
  "tracing",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "oxplow-code-dup"
+version = "0.3.0"
+dependencies = [
+ "oxplow-code-metrics",
+ "tree-sitter",
+ "tree-sitter-c",
+ "tree-sitter-cpp",
+ "tree-sitter-go",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
 ]
 
 [[package]]
