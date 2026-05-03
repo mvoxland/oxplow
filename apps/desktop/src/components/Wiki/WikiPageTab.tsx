@@ -30,11 +30,11 @@ interface Props {
   stream: Stream;
   slug: string;
   onClosed: () => void;
-  /** Called for plain in-tab wikilink-to-note navigation. Routes through
-   *  the host's PageNavigationContext so back/forward live in the shared
+  /** Called for plain in-tab wikilink navigation. Routes through the
+   *  host's PageNavigationContext so back/forward live in the shared
    *  chrome rather than a per-WikiPageTab history. */
-  onNavigateInternalNote: (slug: string) => void;
-  onOpenNoteInNewTab: (slug: string) => void;
+  onNavigateInternalWikiPage: (slug: string) => void;
+  onOpenWikiPageInNewTab: (slug: string) => void;
   onOpenFile: (path: string) => void;
   /** Optional handler for git-commit wikilink clicks — opens the
    *  GitCommitPage for the SHA. */
@@ -45,7 +45,7 @@ interface Props {
   onOpenExternalUrl?: (url: string) => void;
 }
 
-export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalNote, onOpenNoteInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl }: Props) {
+export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage, onOpenWikiPageInNewTab, onOpenFile, onOpenCommit, onOpenExternalUrl }: Props) {
   const [summary, setSummary] = useState<WikiPageSummary | null>(null);
   const [body, setBody] = useState<string>("");
   const [editing, setEditing] = useState(false);
@@ -55,7 +55,7 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalNote, on
 
   // Title flows through the shared PageNavigationContext so it surfaces in
   // the chrome header and the tab strip without a duplicate row inside the
-  // note body. Falls back to the slug until the summary loads.
+  // wiki-page body. Falls back to the slug until the summary loads.
   usePageTitle(summary?.title ?? slug);
 
   const refresh = useCallback(async () => {
@@ -70,7 +70,7 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalNote, on
       setLoadError(null);
     } catch (error) {
       const message = String(error);
-      if (/note not found/i.test(message)) {
+      if (/(wiki page|note) not found/i.test(message)) {
         setNotFound(true);
         setLoadError(null);
         setBody("");
@@ -123,7 +123,7 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalNote, on
       setBody(draft);
     } catch (error) {
       recordOpError({
-        label: `Save note "${slug}"`,
+        label: `Save wiki page "${slug}"`,
         message: String(error),
       });
     }
@@ -140,20 +140,20 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalNote, on
       setEditing(true);
     } catch (error) {
       recordOpError({
-        label: `Create note "${slug}"`,
+        label: `Create wiki page "${slug}"`,
         message: String(error),
       });
     }
   }, [stream.id, slug]);
 
   const handleDelete = useCallback(async () => {
-    if (!window.confirm(`Delete note "${slug}"? The file will be removed.`)) return;
+    if (!window.confirm(`Delete wiki page "${slug}"? The file will be removed.`)) return;
     try {
       await deleteWikiPage(stream.id, slug);
       onClosed();
     } catch (error) {
       recordOpError({
-        label: `Delete note "${slug}"`,
+        label: `Delete wiki page "${slug}"`,
         message: String(error),
       });
     }
@@ -200,7 +200,7 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalNote, on
             >
               Revert
             </button>
-            <button type="button" onClick={() => void handleDelete()} title="Delete note">Delete</button>
+            <button type="button" onClick={() => void handleDelete()} title="Delete wiki page">Delete</button>
           </>
         )}
       </div>
@@ -208,13 +208,13 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalNote, on
         {notFound ? (
           <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
             <div style={{ fontSize: 15, marginBottom: 8, color: "var(--text-primary)" }}>Page not found</div>
-            <div>No note exists with slug <code>{slug}</code>.</div>
+            <div>No wiki page exists with slug <code>{slug}</code>.</div>
             <div style={{ marginTop: 8 }}>
-              Click <strong>Create page</strong> above to start a new note at <code>.oxplow/wiki/{slug}.md</code>.
+              Click <strong>Create page</strong> above to start a new wiki page at <code>.oxplow/wiki/{slug}.md</code>.
             </div>
           </div>
         ) : loadError ? (
-          <div style={{ color: "var(--severity-critical)" }}>Failed to load note: {loadError}</div>
+          <div style={{ color: "var(--severity-critical)" }}>Failed to load wiki page: {loadError}</div>
         ) : editing ? (
           <textarea
             value={draft}
@@ -234,10 +234,10 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalNote, on
           />
         ) : (
           <MarkdownView
-            className="wiki-note-markdown"
+            className="wiki-page-markdown"
             body={draftInitialized ? draft : body}
-            onNavigateInternal={onNavigateInternalNote}
-            onOpenInNewTab={onOpenNoteInNewTab}
+            onNavigateInternal={onNavigateInternalWikiPage}
+            onOpenInNewTab={onOpenWikiPageInNewTab}
             onOpenFile={(path) => onOpenFile(path)}
             onOpenCommit={onOpenCommit}
             onOpenExternalUrl={onOpenExternalUrl}
@@ -302,7 +302,7 @@ function BacklinksFooter({
               status === "deleted"
                 ? `${path} (deleted from workspace)`
                 : status === "changed"
-                  ? `${path} (changed since this note was written)`
+                  ? `${path} (changed since this wiki page was written)`
                   : `Open ${path}`
             }
             style={{

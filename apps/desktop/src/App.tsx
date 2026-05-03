@@ -2186,7 +2186,7 @@ export function App() {
             <WikiIndexPage
               stream={stream}
               selectedSlug={centerActive.startsWith("note:") ? centerActive.slice("note:".length) : null}
-              onOpenNote={handleOpenNote}
+              onOpenWikiPage={handleOpenNote}
             />
           ),
         });
@@ -2298,7 +2298,7 @@ export function App() {
               slug={slug}
               threadWork={selectedThreadWork}
               onClosed={() => closePageTab(ref.id)}
-              onOpenNote={handleOpenNote}
+              onOpenWikiPage={handleOpenNote}
               onOpenFile={(p) => { void handleOpenFile(p); }}
               onOpenPage={noteNavOpen}
               onOpenCommit={handleOpenCommit}

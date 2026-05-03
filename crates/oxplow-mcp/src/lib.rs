@@ -582,7 +582,7 @@ impl OxplowMcp {
     }
 
     #[tool(description = "Delete a note by id.")]
-    async fn delete_note(
+    async fn delete_wiki_page(
         &self,
         params: Parameters<DeleteNoteParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -598,7 +598,7 @@ impl OxplowMcp {
     // ---------- wiki pages ----------
 
     #[tool(description = "List all wiki pages (metadata only).")]
-    async fn list_notes(&self) -> Result<CallToolResult, McpError> {
+    async fn list_wiki_pages(&self) -> Result<CallToolResult, McpError> {
         let notes = self
             .services
             .wiki_page_store
@@ -609,7 +609,7 @@ impl OxplowMcp {
     }
 
     #[tool(description = "Title/slug glob search over wiki pages.")]
-    async fn search_notes(
+    async fn search_wiki_pages(
         &self,
         params: Parameters<SearchParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -623,7 +623,7 @@ impl OxplowMcp {
     }
 
     #[tool(description = "FTS5-backed body search over wiki pages; returns ranked snippets.")]
-    async fn search_note_bodies(
+    async fn search_wiki_page_bodies(
         &self,
         params: Parameters<SearchParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -637,7 +637,7 @@ impl OxplowMcp {
     }
 
     #[tool(description = "Get a wiki page's metadata by slug.")]
-    async fn get_note_metadata(
+    async fn get_wiki_page_metadata(
         &self,
         params: Parameters<SlugParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -1230,7 +1230,7 @@ impl OxplowMcp {
                        (from [[wikilinks]] or inline path mentions). Use this for backlinks: \
                        \"which notes discuss src/foo.ts?\""
     )]
-    async fn find_notes_for_file(
+    async fn find_wiki_pages_for_file(
         &self,
         params: Parameters<FindNotesForFileParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -1251,7 +1251,7 @@ impl OxplowMcp {
         description = "Wiki pages that reference the given note slug in their related_notes \
                        (from [[other-note-slug]] wikilinks). Use for note-to-note backlinks."
     )]
-    async fn find_notes_for_note(
+    async fn find_wiki_pages_for_wiki_page(
         &self,
         params: Parameters<FindNotesForNoteParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -1358,7 +1358,7 @@ impl OxplowMcp {
     }
 
     #[tool(description = "Re-read a wiki page's body file and refresh the FTS index.")]
-    async fn resync_note(
+    async fn resync_wiki_page(
         &self,
         params: Parameters<ResyncNoteParams>,
     ) -> Result<CallToolResult, McpError> {
@@ -1774,11 +1774,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_notes_runs_against_empty_store() {
+    async fn list_wiki_pages_runs_against_empty_store() {
         let (_proj, _services, server) = boot();
         // No notes seeded — the tool should still respond with an
         // empty-list payload rather than erroring.
-        let r = server.list_notes().await.unwrap();
+        let r = server.list_wiki_pages().await.unwrap();
         let body = text_payload(r);
         assert_eq!(body.trim(), "[]");
     }

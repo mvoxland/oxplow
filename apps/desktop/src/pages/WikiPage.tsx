@@ -12,7 +12,7 @@ export interface WikiPageProps {
   slug: string;
   threadWork: ThreadWorkState | null;
   onClosed(): void;
-  onOpenNote(slug: string): void;
+  onOpenWikiPage(slug: string): void;
   onOpenFile(path: string): void;
   onOpenPage(ref: TabRef): void;
   onOpenCommit?(sha: string): void;
@@ -25,7 +25,7 @@ export interface WikiPageProps {
  * the bookmark toggle. In-tab wikilink clicks route through the
  * navigation context so they participate in tab-level history.
  */
-export function WikiPage({ stream, slug, threadWork, onClosed, onOpenNote, onOpenFile, onOpenPage, onOpenCommit, onOpenExternalUrl }: WikiPageProps) {
+export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, onOpenFile, onOpenPage, onOpenCommit, onOpenExternalUrl }: WikiPageProps) {
   const nav = useOptionalPageNavigation();
   const backlinkEntries = useBacklinks(wikiPageRef(slug), stream, threadWork);
   const backlinks = {
@@ -34,7 +34,7 @@ export function WikiPage({ stream, slug, threadWork, onClosed, onOpenNote, onOpe
   };
   if (!stream) {
     return (
-      <Page testId="page-note" kind="note" backlinks={backlinks}>
+      <Page testId="page-wiki" kind="wiki page" backlinks={backlinks}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
           No stream selected.
         </div>
@@ -42,14 +42,14 @@ export function WikiPage({ stream, slug, threadWork, onClosed, onOpenNote, onOpe
     );
   }
   return (
-    <Page testId="page-note" kind="note" backlinks={backlinks}>
+    <Page testId="page-wiki" kind="wiki page" backlinks={backlinks}>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <WikiPageTab
           stream={stream}
           slug={slug}
           onClosed={onClosed}
-          onNavigateInternalNote={(nextSlug) => nav ? nav.navigate(wikiPageRef(nextSlug)) : onOpenNote(nextSlug)}
-          onOpenNoteInNewTab={onOpenNote}
+          onNavigateInternalWikiPage={(nextSlug) => nav ? nav.navigate(wikiPageRef(nextSlug)) : onOpenWikiPage(nextSlug)}
+          onOpenWikiPageInNewTab={onOpenWikiPage}
           onOpenFile={onOpenFile}
           onOpenCommit={onOpenCommit}
           onOpenExternalUrl={onOpenExternalUrl}

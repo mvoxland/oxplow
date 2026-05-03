@@ -5,17 +5,17 @@ import { WikiPane } from "../components/Wiki/WikiPane.js";
 export interface WikiIndexPageProps {
   stream: Stream | null;
   selectedSlug: string | null;
-  onOpenNote: (slug: string) => void;
+  onOpenWikiPage: (slug: string) => void;
 }
 
 /**
- * Thin Page wrapper around the existing WikiPane (wiki notes index).
+ * Thin Page wrapper around the existing WikiPane (wiki-pages index).
  */
-export function WikiIndexPage({ stream, selectedSlug, onOpenNote }: WikiIndexPageProps) {
+export function WikiIndexPage({ stream, selectedSlug, onOpenWikiPage }: WikiIndexPageProps) {
   return (
-    <Page testId="page-wiki-index" title="Notes">
+    <Page testId="page-wiki-index" title="Wiki">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <WikiPane stream={stream} selectedSlug={selectedSlug} onOpenNote={onOpenNote} />
+        <WikiPane stream={stream} selectedSlug={selectedSlug} onOpenWikiPage={onOpenWikiPage} />
       </div>
     </Page>
   );

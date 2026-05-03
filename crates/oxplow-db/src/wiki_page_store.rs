@@ -222,7 +222,7 @@ impl SqliteWikiPageStore {
         .unwrap()
     }
 
-    /// Glob-by-title for the lighter search_notes MCP tool.
+    /// Glob-by-title for the lighter search_wiki_pages MCP tool.
     pub async fn search_titles(
         &self,
         query: &str,

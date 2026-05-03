@@ -1,6 +1,6 @@
 ---
 name: oxplow-wiki-capture
-description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_notes, search_notes, search_note_bodies, find_notes_for_file, get_note_metadata, resync_note, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_wiki_pages, search_wiki_pages, search_wiki_page_bodies, find_wiki_pages_for_file, get_wiki_page_metadata, resync_wiki_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
 # Wiki pages — exploratory capture
@@ -12,7 +12,7 @@ analyses. **It is NOT codebase-only** — any non-trivial exploratory
 Q&A belongs here, including general design / process / rationale
 discussions. The agent writes it as the user asks questions. Bodies
 are markdown files; metadata is synced by a watcher, so you author
-with the **Write** tool and call `mcp__oxplow__resync_note` to pin
+with the **Write** tool and call `mcp__oxplow__resync_wiki_page` to pin
 freshness.
 
 ## When to capture
@@ -52,10 +52,10 @@ where exploration goes regardless of writer status.
 
 Before writing, search for an existing topic note. Don't fragment.
 
-1. `mcp__oxplow__search_notes` — title substring (cheap, scan first).
-2. `mcp__oxplow__search_note_bodies` — content substring; catches
+1. `mcp__oxplow__search_wiki_pages` — title substring (cheap, scan first).
+2. `mcp__oxplow__search_wiki_page_bodies` — content substring; catches
    notes that discuss the topic but aren't named after it.
-3. `mcp__oxplow__find_notes_for_file` — for each non-trivial file you
+3. `mcp__oxplow__find_wiki_pages_for_file` — for each non-trivial file you
    read this turn, check whether an existing note already references it.
 
 If a clearly-relevant note exists, **append a new dated section** to
@@ -102,13 +102,13 @@ Files referenced: `src/foo.ts`, `src/bar/baz.ts`
 
 ## Write mechanics
 
-1. Resolve the path: call `mcp__oxplow__get_note_metadata` (existing
-   note) or `mcp__oxplow__list_notes` and use the returned `path`.
+1. Resolve the path: call `mcp__oxplow__get_wiki_page_metadata` (existing
+   note) or `mcp__oxplow__list_wiki_pages` and use the returned `path`.
    For a brand-new slug, the path is
    `<projectDir>/.oxplow/wiki/<slug>.md`.
 2. Use the **Write** tool to write/replace the file. (For appends to
    an existing note, Read first, then Write the merged body.)
-3. Call `mcp__oxplow__resync_note` with the slug so the freshness
+3. Call `mcp__oxplow__resync_wiki_page` with the slug so the freshness
    baseline pins to current HEAD without waiting for the watcher's
    200ms debounce.
 

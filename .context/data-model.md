@@ -369,11 +369,11 @@ Freshness is a general indicator, not a proof:
   file → `very-stale`.
 
 MCP tools (`crates/oxplow-mcp/src/lib.rs`) are metadata-only —
-`list_notes`, `get_note_metadata`, `resync_note`, `search_notes`
-(title), `search_note_bodies` (content + ~200-char snippet),
-`find_notes_for_file` (backlinks via `captured_refs`), `delete_note`.
+`list_wiki_pages`, `get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages`
+(title), `search_wiki_page_bodies` (content + ~200-char snippet),
+`find_wiki_pages_for_file` (backlinks via `captured_refs`), `delete_wiki_page`.
 There is no `create_note` or `update_note`: the agent Writes the
-file, then optionally calls `resync_note` to pin freshness
+file, then optionally calls `resync_wiki_page` to pin freshness
 immediately (otherwise the watcher catches up within a ~200ms
 debounce).
 
@@ -414,7 +414,7 @@ repeated edits in the same thread upsert in place. Index on
 Writers funnel through two seams, both routing through
 `Runtime.wikiPageThreadUpdateStore.recordUpdate(slug, threadId)`:
 
-- **`oxplow__resync_note` MCP** — accepts `threadId` and records the
+- **`oxplow__resync_wiki_page` MCP** — accepts `threadId` and records the
   edit when present. The wiki-capture skill always supplies it.
 - **PostToolUse hook** in `crates/oxplow-runtime/src/lib.rs` — when
   the agent writes a path matching `.oxplow/wiki/<slug>.md` via
