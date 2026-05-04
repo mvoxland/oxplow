@@ -75,7 +75,7 @@ export function FilesPivot({ pivots, target }: FilesPivotProps) {
               showAddDel={active !== "status"}
               target={target}
               scope={{ kind: scopeKind, value: row.key } as ChangeAnalysisScope}
-              siblings={{ entries: siblingEntries, index: idx }}
+              siblings={{ entries: siblingEntries, index: idx, title: `Files by ${active}` }}
             />
           ))
         )}
@@ -103,7 +103,7 @@ function PivotRow({
   showAddDel: boolean;
   target: ChangeAnalysisTarget;
   scope: ChangeAnalysisScope;
-  siblings: { entries: NavSiblingEntry[]; index: number };
+  siblings: { entries: NavSiblingEntry[]; index: number; title?: string };
 }) {
   const ref = changeAnalysisRef(target, scope);
   const { handlers } = useRouteDispatch(ref, { siblings });

@@ -327,7 +327,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
                       note={v.note}
                       selected={v.note.slug === selectedSlug}
                       rightLabel={formatRelative(v.last_at)}
-                      siblings={{ entries: siblingEntries, index: i }}
+                      siblings={{ entries: siblingEntries, index: i, title: "Recently visited wiki pages" }}
                       onOpenWikiPage={onOpenWikiPage}
                       onOpenMenu={(rect, note) => openMenuForWikiPage(rect, note)}
                     />
@@ -344,13 +344,14 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
                 rows={(() => {
                   const list = showAllModified ? modified : modified.slice(0, SECTION_INITIAL_LIMIT);
                   const siblingEntries = list.map((n) => ({ ref: wikiPageRef(n.slug), label: n.title }));
+                  const sectionTitle = visited.length > 0 ? "Recently modified wiki pages" : "Wiki pages";
                   return list.map((n, i) => (
                     <NoteRow
                       key={`m-${n.slug}`}
                       note={n}
                       selected={n.slug === selectedSlug}
                       rightLabel={formatRelative(n.updated_at)}
-                      siblings={{ entries: siblingEntries, index: i }}
+                      siblings={{ entries: siblingEntries, index: i, title: sectionTitle }}
                       onOpenWikiPage={onOpenWikiPage}
                       onOpenMenu={(rect, note) => openMenuForWikiPage(rect, note)}
                     />
@@ -454,7 +455,7 @@ function SearchResults({
           hit={hit}
           summary={notesBySlug.get(hit.slug) ?? null}
           selected={hit.slug === selectedSlug}
-          siblings={{ entries: siblingEntries, index: i }}
+          siblings={{ entries: siblingEntries, index: i, title: "Wiki search results" }}
           onOpenWikiPage={onOpenWikiPage}
           onOpenMenu={(rect) => onOpenMenu(rect, hit)}
         />

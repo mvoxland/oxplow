@@ -108,7 +108,7 @@ export function CommitGraphTable({
               tags={tagsBySha.get(sha) ?? []}
               currentBranch={currentBranch}
               stats={statsBySha?.get(sha) ?? null}
-              siblings={{ entries: siblingEntries, index: idx }}
+              siblings={{ entries: siblingEntries, index: idx, title: "Recent commits" }}
               onSelect={onSelect}
             />
           </div>
@@ -145,7 +145,7 @@ function CommitRowDispatcher({
   tags: string[];
   currentBranch: string | null;
   stats: CommitStats | null;
-  siblings: { entries: NavSiblingEntry[]; index: number };
+  siblings: { entries: NavSiblingEntry[]; index: number; title?: string };
   onSelect?(sha: string, opts?: { newTab?: boolean }): void;
 }) {
   const { dispatch } = useRouteDispatch(gitCommitRef(sha), {

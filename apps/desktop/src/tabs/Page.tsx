@@ -15,6 +15,7 @@ export interface PageNavBarConfig {
     onPrev?(): void;
     onNext?(): void;
     indicator?: string;
+    indicatorTitle?: string;
   };
   bookmark?: {
     scopes: BookmarkScope[];
@@ -120,6 +121,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           onPrev: ctxNav.goPrevSibling,
           onNext: ctxNav.goNextSibling,
           indicator: `${ctxNav.siblings.index + 1} of ${ctxNav.siblings.entries.length}`,
+          indicatorTitle: ctxNav.siblings.title,
         }
       : undefined,
     bookmark: ctxNav.bookmark
