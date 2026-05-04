@@ -8,6 +8,7 @@ import { LspClient, type EditorNavigationTarget, streamFileUri, toEditorNavigati
 import { getSuggestedLspPackage } from "../lspSuggestions.js";
 import { installLspPackage } from "../api.js";
 import { logUi } from "../logger.js";
+import { usePageSnapshot } from "../tabs/usePageSnapshot.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 
@@ -89,6 +90,31 @@ export function EditorPane({
   filePathRef.current = filePath;
   openFilesRef.current = { order: openFileOrder, files: openFiles };
 
+  // Persist Monaco view-state (cursor / scroll / folds / selection)
+  // across restart so the user lands at the same line they left.
+  // saveViewState/restoreViewState produce an opaque blob — JSON-
+  // serializing it is what Monaco's own multi-buffer editors do.
+  const pendingViewStateRef = useRef<unknown>(null);
+  usePageSnapshot<{ viewState: unknown } | null>({
+    serialize: () => {
+      const editor = editorRef.current;
+      const vs = editor?.saveViewState?.() ?? null;
+      return vs ? { viewState: vs } : null;
+    },
+    restore: (snap) => {
+      const editor = editorRef.current;
+      if (!editor || !snap || !snap.viewState) {
+        // Editor not ready yet — stash for the post-mount apply.
+        pendingViewStateRef.current = snap?.viewState ?? null;
+        return;
+      }
+      try {
+        editor.restoreViewState(snap.viewState as Parameters<typeof editor.restoreViewState>[0]);
+      } catch { /* ignore */ }
+    },
+    deps: [filePath, value],
+  });
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -104,6 +130,14 @@ export function EditorPane({
         contextmenu: false,
       });
       editorRef.current = editor;
+      // Apply any pending view-state that was restored before the
+      // editor finished mounting.
+      if (pendingViewStateRef.current) {
+        try {
+          editor.restoreViewState(pendingViewStateRef.current as Parameters<typeof editor.restoreViewState>[0]);
+        } catch { /* ignore */ }
+        pendingViewStateRef.current = null;
+      }
       // Register Cmd/Ctrl+S inside Monaco so the shortcut works when the
       // editor has focus. The native Electron menu also binds this — menu
       // accelerators fire at the OS level BEFORE the keydown reaches the

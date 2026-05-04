@@ -74,6 +74,14 @@ export interface PageNavigation {
    * `title` prop is supplied.
    */
   title?: string;
+  /**
+   * Stable identity for this page within the persistence layer.
+   * Format: `${threadId}::${tabId}`. The `usePageSnapshot` hook
+   * uses this as the key when reading/writing the per-page snapshot
+   * blob so scroll/expanded/draft state survives across restarts.
+   * Null for surfaces with no per-thread identity (rail, palette).
+   */
+  pageKey?: string;
 }
 
 export const PageNavigationContext = createContext<PageNavigation | null>(null);

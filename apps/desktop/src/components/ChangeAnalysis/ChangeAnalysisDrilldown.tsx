@@ -9,6 +9,7 @@ import { TestsCard } from "./TestsCard.js";
 import { ChangeAnalysisFileTree } from "./FileTreeView.js";
 import { buildFilePivots, summarizeTests, type FunctionsBuckets } from "./analysisHelpers.js";
 import type { GitFileStatus } from "../../api-types.js";
+import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
 
 type ViewMode = "semantic" | "files";
 type StatusFilter = "all" | "added" | "modified" | "deleted";
@@ -37,6 +38,23 @@ export function ChangeAnalysisDrilldown({
       : "all")
     : "all";
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatus);
+  // Persist the view-toggle + status-filter selections across restart
+  // so the user lands on the same configuration they left.
+  usePageSnapshot<{ viewMode: ViewMode; statusFilter: StatusFilter }>({
+    serialize: () => ({ viewMode, statusFilter }),
+    restore: (snap) => {
+      if (snap.viewMode === "semantic" || snap.viewMode === "files") {
+        setViewMode(snap.viewMode);
+      }
+      if (
+        snap.statusFilter === "all" || snap.statusFilter === "added" ||
+        snap.statusFilter === "modified" || snap.statusFilter === "deleted"
+      ) {
+        setStatusFilter(snap.statusFilter);
+      }
+    },
+    deps: [viewMode, statusFilter],
+  });
   void target;
 
   const filesAfterStatus = useMemo(() => {

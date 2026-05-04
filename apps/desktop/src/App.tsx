@@ -89,6 +89,7 @@ import { DiffPage } from "./pages/DiffPage.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
+import { clearPageSnapshot } from "./tabs/usePageSnapshot.js";
 import { useBookmarksStore } from "./tabs/useBookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
@@ -2186,6 +2187,10 @@ export function App() {
       return rest;
     });
     setCenterActive((current) => (current === id ? "agent" : current));
+    // GC the per-page snapshot so closed tabs don't leak forever.
+    if (selectedThreadId) {
+      clearPageSnapshot(`${selectedThreadId}::${id}`);
+    }
   }, [selectedThreadId, setCenterActive, stream]);
 
   // Keep the forward ref in sync with the latest handleOpenPage. Used by
@@ -2810,6 +2815,7 @@ export function App() {
           : undefined,
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
+        pageKey: selectedThreadId ? `${selectedThreadId}::${tabId}` : undefined,
         bookmark: ref ? {
           scopes,
           toggle: (scope: BookmarkScope) => {

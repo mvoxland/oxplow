@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteWikiPage,
   listWikiPages,
@@ -12,6 +12,7 @@ import { MarkdownView } from "./MarkdownView.js";
 import { recordOpError } from "../opErrorsStore.js";
 import { usePageTitle, useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
+import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
 
 type FreshnessStatus = WikiPageSummary["freshness"];
 
@@ -61,6 +62,28 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
   // the chrome header and the tab strip without a duplicate row inside the
   // wiki-page body. Falls back to the slug until the summary loads.
   usePageTitle(summary?.title ?? slug);
+
+  // Persist scroll position across restart. The scroll container is
+  // the body-area div below; we track its scrollTop on every scroll
+  // event (cheap, no debounce needed because writes are batched at
+  // the snapshot layer's localStorage level).
+  const scrollHostRef = useRef<HTMLDivElement | null>(null);
+  const [scrollY, setScrollY] = useState(0);
+  usePageSnapshot<{ scrollY: number }>({
+    serialize: () => ({ scrollY }),
+    restore: (snap) => {
+      if (typeof snap.scrollY === "number") setScrollY(snap.scrollY);
+    },
+    deps: [scrollY],
+  });
+  // Apply the restored scrollY when the body becomes available. We
+  // re-apply whenever `body` changes too because the markdown re-
+  // renders may shift offsets briefly during load.
+  useEffect(() => {
+    const el = scrollHostRef.current;
+    if (!el) return;
+    if (Math.abs(el.scrollTop - scrollY) > 1) el.scrollTop = scrollY;
+  }, [scrollY, body]);
 
   const refresh = useCallback(async () => {
     try {
@@ -208,7 +231,11 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
           </>
         )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+      <div
+        ref={scrollHostRef}
+        onScroll={(e) => setScrollY((e.currentTarget as HTMLDivElement).scrollTop)}
+        style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}
+      >
         {notFound ? (
           <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
             <div style={{ fontSize: 15, marginBottom: 8, color: "var(--text-primary)" }}>Page not found</div>
