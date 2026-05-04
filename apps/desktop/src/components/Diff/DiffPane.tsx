@@ -64,13 +64,14 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
     })();
     return () => {
       cancelled = true;
-      editorRef.current?.dispose();
+      const editor = editorRef.current;
+      const models = modelsRef.current;
       editorRef.current = null;
-      if (modelsRef.current) {
-        modelsRef.current.left?.dispose();
-        modelsRef.current.right?.dispose();
-        modelsRef.current = null;
-      }
+      modelsRef.current = null;
+      editor?.setModel(null);
+      editor?.dispose();
+      models?.left?.dispose();
+      models?.right?.dispose();
     };
   }, []);
 
@@ -95,15 +96,14 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
         const monaco = monacoRef.current;
         const editor = editorRef.current;
         if (!monaco || !editor) return;
-        if (modelsRef.current) {
-          modelsRef.current.left?.dispose();
-          modelsRef.current.right?.dispose();
-        }
         const language = languageForPath(spec.path) ?? "plaintext";
         const left = monaco.editor.createModel(leftResult.content ?? "", language);
         const right = monaco.editor.createModel(rightResult.content ?? "", language);
+        const previous = modelsRef.current;
         editor.setModel({ original: left, modified: right });
         modelsRef.current = { left, right };
+        previous?.left?.dispose();
+        previous?.right?.dispose();
         setError(null);
         if (spec.revealLine && spec.revealLine > 0) {
           // Reveal on the modified (right) editor, which is what the
