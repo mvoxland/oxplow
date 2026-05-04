@@ -126,7 +126,12 @@ const tab: React.CSSProperties = {
   padding: "4px 10px",
   background: "transparent",
   color: "var(--text-muted)",
-  border: "1px solid var(--border-subtle)",
+  // Split into longhand so the active variant can swap borderColor
+  // without React warning about shorthand/non-shorthand mixing on
+  // rerender.
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "var(--border-subtle)",
   borderRadius: 4,
   cursor: "pointer",
   fontSize: 12,
