@@ -1520,6 +1520,27 @@ export function App() {
       if (prev.some((tab) => tab.id === id)) return prev;
       return [...prev, { id, spec: request }];
     });
+    // Diff tabs live in threadPageTabs as the primary track now —
+    // they participate in per-tab back/forward and share the same
+    // chrome as every other page kind. The legacy `diffTabs` array
+    // is just a spec registry indexed by id.
+    if (selectedThreadId) {
+      const ref: TabRef = {
+        id,
+        kind: "diff",
+        payload: {
+          path: request.path,
+          fromRef: request.leftRef,
+          toRef: request.rightKind === "working" ? null : request.rightKind.ref,
+          labelOverride: request.labelOverride ?? null,
+        },
+      };
+      setThreadPageTabs((prev) => {
+        const existing = prev[selectedThreadId] ?? [];
+        if (existing.some((t) => t.id === id)) return prev;
+        return { ...prev, [selectedThreadId]: [...existing, ref] };
+      });
+    }
     setCenterActive(id);
   };
 
@@ -1531,7 +1552,11 @@ export function App() {
       setError(`Clipboard read failed: ${String(err)}`);
       return;
     }
-    const id = `diff:clipboard:${Date.now()}:${path}`;
+    // Use a deterministic id with a timestamp so each compare-with-
+    // clipboard session is its own tab; route through handleOpenDiff
+    // so the spec lands in both the diffTabs registry and the
+    // unified page-tab list.
+    const ts = Date.now();
     const spec: DiffSpec = {
       path,
       leftRef: "",
@@ -1539,10 +1564,9 @@ export function App() {
       baseLabel: "clipboard",
       leftContent: selection,
       rightContent: clipboard,
-      labelOverride: "selection vs clipboard",
+      labelOverride: `selection vs clipboard (${ts})`,
     };
-    setDiffTabs((prev) => [...prev, { id, spec }]);
-    setCenterActive(id);
+    handleOpenDiff(spec);
   };
 
   const handleRevealCommit = (sha: string) => {
@@ -1570,7 +1594,9 @@ export function App() {
 
   const closeDiffTab = (id: string) => {
     setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
-    setCenterActive((current) => (current === id ? "agent" : current));
+    // Diffs live in threadPageTabs now — close from the unified list
+    // too. closePageTab handles centerActive snap-back.
+    closePageTab(id);
   };
 
 
@@ -2106,40 +2132,13 @@ export function App() {
       });
     }
     // The unified-chrome wrap loop below applies to every tab pushed
-    // after this index — diffs, all per-thread page tabs (notes, files-
-    // index, work items, etc.). Only the agent at index 0 is excluded.
+    // after this index — every per-thread page tab (notes, files,
+    // diffs, work items, etc.). Only the agent at index 0 is excluded.
+    // Diffs live in `threadPageTabs` like every other page kind; the
+    // standalone diffTabs array is just the spec registry indexed by
+    // id, looked up by the diff render branch below.
     const pageTabStartIdx = tabs.length;
     const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-    // Diffs that have been navigated to in-tab live in
-    // `threadPageTabs` (so back/forward works); render them in the
-    // page-tab loop below. Standalone diffs (e.g. compare-with-
-    // clipboard) still go through this loop.
-    const diffIdsInPageTabs = new Set<string>();
-    for (const ref of pageTabsForThread) {
-      if (ref.kind === "diff") diffIdsInPageTabs.add(ref.id);
-    }
-    for (const diff of diffTabs) {
-      if (diffIdsInPageTabs.has(diff.id)) continue;
-      const label = diff.spec.path.split("/").pop() ?? diff.spec.path;
-      const suffix = diff.spec.labelOverride ?? "diff";
-      tabs.push({
-        id: diff.id,
-        label: `${label} (${suffix})`,
-        closable: true,
-        reorderGroup: "diff",
-        render: () => stream ? (
-          <DiffPage
-            stream={stream}
-            spec={diff.spec}
-            visible={effectiveCenterActive === diff.id}
-            onJumpToSource={(path) => {
-              void handleOpenFile(path);
-              closeDiffTab(diff.id);
-            }}
-          />
-        ) : null,
-      });
-    }
     for (const ref of pageTabsForThread) {
       // Default for any in-page navigation: replace the current page in this
       // tab (browser-style). Cmd/Ctrl/middle/right-click in RouteLink and
