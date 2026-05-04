@@ -416,12 +416,43 @@ derives `centerActive` from it. `setCenterActive` writes to the map for
 the currently selected thread. Switching threads automatically restores
 each thread's last active tab.
 
-Note tabs are now per-thread (they live in `threadPageTabs` like every
-other page kind, so opening or closing a note in one thread doesn't
-leak into another). File and diff tab lists are still stream-scoped
-(`fileSessions[stream.id]`, `diffTabs`) — file content/dirty
-intentionally crosses threads within a stream; per-thread file tabs
-remain a future refactor.
+## Unified tab list — every tab holds a Page
+
+Every per-thread tab lives in `threadPageTabs[threadId]` as a
+`TabRef`, regardless of kind (`note`, `file`, `diff`, `work-item`,
+`change-analysis`, `git-commit`, etc.). The page-tab loop in
+`centerTabs` builds the renderer by switching on `ref.kind` and
+wrapping each tab in a `PageNavigationContext` so in-tab navigation,
+back/forward, sibling navigation, and bookmark/backlinks all work
+the same way.
+
+- `fileSessions[stream.id]` is now a **content + dirty-state cache**
+  only. Tab membership / order is driven by `threadPageTabs`.
+  `handleOpenFile` populates fileSessions and pushes a `kind: "file"`
+  ref into `threadPageTabs` for the active thread.
+- `diffTabs` is now a **spec registry indexed by id**. `handleOpenDiff`
+  registers the spec and pushes a `kind: "diff"` ref into
+  `threadPageTabs`. The page-tab renderer's `ref.kind === "diff"`
+  branch looks up the spec from `diffTabs` to render `DiffPage`.
+- `closePageTab` is the unified close path; it removes the ref from
+  `threadPageTabs`, drops history + page-title state, and (for
+  file tabs) closes the entry in `fileSessions`.
+- The agent tab is the only special-case at the centerTabs level —
+  it sits at slot 0, is `closable: false`, and uses `AgentPage`
+  (`apps/desktop/src/pages/AgentPage.tsx`) which wraps `TerminalPane`
+  inside `Page` chrome configured with `showNavBar={false}` and
+  `showHeader={false}`. A future cleanup may move the agent ref into
+  `threadPageTabs` too; today centerTabs prepends it deterministically.
+
+This is the architectural rule for new tab kinds: add a `PageKind`,
+add a `pageRefs.ts` helper, render through `Page`, and dispatch in
+the `centerTabs` page-tab loop. **Don't** add a parallel tab track.
+
+Files were stream-scoped historically; lifting them into the
+per-thread list means each thread has its own open-file list within
+a stream. The file content + dirty state continues to be shared
+across threads via fileSessions, so closing a file in one thread
+doesn't lose unsaved edits if it's still open in another.
 
 ## When to update this doc
 

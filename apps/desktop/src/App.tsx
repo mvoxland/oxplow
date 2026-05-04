@@ -464,6 +464,18 @@ export function App() {
         : setOpenFileLoading(openFileInSession(base, path, "", true), path, true);
       return { ...prev, [stream.id]: enforceOpenFileLimit(opened, MAX_OPEN_FILE_TABS) };
     });
+    // File tabs participate in the unified per-thread page tab list
+    // so they share the same chrome and back/forward substrate as
+    // every other page kind. fileSessions still owns the file content
+    // + dirty state; threadPageTabs owns the tab membership.
+    if (selectedThreadId) {
+      const ref = fileRef(path);
+      setThreadPageTabs((prev) => {
+        const existing = prev[selectedThreadId] ?? [];
+        if (existing.some((t) => t.id === ref.id)) return prev;
+        return { ...prev, [selectedThreadId]: [...existing, ref] };
+      });
+    }
     setCenterActive(`file:${path}`);
     setError(null);
     void recordUsage({
@@ -2036,6 +2048,18 @@ export function App() {
 
   const closePageTab = useCallback((id: string) => {
     if (!selectedThreadId) return;
+    // File tabs live in fileSessions for content + dirty state; close
+    // their content cache too when the tab closes from the unified
+    // list so we don't leak buffers. Stream-scoped because the
+    // session map is keyed by stream.
+    if (id.startsWith("file:") && stream) {
+      const path = id.slice("file:".length);
+      setFileSessions((prev) => {
+        const session = prev[stream.id];
+        if (!session || !session.files[path]) return prev;
+        return { ...prev, [stream.id]: closeOpenFile(session, path) };
+      });
+    }
     setThreadPageTabs((prev) => {
       const existing = prev[selectedThreadId] ?? [];
       if (!existing.some((t) => t.id === id)) return prev;
@@ -2053,7 +2077,7 @@ export function App() {
       return rest;
     });
     setCenterActive((current) => (current === id ? "agent" : current));
-  }, [selectedThreadId, setCenterActive]);
+  }, [selectedThreadId, setCenterActive, stream]);
 
   // Keep the forward ref in sync with the latest handleOpenPage. Used by
   // commandHandlers (declared above handleOpenPage) so menu/keyboard
@@ -2087,50 +2111,10 @@ export function App() {
         ),
       },
     ];
-    // Files that already appear as a page-tab (because the user
-    // clicked through from a file-list page) are rendered inside that
-    // page-tab slot — skip them here so the chrome doesn't show two
-    // tabs with the same `file:${path}` id.
-    const pageTabFilePaths = new Set<string>();
-    if (selectedThreadId) {
-      for (const ref of threadPageTabs[selectedThreadId] ?? []) {
-        if (ref.kind === "file") {
-          const p = (ref.payload as { path?: string } | null)?.path;
-          if (p) pageTabFilePaths.add(p);
-        }
-      }
-    }
-    for (const path of currentSession.openOrder) {
-      if (pageTabFilePaths.has(path)) continue;
-      const basename = path.split("/").pop() ?? path;
-      const file = currentSession.files[path];
-      const dirty = !!file && file.draftContent !== file.savedContent;
-      tabs.push({
-        id: `file:${path}`,
-        label: `${dirty ? "● " : ""}${basename}`,
-        closable: true,
-        reorderGroup: "file",
-        render: () => stream ? (
-          <FilePage
-            dirty={dirty}
-            stream={stream}
-            filePath={path}
-            value={file?.draftContent ?? ""}
-            isDirty={dirty}
-            onChange={handleEditorChange}
-            onSave={() => { void handleEditorSave(); }}
-            findRequest={editorFindRequest}
-            navigationTarget={editorNavigationTarget?.path === path ? editorNavigationTarget : null}
-            onNavigateToLocation={handleNavigateToLocation}
-            openFileOrder={currentSession.openOrder}
-            openFiles={currentSession.files}
-            onRevealCommit={handleRevealCommit}
-            onRevealWorkItem={handleRequestEditWorkItem}
-            onCompareWithClipboard={handleCompareWithClipboard}
-          />
-        ) : null,
-      });
-    }
+    // File tabs live in `threadPageTabs` like every other page kind;
+    // the page-tab loop's `ref.kind === "file"` branch handles the
+    // render. fileSessions owns the file content + dirty state, but
+    // tab membership and order are driven by the unified list.
     // The unified-chrome wrap loop below applies to every tab pushed
     // after this index — every per-thread page tab (notes, files,
     // diffs, work items, etc.). Only the agent at index 0 is excluded.
