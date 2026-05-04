@@ -596,15 +596,30 @@ What persists:
   `oxplow.layout.v1.fileSessions` blob; loads file content on first
   stream activation).
 
-What does NOT persist (yet):
-- Per-page state — scroll position, expanded tree nodes, draft text,
-  view-toggle selections. Pages mount fresh after restart. The
-  follow-up `usePageSnapshot` layer will rehydrate this; see the
-  "Restore tabs + per-page state across restart" epic.
-- The `display:none` mounted-stack approach used for in-session
-  back/forward (perfect fidelity, free) cannot survive a restart —
-  no DOM, no React state. Snapshots are the only path forward for
-  cross-restart fidelity.
+Per-page state via `usePageSnapshot`:
+
+Pages opt in via `usePageSnapshot<T>({ serialize, restore, deps })`
+(see `apps/desktop/src/tabs/usePageSnapshot.ts`). On mount the hook
+reads any saved blob keyed by the page's `pageKey` from
+`PageNavigationContext` (`${threadId}::${tabId}`) and calls
+`restore`. On each `deps` change it serializes and writes.
+`closePageTab` clears the snapshot row so closed tabs don't leak.
+
+Adopted pages (Phase 3):
+- `ChangeAnalysisDrilldown` — view toggle (Semantic / File list) +
+  status filter (All / Added / Modified / Deleted).
+- `WikiPageTab` — body scroll position. Reapplied when the body
+  re-renders so brief layout shifts during markdown load don't
+  reset the scroll.
+- `EditorPane` — Monaco view-state (cursor, scroll, folds,
+  selection) via `editor.saveViewState()` / `restoreViewState()`.
+  If a snapshot arrives before the editor mounts, the hook stashes
+  it in a ref and the post-mount block applies it.
+
+Other pages mount fresh after restart. The `display:none`
+mounted-stack approach used for in-session back/forward (perfect
+fidelity, free) cannot survive a restart — no DOM, no React state.
+Snapshots are the only path for cross-restart fidelity.
 
 ## Known follow-ups + invariants
 
