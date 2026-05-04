@@ -171,29 +171,91 @@ function emptyRaw(label: string, kind: RawNode["kind"], filePath: string | null,
   return { label, kind, filePath, dirPath, children: new Map(), rows: [] };
 }
 
+interface PathSegment {
+  label: string;
+  /** Filesystem path the segment represents — used for drill (dir
+   *  scope or file open). For "dir"-kind intermediate segments this
+   *  is the directory; for "file"-kind leaves this is the file. */
+  refPath: string;
+  kind: "dir" | "file";
+}
+
+/**
+ * Compute the grouping segments for a file path. For Rust files
+ * inside `crates/<crate-name>/src/...`, this returns the crate +
+ * module path (e.g. `[oxplow_app, services, stream]`) so the
+ * semantic tree groups by language-level structure rather than
+ * filesystem layout. Falls back to filesystem segments for every
+ * other file.
+ */
+function pathSegments(filePath: string): PathSegment[] {
+  if (filePath.endsWith(".rs")) {
+    const rust = rustGroupingSegments(filePath);
+    if (rust) return rust;
+  }
+  const parts = filePath.split("/");
+  const out: PathSegment[] = [];
+  let cum = "";
+  for (let i = 0; i < parts.length - 1; i++) {
+    const p = parts[i]!;
+    cum = cum ? `${cum}/${p}` : p;
+    out.push({ label: p, refPath: cum, kind: "dir" });
+  }
+  out.push({ label: parts[parts.length - 1] ?? filePath, refPath: filePath, kind: "file" });
+  return out;
+}
+
+function rustGroupingSegments(filePath: string): PathSegment[] | null {
+  const m = /^crates\/([^/]+)\/src\/(.*)$/.exec(filePath);
+  if (!m) return null;
+  const crateDir = m[1]!;
+  const rest = m[2]!;
+  const crateName = crateDir.replace(/-/g, "_");
+  const restNoExt = rest.replace(/\.rs$/, "");
+  // lib.rs / main.rs are the crate root — the file IS the crate.
+  if (restNoExt === "lib" || restNoExt === "main") {
+    return [{ label: crateName, refPath: filePath, kind: "file" }];
+  }
+  let modParts = restNoExt.split("/");
+  // `foo/mod.rs` is the `foo` module — drop the trailing `mod` so
+  // the leaf is the parent directory's name.
+  if (modParts[modParts.length - 1] === "mod") modParts = modParts.slice(0, -1);
+  if (modParts.length === 0) {
+    return [{ label: crateName, refPath: filePath, kind: "file" }];
+  }
+  const segs: PathSegment[] = [];
+  segs.push({ label: crateName, refPath: `crates/${crateDir}`, kind: "dir" });
+  let cum = `crates/${crateDir}/src`;
+  for (let i = 0; i < modParts.length - 1; i++) {
+    const p = modParts[i]!;
+    cum = `${cum}/${p}`;
+    segs.push({ label: p, refPath: cum, kind: "dir" });
+  }
+  // Deepest segment = the file itself.
+  segs.push({ label: modParts[modParts.length - 1] ?? "", refPath: filePath, kind: "file" });
+  return segs;
+}
+
 function buildRawTree(rows: RowEntry[]): RawNode {
   const root = emptyRaw("", "dir", null, "");
   for (const row of rows) {
-    const segments = row.path.split("/");
-    const dirSegments = segments.slice(0, -1);
-    const fileSegment = segments[segments.length - 1] ?? row.path;
+    const segs = pathSegments(row.path);
     let cursor = root;
-    let cursorDirPath = "";
-    for (const seg of dirSegments) {
-      let next = cursor.children.get(seg);
-      const childDirPath = cursorDirPath ? `${cursorDirPath}/${seg}` : seg;
+    let fileNode: RawNode | null = null;
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i]!;
+      const isLast = i === segs.length - 1;
+      let next = cursor.children.get(seg.label);
       if (!next) {
-        next = emptyRaw(seg, "dir", null, childDirPath);
-        cursor.children.set(seg, next);
+        next = isLast
+          ? emptyRaw(seg.label, "file", row.path)
+          : emptyRaw(seg.label, "dir", null, seg.refPath);
+        cursor.children.set(seg.label, next);
       }
       cursor = next;
-      cursorDirPath = childDirPath;
+      if (isLast) fileNode = next;
     }
-    let fileNode = cursor.children.get(fileSegment);
-    if (!fileNode) {
-      fileNode = emptyRaw(fileSegment, "file", row.path);
-      cursor.children.set(fileSegment, fileNode);
-    }
+    if (!fileNode) continue;
     let containerCursor = fileNode;
     for (const seg of row.containerPath) {
       let next = containerCursor.children.get(seg);
