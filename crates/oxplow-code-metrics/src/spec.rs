@@ -63,6 +63,28 @@ impl Language {
             Language::Cpp => &CPP,
         }
     }
+
+    /// Convenience for callers (e.g. `oxplow-code-dup`) that need the
+    /// raw tree-sitter grammar without going through `LanguageSpec`.
+    pub fn tree_sitter_language(&self) -> TsLanguage {
+        self.spec().tree_sitter_language()
+    }
+
+    /// Stable u8 tag used as a hash salt so cross-language token
+    /// streams can never collide.
+    pub fn tag(&self) -> u8 {
+        match self {
+            Language::Rust => 1,
+            Language::TypeScript => 2,
+            Language::Tsx => 3,
+            Language::JavaScript => 4,
+            Language::Python => 5,
+            Language::Go => 6,
+            Language::Java => 7,
+            Language::C => 8,
+            Language::Cpp => 9,
+        }
+    }
 }
 
 /// Cheap path-extension check.

@@ -3,13 +3,15 @@
 //! Identifiers and literals are folded to placeholder kinds (`ID`,
 //! `NUM`, `STR`) so renames and constant tweaks don't break clone
 //! matches. Everything else uses the tree-sitter `node.kind()` string
-//! as the token name. Comments are skipped entirely.
+//! (which is `&'static str`) as the token kind. Comments are skipped.
 
 use tree_sitter::Node;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Token {
-    pub kind: String,
+    /// The normalized AST node kind. Borrows from tree-sitter's
+    /// static grammar tables — no allocation per leaf.
+    pub kind: &'static str,
     pub start_line: u32,
     pub end_line: u32,
 }
@@ -24,15 +26,12 @@ pub fn tokenize_source(root: Node<'_>) -> Vec<Token> {
 fn walk(cursor: &mut tree_sitter::TreeCursor<'_>, out: &mut Vec<Token>) {
     let node = cursor.node();
     let kind = node.kind();
-    // Skip comment nodes whatever their grammar names them.
-    if kind.contains("comment") {
+    if is_comment_kind(kind) {
         return;
     }
     if node.child_count() == 0 {
-        // Leaf node — emit one normalized token.
-        let normalized = normalize_kind(kind).to_string();
         out.push(Token {
-            kind: normalized,
+            kind: normalize_kind(kind),
             start_line: node.start_position().row as u32 + 1,
             end_line: node.end_position().row as u32 + 1,
         });
@@ -49,29 +48,75 @@ fn walk(cursor: &mut tree_sitter::TreeCursor<'_>, out: &mut Vec<Token>) {
     }
 }
 
-fn normalize_kind(kind: &str) -> &str {
-    // Coarse buckets — enough to trip on renames + literal swaps but
-    // keep structural punctuation distinct.
-    if kind == "identifier"
-        || kind == "type_identifier"
-        || kind == "field_identifier"
-        || kind == "property_identifier"
-        || kind == "shorthand_property_identifier"
-        || kind == "shorthand_property_identifier_pattern"
-        || kind == "primitive_type"
-    {
+/// Exact-match comment node kinds across our 9 grammars. Substring
+/// matching on "comment" was fragile (would catch any future node
+/// like `commenter`).
+fn is_comment_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "comment" | "line_comment" | "block_comment" | "doc_comment"
+    )
+}
+
+/// Coarse token-kind buckets — enough to trip on renames + literal
+/// swaps but keep structural punctuation distinct. Uses an
+/// exact-match list per category instead of substring containment.
+fn normalize_kind(kind: &str) -> &'static str {
+    if matches!(
+        kind,
+        "identifier"
+            | "type_identifier"
+            | "field_identifier"
+            | "property_identifier"
+            | "shorthand_property_identifier"
+            | "shorthand_property_identifier_pattern"
+            | "primitive_type"
+            | "scoped_identifier"
+            | "scoped_type_identifier"
+    ) {
         return "ID";
     }
-    if kind.contains("integer")
-        || kind.contains("float")
-        || kind == "number"
-        || kind == "decimal_integer_literal"
-        || kind == "hex_integer_literal"
-    {
+    if matches!(
+        kind,
+        "integer_literal"
+            | "decimal_integer_literal"
+            | "hex_integer_literal"
+            | "octal_integer_literal"
+            | "binary_integer_literal"
+            | "float_literal"
+            | "decimal_floating_point_literal"
+            | "hex_floating_point_literal"
+            | "number"
+            | "integer"
+            | "float"
+    ) {
         return "NUM";
     }
-    if kind.contains("string") || kind == "raw_string_literal" || kind == "char_literal" {
+    if matches!(
+        kind,
+        "string_literal"
+            | "raw_string_literal"
+            | "char_literal"
+            | "string"
+            | "string_fragment"
+            | "interpreted_string_literal"
+            | "raw_string_fragment"
+    ) {
         return "STR";
     }
-    kind
+    // Promote the tree-sitter `&'static str` to our return slot. No
+    // allocation — `Node::kind()` is documented to return `'static`.
+    static_str(kind)
+}
+
+/// Helper: tree-sitter's `Node::kind()` returns `&'static str`, but
+/// the borrow checker can't prove that through a function boundary.
+/// This intermediate lets us return `&'static` without unsafe.
+#[inline]
+fn static_str(s: &str) -> &'static str {
+    // SAFETY: `Node::kind()` always returns a `&'static str` produced
+    // by the tree-sitter C grammar tables. The `&str` we receive here
+    // is one of those static strings; only the lifetime annotation is
+    // narrower. Re-extending it back to `'static` is sound.
+    unsafe { std::mem::transmute::<&str, &'static str>(s) }
 }

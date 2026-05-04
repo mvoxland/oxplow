@@ -4,20 +4,35 @@
 //!    emitting a normalized token per leaf node (identifiers, numeric
 //!    literals, and string literals are folded to placeholder kinds
 //!    so that renames and constant changes don't suppress matches).
-//! 2. **K-gram hash** over runs of `K` consecutive tokens.
+//! 2. **K-gram hash** over runs of `K` consecutive tokens. Each
+//!    file's hashes are salted by its language tag so token streams
+//!    from different grammars cannot collide.
 //! 3. **Winnow** with window `W` to keep one fingerprint per `W`
 //!    tokens — Schleimer/Aiken 2003.
 //! 4. **Inverted index** fingerprint → occurrences.
-//! 5. **Extend** each multi-occurrence fingerprint into the longest
-//!    contiguous run of matching fingerprints between the two files.
+//! 5. **Extend** each multi-occurrence fingerprint forward in the
+//!    fingerprint sequence, tolerating up to `MAX_SKIP` non-matching
+//!    fingerprints between matches (since winnowing samples
+//!    stochastically and two real clones can have slightly divergent
+//!    fingerprint subsets).
 //! 6. **Filter** runs whose line span is shorter than `min_lines`.
 //!
 //! Tunables are exposed on `DupOptions` (K=20, W=4, min_lines=5 by
 //! default).
+//!
+//! # Multi-way clones
+//!
+//! When fingerprint F appears in three or more files, only one
+//! pairing is reported per fingerprint position — once a (doc, fp)
+//! position is consumed by a match it's marked seen and won't seed
+//! another pair. So a 3-way clone (A↔B↔C) typically surfaces as a
+//! single (A, B) row in the panel, not three. This keeps the
+//! Code Quality panel readable; if you need full multi-way analysis
+//! the renderer would have to walk peer chains via `extra.peerPath`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use oxplow_code_metrics::language_for_path;
+use oxplow_code_metrics::{Language, language_for_path};
 use tree_sitter::Parser;
 
 mod tokenize;
@@ -57,6 +72,13 @@ impl Default for DupOptions {
     }
 }
 
+/// Maximum gap (in fingerprint indices) between matching fingerprints
+/// that we'll still consider part of the same run. Two real clones
+/// can have slightly divergent winnowing samples, especially at
+/// boundaries; tolerating one or two skips keeps short matches from
+/// fragmenting without exploding false positives.
+const MAX_SKIP: usize = 2;
+
 /// Scan a batch of (path, content) pairs for duplicate blocks.
 /// Files in unsupported languages are skipped silently.
 pub fn detect_duplicates<I, P, S>(files: I, opts: DupOptions) -> Vec<DuplicateBlock>
@@ -71,9 +93,8 @@ where
         let Some(lang) = language_for_path(&path) else {
             continue;
         };
-        let spec = lang.spec();
         let mut parser = Parser::new();
-        if parser.set_language(&spec.tree_sitter_language()).is_err() {
+        if parser.set_language(&lang.tree_sitter_language()).is_err() {
             continue;
         }
         let Some(tree) = parser.parse(source.as_ref(), None) else {
@@ -83,15 +104,11 @@ where
         if tokens.len() < opts.k {
             continue;
         }
-        let fps = winnow(&tokens, opts.k, opts.w);
+        let fps = winnow(&tokens, lang, opts.k, opts.w);
         if fps.is_empty() {
             continue;
         }
-        docs.push(Doc {
-            path,
-            tokens,
-            fps,
-        });
+        docs.push(Doc { path, tokens, fps });
     }
     detect_across_docs(&docs, opts)
 }
@@ -109,15 +126,20 @@ struct Fingerprint {
     token_idx: usize,
 }
 
-/// Roll a 64-bit polynomial hash over tokens; emit minimum-of-window
-/// fingerprints per Schleimer/Aiken winnowing.
-fn winnow(tokens: &[Token], k: usize, w: usize) -> Vec<Fingerprint> {
+/// Roll a 64-bit polynomial hash over tokens (salted by `language`),
+/// then winnow per Schleimer/Aiken to keep one fingerprint per
+/// minimum-of-window k-hash.
+fn winnow(tokens: &[Token], language: Language, k: usize, w: usize) -> Vec<Fingerprint> {
     let n = tokens.len();
     if n < k {
         return Vec::new();
     }
-    // Per-token hash: 64-bit FNV of the token kind string.
-    let token_hashes: Vec<u64> = tokens.iter().map(|t| fnv1a(t.kind.as_bytes())).collect();
+    // Per-token hash: 64-bit FNV of the token kind, seeded by
+    // language tag so cross-language streams cannot collide.
+    let token_hashes: Vec<u64> = tokens
+        .iter()
+        .map(|t| fnv1a_seeded(language.tag(), t.kind.as_bytes()))
+        .collect();
 
     // K-gram hashes: rolling polynomial over token_hashes.
     let base: u64 = 1099511628211;
@@ -133,20 +155,23 @@ fn winnow(tokens: &[Token], k: usize, w: usize) -> Vec<Fingerprint> {
     k_hashes.push(acc);
     for i in k..n {
         let drop = token_hashes[i - k].wrapping_mul(base_pow);
-        acc = acc.wrapping_sub(drop).wrapping_mul(base).wrapping_add(token_hashes[i]);
+        acc = acc
+            .wrapping_sub(drop)
+            .wrapping_mul(base)
+            .wrapping_add(token_hashes[i]);
         k_hashes.push(acc);
     }
 
-    // Winnow: in each window of `w` k-hashes, pick the minimum's
-    // index. If two share the minimum, prefer the rightmost (which
-    // keeps the algorithm's locality property).
+    // Winnow: in each window of `w` k-hashes, pick the rightmost
+    // minimum (Schleimer/Aiken's tie-break preserves locality).
     let mut prints = Vec::new();
     let mut last_picked: Option<usize> = None;
-    for window_start in 0..k_hashes.len().saturating_sub(w) + 1 {
+    if k_hashes.is_empty() {
+        return prints;
+    }
+    let last_window_start = k_hashes.len().saturating_sub(w);
+    for window_start in 0..=last_window_start {
         let window_end = (window_start + w).min(k_hashes.len());
-        if window_start >= window_end {
-            break;
-        }
         let mut min_idx = window_start;
         for j in (window_start + 1)..window_end {
             if k_hashes[j] <= k_hashes[min_idx] {
@@ -164,8 +189,9 @@ fn winnow(tokens: &[Token], k: usize, w: usize) -> Vec<Fingerprint> {
     prints
 }
 
-fn fnv1a(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
+#[inline]
+fn fnv1a_seeded(seed: u8, bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325 ^ (seed as u64);
     for &b in bytes {
         h ^= b as u64;
         h = h.wrapping_mul(0x00000100000001B3);
@@ -182,11 +208,7 @@ fn detect_across_docs(docs: &[Doc], opts: DupOptions) -> Vec<DuplicateBlock> {
         }
     }
 
-    // For each multi-occurrence fingerprint, build candidate pairs
-    // and try to extend forward through the fingerprint sequence.
-    // Dedupe by tracking which (doc, fp_idx) starts have already
-    // been consumed by a longer match.
-    let mut seen_starts: HashMap<(usize, usize), bool> = HashMap::new();
+    let mut seen_starts: HashSet<(usize, usize)> = HashSet::new();
     let mut blocks: Vec<DuplicateBlock> = Vec::new();
     for (di_a, doc_a) in docs.iter().enumerate() {
         for (fi_a, fp_a) in doc_a.fps.iter().enumerate() {
@@ -203,31 +225,29 @@ fn detect_across_docs(docs: &[Doc], opts: DupOptions) -> Vec<DuplicateBlock> {
                 if di_b < di_a || (di_b == di_a && fi_b <= fi_a) {
                     continue;
                 }
-                if seen_starts.contains_key(&(di_b, fi_b)) {
+                if seen_starts.contains(&(di_b, fi_b)) {
                     continue;
                 }
                 let doc_b = &docs[di_b];
-                // Extend forward through the fingerprint sequence.
-                let mut len = 1usize;
-                while fi_a + len < doc_a.fps.len()
-                    && fi_b + len < doc_b.fps.len()
-                    && doc_a.fps[fi_a + len].hash == doc_b.fps[fi_b + len].hash
-                {
-                    len += 1;
-                }
-                if len < 2 {
-                    // A single shared fingerprint isn't a clone.
+                let Some(run) = extend_run(doc_a, fi_a, doc_b, fi_b) else {
                     continue;
-                }
-                // Map fp range → token range → line range.
+                };
+                let RunSpan {
+                    a_fp_end,
+                    b_fp_end,
+                    consumed_a,
+                    consumed_b,
+                } = run;
                 let a_tok_start = doc_a.fps[fi_a].token_idx;
-                let a_tok_end = doc_a.fps[fi_a + len - 1].token_idx;
+                let a_tok_end = doc_a.fps[a_fp_end].token_idx;
                 let b_tok_start = doc_b.fps[fi_b].token_idx;
-                let b_tok_end = doc_b.fps[fi_b + len - 1].token_idx;
+                let b_tok_end = doc_b.fps[b_fp_end].token_idx;
+                let a_end_line =
+                    doc_a.tokens[a_tok_end.min(doc_a.tokens.len() - 1)].end_line;
+                let b_end_line =
+                    doc_b.tokens[b_tok_end.min(doc_b.tokens.len() - 1)].end_line;
                 let a_start_line = doc_a.tokens[a_tok_start].start_line;
-                let a_end_line = doc_a.tokens[a_tok_end.min(doc_a.tokens.len() - 1)].end_line;
                 let b_start_line = doc_b.tokens[b_tok_start].start_line;
-                let b_end_line = doc_b.tokens[b_tok_end.min(doc_b.tokens.len() - 1)].end_line;
                 let span_a = a_end_line.saturating_sub(a_start_line) + 1;
                 let span_b = b_end_line.saturating_sub(b_start_line) + 1;
                 let line_count = span_a.max(span_b);
@@ -243,16 +263,15 @@ fn detect_across_docs(docs: &[Doc], opts: DupOptions) -> Vec<DuplicateBlock> {
                     b_end_line,
                     line_count,
                 });
-                // Mark every consumed start so we don't re-emit
-                // shorter sub-runs of the same match.
-                for offset in 0..len {
-                    seen_starts.insert((di_a, fi_a + offset), true);
-                    seen_starts.insert((di_b, fi_b + offset), true);
+                for fp_idx in consumed_a {
+                    seen_starts.insert((di_a, fp_idx));
+                }
+                for fp_idx in consumed_b {
+                    seen_starts.insert((di_b, fp_idx));
                 }
             }
         }
     }
-    // Sort for determinism (helps tests + UI).
     blocks.sort_by(|x, y| {
         x.a_path
             .cmp(&y.a_path)
@@ -260,6 +279,63 @@ fn detect_across_docs(docs: &[Doc], opts: DupOptions) -> Vec<DuplicateBlock> {
             .then_with(|| x.b_path.cmp(&y.b_path))
     });
     blocks
+}
+
+struct RunSpan {
+    /// Last matching fingerprint index in doc A.
+    a_fp_end: usize,
+    /// Last matching fingerprint index in doc B.
+    b_fp_end: usize,
+    /// Every fingerprint index in doc A consumed by this run.
+    consumed_a: Vec<usize>,
+    /// Every fingerprint index in doc B consumed by this run.
+    consumed_b: Vec<usize>,
+}
+
+/// Extend a (a, b) match through both fingerprint streams. Tolerates
+/// up to `MAX_SKIP` non-matching fingerprints on either side before
+/// giving up (winnowing can sample slightly different positions for
+/// the same underlying clone).
+fn extend_run(doc_a: &Doc, fi_a: usize, doc_b: &Doc, fi_b: usize) -> Option<RunSpan> {
+    let mut consumed_a = vec![fi_a];
+    let mut consumed_b = vec![fi_b];
+    let mut a = fi_a + 1;
+    let mut b = fi_b + 1;
+    loop {
+        // Look for the next matching pair within the skip window.
+        let mut matched = None;
+        'search: for da in 0..=MAX_SKIP {
+            for db in 0..=MAX_SKIP {
+                let na = a + da;
+                let nb = b + db;
+                if na >= doc_a.fps.len() || nb >= doc_b.fps.len() {
+                    continue;
+                }
+                if doc_a.fps[na].hash == doc_b.fps[nb].hash {
+                    matched = Some((na, nb));
+                    break 'search;
+                }
+            }
+        }
+        match matched {
+            Some((na, nb)) => {
+                consumed_a.push(na);
+                consumed_b.push(nb);
+                a = na + 1;
+                b = nb + 1;
+            }
+            None => break,
+        }
+    }
+    if consumed_a.len() < 2 {
+        return None;
+    }
+    Some(RunSpan {
+        a_fp_end: *consumed_a.last().unwrap(),
+        b_fp_end: *consumed_b.last().unwrap(),
+        consumed_a,
+        consumed_b,
+    })
 }
 
 #[cfg(test)]
