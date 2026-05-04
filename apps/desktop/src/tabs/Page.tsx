@@ -9,6 +9,13 @@ export interface PageNavBarConfig {
   canForward: boolean;
   onBack(): void;
   onForward(): void;
+  siblings?: {
+    prevLabel?: string;
+    nextLabel?: string;
+    onPrev?(): void;
+    onNext?(): void;
+    indicator?: string;
+  };
   bookmark?: {
     scopes: BookmarkScope[];
     onToggleScope(scope: BookmarkScope): void;
@@ -106,6 +113,15 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
     canForward: ctxNav.canGoForward,
     onBack: ctxNav.goBack,
     onForward: ctxNav.goForward,
+    siblings: ctxNav.siblings
+      ? {
+          prevLabel: ctxNav.siblings.entries[ctxNav.siblings.index - 1]?.label,
+          nextLabel: ctxNav.siblings.entries[ctxNav.siblings.index + 1]?.label,
+          onPrev: ctxNav.goPrevSibling,
+          onNext: ctxNav.goNextSibling,
+          indicator: `${ctxNav.siblings.index + 1} of ${ctxNav.siblings.entries.length}`,
+        }
+      : undefined,
     bookmark: ctxNav.bookmark
       ? {
           scopes: ctxNav.bookmark.scopes,
@@ -145,6 +161,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           canForward={effectiveNavBar.canForward}
           onBack={effectiveNavBar.onBack}
           onForward={effectiveNavBar.onForward}
+          siblings={effectiveNavBar.siblings}
           title={effectiveTitle}
           kind={kind}
           bookmark={effectiveNavBar.bookmark}

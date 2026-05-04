@@ -290,6 +290,54 @@ The bookmark toggle and backlinks dropdown affordances on
 `PageNavBar` are scaffolded but currently inert; Phases 2 and 3 wire
 them.
 
+## Sibling navigation (list → page prev/next)
+
+When a page is opened from a list (notes index, file tree, backlinks,
+work-item list, …), `PageNavBar` renders **up/down sibling buttons**
+next to back/forward. They step through the originating list without
+touching back/forward — Back still goes to the page that listed the
+items, never to the previously-viewed sibling.
+
+Mechanics:
+
+- A list registers its rows by passing `siblings: NavSiblings` into
+  `useRouteDispatch(ref, { siblings })`. `NavSiblings` is
+  `{ entries: Array<{ ref, label }>; index: number }`. The `label`
+  shows up in the prev/next button hover tooltip.
+- The dispatcher forwards `siblings` to `PageNavigationContext.navigate`
+  on in-tab navigation only (new-tab escape paths drop it — sibling
+  context is in-tab only).
+- Per-tab history entries (`threadPageHistory`) gained a `siblings`
+  field. `handleNavigateInTab` calls `resolveSiblings` to snap the
+  destination's index against `ref.id`, so a stale list still lands on
+  the right row.
+- `handleStepSibling` swaps the active tab to a sibling at the target
+  index, mutating only `siblings.index` — back/forward stacks are
+  preserved.
+- Back/forward navigation **clears** siblings on the destination
+  entry: the back target predates the list-originated chain.
+- `Page` reads `ctxNav.siblings` and constructs the nav-bar config
+  (`prevLabel` / `nextLabel` from `entries[index ± 1]`, callbacks from
+  `goPrevSibling` / `goNextSibling` which are only set when not at the
+  edge). The `1 of N` indicator renders between the buttons.
+
+Adopted lists (Phase 1 of this feature):
+
+- `tabs/BacklinksList.tsx` — every backlink entry passes its index in
+  the merged list (snapshot/commit slideover entries are excluded).
+- `components/Wiki/WikiPane.tsx` — `NoteRow` (Recently visited /
+  Recently modified sections, each independent) and `SearchRow`
+  (search results) accept a `siblings` prop wired through the
+  pre-computed entries-with-labels.
+- `components/LeftPanel/FileTree.tsx` — `TreeEntries` exposes file-row
+  siblings within each directory level (excluding directories and
+  deleted files).
+
+Future lists adopt by passing `siblings` to `useRouteDispatch` /
+`RouteLink`. Lists that wrap their own click callback (CommitGraphTable,
+WorkGroupList) need to migrate to `useRouteDispatch` first or accept
+a parallel `siblings` prop they forward.
+
 ## Linking between tabs — single chokepoint rule
 
 **Any clickable row that targets another `TabRef` MUST go through
