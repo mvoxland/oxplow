@@ -1,16 +1,89 @@
+/** Maps a file path's extension to a Monaco language id. The set of
+ *  ids matches Monaco's bundled basic-languages registrations — adding
+ *  an entry here is enough to light up syntax highlighting for that
+ *  extension. Falls back to `plaintext` for anything unrecognized. */
 export function languageForPath(path: string | null): string {
   if (!path) return "plaintext";
-  if (path.endsWith(".ts")) return "typescript";
-  if (path.endsWith(".tsx")) return "typescript";
-  if (path.endsWith(".js") || path.endsWith(".jsx") || path.endsWith(".mjs") || path.endsWith(".cjs")) return "javascript";
-  if (path.endsWith(".json")) return "json";
-  if (path.endsWith(".md")) return "markdown";
-  if (path.endsWith(".css")) return "css";
-  if (path.endsWith(".html")) return "html";
-  if (path.endsWith(".yml") || path.endsWith(".yaml")) return "yaml";
-  if (path.endsWith(".sh")) return "shell";
+  const lower = path.toLowerCase();
+  for (const [suffix, id] of EXTENSION_MAP) {
+    if (lower.endsWith(suffix)) return id;
+  }
   return "plaintext";
 }
+
+const EXTENSION_MAP: ReadonlyArray<readonly [string, string]> = [
+  [".tsx", "typescript"],
+  [".ts", "typescript"],
+  [".mts", "typescript"],
+  [".cts", "typescript"],
+  [".jsx", "javascript"],
+  [".mjs", "javascript"],
+  [".cjs", "javascript"],
+  [".js", "javascript"],
+  [".rs", "rust"],
+  [".py", "python"],
+  [".pyi", "python"],
+  [".go", "go"],
+  [".java", "java"],
+  [".kt", "kotlin"],
+  [".kts", "kotlin"],
+  [".scala", "scala"],
+  [".rb", "ruby"],
+  [".php", "php"],
+  [".cs", "csharp"],
+  [".swift", "swift"],
+  [".m", "objective-c"],
+  [".mm", "objective-c"],
+  [".cpp", "cpp"],
+  [".cxx", "cpp"],
+  [".cc", "cpp"],
+  [".hpp", "cpp"],
+  [".hxx", "cpp"],
+  [".hh", "cpp"],
+  [".c", "c"],
+  [".h", "c"],
+  [".sql", "sql"],
+  [".lua", "lua"],
+  [".dart", "dart"],
+  [".r", "r"],
+  [".jl", "julia"],
+  [".clj", "clojure"],
+  [".cljs", "clojure"],
+  [".cljc", "clojure"],
+  [".ex", "elixir"],
+  [".exs", "elixir"],
+  [".erl", "erlang"],
+  [".hs", "haskell"],
+  [".pl", "perl"],
+  [".ps1", "powershell"],
+  [".bat", "bat"],
+  [".cmd", "bat"],
+  [".ini", "ini"],
+  [".toml", "ini"],
+  [".dockerfile", "dockerfile"],
+  [".graphql", "graphql"],
+  [".gql", "graphql"],
+  [".tex", "latex"],
+  [".xml", "xml"],
+  [".svg", "xml"],
+  [".json", "json"],
+  [".jsonc", "json"],
+  [".json5", "json"],
+  [".md", "markdown"],
+  [".markdown", "markdown"],
+  [".css", "css"],
+  [".scss", "scss"],
+  [".less", "less"],
+  [".html", "html"],
+  [".htm", "html"],
+  [".vue", "html"],
+  [".yml", "yaml"],
+  [".yaml", "yaml"],
+  [".sh", "shell"],
+  [".bash", "shell"],
+  [".zsh", "shell"],
+  [".fish", "shell"],
+];
 
 export function isLspCandidateLanguage(languageId: string): boolean {
   return languageId === "typescript" || languageId === "javascript";
