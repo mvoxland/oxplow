@@ -20,6 +20,11 @@ export interface CenterTab {
   /** Tabs that share a `reorderGroup` can be drag-reordered relative to
    *  each other. Tabs without a group are pinned (e.g. the agent tab). */
   reorderGroup?: string;
+  /** When true, this tab does NOT appear in the strip but its body
+   *  still mounts (kept hidden via display:none). Used by the host
+   *  to keep back/forward stack entries alive so navigation between
+   *  them preserves React component state without remounting. */
+  hidden?: boolean;
 }
 
 interface CenterTabsProps {
@@ -36,7 +41,8 @@ interface CenterTabsProps {
 const TAB_DRAG_MIME = "application/x-oxplow-center-tab";
 
 export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReorder }: CenterTabsProps) {
-  const active = tabs.find((t) => t.id === activeId) ?? tabs[0] ?? null;
+  const active = tabs.find((t) => t.id === activeId) ?? tabs.find((t) => !t.hidden) ?? tabs[0] ?? null;
+  const stripTabs = tabs.filter((t) => !t.hidden);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -44,7 +50,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <div style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-tab-inactive)", minHeight: 36 }}>
-        {tabs.map((tab) => {
+        {stripTabs.map((tab) => {
           const isActive = tab.id === active?.id;
           const isHover = !isActive && hoverId === tab.id;
           const canDrag = !!onReorder && !!tab.reorderGroup;
@@ -171,12 +177,33 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
         })}
       </div>
       {header}
-      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {active ? (
-          <ErrorBoundary key={active.id} label={active.label}>
-            {active.render()}
-          </ErrorBoundary>
-        ) : null}
+      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", position: "relative" }}>
+        {/* Render every tab body as a sibling, only the active one
+         *  visible. Hidden tabs (back/forward stack entries the host
+         *  pushes for each slot) stay mounted so navigating back to
+         *  them preserves their React state — scroll position,
+         *  expanded trees, draft text, etc. */}
+        {tabs.map((tab) => {
+          const isActive = tab.id === active?.id;
+          return (
+            <div
+              key={tab.id}
+              style={{
+                display: isActive ? "flex" : "none",
+                flex: 1,
+                minHeight: 0,
+                minWidth: 0,
+                flexDirection: "column",
+              }}
+              data-testid={`center-tab-body-${tab.id}`}
+              aria-hidden={!isActive}
+            >
+              <ErrorBoundary label={tab.label}>
+                {tab.render()}
+              </ErrorBoundary>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
