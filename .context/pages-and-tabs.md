@@ -576,6 +576,36 @@ tab kebab × | menu close
        └→ snap centerActive to "agent" if it was the closed tab
 ```
 
+## Persistence across restart
+
+`threadPageTabs`, `threadPageHistory`, `diffTabs` (the spec registry)
+are all persisted to `localStorage` on change and restored via the
+`useState` initializer on boot. Storage keys:
+`oxplow.layout.v1.threadPageTabs`, `oxplow.layout.v1.threadPageHistory`,
+`oxplow.layout.v1.diffSpecs`.
+
+What persists:
+- The full per-thread tab list (every TabRef).
+- The per-tab back/forward history + siblings record.
+- Diff specs (the registry indexed by id) — except clipboard /
+  selection-vs-clipboard diffs that carry inline `leftContent` /
+  `rightContent`. Those are session-only.
+- The active center tab id (`oxplow.layout.v1.centerActive`,
+  unchanged from before).
+- The per-stream open file paths (existing
+  `oxplow.layout.v1.fileSessions` blob; loads file content on first
+  stream activation).
+
+What does NOT persist (yet):
+- Per-page state — scroll position, expanded tree nodes, draft text,
+  view-toggle selections. Pages mount fresh after restart. The
+  follow-up `usePageSnapshot` layer will rehydrate this; see the
+  "Restore tabs + per-page state across restart" epic.
+- The `display:none` mounted-stack approach used for in-session
+  back/forward (perfect fidelity, free) cannot survive a restart —
+  no DOM, no React state. Snapshots are the only path forward for
+  cross-restart fidelity.
+
 ## Known follow-ups + invariants
 
 - **Agent ref doesn't live in threadPageTabs yet.** It's the only
