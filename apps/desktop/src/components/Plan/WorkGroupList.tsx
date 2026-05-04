@@ -864,16 +864,6 @@ function EpicInlineRow({
       </span>
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
         {item.title}
-        {item.note_count > 0 ? (
-          <span style={{
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            background: "var(--muted)", color: "var(--bg)", borderRadius: "50%",
-            fontSize: 9, minWidth: 14, height: 14, padding: "0 3px", marginLeft: 4,
-            lineHeight: 1, verticalAlign: "middle", flexShrink: 0,
-          }}>
-            {item.note_count}
-          </span>
-        ) : null}
       </span>
       <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }} />
       <button
@@ -1153,16 +1143,6 @@ function InlineItemRow({
         }}
       >
         {item.title}
-        {item.note_count > 0 ? (
-          <span style={{
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            background: "var(--muted)", color: "var(--bg)", borderRadius: "50%",
-            fontSize: 9, minWidth: 14, height: 14, padding: "0 3px", marginLeft: 4,
-            lineHeight: 1, verticalAlign: "middle", flexShrink: 0,
-          }}>
-            {item.note_count}
-          </span>
-        ) : null}
       </span>
       <InlinePriorityPicker
         priority={item.priority}
