@@ -2,6 +2,9 @@ import type { CSSProperties, MutableRefObject } from "react";
 import { useMemo } from "react";
 import type { GitLogCommit, GitLogResult } from "../../api.js";
 import { layoutCommits, type GraphRow } from "./layout.js";
+import { useRouteDispatch } from "../../tabs/RouteLink.js";
+import { gitCommitRef } from "../../tabs/pageRefs.js";
+import type { NavSiblingEntry } from "../../tabs/PageNavigationContext.js";
 
 const BRANCH_COLORS = [
   "#4a9eff",
@@ -66,13 +69,24 @@ export function CommitGraphTable({
     GRAPH_PAD * 2 + LANE_WIDTH,
   );
 
+  // Sibling-list for prev/next navigation. Built from the visible
+  // commits so the destination GitCommitPage gets up/down buttons that
+  // step through the same list the user clicked from.
+  const siblingEntries: NavSiblingEntry[] = useMemo(
+    () => layout.rows.map((row) => ({
+      ref: gitCommitRef(row.commit.sha),
+      label: `${row.commit.sha.slice(0, 7)} ${row.commit.subject ?? ""}`.trim(),
+    })),
+    [layout.rows],
+  );
+
   if (layout.rows.length === 0) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No commits.</div>;
   }
 
   return (
     <div data-testid="commit-graph-table">
-      {layout.rows.map((row) => {
+      {layout.rows.map((row, idx) => {
         const sha = row.commit.sha;
         const matched = !matches || matches.has(sha);
         return (
@@ -84,7 +98,8 @@ export function CommitGraphTable({
               else rowRefs.current.delete(sha);
             }}
           >
-            <CommitRow
+            <CommitRowDispatcher
+              sha={sha}
               row={row}
               graphWidth={graphWidth}
               selected={selectedSha === sha}
@@ -93,12 +108,65 @@ export function CommitGraphTable({
               tags={tagsBySha.get(sha) ?? []}
               currentBranch={currentBranch}
               stats={statsBySha?.get(sha) ?? null}
-              onClick={(e) => onSelect?.(sha, { newTab: e.metaKey || e.ctrlKey || e.button === 1 })}
+              siblings={{ entries: siblingEntries, index: idx }}
+              onSelect={onSelect}
             />
           </div>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Adapter that owns the per-row `useRouteDispatch` so the page-context
+ * path picks up siblings while the legacy `onSelect` callback (rail
+ * cases, dashboard) still works as the new-tab fallback.
+ */
+function CommitRowDispatcher({
+  sha,
+  row,
+  graphWidth,
+  selected,
+  matched,
+  branchHeads,
+  tags,
+  currentBranch,
+  stats,
+  siblings,
+  onSelect,
+}: {
+  sha: string;
+  row: GraphRow;
+  graphWidth: number;
+  selected: boolean;
+  matched: boolean;
+  branchHeads: string[];
+  tags: string[];
+  currentBranch: string | null;
+  stats: CommitStats | null;
+  siblings: { entries: NavSiblingEntry[]; index: number };
+  onSelect?(sha: string, opts?: { newTab?: boolean }): void;
+}) {
+  const { dispatch } = useRouteDispatch(gitCommitRef(sha), {
+    siblings,
+    onNavigate: (_ref, opts) => onSelect?.(sha, opts),
+  });
+  return (
+    <CommitRow
+      row={row}
+      graphWidth={graphWidth}
+      selected={selected}
+      matched={matched}
+      branchHeads={branchHeads}
+      tags={tags}
+      currentBranch={currentBranch}
+      stats={stats}
+      onClick={(e) => {
+        const newTab = e.metaKey || e.ctrlKey || e.button === 1;
+        dispatch(newTab);
+      }}
+    />
   );
 }
 

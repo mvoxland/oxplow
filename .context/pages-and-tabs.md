@@ -321,7 +321,7 @@ Mechanics:
   `goPrevSibling` / `goNextSibling` which are only set when not at the
   edge). The `1 of N` indicator renders between the buttons.
 
-Adopted lists (Phase 1 of this feature):
+Adopted lists:
 
 - `tabs/BacklinksList.tsx` — every backlink entry passes its index in
   the merged list (snapshot/commit slideover entries are excluded).
@@ -332,11 +332,24 @@ Adopted lists (Phase 1 of this feature):
 - `components/LeftPanel/FileTree.tsx` — `TreeEntries` exposes file-row
   siblings within each directory level (excluding directories and
   deleted files).
+- `components/History/CommitGraphTable.tsx` — each row dispatches via
+  `useRouteDispatch(gitCommitRef(sha), { siblings, onNavigate: onSelect })`
+  through a `CommitRowDispatcher` adapter, so the legacy `onSelect`
+  callback survives as the rail-side fallback while the in-page path
+  picks up siblings.
+- `pages/DashboardPage.tsx` — `RowButton` now optionally takes
+  `navRef` + `siblings` + `onNavigate`; the Planning dashboard wires
+  ready / backlog / recent-notes lists.
+
+`WorkGroupList` rows (Plan / Tasks / Backlog pages) intentionally do
+NOT adopt: clicking opens the edit modal, not a page. Sibling nav
+applies only to lists whose rows navigate to a page.
 
 Future lists adopt by passing `siblings` to `useRouteDispatch` /
-`RouteLink`. Lists that wrap their own click callback (CommitGraphTable,
-WorkGroupList) need to migrate to `useRouteDispatch` first or accept
-a parallel `siblings` prop they forward.
+`RouteLink`. Lists that wrap their own click callback can either
+migrate to `useRouteDispatch` directly (preferred) or use the
+adapter-component pattern from `CommitGraphTable`'s
+`CommitRowDispatcher`.
 
 ## Linking between tabs — single chokepoint rule
 

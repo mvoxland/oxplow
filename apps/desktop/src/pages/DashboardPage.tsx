@@ -12,6 +12,7 @@ import {
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { findingRef, indexRef, wikiPageRef, workItemRef } from "../tabs/pageRefs.js";
+import { useRouteDispatch } from "../tabs/RouteLink.js";
 
 export type DashboardVariant = "planning" | "review" | "quality" | "visits";
 
@@ -76,12 +77,42 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function RowButton({ label, subtitle, onClick, testId }: { label: string; subtitle?: string; onClick(): void; testId?: string }) {
+function RowButton({
+  label,
+  subtitle,
+  onClick,
+  testId,
+  navRef,
+  siblings,
+  onNavigate,
+}: {
+  label: string;
+  subtitle?: string;
+  onClick?(): void;
+  testId?: string;
+  /** When supplied, the row dispatches via `useRouteDispatch` so it
+   *  participates in in-tab navigation + sibling navigation. The
+   *  legacy `onClick` is used as the rail-side fallback when no page
+   *  context exists. */
+  navRef?: TabRef;
+  siblings?: import("../tabs/PageNavigationContext.js").NavSiblings;
+  onNavigate?(ref: TabRef, opts?: { newTab?: boolean }): void;
+}) {
+  // Hooks must run unconditionally; pass a placeholder ref when
+  // navRef is omitted and rely on the caller's onClick.
+  const dispatchHook = useRouteDispatch(navRef ?? indexRef("settings"), {
+    siblings,
+    onNavigate: onNavigate ?? (() => onClick?.()),
+  });
+  const handleClick = () => {
+    if (navRef) dispatchHook.dispatch(false);
+    else onClick?.();
+  };
   return (
     <button
       type="button"
       data-testid={testId}
-      onClick={onClick}
+      onClick={handleClick}
       style={{
         display: "flex",
         alignItems: "center",
@@ -191,37 +222,58 @@ function PlanningSections({
     <>
       <Section title="Ready in This Thread">
         {ready.length === 0 ? <EmptyHint>Nothing ready.</EmptyHint> : null}
-        {ready.slice(0, 10).map((item) => (
-          <RowButton
-            key={item.id}
-            testId={`dashboard-planning-ready-${item.id}`}
-            label={item.title}
-            subtitle={item.priority}
-            onClick={() => onOpenPage(workItemRef(item.id))}
-          />
-        ))}
+        {(() => {
+          const list = ready.slice(0, 10);
+          const siblingEntries = list.map((it) => ({ ref: workItemRef(it.id), label: it.title }));
+          return list.map((item, i) => (
+            <RowButton
+              key={item.id}
+              testId={`dashboard-planning-ready-${item.id}`}
+              label={item.title}
+              subtitle={item.priority}
+              navRef={workItemRef(item.id)}
+              siblings={{ entries: siblingEntries, index: i }}
+              onNavigate={(ref) => onOpenPage(ref)}
+              onClick={() => onOpenPage(workItemRef(item.id))}
+            />
+          ));
+        })()}
       </Section>
       <Section title="Backlog">
         {backlogItems.length === 0 ? <EmptyHint>Backlog is empty.</EmptyHint> : null}
-        {backlogItems.slice(0, 10).map((item) => (
-          <RowButton
-            key={item.id}
-            label={item.title}
-            subtitle={item.priority}
-            onClick={() => onOpenPage(workItemRef(item.id))}
-          />
-        ))}
+        {(() => {
+          const list = backlogItems.slice(0, 10);
+          const siblingEntries = list.map((it) => ({ ref: workItemRef(it.id), label: it.title }));
+          return list.map((item, i) => (
+            <RowButton
+              key={item.id}
+              label={item.title}
+              subtitle={item.priority}
+              navRef={workItemRef(item.id)}
+              siblings={{ entries: siblingEntries, index: i }}
+              onNavigate={(ref) => onOpenPage(ref)}
+              onClick={() => onOpenPage(workItemRef(item.id))}
+            />
+          ));
+        })()}
       </Section>
       <Section title="Recent Notes">
         {notes.length === 0 ? <EmptyHint>No notes yet.</EmptyHint> : null}
-        {notes.slice(0, 8).map((note) => (
-          <RowButton
-            key={note.slug}
-            label={note.title || note.slug}
-            subtitle={note.freshness}
-            onClick={() => onOpenPage(wikiPageRef(note.slug))}
-          />
-        ))}
+        {(() => {
+          const list = notes.slice(0, 8);
+          const siblingEntries = list.map((n) => ({ ref: wikiPageRef(n.slug), label: n.title || n.slug }));
+          return list.map((note, i) => (
+            <RowButton
+              key={note.slug}
+              label={note.title || note.slug}
+              subtitle={note.freshness}
+              navRef={wikiPageRef(note.slug)}
+              siblings={{ entries: siblingEntries, index: i }}
+              onNavigate={(ref) => onOpenPage(ref)}
+              onClick={() => onOpenPage(wikiPageRef(note.slug))}
+            />
+          ));
+        })()}
       </Section>
       <Section title="Subsystem Docs">
         <RowButton
