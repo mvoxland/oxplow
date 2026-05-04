@@ -712,6 +712,17 @@ paused for a subagent, even though the subagent was still doing real
 work. The status flips to `waiting` once the final `Task` PostToolUse
 returns and a subsequent `stop` lands. See wi-593a50b62e22.
 
+**ExitPlanMode-pending carve-out.** Claude Code's built-in
+`ExitPlanMode` tool fires `PreToolUse` when the agent asks the user
+"should I implement this plan?", but the matching `PostToolUse` only
+arrives once the user approves or rejects. Until then no `Stop` hook
+fires either — the agent is genuinely waiting on the user. The
+reducer counts unreturned `ExitPlanMode` calls and, if the count is
+>0 at the end of replay, overrides the derived state to
+`AwaitingUser` so the dot turns red instead of staying yellow. See
+`agent_status_derive::derive_thread_status` in
+`crates/oxplow-app/src/agent_status_derive.rs`.
+
 **User-interrupt synthetic event.** Claude Code does not reliably fire
 the `Stop` hook when the user cancels a turn with Escape (or `Ctrl-C`):
 the in-flight tool's `PostToolUse` is dropped and no `Stop` lands, so
