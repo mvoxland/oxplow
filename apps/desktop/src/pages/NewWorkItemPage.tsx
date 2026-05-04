@@ -13,6 +13,7 @@ import { Page } from "../tabs/Page.js";
 
 const KIND_OPTIONS: WorkItemKind[] = ["task", "epic", "subtask", "bug", "note"];
 const PRIORITY_OPTIONS: WorkItemPriority[] = ["low", "medium", "high", "urgent"];
+const STATUS_OPTIONS: Array<Extract<WorkItemStatus, "ready" | "blocked">> = ["ready", "blocked"];
 
 /**
  * Defaults negotiation between the original `newWorkItemRef` payload
@@ -89,6 +90,7 @@ export function NewWorkItemPage({
 
   const [kind, setKind] = useState<WorkItemKind>(coerceKind(resolved.initialCategory));
   const [priority, setPriority] = useState<WorkItemPriority>(coercePriority(resolved.initialPriority));
+  const [status, setStatus] = useState<"ready" | "blocked">("ready");
   const [parentId, setParentId] = useState<string | null>(resolved.parentId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -115,6 +117,7 @@ export function NewWorkItemPage({
         acceptanceCriteria: acceptance.trim() ? acceptance : null,
         parentId: parentId ?? null,
         priority,
+        status,
       });
       // Save-and-Another resets the title/description/acceptance fields
       // but keeps the kind/priority/parent so the user doesn't have to
@@ -140,7 +143,7 @@ export function NewWorkItemPage({
   return (
     <Page
       testId="page-new-work-item"
-      title="New work item"
+      title="New task"
       kind="new work item"
       actions={
         onClose ? (
@@ -212,6 +215,20 @@ export function NewWorkItemPage({
               {PRIORITY_OPTIONS.map((p) => (
                 <option key={p} value={p}>
                   {p}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Status">
+            <select
+              data-testid="work-item-status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value === "blocked" ? "blocked" : "ready")}
+              style={inputStyle}
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s === "ready" ? "Ready" : "Blocked"}
                 </option>
               ))}
             </select>

@@ -2465,7 +2465,7 @@ export function App() {
         } | null) ?? {};
         tabs.push({
           id: ref.id,
-          label: "New work item",
+          label: "New task",
           closable: true,
           render: () => (
             <NewWorkItemPage
