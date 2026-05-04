@@ -7,6 +7,10 @@ import { fileRef } from "../../tabs/pageRefs.js";
 interface Props {
   files: BranchChangeEntry[];
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+  /** When supplied, plain click opens the file's diff in the current
+   *  tab (browser-tab semantic, back returns to this list).
+   *  Otherwise falls through to in-tab file open. */
+  onOpenFileDiff?(path: string): void;
 }
 
 /**
@@ -15,19 +19,23 @@ interface Props {
  * so the toolbar (filter + Expand all / Collapse all), the chevron
  * toggle, and the status badges all match the Semantic view exactly.
  */
-export function ChangeAnalysisFileTree({ files, onOpenFile }: Props) {
+export function ChangeAnalysisFileTree({ files, onOpenFile, onOpenFileDiff }: Props) {
   const ctxNav = useOptionalPageNavigation();
-  // Default click semantic: navigate **in-tab** via the page-context
-  // chokepoint so the active Change Analysis page swaps to a file
-  // tab instead of leaking a new tab. Cmd/Ctrl-click escapes to a
-  // new tab. Outside a PageNavigationContext we fall back to the
-  // host's onOpenFile (rail/test surfaces don't have a current tab).
+  // Default click semantic: navigate **in-tab** to the file's diff
+  // when an `onOpenFileDiff` is supplied; otherwise fall through to
+  // an in-tab file open via the page-context chokepoint. Cmd/Ctrl-
+  // click escapes to a new file tab.
   const openFile = (path: string, opts: { newTab: boolean }) => {
-    if (ctxNav) {
-      ctxNav.navigate(fileRef(path), { newTab: opts.newTab });
-    } else {
-      onOpenFile(path, { newTab: opts.newTab });
+    if (opts.newTab) {
+      onOpenFile(path, { newTab: true });
+      return;
     }
+    if (onOpenFileDiff) {
+      onOpenFileDiff(path);
+      return;
+    }
+    if (ctxNav) ctxNav.navigate(fileRef(path), { newTab: false });
+    else onOpenFile(path, { newTab: false });
   };
   const tree = useMemo(() => buildTree(files, openFile), [files, openFile]);
   const total = files.length;

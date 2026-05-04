@@ -23,9 +23,13 @@ export interface ChangeAnalysisPageProps {
    *  and head refs. The page builds the spec; the host wires it to
    *  the existing diff-tab opener. */
   onOpenDiff?(spec: DiffSpec): void;
+  /** Replace the current change-analysis tab with a diff view in
+   *  place — browser-tab semantic, back returns to the analysis
+   *  dashboard. Preferred over `onOpenDiff` for in-page clicks. */
+  onOpenDiffInTab?(spec: DiffSpec): void;
 }
 
-export function ChangeAnalysisPage({ stream, target, scope, onOpenPage, onOpenFile, onOpenDiff }: ChangeAnalysisPageProps) {
+export function ChangeAnalysisPage({ stream, target, scope, onOpenPage, onOpenFile, onOpenDiff, onOpenDiffInTab }: ChangeAnalysisPageProps) {
   const streamId = stream?.id ?? null;
   const analysis = useChangeAnalysis({ streamId, target, scope });
 
@@ -78,6 +82,7 @@ export function ChangeAnalysisPage({ stream, target, scope, onOpenPage, onOpenFi
             analysis={analysis}
             onOpenFile={onOpenFile}
             onOpenDiff={onOpenDiff}
+            onOpenDiffInTab={onOpenDiffInTab}
           />
         ) : (
           <>

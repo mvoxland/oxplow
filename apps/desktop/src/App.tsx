@@ -1507,12 +1507,14 @@ export function App() {
   }, [currentSession.openOrder, diffTabs, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
-  const handleOpenDiff = (request: DiffSpec) => {
+  const computeDiffId = (request: DiffSpec): string => {
     const rightKey = request.rightKind === "working" ? "working" : `ref:${request.rightKind.ref}`;
-    // Including the labelOverride in the id lets snapshot diffs coexist with
-    // git diffs for the same path without colliding.
     const labelKey = request.labelOverride ? `:${request.labelOverride}` : "";
-    const id = `diff:${request.leftRef}:${rightKey}:${request.path}${labelKey}`;
+    return `diff:${request.leftRef}:${rightKey}:${request.path}${labelKey}`;
+  };
+
+  const handleOpenDiff = (request: DiffSpec) => {
+    const id = computeDiffId(request);
     setDiffTabs((prev) => {
       if (prev.some((tab) => tab.id === id)) return prev;
       return [...prev, { id, spec: request }];
@@ -1569,6 +1571,7 @@ export function App() {
     setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
     setCenterActive((current) => (current === id ? "agent" : current));
   };
+
 
   const handleOpenNote = useCallback((slug: string) => {
     const tid = selectedThread?.id ?? null;
@@ -1805,10 +1808,13 @@ export function App() {
       return;
     }
     if (existing[idx]!.id === ref.id) return;
-    // agent/note/diff still live in their own tab tracks — promote to
-    // a regular open. File refs DO support in-tab nav: the page tab
-    // becomes a file viewer (back returns to the prior page).
-    if (ref.kind === "agent" || ref.kind === "diff") {
+    // agent still lives in its own slot — promote to a regular
+    // open. Files and diffs DO support in-tab nav: the page tab
+    // becomes a file viewer / diff viewer (back returns to the
+    // prior page). Diffs require their spec to be pre-registered
+    // in `diffTabs`; the helper that initiates the navigation
+    // (handleOpenDiffInTab) is responsible for that.
+    if (ref.kind === "agent") {
       handleOpenPage(ref);
       return;
     }
@@ -1849,6 +1855,37 @@ export function App() {
     });
     setCenterActive(ref.id);
   }, [handleOpenPage, selectedThreadId, setCenterActive, threadPageTabs]);
+
+  /**
+   * Open a diff *in-tab* — replaces the active page tab's ref with
+   * the diff ref, with the diff's spec registered in `diffTabs` so
+   * the page-tab renderer can find it. Pushes the prior ref onto the
+   * back stack so Back returns to the originating page (e.g. the
+   * change-analysis dashboard). Caller passes the active tab id so
+   * we know which slot to mutate.
+   */
+  const handleOpenDiffInTab = useCallback((
+    currentTabId: string,
+    spec: DiffSpec,
+    siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
+  ) => {
+    const id = computeDiffId(spec);
+    setDiffTabs((prev) => {
+      if (prev.some((tab) => tab.id === id)) return prev;
+      return [...prev, { id, spec }];
+    });
+    const ref: TabRef = {
+      id,
+      kind: "diff",
+      payload: {
+        path: spec.path,
+        fromRef: spec.leftRef,
+        toRef: spec.rightKind === "working" ? null : spec.rightKind.ref,
+        labelOverride: spec.labelOverride ?? null,
+      },
+    };
+    handleNavigateInTab(currentTabId, ref, siblings);
+  }, [handleNavigateInTab]);
 
   /**
    * Step the active tab to a sibling at `targetIdx` without touching
@@ -2089,7 +2126,17 @@ export function App() {
     // after this index — diffs, all per-thread page tabs (notes, files-
     // index, work items, etc.). Only the agent at index 0 is excluded.
     const pageTabStartIdx = tabs.length;
+    const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
+    // Diffs that have been navigated to in-tab live in
+    // `threadPageTabs` (so back/forward works); render them in the
+    // page-tab loop below. Standalone diffs (e.g. compare-with-
+    // clipboard) still go through this loop.
+    const diffIdsInPageTabs = new Set<string>();
+    for (const ref of pageTabsForThread) {
+      if (ref.kind === "diff") diffIdsInPageTabs.add(ref.id);
+    }
     for (const diff of diffTabs) {
+      if (diffIdsInPageTabs.has(diff.id)) continue;
       const label = diff.spec.path.split("/").pop() ?? diff.spec.path;
       const suffix = diff.spec.labelOverride ?? "diff";
       tabs.push({
@@ -2110,7 +2157,6 @@ export function App() {
         ) : null,
       });
     }
-    const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
     for (const ref of pageTabsForThread) {
       // Default for any in-page navigation: replace the current page in this
       // tab (browser-style). Cmd/Ctrl/middle/right-click in RouteLink and
@@ -2128,6 +2174,33 @@ export function App() {
       const navRevealCommit = (sha: string) => {
         navOpen(gitCommitRef(sha));
       };
+      if (ref.kind === "diff") {
+        // Diff that arrived via in-tab navigation. Look up the
+        // registered spec; skip if missing (the registration path is
+        // handleOpenDiffInTab — a stale ref without a spec would be
+        // a bug).
+        const spec = diffTabs.find((t) => t.id === ref.id)?.spec;
+        if (!spec) continue;
+        const label = spec.path.split("/").pop() ?? spec.path;
+        const suffix = spec.labelOverride ?? "diff";
+        tabs.push({
+          id: ref.id,
+          label: `${label} (${suffix})`,
+          closable: true,
+          render: () => stream ? (
+            <DiffPage
+              stream={stream}
+              spec={spec}
+              visible={effectiveCenterActive === ref.id}
+              onJumpToSource={(p) => {
+                void handleOpenFile(p);
+                closeDiffTab(ref.id);
+              }}
+            />
+          ) : null,
+        });
+        continue;
+      }
       if (ref.kind === "file") {
         const path = (ref.payload as { path?: string } | null)?.path;
         if (!path) continue;
@@ -2240,6 +2313,7 @@ export function App() {
               onOpenPage={navOpen}
               onOpenFile={navOpenFile}
               onOpenDiff={handleOpenDiff}
+              onOpenDiffInTab={(spec) => handleOpenDiffInTab(ref.id, spec)}
             />
           ),
         });

@@ -293,19 +293,24 @@ function toHierarchyNode(
       statuses: new Set<HierarchyStatus>([row.status]),
       detail: row.detail,
       onDrill: (e) => {
-        // Plain click → open the file in-tab via the page-context
-        // chokepoint (browser-tab semantics: clicking around stays in
-        // the same tab). Cmd/Ctrl-click → new tab. We don't open the
-        // diff view from function rows by default because that opens
-        // a separate diff tab and the user wants in-tab navigation.
+        // Plain click → open the diff for this file at the function's
+        // line, *in the current tab* (browser-tab semantic; back
+        // returns to the analysis dashboard). Cmd/Ctrl-click → new
+        // tab via the file-open path (escape hatch).
         const newTab = e.metaKey || e.ctrlKey;
-        if (ctxNav && !newTab) {
-          ctxNav.navigate(fileRef(row.path), { newTab: false });
-        } else {
-          onOpenFile(row.path, { newTab });
+        if (newTab) {
+          onOpenFile(row.path, { newTab: true });
+          return;
         }
+        if (onOpenFunctionDiff && row.startLine > 0) {
+          onOpenFunctionDiff(row.path, row.startLine);
+          return;
+        }
+        // Fallback: open the file in-tab.
+        if (ctxNav) ctxNav.navigate(fileRef(row.path), { newTab: false });
+        else onOpenFile(row.path);
       },
-      drillTitle: `Open ${row.path}`,
+      drillTitle: row.startLine > 0 ? `Open diff at line ${row.startLine}` : `Open diff for ${row.path}`,
       testId: "change-analysis-fn-row",
       children: [],
     }));
@@ -322,16 +327,21 @@ function toHierarchyNode(
   if (node.kind === "file" && node.filePath) {
     const filePath = node.filePath;
     onDrill = (e) => {
-      // File branches open the file in-tab via context (same browser-
-      // tab semantic as the file-list view). Cmd/Ctrl → new tab.
+      // File branches open the file's diff at line 1 *in the current
+      // tab*. Cmd/Ctrl-click → new tab via the file-open escape.
       const newTab = e.metaKey || e.ctrlKey;
-      if (ctxNav && !newTab) {
-        ctxNav.navigate(fileRef(filePath), { newTab: false });
-      } else {
-        onOpenFile(filePath, { newTab });
+      if (newTab) {
+        onOpenFile(filePath, { newTab: true });
+        return;
       }
+      if (onOpenFunctionDiff) {
+        onOpenFunctionDiff(filePath, 1);
+        return;
+      }
+      if (ctxNav) ctxNav.navigate(fileRef(filePath), { newTab: false });
+      else onOpenFile(filePath);
     };
-    drillTitle = `Open ${filePath}`;
+    drillTitle = `Open diff for ${filePath}`;
   } else if (node.kind === "dir" && node.dirPath != null && target) {
     const dirPath = node.dirPath;
     const ref = changeAnalysisRef(target, { kind: "dir", value: dirPath });
