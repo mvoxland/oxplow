@@ -407,6 +407,10 @@ export async function listStreams(): Promise<Stream[]> {
   return unwrap(await commands.listStreams());
 }
 
+export async function listThreads(streamId: string): Promise<Thread[]> {
+  return unwrap(await commands.listThreads(streamId)) as unknown as Thread[];
+}
+
 export async function getCurrentStream(): Promise<Stream> {
   const cur = unwrap(await commands.getCurrentStream());
   if (cur) return cur;
@@ -1485,11 +1489,12 @@ export async function listWorkspaceFiles(streamId: string): Promise<{
   files: WorkspaceIndexedFile[];
   summary: WorkspaceStatusSummary;
 }> {
-  const raw = unwrap(await commands.listWorkspaceFiles(streamId || null)) as unknown as {
-    files: WorkspaceIndexedFile[];
-    summary: WorkspaceStatusSummary;
-  };
-  return raw;
+  const [filesRes, summary] = await Promise.all([
+    commands.listWorkspaceFiles(streamId || null),
+    getWorkspaceStatusSummary(streamId),
+  ]);
+  const files = unwrap(filesRes) as unknown as WorkspaceIndexedFile[];
+  return { files, summary };
 }
 
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {

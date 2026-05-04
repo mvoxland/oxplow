@@ -2342,7 +2342,7 @@ export function App() {
           render: () => {
             switch (ref.kind) {
               case "tasks":
-                return <TasksPage {...sharedProps} onOpenPage={navOpen} onMoveBacklogItemToThread={handleMoveBacklogItemToThread} />;
+                return <TasksPage {...sharedProps} streams={streams} currentStreamId={stream?.id ?? null} onOpenPage={navOpen} onMoveBacklogItemToThread={handleMoveBacklogItemToThread} />;
               case "done-work":
                 return <DoneWorkPage {...sharedProps} onOpenPage={navOpen} />;
               case "backlog":
