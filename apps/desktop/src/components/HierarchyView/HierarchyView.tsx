@@ -62,9 +62,14 @@ export function HierarchyView({
   emptyLabel = "Nothing to show.",
 }: HierarchyViewProps) {
   const [search, setSearch] = useState("");
-  // Collapse-state is stored as a Set of node ids the user has
-  // explicitly collapsed; everything else is expanded by default.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Collapse-state is stored as user *overrides* on top of the
+  // computed default. The default collapses every branch deeper than
+  // the first nested layer (top-level nodes are expanded so their
+  // direct children render; grandchildren start collapsed). Storing
+  // overrides — rather than the absolute collapsed set — means that
+  // when the data refreshes with new ids, those new ids automatically
+  // pick up the default state instead of leaking into "expanded".
+  const [overrides, setOverrides] = useState<Map<string, boolean>>(new Map());
 
   const filtered = useMemo(() => {
     if (!search.trim()) return nodes;
@@ -73,21 +78,40 @@ export function HierarchyView({
   }, [nodes, search]);
 
   const allIds = useMemo(() => collectAllIds(filtered), [filtered]);
+  const defaultCollapsed = useMemo(() => collectDefaultCollapsedIds(filtered), [filtered]);
+
+  // Merge default + overrides into the effective collapsed set.
+  const effectivelyCollapsed = useMemo(() => {
+    if (search.trim()) return new Set<string>(); // search forces all expanded
+    const out = new Set<string>(defaultCollapsed);
+    for (const [id, userCollapsed] of overrides) {
+      if (userCollapsed) out.add(id);
+      else out.delete(id);
+    }
+    return out;
+  }, [defaultCollapsed, overrides, search]);
 
   const toggle = (id: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+    setOverrides((prev) => {
+      const currentlyCollapsed = effectivelyCollapsed.has(id);
+      const next = new Map(prev);
+      next.set(id, !currentlyCollapsed);
       return next;
     });
   };
 
-  const expandAll = () => setCollapsed(new Set());
-  const collapseAll = () => setCollapsed(new Set(allIds));
-
-  // While a search is active, force-expand so matches are visible.
-  const effectivelyCollapsed = search.trim() ? new Set<string>() : collapsed;
+  const expandAll = () => {
+    // Mark every branch as user-expanded so they override any default-
+    // collapsed entries.
+    const next = new Map<string, boolean>();
+    for (const id of allIds) next.set(id, false);
+    setOverrides(next);
+  };
+  const collapseAll = () => {
+    const next = new Map<string, boolean>();
+    for (const id of allIds) next.set(id, true);
+    setOverrides(next);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -295,6 +319,25 @@ function collectAllIds(nodes: HierarchyNode[], out: string[] = []): string[] {
       out.push(n.id);
       collectAllIds(n.children, out);
     }
+  }
+  return out;
+}
+
+/**
+ * Collect ids of branch nodes that should start collapsed by default —
+ * every branch whose depth is >= 1. Top-level nodes (depth 0) stay
+ * expanded so their direct children render; deeper nesting is hidden
+ * until the user expands it.
+ */
+function collectDefaultCollapsedIds(
+  nodes: HierarchyNode[],
+  depth = 0,
+  out: Set<string> = new Set(),
+): Set<string> {
+  for (const n of nodes) {
+    if (n.children.length === 0) continue;
+    if (depth >= 1) out.add(n.id);
+    collectDefaultCollapsedIds(n.children, depth + 1, out);
   }
   return out;
 }
