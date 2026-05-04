@@ -7,6 +7,18 @@ export interface PageNavBarProps {
   canForward: boolean;
   onBack(): void;
   onForward(): void;
+  /** Sibling-list navigation. When omitted, the up/down buttons are
+   *  hidden — the page wasn't opened from a list. When supplied,
+   *  buttons are disabled at edges and the hover-title shows the
+   *  label of the prev/next entry. */
+  siblings?: {
+    prevLabel?: string;
+    nextLabel?: string;
+    onPrev?(): void;
+    onNext?(): void;
+    /** "3 of 12" indicator rendered between the buttons. */
+    indicator?: string;
+  };
   /** Page title rendered to the right of the back/forward arrows. */
   title?: ReactNode;
   /** Small kind chip rendered after the title ("note", "file", …). */
@@ -40,6 +52,7 @@ export function PageNavBar({
   canForward,
   onBack,
   onForward,
+  siblings,
   title,
   kind,
   bookmark,
@@ -85,6 +98,47 @@ export function PageNavBar({
       >
         →
       </button>
+
+      {siblings ? (
+        <div
+          data-testid="page-nav-siblings"
+          style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 4 }}
+        >
+          <button
+            type="button"
+            data-testid="page-nav-sibling-prev"
+            title={siblings.prevLabel ? `Previous: ${siblings.prevLabel}` : "Previous in list"}
+            disabled={!siblings.onPrev}
+            onClick={siblings.onPrev}
+            style={navButtonStyle(!!siblings.onPrev)}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            data-testid="page-nav-sibling-next"
+            title={siblings.nextLabel ? `Next: ${siblings.nextLabel}` : "Next in list"}
+            disabled={!siblings.onNext}
+            onClick={siblings.onNext}
+            style={navButtonStyle(!!siblings.onNext)}
+          >
+            ↓
+          </button>
+          {siblings.indicator ? (
+            <span
+              data-testid="page-nav-sibling-indicator"
+              style={{
+                fontSize: 11,
+                color: "var(--text-secondary)",
+                marginLeft: 2,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {siblings.indicator}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {title || kind ? (
         <div

@@ -1,9 +1,11 @@
 import type { MouseEvent } from "react";
+import { useMemo } from "react";
 import type { BacklinkEntry } from "./backlinksIndex.js";
 import type { TabRef } from "./tabState.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
+import type { NavSiblings } from "./PageNavigationContext.js";
 
 /**
  * A backlink entry that points at a snapshot. Snapshots aren't a Page
@@ -109,6 +111,18 @@ export function BacklinksList({
   onOpenCommit,
 }: BacklinksListProps) {
   const ctxNav = useOptionalPageNavigation();
+  // Pre-compute the sibling list (the regular `entries` only — snapshot
+  // and commit entries open slideovers and don't participate in tab-
+  // level navigation). The destination page receives this as
+  // `siblings`, picks up prev/next buttons keyed by the row's index.
+  const siblingsList = useMemo<NavSiblings>(
+    () => ({
+      entries: entries.map((e) => ({ ref: e.ref, label: e.label })),
+      // index is resolved at the destination via ref.id matching.
+      index: 0,
+    }),
+    [entries],
+  );
   const totalEntries = entries.length + snapshotEntries.length + commitEntries.length;
   if (totalEntries === 0) {
     return (
@@ -162,7 +176,7 @@ export function BacklinksList({
           )}
         </button>
       ))}
-      {entries.map((entry) => {
+      {entries.map((entry, idx) => {
         const ctxRef = tabRefToContextRef(entry.ref);
         return (
         <button
@@ -176,7 +190,7 @@ export function BacklinksList({
             if ((e.metaKey || e.ctrlKey) || !ctxNav) {
               onOpenPage(entry.ref);
             } else {
-              ctxNav.navigate(entry.ref);
+              ctxNav.navigate(entry.ref, { siblings: { entries: siblingsList.entries, index: idx } });
             }
           }}
           onAuxClick={(e: MouseEvent) => {

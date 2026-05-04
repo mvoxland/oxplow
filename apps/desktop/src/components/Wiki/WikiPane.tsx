@@ -318,16 +318,21 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
                 count={visited.length}
                 showAll={showAllVisited}
                 onToggleShowAll={() => setShowAllVisited((v) => !v)}
-                rows={(showAllVisited ? visited : visited.slice(0, SECTION_INITIAL_LIMIT)).map((v) => (
-                  <NoteRow
-                    key={`v-${v.note.slug}`}
-                    note={v.note}
-                    selected={v.note.slug === selectedSlug}
-                    rightLabel={formatRelative(v.last_at)}
-                    onOpenWikiPage={onOpenWikiPage}
-                    onOpenMenu={(rect, note) => openMenuForWikiPage(rect, note)}
-                  />
-                ))}
+                rows={(() => {
+                  const list = showAllVisited ? visited : visited.slice(0, SECTION_INITIAL_LIMIT);
+                  const siblingEntries = list.map((v) => ({ ref: wikiPageRef(v.note.slug), label: v.note.title }));
+                  return list.map((v, i) => (
+                    <NoteRow
+                      key={`v-${v.note.slug}`}
+                      note={v.note}
+                      selected={v.note.slug === selectedSlug}
+                      rightLabel={formatRelative(v.last_at)}
+                      siblings={{ entries: siblingEntries, index: i }}
+                      onOpenWikiPage={onOpenWikiPage}
+                      onOpenMenu={(rect, note) => openMenuForWikiPage(rect, note)}
+                    />
+                  ));
+                })()}
               />
             )}
             {modified.length > 0 && (
@@ -336,16 +341,21 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
                 count={modified.length}
                 showAll={showAllModified}
                 onToggleShowAll={() => setShowAllModified((v) => !v)}
-                rows={(showAllModified ? modified : modified.slice(0, SECTION_INITIAL_LIMIT)).map((n) => (
-                  <NoteRow
-                    key={`m-${n.slug}`}
-                    note={n}
-                    selected={n.slug === selectedSlug}
-                    rightLabel={formatRelative(n.updated_at)}
-                    onOpenWikiPage={onOpenWikiPage}
-                    onOpenMenu={(rect, note) => openMenuForWikiPage(rect, note)}
-                  />
-                ))}
+                rows={(() => {
+                  const list = showAllModified ? modified : modified.slice(0, SECTION_INITIAL_LIMIT);
+                  const siblingEntries = list.map((n) => ({ ref: wikiPageRef(n.slug), label: n.title }));
+                  return list.map((n, i) => (
+                    <NoteRow
+                      key={`m-${n.slug}`}
+                      note={n}
+                      selected={n.slug === selectedSlug}
+                      rightLabel={formatRelative(n.updated_at)}
+                      siblings={{ entries: siblingEntries, index: i }}
+                      onOpenWikiPage={onOpenWikiPage}
+                      onOpenMenu={(rect, note) => openMenuForWikiPage(rect, note)}
+                    />
+                  ));
+                })()}
               />
             )}
             {visited.length > 0 && modified.length > SECTION_INITIAL_LIMIT && !showAllRest && (
@@ -435,14 +445,16 @@ function SearchResults({
   if (hits.length === 0) {
     return <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>No matches.</div>;
   }
+  const siblingEntries = hits.map((h) => ({ ref: wikiPageRef(h.slug), label: h.title }));
   return (
     <>
-      {hits.map((hit) => (
+      {hits.map((hit, i) => (
         <SearchRow
           key={hit.slug}
           hit={hit}
           summary={notesBySlug.get(hit.slug) ?? null}
           selected={hit.slug === selectedSlug}
+          siblings={{ entries: siblingEntries, index: i }}
           onOpenWikiPage={onOpenWikiPage}
           onOpenMenu={(rect) => onOpenMenu(rect, hit)}
         />
@@ -455,18 +467,21 @@ function SearchRow({
   hit,
   summary,
   selected,
+  siblings,
   onOpenWikiPage,
   onOpenMenu,
 }: {
   hit: WikiPageSearchHit;
   summary: WikiPageSummary | null;
   selected: boolean;
+  siblings?: import("../../tabs/PageNavigationContext.js").NavSiblings;
   onOpenWikiPage: (slug: string) => void;
   onOpenMenu: (rect: DOMRect) => void;
 }) {
   const freshness = summary?.freshness ?? "fresh";
   const { handlers } = useRouteDispatch(wikiPageRef(hit.slug), {
     onNavigate: () => onOpenWikiPage(hit.slug),
+    siblings,
   });
   return (
     <div
@@ -528,17 +543,20 @@ function NoteRow({
   note,
   selected,
   rightLabel,
+  siblings,
   onOpenWikiPage,
   onOpenMenu,
 }: {
   note: WikiPageSummary;
   selected: boolean;
   rightLabel?: string;
+  siblings?: import("../../tabs/PageNavigationContext.js").NavSiblings;
   onOpenWikiPage: (slug: string) => void;
   onOpenMenu: (rect: DOMRect, note: WikiPageSummary) => void;
 }) {
   const { handlers } = useRouteDispatch(wikiPageRef(note.slug), {
     onNavigate: () => onOpenWikiPage(note.slug),
+    siblings,
   });
   return (
     <div

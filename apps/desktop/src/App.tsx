@@ -147,6 +147,29 @@ const FILE_SESSIONS_STORAGE_KEY = "oxplow.layout.v1.fileSessions";
 // and a file tab may have failed to reopen).
 const CENTER_ACTIVE_STORAGE_KEY = "oxplow.layout.v1.centerActive";
 
+/**
+ * Take a caller-supplied siblings record, snap its `index` to the
+ * position whose `ref.id` matches the destination, and drop the
+ * record entirely if there's no match (a stale list shouldn't drive
+ * prev/next on a page that isn't actually in it).
+ */
+function resolveSiblings(
+  siblings: import("./tabs/PageNavigationContext.js").NavSiblings | undefined,
+  ref: TabRef,
+): import("./tabs/PageNavigationContext.js").NavSiblings | null {
+  if (!siblings || siblings.entries.length === 0) return null;
+  const matchIdx = siblings.entries.findIndex((e) => e.ref.id === ref.id);
+  if (matchIdx < 0) {
+    // Caller passed `siblings` but the destination isn't in the list.
+    // If the supplied index points at a valid slot, trust it; otherwise
+    // drop. This guards against silently rendering "1 of N" with the
+    // wrong page.
+    if (siblings.index < 0 || siblings.index >= siblings.entries.length) return null;
+    return siblings;
+  }
+  return { entries: siblings.entries, index: matchIdx };
+}
+
 function readPersistedFileSessionPaths(): Record<string, string[]> {
   try {
     const raw = window.localStorage.getItem(FILE_SESSIONS_STORAGE_KEY);
@@ -224,7 +247,7 @@ export function App() {
   // ref, the entry is migrated to the new id along with the swap. Files,
   // notes, diffs, and the agent tab don't participate.
   const [threadPageHistory, setThreadPageHistory] = useState<
-    Record<string, Record<string, { back: TabRef[]; forward: TabRef[] }>>
+    Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>>
   >({});
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
   const [error, setError] = useState<string | null>(null);
@@ -1769,7 +1792,11 @@ export function App() {
    * If `currentTabId` doesn't refer to a known page tab, falls back to
    * `handleOpenPage` (open in new tab).
    */
-  const handleNavigateInTab = useCallback((currentTabId: string, ref: TabRef) => {
+  const handleNavigateInTab = useCallback((
+    currentTabId: string,
+    ref: TabRef,
+    siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
+  ) => {
     if (!selectedThreadId) return;
     const existing = threadPageTabs[selectedThreadId] ?? [];
     const idx = existing.findIndex((t) => t.id === currentTabId);
@@ -1803,18 +1830,75 @@ export function App() {
     });
     setThreadPageHistory((prev) => {
       const perThread = prev[selectedThreadId] ?? {};
-      const old = perThread[currentTabId] ?? { back: [], forward: [] };
+      const old = perThread[currentTabId] ?? { back: [], forward: [], siblings: null };
       const { [currentTabId]: _drop, ...rest } = perThread;
+      // Snap the siblings index to whatever entry matches `ref.id` in
+      // case the caller passed an out-of-date index.
+      const resolvedSiblings = resolveSiblings(siblings, ref);
       return {
         ...prev,
         [selectedThreadId]: {
           ...rest,
-          [ref.id]: { back: [...old.back, oldRef], forward: [] },
+          [ref.id]: {
+            back: [...old.back, oldRef],
+            forward: [],
+            siblings: resolvedSiblings,
+          },
         },
       };
     });
     setCenterActive(ref.id);
   }, [handleOpenPage, selectedThreadId, setCenterActive, threadPageTabs]);
+
+  /**
+   * Step the active tab to a sibling at `targetIdx` without touching
+   * back/forward. The tab id changes to the new ref's id and the
+   * siblings record migrates with it.
+   */
+  const handleStepSibling = useCallback((currentTabId: string, targetIdx: number) => {
+    if (!selectedThreadId) return;
+    const perThread = threadPageHistory[selectedThreadId] ?? {};
+    const entry = perThread[currentTabId];
+    if (!entry || !entry.siblings) return;
+    if (targetIdx < 0 || targetIdx >= entry.siblings.entries.length) return;
+    const target = entry.siblings.entries[targetIdx]!.ref;
+    const existing = threadPageTabs[selectedThreadId] ?? [];
+    const idx = existing.findIndex((t) => t.id === currentTabId);
+    if (idx < 0) return;
+    if (target.id === currentTabId) return;
+    if (target.kind === "file") {
+      const payload = target.payload as { path?: string } | null;
+      if (payload?.path) void handleOpenFile(payload.path);
+    }
+    setThreadPageTabs((prev) => {
+      const list = prev[selectedThreadId] ?? [];
+      const next = list.slice();
+      const dupIdx = next.findIndex((t, i) => i !== idx && t.id === target.id);
+      if (dupIdx >= 0) next.splice(dupIdx, 1);
+      const adjustedIdx = dupIdx >= 0 && dupIdx < idx ? idx - 1 : idx;
+      next[adjustedIdx] = target;
+      return { ...prev, [selectedThreadId]: next };
+    });
+    setThreadPageHistory((prev) => {
+      const perThread = prev[selectedThreadId] ?? {};
+      const old = perThread[currentTabId];
+      if (!old) return prev;
+      const { [currentTabId]: _drop, ...rest } = perThread;
+      return {
+        ...prev,
+        [selectedThreadId]: {
+          ...rest,
+          [target.id]: {
+            // Preserve back/forward — sibling navigation is orthogonal.
+            back: old.back,
+            forward: old.forward,
+            siblings: old.siblings ? { entries: old.siblings.entries, index: targetIdx } : null,
+          },
+        },
+      };
+    });
+    setCenterActive(target.id);
+  }, [handleOpenFile, selectedThreadId, setCenterActive, threadPageHistory, threadPageTabs]);
 
   const handleGoBack = useCallback((currentTabId: string) => {
     if (!selectedThreadId) return;
@@ -1842,6 +1926,9 @@ export function App() {
           [target.id]: {
             back: entry.back.slice(0, -1),
             forward: [...entry.forward, oldRef],
+            // Going back drops siblings — the target predates the
+            // list-originated chain.
+            siblings: null,
           },
         },
       };
@@ -1875,6 +1962,7 @@ export function App() {
           [target.id]: {
             back: [...entry.back, oldRef],
             forward: entry.forward.slice(0, -1),
+            siblings: null,
           },
         },
       };
@@ -2517,20 +2605,27 @@ export function App() {
     for (let i = pageTabStartIdx; i < tabs.length; i++) {
       const tab = tabs[i]!;
       const tabId = tab.id;
-      const entry = perThreadHistory[tabId] ?? { back: [], forward: [] };
+      const entry = perThreadHistory[tabId] ?? { back: [], forward: [], siblings: null };
       const ref = pageRefsForThread.find((r) => r.id === tabId);
       const innerRender = tab.render;
       const scopes = ref ? bookmarksStore.scopesFor(selectedThreadId, stream?.id ?? null, ref.id) : [];
       const registeredTitle = pageTitles[tabId];
       const navValue = {
-        navigate: (newRef: TabRef, opts?: { newTab?: boolean }) => {
+        navigate: (newRef: TabRef, opts?: { newTab?: boolean; siblings?: import("./tabs/PageNavigationContext.js").NavSiblings }) => {
           if (opts?.newTab) handleOpenPage(newRef);
-          else handleNavigateInTab(tabId, newRef);
+          else handleNavigateInTab(tabId, newRef, opts?.siblings);
         },
         goBack: () => handleGoBack(tabId),
         goForward: () => handleGoForward(tabId),
         canGoBack: entry.back.length > 0,
         canGoForward: entry.forward.length > 0,
+        siblings: entry.siblings,
+        goPrevSibling: entry.siblings && entry.siblings.index > 0
+          ? () => handleStepSibling(tabId, entry.siblings!.index - 1)
+          : undefined,
+        goNextSibling: entry.siblings && entry.siblings.index < entry.siblings.entries.length - 1
+          ? () => handleStepSibling(tabId, entry.siblings!.index + 1)
+          : undefined,
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
         bookmark: ref ? {
@@ -2576,6 +2671,7 @@ export function App() {
     handleNavigateInTab,
     handleGoBack,
     handleGoForward,
+    handleStepSibling,
     closePageTab,
     pageTitles,
     setPageTitle,

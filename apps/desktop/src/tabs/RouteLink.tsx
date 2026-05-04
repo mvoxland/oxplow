@@ -2,6 +2,7 @@ import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 import type { TabRef } from "./tabState.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
+import type { NavSiblings } from "./PageNavigationContext.js";
 
 /**
  * Browser-style click semantics for any element that points at a
@@ -22,9 +23,17 @@ export function useRouteDispatch(
   options: {
     onNavigate?: (ref: TabRef, opts?: { newTab?: boolean }) => void;
     pinnedSlot?: boolean;
+    /**
+     * Optional sibling list this row is part of. When the row
+     * dispatches an in-tab navigation, the siblings travel with it
+     * and the destination page picks up prev/next buttons in its
+     * nav bar. Ignored when the navigation falls back to a new tab
+     * or to the rail-side `onNavigate` callback.
+     */
+    siblings?: NavSiblings;
   } = {},
 ) {
-  const { onNavigate, pinnedSlot = false } = options;
+  const { onNavigate, pinnedSlot = false, siblings } = options;
   const ctxNav = useOptionalPageNavigation();
   const dispatch = useCallback((newTab: boolean) => {
     const escape = newTab || pinnedSlot;
@@ -34,7 +43,7 @@ export function useRouteDispatch(
     // caller's `onNavigate` — that callback typically maps to the
     // host's "always-open-as-new-tab" handler.
     if (ctxNav) {
-      ctxNav.navigate(ref, { newTab: escape });
+      ctxNav.navigate(ref, { newTab: escape, siblings: escape ? undefined : siblings });
       return;
     }
     if (onNavigate) {
@@ -42,7 +51,7 @@ export function useRouteDispatch(
       return;
     }
     // No way to navigate — silently no-op.
-  }, [ctxNav, onNavigate, pinnedSlot, ref]);
+  }, [ctxNav, onNavigate, pinnedSlot, ref, siblings]);
 
   const handlers = useMemo(() => ({
     onClick: (e: MouseEvent) => {

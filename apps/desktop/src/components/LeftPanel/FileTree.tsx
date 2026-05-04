@@ -4,6 +4,7 @@ import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { fileRef } from "../../tabs/pageRefs.js";
+import type { NavSiblings } from "../../tabs/PageNavigationContext.js";
 
 /**
  * `requestMenu` opens a menu anchored at the kebab's bottom-right
@@ -55,6 +56,9 @@ export function ChangedFilesSection({
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
+  // ChangedFilesSection lives inside the rail HUD's ProjectPanel, which
+  // has no PageNavigationContext, so siblings would be a no-op. Skipped
+  // until/unless this section moves into a Page.
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%" }}>
       <div style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
@@ -102,11 +106,22 @@ export function TreeEntries({
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
 }) {
+  // Siblings for file-row navigation: every file at this directory
+  // level. Directories don't participate (they're not destinations).
+  const siblingEntries = entries
+    .filter((e) => e.kind === "file" && e.gitStatus !== "deleted")
+    .map((e) => ({ ref: fileRef(e.path), label: e.path }));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: "100%", width: "max-content" }}>
       {entries.map((entry) => {
         const expanded = !!expandedDirs[entry.path];
         const children = entriesByDir[entry.path] ?? [];
+        const fileSiblingIdx = entry.kind === "file"
+          ? siblingEntries.findIndex((s) => s.ref.id === fileRef(entry.path).id)
+          : -1;
+        const rowSiblings: NavSiblings | undefined = fileSiblingIdx >= 0
+          ? { entries: siblingEntries, index: fileSiblingIdx }
+          : undefined;
         // "Marked" = this directory's name itself is in the config list.
         // "Inside" = some ancestor segment matches, so this path is being
         // ignored by inheritance even if its own name isn't in the list.
@@ -120,6 +135,7 @@ export function TreeEntries({
               insideGenerated={insideGenerated}
               markedSelf={markedSelf}
               selected={selectedFilePath === entry.path}
+              siblings={rowSiblings}
               onToggleDirectory={onToggleDirectory}
               onOpenFile={onOpenFile}
               onOpenMenu={onOpenMenu}
@@ -164,6 +180,7 @@ function TreeEntryRow({
   insideGenerated,
   markedSelf,
   selected,
+  siblings,
   onToggleDirectory,
   onOpenFile,
   onOpenMenu,
@@ -173,6 +190,7 @@ function TreeEntryRow({
   insideGenerated: boolean;
   markedSelf: boolean;
   selected: boolean;
+  siblings?: NavSiblings;
   onToggleDirectory(path: string): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
@@ -181,6 +199,7 @@ function TreeEntryRow({
   // ref is unused. fileRef is cheap to construct.
   const { handlers } = useRouteDispatch(fileRef(entry.path), {
     onNavigate: (_ref, opts) => onOpenFile(entry.path, opts),
+    siblings,
   });
   const isFile = entry.kind === "file";
   const isOpenable = isFile && entry.gitStatus !== "deleted";

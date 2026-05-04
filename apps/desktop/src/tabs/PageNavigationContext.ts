@@ -5,6 +5,27 @@ import type { BookmarkScope } from "./bookmarks.js";
 export interface NavigateOptions {
   /** Force a brand new tab (slot) instead of replacing the current page. */
   newTab?: boolean;
+  /**
+   * Sibling list this navigation came from. When supplied, the
+   * destination page renders prev/next sibling buttons in its nav bar
+   * that step through the list without affecting back/forward history.
+   * The destination's index inside the list is auto-detected from the
+   * entries (matched on `ref.id`); pass `siblingsIndex` explicitly to
+   * disambiguate when an id appears more than once.
+   */
+  siblings?: NavSiblings;
+}
+
+export interface NavSiblingEntry {
+  ref: TabRef;
+  /** Human-readable label for hover-tooltips (file path, work-item title, …). */
+  label: string;
+}
+
+export interface NavSiblings {
+  entries: NavSiblingEntry[];
+  /** 0-based position of the page being navigated to. */
+  index: number;
 }
 
 export interface BookmarkBinding {
@@ -29,6 +50,14 @@ export interface PageNavigation {
   goForward(): void;
   canGoBack: boolean;
   canGoForward: boolean;
+  /** Sibling-list state for the current page. Null when this page
+   *  was not opened from a list. Up/down step through `entries`
+   *  without affecting back/forward history. */
+  siblings?: NavSiblings | null;
+  /** Step to the previous sibling (index - 1). No-op when at index 0. */
+  goPrevSibling?(): void;
+  /** Step to the next sibling (index + 1). No-op at the last entry. */
+  goNextSibling?(): void;
   /** Bookmark binding for the page currently rendered in this tab. */
   bookmark?: BookmarkBinding;
   /**
