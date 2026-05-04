@@ -17,6 +17,8 @@ function urlTransform(value: string): string {
 }
 import { Kebab } from "../Kebab.js";
 import type { MenuItem } from "../../menu.js";
+import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
+import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
 
 // Mermaid is loaded lazily so this module is safe to import in
 // non-DOM test environments (parseMarkdownLink is the main reason
@@ -318,6 +320,12 @@ export function MarkdownView({
 }: MarkdownViewProps) {
   const processedBody = useMemo(() => preprocessWikilinks(body), [body]);
   const ref = useRef<HTMLDivElement | null>(null);
+  // Page-context chokepoint: when this MarkdownView renders inside a
+  // page, plain-click follows browser-tab semantics (in-tab nav).
+  // Modifier-click + middle/right-click always escape to a new tab.
+  // Outside a page (e.g. work-item modal), the host callbacks own
+  // the click.
+  const ctxNav = useOptionalPageNavigation();
 
   const handleLinkClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
     const href = event.currentTarget.getAttribute("href") ?? "";
@@ -330,24 +338,40 @@ export function MarkdownView({
       else window.open(href, "_blank", "noopener,noreferrer");
       return;
     }
+    const newTab = event.metaKey || event.ctrlKey || event.button === 1;
     if (parsed.kind === "file") {
+      if (ctxNav && !newTab) {
+        ctxNav.navigate(fileRef(parsed.path), { newTab: false });
+        return;
+      }
       onOpenFile?.(parsed.path, parsed.line);
       return;
     }
     if (parsed.kind === "directory") {
+      if (ctxNav && !newTab) {
+        ctxNav.navigate(directoryRef(parsed.path), { newTab: false });
+        return;
+      }
       onOpenDirectory?.(parsed.path);
       return;
     }
     if (parsed.kind === "git-commit") {
+      if (ctxNav && !newTab) {
+        ctxNav.navigate(gitCommitRef(parsed.sha), { newTab: false });
+        return;
+      }
       onOpenCommit?.(parsed.sha);
       return;
     }
-    // Internal link
-    const newTab = event.metaKey || event.ctrlKey || event.button === 1;
+    // Internal (wiki) link
+    if (ctxNav && !newTab) {
+      ctxNav.navigate(wikiPageRef(parsed.slug), { newTab: false });
+      return;
+    }
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
     else if (onNavigateInternal) onNavigateInternal(parsed.slug);
     // No handlers? Silently ignore — work-item notes don't have wiki nav.
-  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
+  }, [ctxNav, onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
 
   const buildLinkMenu = useCallback((href: string): MenuItem[] => {
     const parsed = parseMarkdownLink(href);
