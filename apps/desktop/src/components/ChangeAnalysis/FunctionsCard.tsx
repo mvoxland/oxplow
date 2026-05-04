@@ -187,18 +187,24 @@ interface PathSegment {
  * else falls back to filesystem segments because there's no
  * meaningful "package" above the file:
  *
+ * - **Java**: `package com.x.y;` is a real language-level
+ *   grouping. The directory chain under `src/main/java/` (or just
+ *   `/java/`) mirrors the package, but the canonical *display*
+ *   form is dot-separated (`com.example.foo`). The grouping
+ *   strips everything up through the `java/` ancestor and renders
+ *   the package as a single dotted node; the class leaf drops
+ *   `.java`.
+ * - **Go**: each directory is a package; all `.go` files in a
+ *   dir share the same package. The dir IS the grouping; files
+ *   stay as separate leaves but with `.go` stripped from the
+ *   label so the logical file name shows.
  * - **TS / JS / TSX**: each file *is* a module; there's no
  *   language-level container above it. Workspace structure is
- *   conventional (directories), which the filesystem path already
- *   reflects 1:1.
- * - **Go**: each directory is a package; all `.go` files in a dir
- *   share the same package. The dir IS the grouping; files inside
- *   are still meaningful units, so we keep them as separate leaves.
- * - **Java**: `package com.x.y;` matches the directory chain in
- *   well-formed projects (under `src/main/java/` etc.). Parsing
- *   the package declaration would just confirm the dir layout.
- * - **C / C++**: no namespace-like grouping above the file (C++
- *   namespaces live INSIDE files and are already in `containerPath`).
+ *   conventional (directories), which the filesystem path
+ *   already reflects 1:1.
+ * - **C / C++**: no namespace-like grouping above the file
+ *   (C++ namespaces live INSIDE files and are already in
+ *   `containerPath`).
  */
 function pathSegments(filePath: string): PathSegment[] {
   if (filePath.endsWith(".rs")) {
@@ -208,6 +214,22 @@ function pathSegments(filePath: string): PathSegment[] {
   if (filePath.endsWith(".py") || filePath.endsWith(".pyi")) {
     return pythonGroupingSegments(filePath);
   }
+  if (filePath.endsWith(".java")) {
+    return javaGroupingSegments(filePath);
+  }
+  if (filePath.endsWith(".go")) {
+    return defaultGroupingSegments(filePath, ".go");
+  }
+  return defaultGroupingSegments(filePath, null);
+}
+
+/**
+ * Filesystem grouping with optional file-extension stripping on
+ * the leaf. When `dropExt` is null, the leaf keeps its full name
+ * (extension included) so similar-named files (`Foo.tsx` vs
+ * `Foo.ts`) stay distinguishable.
+ */
+function defaultGroupingSegments(filePath: string, dropExt: string | null): PathSegment[] {
   const parts = filePath.split("/");
   const out: PathSegment[] = [];
   let cum = "";
@@ -216,7 +238,53 @@ function pathSegments(filePath: string): PathSegment[] {
     cum = cum ? `${cum}/${p}` : p;
     out.push({ label: p, refPath: cum, kind: "dir" });
   }
-  out.push({ label: parts[parts.length - 1] ?? filePath, refPath: filePath, kind: "file" });
+  const fileName = parts[parts.length - 1] ?? filePath;
+  const leafLabel = dropExt && fileName.endsWith(dropExt)
+    ? fileName.slice(0, -dropExt.length)
+    : fileName;
+  out.push({ label: leafLabel, refPath: filePath, kind: "file" });
+  return out;
+}
+
+/**
+ * Java grouping: filesystem dirs up to the source-root marker
+ * (`java/`), then a single dot-joined package node, then the
+ * class leaf with `.java` stripped. When no `java/` ancestor
+ * exists (uncommon — modules without the conventional root),
+ * fall back to default-grouping with `.java` stripped.
+ */
+function javaGroupingSegments(filePath: string): PathSegment[] {
+  const parts = filePath.split("/");
+  // Find the last `java` segment that has at least one segment + a
+  // file after it (so we know it's the source-root marker, not a
+  // file or a different dir named "java").
+  let javaIdx = -1;
+  for (let i = parts.length - 2; i >= 0; i--) {
+    if (parts[i] === "java") { javaIdx = i; break; }
+  }
+  if (javaIdx < 0) {
+    return defaultGroupingSegments(filePath, ".java");
+  }
+  const preDirs = parts.slice(0, javaIdx);
+  const pkgParts = parts.slice(javaIdx + 1, parts.length - 1);
+  const fileName = parts[parts.length - 1] ?? filePath;
+  const className = fileName.replace(/\.java$/, "");
+
+  const out: PathSegment[] = [];
+  let cum = "";
+  for (const p of preDirs) {
+    cum = cum ? `${cum}/${p}` : p;
+    out.push({ label: p, refPath: cum, kind: "dir" });
+  }
+  // Account for the `java/` boilerplate dir in cumulative paths
+  // even though we don't render it as its own node.
+  cum = cum ? `${cum}/java` : "java";
+  if (pkgParts.length > 0) {
+    let pkgCum = cum;
+    for (const p of pkgParts) pkgCum = `${pkgCum}/${p}`;
+    out.push({ label: pkgParts.join("."), refPath: pkgCum, kind: "dir" });
+  }
+  out.push({ label: className, refPath: filePath, kind: "file" });
   return out;
 }
 
