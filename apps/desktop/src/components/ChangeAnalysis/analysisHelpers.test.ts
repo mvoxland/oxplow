@@ -97,7 +97,7 @@ describe("diffFunctions", () => {
   });
   test("detects signature changes", () => {
     expect(buckets.modifiedSignature).toEqual([
-      { path: "src/foo.ts", name: "beta", containerPath: [], before: 2, after: 3 },
+      { path: "src/foo.ts", name: "beta", containerPath: [], startLine: 12, before: 2, after: 3 },
     ]);
   });
   test("methods with the same short name in sibling containers don't collide", () => {
@@ -121,7 +121,7 @@ describe("diffFunctions", () => {
     ];
     const result = diffFunctions(indexSides(sidesNested));
     expect(result.modifiedSignature).toEqual([
-      { path: "src/x.ts", name: "save", containerPath: ["UserStore"], before: 0, after: 1 },
+      { path: "src/x.ts", name: "save", containerPath: ["UserStore"], startLine: 1, before: 0, after: 1 },
     ]);
   });
   test("detects body changes alongside signature changes", () => {

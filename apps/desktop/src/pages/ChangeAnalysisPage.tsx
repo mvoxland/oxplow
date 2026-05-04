@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { Stream } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -9,15 +9,20 @@ import { FilesPivot } from "../components/ChangeAnalysis/FilesPivot.js";
 import { FunctionsCard } from "../components/ChangeAnalysis/FunctionsCard.js";
 import { DuplicationCard } from "../components/ChangeAnalysis/DuplicationCard.js";
 import { TestsCard } from "../components/ChangeAnalysis/TestsCard.js";
+import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
 export interface ChangeAnalysisPageProps {
   stream: Stream | null;
   target: string;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+  /** Open the diff for a path between the analysis's resolved base
+   *  and head refs. The page builds the spec; the host wires it to
+   *  the existing diff-tab opener. */
+  onOpenDiff?(spec: DiffSpec): void;
 }
 
-export function ChangeAnalysisPage({ stream, target, onOpenPage, onOpenFile }: ChangeAnalysisPageProps) {
+export function ChangeAnalysisPage({ stream, target, onOpenPage, onOpenFile, onOpenDiff }: ChangeAnalysisPageProps) {
   const streamId = stream?.id ?? null;
   const analysis = useChangeAnalysis({ streamId, target });
 
@@ -30,6 +35,25 @@ export function ChangeAnalysisPage({ stream, target, onOpenPage, onOpenFile }: C
     if (target === "working") return uncommittedChangesRef();
     return gitCommitRef(target);
   }, [target]);
+
+  const handleOpenFunctionDiff = useCallback(
+    (path: string, line: number) => {
+      if (!onOpenDiff || !analysis.refs) {
+        onOpenFile(path);
+        return;
+      }
+      const { baseRef, headRef } = analysis.refs;
+      const rightKind: DiffSpec["rightKind"] = headRef ? { ref: headRef } : "working";
+      onOpenDiff({
+        path,
+        leftRef: baseRef,
+        rightKind,
+        baseLabel: target === "working" ? "working tree" : `parent of ${target.slice(0, 7)}`,
+        revealLine: line,
+      });
+    },
+    [onOpenDiff, onOpenFile, analysis.refs, target],
+  );
 
   if (!streamId) {
     return (
@@ -85,7 +109,11 @@ export function ChangeAnalysisPage({ stream, target, onOpenPage, onOpenFile }: C
               tests={analysis.tests}
             />
             <FilesPivot pivots={analysis.pivots} files={analysis.files} onOpenFile={onOpenFile} />
-            <FunctionsCard functions={analysis.functions} onOpenFile={onOpenFile} />
+            <FunctionsCard
+              functions={analysis.functions}
+              onOpenFile={onOpenFile}
+              onOpenFunctionDiff={handleOpenFunctionDiff}
+            />
             <DuplicationCard
               duplication={analysis.duplication}
               onOpenFile={onOpenFile}

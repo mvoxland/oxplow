@@ -2146,6 +2146,7 @@ export function App() {
               target={target}
               onOpenPage={navOpen}
               onOpenFile={navOpenFile}
+              onOpenDiff={handleOpenDiff}
             />
           ),
         });

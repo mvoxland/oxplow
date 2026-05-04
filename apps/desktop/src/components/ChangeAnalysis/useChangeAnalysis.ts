@@ -48,6 +48,10 @@ export interface ChangeAnalysisState {
   };
   tests: TestSummary;
   refresh: () => Promise<void>;
+  /** The (base, head) refs used to compute this analysis. `headRef`
+   *  is null in working-tree mode (caller should diff against the
+   *  workspace). Null until the first refresh resolves. */
+  refs: { baseRef: string; headRef: string | null } | null;
 }
 
 const EMPTY_FILES: BranchChangeEntry[] = [];
@@ -116,6 +120,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedRefs, setResolvedRefs] = useState<{ baseRef: string; headRef: string | null } | null>(null);
   const reqIdRef = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -136,8 +141,12 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
         setError(refs.error);
         setFiles(EMPTY_FILES);
         setFunctions(EMPTY_BUCKETS);
+        setResolvedRefs(null);
         setLoading(false);
         return;
+      }
+      if (reqId === reqIdRef.current) {
+        setResolvedRefs({ baseRef: refs.baseRef, headRef: refs.headRef });
       }
       const fileList = await fetchFiles(streamId, refs.baseRef, target);
       if (reqId !== reqIdRef.current) return;
@@ -276,6 +285,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     },
     tests,
     refresh,
+    refs: resolvedRefs,
   };
 }
 
