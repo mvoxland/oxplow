@@ -220,6 +220,9 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
             length: fn.length,
             startLine: fn.start_line,
             containerPath: fn.container_path,
+            visibility: (fn.visibility === "public" || fn.visibility === "private")
+              ? (fn.visibility as "public" | "private")
+              : "unknown" as const,
           })),
         }));
         setFunctions(diffFunctions(indexSides(sides)));

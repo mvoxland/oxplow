@@ -286,6 +286,112 @@ fn top_level_function_has_empty_container_path() {
 }
 
 #[test]
+fn rust_visibility_pub_vs_private() {
+    let src = r#"
+pub fn exported() {}
+fn private_fn() {}
+"#;
+    let m = analyze_file("src/x.rs", src);
+    let exported = m.iter().find(|f| f.name == "exported").unwrap();
+    let priv_fn = m.iter().find(|f| f.name == "private_fn").unwrap();
+    assert_eq!(exported.visibility, Visibility::Public);
+    assert_eq!(priv_fn.visibility, Visibility::Private);
+}
+
+#[test]
+fn typescript_class_method_visibility() {
+    let src = r#"
+class Greeter {
+    private secret(): void {}
+    public hello(): void {}
+    plain(): void {}
+}
+"#;
+    let m = analyze_file("src/x.ts", src);
+    let secret = m.iter().find(|f| f.name == "secret").unwrap();
+    let hello = m.iter().find(|f| f.name == "hello").unwrap();
+    let plain = m.iter().find(|f| f.name == "plain").unwrap();
+    assert_eq!(secret.visibility, Visibility::Private);
+    assert_eq!(hello.visibility, Visibility::Public);
+    // No accessibility modifier inside a class → public default.
+    assert_eq!(plain.visibility, Visibility::Public);
+}
+
+#[test]
+fn typescript_top_level_export_visibility() {
+    let src = r#"
+export function exported() {}
+function helper() {}
+"#;
+    let m = analyze_file("src/x.ts", src);
+    let exported = m.iter().find(|f| f.name == "exported").unwrap();
+    let helper = m.iter().find(|f| f.name == "helper").unwrap();
+    assert_eq!(exported.visibility, Visibility::Public);
+    assert_eq!(helper.visibility, Visibility::Private);
+}
+
+#[test]
+fn python_underscore_visibility() {
+    let src = "
+def _helper():
+    pass
+def public():
+    pass
+";
+    let m = analyze_file("src/x.py", src);
+    let helper = m.iter().find(|f| f.name == "_helper").unwrap();
+    let public = m.iter().find(|f| f.name == "public").unwrap();
+    assert_eq!(helper.visibility, Visibility::Private);
+    assert_eq!(public.visibility, Visibility::Public);
+}
+
+#[test]
+fn go_capitalization_visibility() {
+    let src = r#"
+package main
+func Public() {}
+func privateFn() {}
+"#;
+    let m = analyze_file("main.go", src);
+    let pub_fn = m.iter().find(|f| f.name == "Public").unwrap();
+    let priv_fn = m.iter().find(|f| f.name == "privateFn").unwrap();
+    assert_eq!(pub_fn.visibility, Visibility::Public);
+    assert_eq!(priv_fn.visibility, Visibility::Private);
+}
+
+#[test]
+fn java_visibility_modifiers() {
+    let src = r#"
+class Foo {
+    private int alpha() { return 0; }
+    public int beta() { return 0; }
+    int packagePriv() { return 0; }
+}
+"#;
+    let m = analyze_file("Foo.java", src);
+    let alpha = m.iter().find(|f| f.name == "alpha").unwrap();
+    let beta = m.iter().find(|f| f.name == "beta").unwrap();
+    let pkg = m.iter().find(|f| f.name == "packagePriv").unwrap();
+    assert_eq!(alpha.visibility, Visibility::Private);
+    assert_eq!(beta.visibility, Visibility::Public);
+    // Package-private treated as Private (can't call from outside).
+    assert_eq!(pkg.visibility, Visibility::Private);
+}
+
+#[test]
+fn c_static_visibility() {
+    let src = r#"
+static int hidden(int x) { return x; }
+int exported(int x) { return x; }
+"#;
+    let m = analyze_file("src/x.c", src);
+    let hidden = m.iter().find(|f| f.name == "hidden").unwrap();
+    let exported = m.iter().find(|f| f.name == "exported").unwrap();
+    assert_eq!(hidden.visibility, Visibility::Private);
+    assert_eq!(exported.visibility, Visibility::Public);
+}
+
+#[test]
 fn nested_functions_each_get_their_own_record() {
     let src = r#"
 fn outer() {

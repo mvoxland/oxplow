@@ -551,6 +551,13 @@ export type AnalyzedFunction = {
 	 *  card hierarchically.
 	 */
 	container_path: string[],
+	/**
+	 *  Heuristic public/private classification — see
+	 *  `oxplow_code_metrics::Visibility`. Frontend uses this to
+	 *  drive a "Show private" filter on the Semantic view.
+	 *  Serialized as `"public"` / `"private"` / `"unknown"`.
+	 */
+	visibility: string,
 };
 
 export type AppVersion = {

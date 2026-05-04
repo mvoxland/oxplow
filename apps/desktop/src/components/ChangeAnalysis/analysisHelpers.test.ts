@@ -72,18 +72,18 @@ describe("diffFunctions", () => {
       path: "src/foo.ts",
       side: "base",
       functions: [
-        { name: "alpha", paramCount: 1, complexity: 3, length: 10, startLine: 1, containerPath: [] },
-        { name: "beta", paramCount: 2, complexity: 5, length: 20, startLine: 12, containerPath: [] },
-        { name: "gone", paramCount: 0, complexity: 1, length: 4, startLine: 33, containerPath: [] },
+        { name: "alpha", paramCount: 1, complexity: 3, length: 10, startLine: 1, containerPath: [], visibility: "public" },
+        { name: "beta", paramCount: 2, complexity: 5, length: 20, startLine: 12, containerPath: [], visibility: "public" },
+        { name: "gone", paramCount: 0, complexity: 1, length: 4, startLine: 33, containerPath: [], visibility: "public" },
       ],
     },
     {
       path: "src/foo.ts",
       side: "head",
       functions: [
-        { name: "alpha", paramCount: 1, complexity: 3, length: 10, startLine: 1, containerPath: [] }, // unchanged
-        { name: "beta", paramCount: 3, complexity: 8, length: 22, startLine: 12, containerPath: [] }, // sig + body
-        { name: "fresh", paramCount: 1, complexity: 2, length: 6, startLine: 28, containerPath: [] }, // added
+        { name: "alpha", paramCount: 1, complexity: 3, length: 10, startLine: 1, containerPath: [], visibility: "public" }, // unchanged
+        { name: "beta", paramCount: 3, complexity: 8, length: 22, startLine: 12, containerPath: [], visibility: "public" }, // sig + body
+        { name: "fresh", paramCount: 1, complexity: 2, length: 6, startLine: 28, containerPath: [], visibility: "public" }, // added
       ],
     },
   ];
@@ -97,7 +97,7 @@ describe("diffFunctions", () => {
   });
   test("detects signature changes", () => {
     expect(buckets.modifiedSignature).toEqual([
-      { path: "src/foo.ts", name: "beta", containerPath: [], startLine: 12, before: 2, after: 3 },
+      { path: "src/foo.ts", name: "beta", containerPath: [], startLine: 12, before: 2, after: 3, visibility: "public" },
     ]);
   });
   test("methods with the same short name in sibling containers don't collide", () => {
@@ -106,22 +106,22 @@ describe("diffFunctions", () => {
         path: "src/x.ts",
         side: "base",
         functions: [
-          { name: "save", paramCount: 0, complexity: 1, length: 4, startLine: 1, containerPath: ["UserStore"] },
-          { name: "save", paramCount: 0, complexity: 1, length: 4, startLine: 10, containerPath: ["DocStore"] },
+          { name: "save", paramCount: 0, complexity: 1, length: 4, startLine: 1, containerPath: ["UserStore"], visibility: "public" },
+          { name: "save", paramCount: 0, complexity: 1, length: 4, startLine: 10, containerPath: ["DocStore"], visibility: "public" },
         ],
       },
       {
         path: "src/x.ts",
         side: "head",
         functions: [
-          { name: "save", paramCount: 1, complexity: 1, length: 4, startLine: 1, containerPath: ["UserStore"] },
-          { name: "save", paramCount: 0, complexity: 1, length: 4, startLine: 10, containerPath: ["DocStore"] },
+          { name: "save", paramCount: 1, complexity: 1, length: 4, startLine: 1, containerPath: ["UserStore"], visibility: "public" },
+          { name: "save", paramCount: 0, complexity: 1, length: 4, startLine: 10, containerPath: ["DocStore"], visibility: "public" },
         ],
       },
     ];
     const result = diffFunctions(indexSides(sidesNested));
     expect(result.modifiedSignature).toEqual([
-      { path: "src/x.ts", name: "save", containerPath: ["UserStore"], startLine: 1, before: 0, after: 1 },
+      { path: "src/x.ts", name: "save", containerPath: ["UserStore"], startLine: 1, before: 0, after: 1, visibility: "public" },
     ]);
   });
   test("detects body changes alongside signature changes", () => {

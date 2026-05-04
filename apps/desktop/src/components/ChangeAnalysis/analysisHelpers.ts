@@ -1,5 +1,7 @@
 import type { BranchChangeEntry, GitFileStatus } from "../../api-types.js";
 
+export type FunctionVisibility = "public" | "private" | "unknown";
+
 export interface AnalyzedFunctionSummary {
   name: string;
   paramCount: number;
@@ -8,6 +10,8 @@ export interface AnalyzedFunctionSummary {
   startLine: number;
   /** Outer-to-inner container ancestors (class/impl/module/namespace). */
   containerPath: string[];
+  /** Heuristic public/private classification per language. */
+  visibility: FunctionVisibility;
 }
 
 export interface FilePivotRow {
@@ -24,10 +28,10 @@ export interface FilePivots {
 }
 
 export interface FunctionsBuckets {
-  added: Array<{ path: string; name: string; containerPath: string[]; startLine: number; paramCount: number; complexity: number }>;
-  deleted: Array<{ path: string; name: string; containerPath: string[]; startLine: number }>;
-  modifiedSignature: Array<{ path: string; name: string; containerPath: string[]; startLine: number; before: number; after: number }>;
-  modifiedBody: Array<{ path: string; name: string; containerPath: string[]; startLine: number; complexityDelta: number; lengthDelta: number }>;
+  added: Array<{ path: string; name: string; containerPath: string[]; startLine: number; paramCount: number; complexity: number; visibility: FunctionVisibility }>;
+  deleted: Array<{ path: string; name: string; containerPath: string[]; startLine: number; visibility: FunctionVisibility }>;
+  modifiedSignature: Array<{ path: string; name: string; containerPath: string[]; startLine: number; before: number; after: number; visibility: FunctionVisibility }>;
+  modifiedBody: Array<{ path: string; name: string; containerPath: string[]; startLine: number; complexityDelta: number; lengthDelta: number; visibility: FunctionVisibility }>;
 }
 
 const TEST_PATTERNS: RegExp[] = [
@@ -168,6 +172,7 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
           startLine: after.startLine,
           paramCount: after.paramCount,
           complexity: after.complexity,
+          visibility: after.visibility,
         });
         continue;
       }
@@ -177,11 +182,13 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
           name: before.name,
           containerPath: before.containerPath,
           startLine: before.startLine,
+          visibility: before.visibility,
         });
         continue;
       }
       if (!before || !after) continue;
       const containerPath = after.containerPath;
+      const visibility = after.visibility;
       if (before.paramCount !== after.paramCount) {
         out.modifiedSignature.push({
           path,
@@ -190,6 +197,7 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
           startLine: after.startLine,
           before: before.paramCount,
           after: after.paramCount,
+          visibility,
         });
       }
       const complexityDelta = after.complexity - before.complexity;
@@ -202,6 +210,7 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
           startLine: after.startLine,
           complexityDelta,
           lengthDelta,
+          visibility,
         });
       }
     }

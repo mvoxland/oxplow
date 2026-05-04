@@ -22,6 +22,19 @@ emit three findings:
 `extra.functionName` carries the function identifier so the UI can
 group all three back together.
 
+`FunctionMetrics.visibility` (`Public`/`Private`/`Unknown`, surfaced
+on the IPC as `"public"`/`"private"`/`"unknown"`) is a heuristic
+public-or-private classification per language: Rust looks for a
+`visibility_modifier` child; TS/JS uses `accessibility_modifier`,
+`#`-prefixed names, or the enclosing class/`export_statement` for
+top-level functions; Java reads the `modifiers` child; C++ tracks the
+preceding `access_specifier` within the enclosing class/struct (class
+default = private, struct default = public); Go uses identifier
+capitalization; Python uses the leading-underscore convention; C
+treats `static` storage class as private. The Change Analysis
+Semantic view drives a "Show private" toggle from this field
+(default on) and colors the function glyph by visibility.
+
 `FunctionMetrics.container_path` (and `AnalyzedFunction.container_path`
 on the IPC surface) carries the outer-to-inner names of the named-
 declaration ancestors a function lives inside (class / impl / trait /
