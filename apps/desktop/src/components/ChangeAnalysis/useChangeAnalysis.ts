@@ -178,6 +178,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
             complexity: fn.complexity,
             length: fn.length,
             startLine: fn.start_line,
+            containerPath: fn.container_path,
           })),
         }));
         setFunctions(diffFunctions(indexSides(sides)));

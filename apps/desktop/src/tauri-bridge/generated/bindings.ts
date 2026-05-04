@@ -544,6 +544,13 @@ export type AnalyzedFunction = {
 	complexity: number,
 	parameter_count: number,
 	nloc: number,
+	/**
+	 *  Outer-to-inner names of the named-declaration ancestors this
+	 *  function lives inside (class / impl / module / namespace).
+	 *  Empty for top-level functions; used to render the Functions
+	 *  card hierarchically.
+	 */
+	container_path: string[],
 };
 
 export type AppVersion = {

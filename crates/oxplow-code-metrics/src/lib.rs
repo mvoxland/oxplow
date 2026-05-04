@@ -40,6 +40,11 @@ pub struct FunctionMetrics {
     pub start_line: u32,
     /// 1-based end line.
     pub end_line: u32,
+    /// Outer-to-inner names of the named-declaration ancestors this
+    /// function lives inside (class / impl / module / namespace).
+    /// Empty for top-level functions. Language-specific — see
+    /// `LanguageSpec::container_kinds`.
+    pub container_path: Vec<String>,
 }
 
 /// Analyze a single file. Returns an empty Vec for unsupported
@@ -109,6 +114,7 @@ fn function_metrics(
     let name = function_name(node, src, spec).unwrap_or_else(|| "(anonymous)".into());
     let parameter_count = count_parameters(node, spec);
     let complexity = count_decision_points(node, spec) + 1;
+    let container_path = container_path(node, src, spec);
 
     Some(FunctionMetrics {
         path: path.into(),
@@ -118,7 +124,43 @@ fn function_metrics(
         parameter_count,
         start_line,
         end_line,
+        container_path,
     })
+}
+
+/// Walk parents of `node` and collect outer-to-inner names of every
+/// ancestor whose kind is in `spec.container_kinds`. Stops at the
+/// nearest enclosing function — a closure inside a method does not
+/// inherit the method's class as a container (the method itself is
+/// already its own record with that container_path).
+fn container_path(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if spec.function_kinds.contains(&parent.kind()) {
+            break;
+        }
+        if spec.container_kinds.contains(&parent.kind()) {
+            if let Some(name) = container_name(parent, src, spec) {
+                names.push(name);
+            }
+        }
+        current = parent.parent();
+    }
+    names.reverse();
+    names
+}
+
+fn container_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<String> {
+    for field in spec.container_name_fields {
+        if let Some(name_node) = node.child_by_field_name(field) {
+            let leaf = innermost_identifier(name_node).unwrap_or(name_node);
+            if let Ok(text) = leaf.utf8_text(src) {
+                return Some(text.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn function_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<String> {

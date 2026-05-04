@@ -202,6 +202,90 @@ fn classify(x: i32) -> &'static str {
 }
 
 #[test]
+fn rust_method_in_impl_records_container_path() {
+    let src = r#"
+struct Foo;
+impl Foo {
+    fn bar(&self) -> i32 { 1 }
+}
+"#;
+    let m = analyze_file("src/x.rs", src);
+    let bar = m.iter().find(|f| f.name == "bar").expect("method");
+    assert_eq!(bar.container_path, vec!["Foo".to_string()]);
+}
+
+#[test]
+fn rust_method_in_nested_module_records_full_container_path() {
+    let src = r#"
+mod outer {
+    mod inner {
+        struct Foo;
+        impl Foo {
+            fn bar(&self) -> i32 { 1 }
+        }
+    }
+}
+"#;
+    let m = analyze_file("src/x.rs", src);
+    let bar = m.iter().find(|f| f.name == "bar").expect("method");
+    assert_eq!(
+        bar.container_path,
+        vec!["outer".to_string(), "inner".to_string(), "Foo".to_string()],
+    );
+}
+
+#[test]
+fn typescript_method_in_class_records_class_name() {
+    let src = r#"
+class Greeter {
+    greet(name: string) {
+        return "hi " + name;
+    }
+}
+"#;
+    let m = analyze_file("src/x.ts", src);
+    let greet = m.iter().find(|f| f.name == "greet").expect("method");
+    assert_eq!(greet.container_path, vec!["Greeter".to_string()]);
+}
+
+#[test]
+fn python_method_in_class_records_class_name() {
+    let src = "
+class Greeter:
+    def greet(self, name):
+        return name
+";
+    let m = analyze_file("src/x.py", src);
+    let greet = m.iter().find(|f| f.name == "greet").expect("method");
+    assert_eq!(greet.container_path, vec!["Greeter".to_string()]);
+}
+
+#[test]
+fn java_method_in_nested_class_records_full_container_path() {
+    let src = r#"
+class Outer {
+    static class Inner {
+        public int val() { return 1; }
+    }
+}
+"#;
+    let m = analyze_file("Outer.java", src);
+    let val = m.iter().find(|f| f.name == "val").expect("method");
+    assert_eq!(
+        val.container_path,
+        vec!["Outer".to_string(), "Inner".to_string()],
+    );
+}
+
+#[test]
+fn top_level_function_has_empty_container_path() {
+    let src = "fn add(a: i32, b: i32) -> i32 { a + b }\n";
+    let m = analyze_file("src/x.rs", src);
+    assert_eq!(m.len(), 1);
+    assert!(m[0].container_path.is_empty());
+}
+
+#[test]
 fn nested_functions_each_get_their_own_record() {
     let src = r#"
 fn outer() {

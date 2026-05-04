@@ -6,6 +6,8 @@ export interface AnalyzedFunctionSummary {
   complexity: number;
   length: number;
   startLine: number;
+  /** Outer-to-inner container ancestors (class/impl/module/namespace). */
+  containerPath: string[];
 }
 
 export interface FilePivotRow {
@@ -22,10 +24,10 @@ export interface FilePivots {
 }
 
 export interface FunctionsBuckets {
-  added: Array<{ path: string; name: string; paramCount: number; complexity: number }>;
-  deleted: Array<{ path: string; name: string }>;
-  modifiedSignature: Array<{ path: string; name: string; before: number; after: number }>;
-  modifiedBody: Array<{ path: string; name: string; complexityDelta: number; lengthDelta: number }>;
+  added: Array<{ path: string; name: string; containerPath: string[]; paramCount: number; complexity: number }>;
+  deleted: Array<{ path: string; name: string; containerPath: string[] }>;
+  modifiedSignature: Array<{ path: string; name: string; containerPath: string[]; before: number; after: number }>;
+  modifiedBody: Array<{ path: string; name: string; containerPath: string[]; complexityDelta: number; lengthDelta: number }>;
 }
 
 const TEST_PATTERNS: RegExp[] = [
@@ -94,9 +96,17 @@ function incPivot(map: Map<string, FilePivotRow>, key: string, add: number, del:
 }
 
 export interface SidedFunctionMap {
-  /** path -> functionName -> summary */
+  /** path -> qualifiedKey -> summary, where qualifiedKey is
+   *  `container/path/joined::functionName` so methods with the same
+   *  short name in sibling classes don't collide. */
   base: Map<string, Map<string, AnalyzedFunctionSummary>>;
   head: Map<string, Map<string, AnalyzedFunctionSummary>>;
+}
+
+function qualifiedKey(fn: AnalyzedFunctionSummary): string {
+  return fn.containerPath.length === 0
+    ? fn.name
+    : `${fn.containerPath.join("::")}::${fn.name}`;
 }
 
 export interface SideEntry {
@@ -118,9 +128,10 @@ export function indexSides(sides: SideEntry[]): SidedFunctionMap {
       target.set(side.path, perFile);
     }
     for (const fn of side.functions) {
+      const key = qualifiedKey(fn);
       // If the analyzer reports the same function name twice (overloads,
       // nested closures), keep the first to keep the diff stable.
-      if (!perFile.has(fn.name)) perFile.set(fn.name, fn);
+      if (!perFile.has(key)) perFile.set(key, fn);
     }
   }
   return { base, head };
@@ -145,23 +156,31 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
   for (const path of allPaths) {
     const baseFns = index.base.get(path) ?? new Map();
     const headFns = index.head.get(path) ?? new Map();
-    const allNames = new Set<string>([...baseFns.keys(), ...headFns.keys()]);
-    for (const name of allNames) {
-      const before = baseFns.get(name);
-      const after = headFns.get(name);
+    const allKeys = new Set<string>([...baseFns.keys(), ...headFns.keys()]);
+    for (const key of allKeys) {
+      const before = baseFns.get(key);
+      const after = headFns.get(key);
       if (!before && after) {
-        out.added.push({ path, name, paramCount: after.paramCount, complexity: after.complexity });
+        out.added.push({
+          path,
+          name: after.name,
+          containerPath: after.containerPath,
+          paramCount: after.paramCount,
+          complexity: after.complexity,
+        });
         continue;
       }
       if (before && !after) {
-        out.deleted.push({ path, name });
+        out.deleted.push({ path, name: before.name, containerPath: before.containerPath });
         continue;
       }
       if (!before || !after) continue;
+      const containerPath = after.containerPath;
       if (before.paramCount !== after.paramCount) {
         out.modifiedSignature.push({
           path,
-          name,
+          name: after.name,
+          containerPath,
           before: before.paramCount,
           after: after.paramCount,
         });
@@ -169,7 +188,13 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
       const complexityDelta = after.complexity - before.complexity;
       const lengthDelta = after.length - before.length;
       if (complexityDelta !== 0 || lengthDelta !== 0) {
-        out.modifiedBody.push({ path, name, complexityDelta, lengthDelta });
+        out.modifiedBody.push({
+          path,
+          name: after.name,
+          containerPath,
+          complexityDelta,
+          lengthDelta,
+        });
       }
     }
   }

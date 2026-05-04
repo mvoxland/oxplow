@@ -39,6 +39,15 @@ pub struct LanguageSpec {
     pub parameter_kinds: &'static [&'static str],
     /// AST node kinds that increment cyclomatic complexity by 1.
     pub decision_kinds: &'static [&'static str],
+    /// AST node kinds that act as named containers for the
+    /// hierarchical "where does this function live" path
+    /// (class, impl, module, namespace, etc.).
+    pub container_kinds: &'static [&'static str],
+    /// Field names tried (in order) on a container node to locate
+    /// its identifier. `name` covers most languages; Rust's
+    /// `impl_item` exposes the type via `type` instead, so we try
+    /// multiple fields.
+    pub container_name_fields: &'static [&'static str],
     /// Loader for the bundled tree-sitter grammar.
     grammar: fn() -> TsLanguage,
 }
@@ -126,6 +135,8 @@ static RUST: LanguageSpec = LanguageSpec {
         // boolean operators (&&, ||) are tokens inside binary_expression,
         // not their own nodes — skipping for simplicity.
     ],
+    container_kinds: &["impl_item", "trait_item", "mod_item"],
+    container_name_fields: &["name", "type"],
     grammar: || tree_sitter_rust::LANGUAGE.into(),
 };
 
@@ -137,6 +148,8 @@ static TYPESCRIPT: LanguageSpec = LanguageSpec {
     param_list_fields: JS_PARAM_FIELDS,
     parameter_kinds: JS_PARAM_KINDS,
     decision_kinds: JS_DECISION_KINDS,
+    container_kinds: TS_CONTAINER_KINDS,
+    container_name_fields: JS_NAME_FIELDS,
     grammar: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
 };
 
@@ -146,6 +159,8 @@ static TSX: LanguageSpec = LanguageSpec {
     param_list_fields: JS_PARAM_FIELDS,
     parameter_kinds: JS_PARAM_KINDS,
     decision_kinds: JS_DECISION_KINDS,
+    container_kinds: TS_CONTAINER_KINDS,
+    container_name_fields: JS_NAME_FIELDS,
     grammar: || tree_sitter_typescript::LANGUAGE_TSX.into(),
 };
 
@@ -155,8 +170,22 @@ static JAVASCRIPT: LanguageSpec = LanguageSpec {
     param_list_fields: JS_PARAM_FIELDS,
     parameter_kinds: JS_PARAM_KINDS,
     decision_kinds: JS_DECISION_KINDS,
+    container_kinds: JS_CONTAINER_KINDS,
+    container_name_fields: JS_NAME_FIELDS,
     grammar: || tree_sitter_javascript::LANGUAGE.into(),
 };
+
+static TS_CONTAINER_KINDS: &[&str] = &[
+    "class_declaration",
+    "class",
+    "abstract_class_declaration",
+    "interface_declaration",
+    "internal_module",
+    "module",
+    "namespace_declaration",
+    "enum_declaration",
+];
+static JS_CONTAINER_KINDS: &[&str] = &["class_declaration", "class"];
 
 static JS_FUNCTION_KINDS: &[&str] = &[
     "function_declaration",
@@ -219,6 +248,8 @@ static PYTHON: LanguageSpec = LanguageSpec {
         "match_statement",
         "case_clause",
     ],
+    container_kinds: &["class_definition"],
+    container_name_fields: &["name"],
     grammar: || tree_sitter_python::LANGUAGE.into(),
 };
 
@@ -239,6 +270,10 @@ static GO: LanguageSpec = LanguageSpec {
         "select_statement",
         "communication_case",
     ],
+    // Go has no class-like containers; the package is implicit at
+    // the file level so there's nothing meaningful to attach.
+    container_kinds: &[],
+    container_name_fields: &["name"],
     grammar: || tree_sitter_go::LANGUAGE.into(),
 };
 
@@ -264,6 +299,14 @@ static JAVA: LanguageSpec = LanguageSpec {
         "catch_clause",
         "ternary_expression",
     ],
+    container_kinds: &[
+        "class_declaration",
+        "interface_declaration",
+        "enum_declaration",
+        "record_declaration",
+        "annotation_type_declaration",
+    ],
+    container_name_fields: &["name"],
     grammar: || tree_sitter_java::LANGUAGE.into(),
 };
 
@@ -282,6 +325,9 @@ static C: LanguageSpec = LanguageSpec {
         "do_statement",
         "conditional_expression",
     ],
+    // C has no class-like containers — top-level functions only.
+    container_kinds: &[],
+    container_name_fields: &["name"],
     grammar: || tree_sitter_c::LANGUAGE.into(),
 };
 
@@ -305,5 +351,11 @@ static CPP: LanguageSpec = LanguageSpec {
         "catch_clause",
         "conditional_expression",
     ],
+    container_kinds: &[
+        "class_specifier",
+        "struct_specifier",
+        "namespace_definition",
+    ],
+    container_name_fields: &["name"],
     grammar: || tree_sitter_cpp::LANGUAGE.into(),
 };
