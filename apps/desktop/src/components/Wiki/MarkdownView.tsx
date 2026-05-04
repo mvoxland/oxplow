@@ -32,6 +32,100 @@ function loadMermaid() {
   return mermaidPromise;
 }
 
+// svg-pan-zoom uses CommonJS-style `export = svgPanZoom`, so the
+// runtime default-import gives us the callable instance directly.
+type SvgPanZoomFn = (typeof import("svg-pan-zoom"));
+let svgPanZoomPromise: Promise<SvgPanZoomFn> | null = null;
+function loadSvgPanZoom() {
+  if (!svgPanZoomPromise) {
+    svgPanZoomPromise = import("svg-pan-zoom").then((mod) => {
+      // Vite's CJS interop wraps the export under `.default`; native
+      // ESM gives the function directly. Handle both shapes.
+      const m = mod as unknown as { default?: SvgPanZoomFn };
+      return (m.default ?? (mod as unknown as SvgPanZoomFn));
+    });
+  }
+  return svgPanZoomPromise;
+}
+
+/**
+ * Wrap a freshly rendered Mermaid host in svg-pan-zoom and inject a
+ * small overlay toolbar (+ / − / Reset). Returns a cleanup that tears
+ * the pan-zoom instance down — important so the React effect can
+ * dispose stale instances when the body re-renders.
+ *
+ * Mermaid emits an `<svg>` whose width/height come from the diagram's
+ * intrinsic size; svg-pan-zoom needs an explicit fixed size on the
+ * element so the viewport math works. We give the wrapper a fixed
+ * height and let the SVG fill it.
+ */
+async function attachPanZoom(host: HTMLElement): Promise<(() => void) | null> {
+  const svg = host.querySelector<SVGSVGElement>("svg");
+  if (!svg) return null;
+  // svg-pan-zoom requires the SVG to have a width/height set.
+  svg.removeAttribute("style");
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", "100%");
+  host.style.position = "relative";
+  host.style.height = "480px";
+  host.style.maxHeight = "70vh";
+  host.style.border = "1px solid var(--border-subtle)";
+  host.style.borderRadius = "6px";
+  host.style.overflow = "hidden";
+  const svgPanZoom = await loadSvgPanZoom();
+  const instance = svgPanZoom(svg, {
+    zoomEnabled: true,
+    panEnabled: true,
+    controlIconsEnabled: false,
+    fit: true,
+    center: true,
+    minZoom: 0.2,
+    maxZoom: 20,
+    contain: false,
+  });
+  const toolbar = document.createElement("div");
+  toolbar.className = "mermaid-pz-toolbar";
+  toolbar.style.cssText = [
+    "position: absolute",
+    "top: 6px",
+    "right: 6px",
+    "display: flex",
+    "gap: 2px",
+    "background: var(--surface-card)",
+    "border: 1px solid var(--border-subtle)",
+    "border-radius: 4px",
+    "padding: 2px",
+    "font-size: 12px",
+    "z-index: 1",
+  ].join(";");
+  const makeBtn = (label: string, title: string, onClick: () => void) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.title = title;
+    btn.style.cssText = [
+      "background: transparent",
+      "border: none",
+      "color: var(--text-primary)",
+      "cursor: pointer",
+      "padding: 2px 6px",
+      "font-size: 12px",
+      "line-height: 1",
+      "min-width: 20px",
+    ].join(";");
+    btn.addEventListener("click", (e) => { e.preventDefault(); onClick(); });
+    return btn;
+  };
+  toolbar.appendChild(makeBtn("−", "Zoom out", () => instance.zoomOut()));
+  toolbar.appendChild(makeBtn("+", "Zoom in", () => instance.zoomIn()));
+  toolbar.appendChild(makeBtn("Reset", "Reset view", () => { instance.resetZoom(); instance.center(); instance.fit(); }));
+  host.appendChild(toolbar);
+  return () => {
+    try { instance.destroy(); } catch { /* ignore */ }
+    toolbar.remove();
+  };
+}
+
 export type ParsedLink =
   | { kind: "empty" }
   | { kind: "anchor" }
@@ -306,10 +400,13 @@ export function MarkdownView({
 
   // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.
+  // Each rendered SVG is wrapped in svg-pan-zoom + a small overlay
+  // toolbar (+ / − / Reset) so large diagrams aren't dead space.
   useEffect(() => {
     if (!renderMermaid) return;
     const root = ref.current;
     if (!root) return;
+    const cleanups: Array<() => void> = [];
     const blocks = root.querySelectorAll<HTMLElement>("code.language-mermaid");
     blocks.forEach(async (code, idx) => {
       const source = code.textContent ?? "";
@@ -322,6 +419,8 @@ export function MarkdownView({
         host.innerHTML = svg;
         const pre = code.parentElement;
         if (pre && pre.tagName === "PRE") pre.replaceWith(host);
+        const cleanup = await attachPanZoom(host);
+        if (cleanup) cleanups.push(cleanup);
       } catch (error) {
         const pre = code.parentElement;
         if (pre && pre.tagName === "PRE") {
@@ -333,6 +432,11 @@ export function MarkdownView({
         }
       }
     });
+    return () => {
+      for (const fn of cleanups) {
+        try { fn(); } catch { /* ignore destroy errors */ }
+      }
+    };
   }, [body, renderMermaid]);
 
   const wrapperStyle: CSSProperties = {

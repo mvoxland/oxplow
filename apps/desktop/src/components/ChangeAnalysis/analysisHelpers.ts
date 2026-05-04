@@ -24,10 +24,10 @@ export interface FilePivots {
 }
 
 export interface FunctionsBuckets {
-  added: Array<{ path: string; name: string; containerPath: string[]; paramCount: number; complexity: number }>;
-  deleted: Array<{ path: string; name: string; containerPath: string[] }>;
-  modifiedSignature: Array<{ path: string; name: string; containerPath: string[]; before: number; after: number }>;
-  modifiedBody: Array<{ path: string; name: string; containerPath: string[]; complexityDelta: number; lengthDelta: number }>;
+  added: Array<{ path: string; name: string; containerPath: string[]; startLine: number; paramCount: number; complexity: number }>;
+  deleted: Array<{ path: string; name: string; containerPath: string[]; startLine: number }>;
+  modifiedSignature: Array<{ path: string; name: string; containerPath: string[]; startLine: number; before: number; after: number }>;
+  modifiedBody: Array<{ path: string; name: string; containerPath: string[]; startLine: number; complexityDelta: number; lengthDelta: number }>;
 }
 
 const TEST_PATTERNS: RegExp[] = [
@@ -165,13 +165,19 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
           path,
           name: after.name,
           containerPath: after.containerPath,
+          startLine: after.startLine,
           paramCount: after.paramCount,
           complexity: after.complexity,
         });
         continue;
       }
       if (before && !after) {
-        out.deleted.push({ path, name: before.name, containerPath: before.containerPath });
+        out.deleted.push({
+          path,
+          name: before.name,
+          containerPath: before.containerPath,
+          startLine: before.startLine,
+        });
         continue;
       }
       if (!before || !after) continue;
@@ -181,6 +187,7 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
           path,
           name: after.name,
           containerPath,
+          startLine: after.startLine,
           before: before.paramCount,
           after: after.paramCount,
         });
@@ -192,6 +199,7 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
           path,
           name: after.name,
           containerPath,
+          startLine: after.startLine,
           complexityDelta,
           lengthDelta,
         });

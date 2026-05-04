@@ -13,6 +13,11 @@ export interface DiffSpec {
   rightContent?: string;
   /** Optional override for the tab label suffix shown next to the filename. */
   labelOverride?: string;
+  /** When set, scroll/reveal this 1-based line on the modified (right)
+   *  side after both models load, and select it so the position is
+   *  obvious. Used by the Change Analysis function rows to land on the
+   *  function's start line. */
+  revealLine?: number;
 }
 
 interface Props {
@@ -100,12 +105,26 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
         editor.setModel({ original: left, modified: right });
         modelsRef.current = { left, right };
         setError(null);
+        if (spec.revealLine && spec.revealLine > 0) {
+          // Reveal on the modified (right) editor, which is what the
+          // analysis-page jump targets. The diff editor exposes the
+          // sub-editor via getModifiedEditor(); fall back gracefully
+          // if Monaco's API ever shifts shape.
+          const modifiedEditor = (editor as { getModifiedEditor?: () => any }).getModifiedEditor?.();
+          if (modifiedEditor) {
+            const line = spec.revealLine;
+            modifiedEditor.revealLineInCenter(line);
+            modifiedEditor.setPosition({ lineNumber: line, column: 1 });
+            modifiedEditor.setSelection({ startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 });
+            modifiedEditor.focus();
+          }
+        }
       } catch (e) {
         if (!cancelled) setError(String(e));
       }
     })();
     return () => { cancelled = true; };
-  }, [stream, editorReady, spec.path, spec.leftRef, typeof spec.rightKind === "string" ? "working" : spec.rightKind.ref, spec.leftContent, spec.rightContent]);
+  }, [stream, editorReady, spec.path, spec.leftRef, typeof spec.rightKind === "string" ? "working" : spec.rightKind.ref, spec.leftContent, spec.rightContent, spec.revealLine]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>

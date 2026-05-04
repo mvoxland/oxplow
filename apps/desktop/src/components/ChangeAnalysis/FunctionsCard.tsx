@@ -2,16 +2,23 @@ import type { FunctionsBuckets } from "./analysisHelpers.js";
 
 interface FunctionsCardProps {
   functions: FunctionsBuckets;
+  /** Click target for function leaf rows. Falls back to opening the
+   *  file in the editor if the host doesn't supply
+   *  `onOpenFunctionDiff`. */
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+  /** Preferred click target — opens the file's diff tab and reveals
+   *  the function's start line. */
+  onOpenFunctionDiff?(path: string, line: number): void;
 }
 
 interface RowEntry {
   path: string;
   containerPath: string[];
+  startLine: number;
   text: string;
 }
 
-export function FunctionsCard({ functions, onOpenFile }: FunctionsCardProps) {
+export function FunctionsCard({ functions, onOpenFile, onOpenFunctionDiff }: FunctionsCardProps) {
   const empty =
     functions.added.length === 0 &&
     functions.deleted.length === 0 &&
@@ -21,21 +28,25 @@ export function FunctionsCard({ functions, onOpenFile }: FunctionsCardProps) {
   const added: RowEntry[] = functions.added.map((fn) => ({
     path: fn.path,
     containerPath: fn.containerPath,
+    startLine: fn.startLine,
     text: `${fn.name} (cc=${fn.complexity}, p=${fn.paramCount})`,
   }));
   const deleted: RowEntry[] = functions.deleted.map((fn) => ({
     path: fn.path,
     containerPath: fn.containerPath,
+    startLine: fn.startLine,
     text: fn.name,
   }));
   const modSig: RowEntry[] = functions.modifiedSignature.map((fn) => ({
     path: fn.path,
     containerPath: fn.containerPath,
+    startLine: fn.startLine,
     text: `${fn.name} : ${fn.before} → ${fn.after} params`,
   }));
   const modBody: RowEntry[] = functions.modifiedBody.map((fn) => ({
     path: fn.path,
     containerPath: fn.containerPath,
+    startLine: fn.startLine,
     text: `${fn.name} (Δcc ${fn.complexityDelta >= 0 ? "+" : ""}${fn.complexityDelta}, Δlen ${
       fn.lengthDelta >= 0 ? "+" : ""
     }${fn.lengthDelta})`,
@@ -50,19 +61,21 @@ export function FunctionsCard({ functions, onOpenFile }: FunctionsCardProps) {
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Bucket title={`Added (${added.length})`} testId="functions-added" rows={added} onOpenFile={onOpenFile} />
-          <Bucket title={`Deleted (${deleted.length})`} testId="functions-deleted" rows={deleted} onOpenFile={onOpenFile} />
+          <Bucket title={`Added (${added.length})`} testId="functions-added" rows={added} onOpenFile={onOpenFile} onOpenFunctionDiff={onOpenFunctionDiff} />
+          <Bucket title={`Deleted (${deleted.length})`} testId="functions-deleted" rows={deleted} onOpenFile={onOpenFile} onOpenFunctionDiff={onOpenFunctionDiff} />
           <Bucket
             title={`Signature changed (${modSig.length})`}
             testId="functions-sig"
             rows={modSig}
             onOpenFile={onOpenFile}
+            onOpenFunctionDiff={onOpenFunctionDiff}
           />
           <Bucket
             title={`Body changed (${modBody.length})`}
             testId="functions-body"
             rows={modBody}
             onOpenFile={onOpenFile}
+            onOpenFunctionDiff={onOpenFunctionDiff}
           />
         </div>
       )}
@@ -116,11 +129,13 @@ function Bucket({
   testId,
   rows,
   onOpenFile,
+  onOpenFunctionDiff,
 }: {
   title: string;
   testId: string;
   rows: RowEntry[];
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+  onOpenFunctionDiff?(path: string, line: number): void;
 }) {
   const tree = buildTree(rows);
   return (
@@ -131,7 +146,7 @@ function Bucket({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {tree.map((node) => (
-            <TreeBranch key={node.path} node={node} depth={0} onOpenFile={onOpenFile} />
+            <TreeBranch key={node.path} node={node} depth={0} onOpenFile={onOpenFile} onOpenFunctionDiff={onOpenFunctionDiff} />
           ))}
         </div>
       )}
@@ -143,10 +158,12 @@ function TreeBranch({
   node,
   depth,
   onOpenFile,
+  onOpenFunctionDiff,
 }: {
   node: TreeNode;
   depth: number;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+  onOpenFunctionDiff?(path: string, line: number): void;
 }) {
   const hasNested = node.children.length > 0;
   const hasContent = hasNested || node.rows.length > 0;
@@ -162,14 +179,29 @@ function TreeBranch({
         <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>({count})</span>
       </summary>
       {node.children.map((child) => (
-        <TreeBranch key={`${child.label}@${child.path}`} node={child} depth={depth + 1} onOpenFile={onOpenFile} />
+        <TreeBranch key={`${child.label}@${child.path}`} node={child} depth={depth + 1} onOpenFile={onOpenFile} onOpenFunctionDiff={onOpenFunctionDiff} />
       ))}
       {node.rows.map((row, i) => (
         <button
           key={`${row.text}:${i}`}
           type="button"
-          onClick={(e) => onOpenFile(row.path, { newTab: e.metaKey || e.ctrlKey })}
+          onClick={(e) => {
+            // Cmd/Ctrl-click is the escape hatch — open the file in
+            // the editor instead of the diff view (handy for jumping
+            // straight to the working copy when you don't care about
+            // the comparison).
+            if (e.metaKey || e.ctrlKey) {
+              onOpenFile(row.path, { newTab: true });
+              return;
+            }
+            if (onOpenFunctionDiff && row.startLine > 0) {
+              onOpenFunctionDiff(row.path, row.startLine);
+            } else {
+              onOpenFile(row.path);
+            }
+          }}
           style={{ ...fnRow, paddingLeft: 12 + (depth + 1) * 12 }}
+          title={row.startLine > 0 ? `Open diff at line ${row.startLine}` : "Open diff"}
         >
           {row.text}
         </button>
