@@ -38,8 +38,10 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
-use oxplow_app::{HookEnvelope, Services};
-use oxplow_domain::stores::{AgentTurnStore, ThreadStore, WorkItemStore};
+use oxplow_app::{
+    build_session_context_block_with_role, role_change_banner, HookEnvelope, RoleMode, Services,
+};
+use oxplow_domain::stores::{AgentTurnStore, StreamStore, ThreadStore, WorkItemStore};
 use oxplow_domain::{HookKind, StreamId, ThreadId, WorkItemStatus};
 use oxplow_runtime::filing::{
     build_filing_enforcement_pre_tool_deny, FilingEnforcementContext,
@@ -93,11 +95,25 @@ struct StopState {
     filed_but_didnt_ship_fired: HashMap<ThreadId, bool>,
 }
 
+/// Captures the thread's writer/read-only role on the FIRST hook the
+/// runtime sees for a given Claude session id, then reuses that
+/// snapshot as the comparison baseline for the ROLE CHANGE banner on
+/// every subsequent hook of that session. Keyed by session_id (not
+/// thread_id) so a thread that re-attaches with a fresh Claude
+/// session — e.g. after a daemon restart — gets a fresh baseline.
+/// Loss across restart is acceptable: the worst case is one extra
+/// no-op turn before the next promotion gets a banner.
+#[derive(Default)]
+struct RoleState {
+    initial_role_by_session_id: HashMap<String, RoleMode>,
+}
+
 #[derive(Clone)]
 struct AppCtx {
     services: Arc<Services>,
     hook_token: Arc<String>,
     stop_state: Arc<Mutex<StopState>>,
+    role_state: Arc<Mutex<RoleState>>,
 }
 
 /// Boot the control plane. Picks an ephemeral port on 127.0.0.1 and
@@ -111,6 +127,7 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
         services: services.clone(),
         hook_token: Arc::new(token.clone()),
         stop_state: Arc::new(Mutex::new(StopState::default())),
+        role_state: Arc::new(Mutex::new(RoleState::default())),
     };
 
     let mcp_services = services.clone();
@@ -341,6 +358,65 @@ async fn handle_hook(
             (envelope_for_resume.thread_id.as_ref(), body_value.as_ref())
         {
             attribute_wiki_page_edit(&ctx, thread_id, body).await;
+
+            // ExitPlanMode just settled — if the thread was promoted
+            // (or demoted) while sitting on the plan-mode approval
+            // prompt, no UserPromptSubmit fires between the user
+            // clicking "Leave plan mode" and the agent resuming. So
+            // emit the ROLE CHANGE banner here directly via
+            // hookSpecificOutput.additionalContext, which Claude
+            // Code injects into the conversation as a system note.
+            if body
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "ExitPlanMode")
+                .unwrap_or(false)
+            {
+                if let Some(banner) =
+                    role_change_banner_for(&ctx, thread_id, envelope_for_resume.session_id.as_deref())
+                        .await
+                {
+                    return (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "hookSpecificOutput": {
+                                "hookEventName": "PostToolUse",
+                                "additionalContext": banner,
+                            }
+                        })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
+
+    // UserPromptSubmit: refresh the agent's view of stream + thread +
+    // role on every prompt. Captures the launch-time role on the
+    // first prompt of each session so subsequent prompts can detect
+    // promotions/demotions and append a loud ROLE CHANGE banner. The
+    // block is returned via hookSpecificOutput.additionalContext per
+    // the Claude Code hook contract.
+    if kind == HookKind::UserPromptSubmit {
+        if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
+            if let Some(ctx_block) = refreshed_session_context(
+                &ctx,
+                thread_id,
+                envelope_for_resume.session_id.as_deref(),
+            )
+            .await
+            {
+                return (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "hookSpecificOutput": {
+                            "hookEventName": "UserPromptSubmit",
+                            "additionalContext": ctx_block,
+                        }
+                    })),
+                )
+                    .into_response();
+            }
         }
     }
 
@@ -726,6 +802,95 @@ fn build_filed_but_didnt_ship_reason() -> String {
      If you meant to start the work, mark one in_progress and re-issue the edit. \
      If you meant to queue it for later, reply with that intent and the next turn picks it up."
         .into()
+}
+
+/// Look up (or capture, if first time we see this session) the role
+/// this thread was launched with for the given Claude session_id,
+/// then return it. None when no session_id was supplied (the agent
+/// hasn't reported one yet via any hook).
+async fn capture_or_get_initial_role(
+    ctx: &AppCtx,
+    thread_id: &ThreadId,
+    session_id: Option<&str>,
+) -> Option<RoleMode> {
+    let session_id = session_id?.to_string();
+    let thread = ctx
+        .services
+        .thread_store
+        .get(thread_id)
+        .await
+        .ok()
+        .flatten()?;
+    let current = RoleMode::from_thread(&thread);
+    let mut st = ctx.role_state.lock();
+    Some(*st.initial_role_by_session_id.entry(session_id).or_insert(current))
+}
+
+/// Build a fresh `<session-context>` block for the thread with the
+/// initial-role banner attached when the role has flipped. Returns
+/// None when stream/thread lookups fail or the project disables
+/// session-context injection. Caller wraps the returned string in
+/// `hookSpecificOutput.additionalContext`.
+async fn refreshed_session_context(
+    ctx: &AppCtx,
+    thread_id: &ThreadId,
+    session_id: Option<&str>,
+) -> Option<String> {
+    let cfg = ctx.services.config.read().ok()?.clone();
+    if !cfg.inject_session_context {
+        return None;
+    }
+    let thread = ctx
+        .services
+        .thread_store
+        .get(thread_id)
+        .await
+        .ok()
+        .flatten()?;
+    let stream = ctx
+        .services
+        .stream_store
+        .get(&thread.stream_id)
+        .await
+        .ok()
+        .flatten()?;
+    let initial = capture_or_get_initial_role(ctx, thread_id, session_id).await;
+    Some(build_session_context_block_with_role(
+        &stream,
+        Some(&thread),
+        initial,
+    ))
+}
+
+/// Returns just the ROLE CHANGE sentence (no surrounding session-
+/// context block) when the thread's current role differs from the
+/// initial role recorded for this session. None when there's no
+/// captured baseline yet, the lookup fails, or the role hasn't
+/// changed. Used by the ExitPlanMode PostToolUse path which only
+/// needs the banner — the agent already has a fresh session-context
+/// from the most recent UserPromptSubmit.
+async fn role_change_banner_for(
+    ctx: &AppCtx,
+    thread_id: &ThreadId,
+    session_id: Option<&str>,
+) -> Option<String> {
+    let session_id = session_id?.to_string();
+    let thread = ctx
+        .services
+        .thread_store
+        .get(thread_id)
+        .await
+        .ok()
+        .flatten()?;
+    let current = RoleMode::from_thread(&thread);
+    let initial = {
+        let st = ctx.role_state.lock();
+        st.initial_role_by_session_id.get(&session_id).copied()
+    }?;
+    if initial == current {
+        return None;
+    }
+    Some(role_change_banner(initial, current))
 }
 
 fn parse_hook_kind(event: &str) -> Option<HookKind> {

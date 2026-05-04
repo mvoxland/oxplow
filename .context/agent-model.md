@@ -633,13 +633,16 @@ The initial system prompt's `NON_WRITER_PROMPT_BLOCK` is frozen at
 launch and replayed via cache-read on every turn, so a mid-session
 writer promotion used to leave the agent acting read-only long after
 the UI flipped it. To supersede the stale block in-place,
-`buildSessionContextBlock` accepts an `initialRole` input and appends a
-loud `ROLE CHANGE:` line before `</session-context>` when the current
-role differs from it. `buildRefreshedSessionContext` (in `crates/oxplow-runtime/src/lib.rs`)
+`build_session_context_block_with_role` (in
+`crates/oxplow-app/src/agent_prompt.rs`) accepts an `initial_role`
+input and appends a loud `ROLE CHANGE:` line before
+`</session-context>` when the current role differs from it. The
+control plane (`crates/oxplow-control-plane/src/lib.rs::RoleState`)
 captures the role once per Claude session id in
-`initialRoleBySessionId`, keyed off the first `UserPromptSubmit` the
-runtime sees for that session, so the comparison baseline is stable
-across subsequent turns. Both directions are covered:
+`initial_role_by_session_id` on the first hook it sees for that
+session — UserPromptSubmit OR an ExitPlanMode PostToolUse, whichever
+fires first — so the comparison baseline is stable across subsequent
+turns. Both directions are covered:
 
 - **read-only → writer.** "The NON_WRITER block in your initial system
   prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the
@@ -650,6 +653,20 @@ across subsequent turns. Both directions are covered:
 
 No banner is emitted when the role has not changed, so steady-state
 turns don't grow.
+
+The banner reaches the agent via two complementary injection points:
+
+1. **UserPromptSubmit.** `refreshed_session_context` builds a fresh
+   `<session-context>` block (with the banner appended when the role
+   has flipped) and returns it as
+   `hookSpecificOutput.additionalContext`. Fires on every prompt
+   when `inject_session_context: true` (default).
+2. **PostToolUse(ExitPlanMode).** When the user promotes the thread
+   while it's sitting on the plan-mode approval prompt, no
+   UserPromptSubmit fires between "Leave plan mode" and the agent
+   resuming. `role_change_banner_for` injects the banner via the
+   PostToolUse `additionalContext` channel so the agent learns about
+   the role flip before its next tool call.
 
 ## Preamble vs skill split
 

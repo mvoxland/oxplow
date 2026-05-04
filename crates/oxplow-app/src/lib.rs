@@ -32,6 +32,10 @@ pub mod thread_runtime;
 pub mod work_item_service;
 pub mod workspace_watch;
 
+pub use agent_prompt::{
+    build_session_context_block, build_session_context_block_with_role, role_change_banner,
+    RoleMode,
+};
 pub use events::{
     CodeQualityScanPhase, EventBus, OxplowEvent, SnapshotSourceKind, WorkspaceChangeKind,
 };

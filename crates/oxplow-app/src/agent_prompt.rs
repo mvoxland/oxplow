@@ -16,6 +16,36 @@ use std::path::Path;
 use oxplow_config::OxplowConfig;
 use oxplow_domain::{Stream, Thread};
 
+/// The two role buckets the agent cares about. Writer threads can
+/// mutate the worktree; read-only threads cannot (their PreToolUse
+/// hook denies Edit/Write/MultiEdit/NotebookEdit). Used as the
+/// comparison baseline for the ROLE CHANGE banner — captured once
+/// per Claude session id at agent launch, then compared against the
+/// current thread status on every UserPromptSubmit / qualifying
+/// PostToolUse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoleMode {
+    Writer,
+    ReadOnly,
+}
+
+impl RoleMode {
+    pub fn from_thread(thread: &Thread) -> Self {
+        if thread.status.is_writer() {
+            RoleMode::Writer
+        } else {
+            RoleMode::ReadOnly
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RoleMode::Writer => "writer",
+            RoleMode::ReadOnly => "read-only",
+        }
+    }
+}
+
 /// Read `<project>/CLAUDE.md` if it exists. Empty string otherwise.
 pub fn load_claude_md(project_dir: &Path) -> String {
     let path = project_dir.join("CLAUDE.md");
@@ -25,6 +55,22 @@ pub fn load_claude_md(project_dir: &Path) -> String {
 /// Build the `<session-context>` block. Includes worktree path,
 /// stream/thread titles, and the thread's writer/read-only role.
 pub fn build_session_context_block(stream: &Stream, thread: Option<&Thread>) -> String {
+    build_session_context_block_with_role(stream, thread, None)
+}
+
+/// Like `build_session_context_block` but appends a loud
+/// `ROLE CHANGE:` line before `</session-context>` when the current
+/// thread role differs from the supplied `initial_role`. The launch-
+/// time `NON_WRITER_PROMPT_BLOCK` is frozen in the system prompt and
+/// replayed via cache-read on every turn — without this banner, a
+/// mid-session writer promotion never reaches the agent. The banner
+/// supersedes the stale block in-place. No banner is emitted when
+/// the role hasn't changed (steady-state turns don't grow).
+pub fn build_session_context_block_with_role(
+    stream: &Stream,
+    thread: Option<&Thread>,
+    initial_role: Option<RoleMode>,
+) -> String {
     let mut s = String::from("<session-context>\n");
     s.push_str(&format!("stream_id={}\n", stream.id));
     s.push_str(&format!("stream_title={}\n", stream.title));
@@ -33,13 +79,30 @@ pub fn build_session_context_block(stream: &Stream, thread: Option<&Thread>) -> 
     if let Some(t) = thread {
         s.push_str(&format!("thread_id={}\n", t.id));
         s.push_str(&format!("thread_title={}\n", t.title));
-        s.push_str(&format!(
-            "role={}\n",
-            if t.status.is_writer() { "writer" } else { "read-only" }
-        ));
+        let current = RoleMode::from_thread(t);
+        s.push_str(&format!("role={}\n", current.as_str()));
+        if let Some(initial) = initial_role {
+            if initial != current {
+                s.push_str(&role_change_banner(initial, current));
+                s.push('\n');
+            }
+        }
     }
     s.push_str("</session-context>");
     s
+}
+
+/// Loud banner emitted when the thread's role flipped mid-session.
+/// Phrased so the agent treats it as a direct override of the
+/// frozen `NON_WRITER_PROMPT_BLOCK` (or absence thereof) in the
+/// initial system prompt.
+pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
+    match (initial, current) {
+        (RoleMode::ReadOnly, RoleMode::Writer) => "ROLE CHANGE: this thread has been promoted to writer mid-session. The NON_WRITER block in your initial system prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the worktree. File a tracked work item before editing project files (filing-enforcement applies).".to_string(),
+        (RoleMode::Writer, RoleMode::ReadOnly) => "ROLE CHANGE: this thread has been demoted to read-only mid-session. The NON_WRITER block applies now even though it wasn't in your initial system prompt — Write/Edit/Bash mutations to the worktree will be blocked. Wiki captures under .oxplow/wiki/ remain allowed.".to_string(),
+        // Same-role pairs never reach this fn — caller skips.
+        _ => String::new(),
+    }
 }
 
 /// Compose the full system-prompt suffix oxplow appends to whatever
@@ -168,5 +231,54 @@ mod tests {
         t.status = ThreadStatus::Queued;
         let block = build_session_context_block(&stream(), Some(&t));
         assert!(block.contains("role=read-only"));
+    }
+
+    #[test]
+    fn role_change_banner_fires_on_promotion() {
+        // Thread is currently writer; was launched as read-only.
+        let block = build_session_context_block_with_role(
+            &stream(),
+            Some(&thread()),
+            Some(RoleMode::ReadOnly),
+        );
+        assert!(block.contains("role=writer"));
+        assert!(block.contains("ROLE CHANGE"));
+        assert!(block.contains("promoted to writer"));
+        assert!(block.contains("SUPERSEDED"));
+    }
+
+    #[test]
+    fn role_change_banner_fires_on_demotion() {
+        // Thread is currently read-only; was launched as writer.
+        let mut t = thread();
+        t.status = ThreadStatus::Queued;
+        let block = build_session_context_block_with_role(
+            &stream(),
+            Some(&t),
+            Some(RoleMode::Writer),
+        );
+        assert!(block.contains("role=read-only"));
+        assert!(block.contains("ROLE CHANGE"));
+        assert!(block.contains("demoted to read-only"));
+    }
+
+    #[test]
+    fn no_banner_when_role_matches_initial() {
+        // Initial=Writer, current=Writer → steady state, no banner.
+        let block = build_session_context_block_with_role(
+            &stream(),
+            Some(&thread()),
+            Some(RoleMode::Writer),
+        );
+        assert!(block.contains("role=writer"));
+        assert!(!block.contains("ROLE CHANGE"));
+    }
+
+    #[test]
+    fn no_banner_when_initial_role_unset() {
+        // Caller hasn't captured an initial role yet (e.g. very first
+        // turn or hook fired before capture) — no banner.
+        let block = build_session_context_block_with_role(&stream(), Some(&thread()), None);
+        assert!(!block.contains("ROLE CHANGE"));
     }
 }
