@@ -289,6 +289,7 @@ function toHierarchyNode(
       id: `${id}/fn:${row.name}:${i}`,
       label: row.name,
       icon: <FnIcon visibility={row.visibility} />,
+      labelColor: visibilityColor(row.visibility),
       statuses: new Set<HierarchyStatus>([row.status]),
       detail: row.detail,
       onDrill: (e) => {
@@ -394,29 +395,32 @@ function ContainerIcon() {
     </svg>
   );
 }
+function visibilityColor(visibility: FunctionVisibility): string {
+  if (visibility === "private") return "var(--text-muted)";
+  if (visibility === "public") return "var(--text-primary)";
+  return "var(--text-secondary)";
+}
+
+function visibilityTitle(visibility: FunctionVisibility): string {
+  if (visibility === "private") return "Private (heuristic)";
+  if (visibility === "public") return "Public (heuristic)";
+  return "Visibility unknown";
+}
+
 function FnIcon({ visibility }: { visibility?: FunctionVisibility }) {
   // ƒ glyph for functions — colored by visibility so the user can
   // see at a glance which rows are public vs private. Stays within
   // 1em so the row height doesn't grow.
-  const color = visibility === "private"
-    ? "var(--text-muted)"
-    : visibility === "public"
-      ? "var(--text-primary)"
-      : "var(--text-secondary)";
-  const title = visibility === "private"
-    ? "Private (heuristic)"
-    : visibility === "public"
-      ? "Public (heuristic)"
-      : "Visibility unknown";
+  const v = visibility ?? "unknown";
   return (
     <span
-      title={title}
+      title={visibilityTitle(v)}
       style={{
         fontFamily: "serif",
         fontStyle: "italic",
         fontSize: "1em",
         lineHeight: 1,
-        color,
+        color: visibilityColor(v),
       }}
     >
       ƒ

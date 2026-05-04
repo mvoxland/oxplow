@@ -28,6 +28,9 @@ export interface HierarchyNode {
   drillTitle?: string;
   /** Test-id for the row. */
   testId?: string;
+  /** Optional override for the label color. Used by callers that
+   *  want to color-code rows (e.g. by function visibility). */
+  labelColor?: string;
   children: HierarchyNode[];
 }
 
@@ -197,12 +200,14 @@ function Branch({
             type="button"
             onClick={node.onDrill}
             title={node.drillTitle}
-            style={labelButton}
+            style={node.labelColor ? { ...labelButton, color: node.labelColor } : labelButton}
           >
             {node.label}
           </button>
         ) : (
-          <span style={labelText}>{node.label}</span>
+          <span style={node.labelColor ? { ...labelText, color: node.labelColor } : labelText}>
+            {node.label}
+          </span>
         )}
         {node.detail ? <span style={detailText}>{node.detail}</span> : null}
         {typeof node.count === "number" ? (
@@ -450,13 +455,17 @@ const badgeStyle = (cfg: { fg: string; bg: string }): React.CSSProperties => ({
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  width: "1.1em",
-  height: "1.1em",
+  // Pixel sizing — em-relative was rendering at ~10px and the
+  // badges effectively disappeared. Fixed 14×14 with 10px glyph
+  // matches the row's 12px line height without growing it.
+  width: 14,
+  height: 14,
   borderRadius: 3,
-  fontSize: "0.75em",
+  fontSize: 10,
   fontWeight: 700,
   color: cfg.fg,
   background: cfg.bg,
   lineHeight: 1,
+  flexShrink: 0,
 });
 
