@@ -201,10 +201,13 @@ interface PathSegment {
  * - **TS / JS / TSX**: each file *is* a module; there's no
  *   language-level container above it. Workspace structure is
  *   conventional (directories), which the filesystem path
- *   already reflects 1:1.
+ *   already reflects 1:1. We still drop the extension on the
+ *   leaf to match the rendering of every other supported
+ *   language.
  * - **C / C++**: no namespace-like grouping above the file
  *   (C++ namespaces live INSIDE files and are already in
- *   `containerPath`).
+ *   `containerPath`). Drop the extension on the leaf for
+ *   consistent rendering.
  */
 function pathSegments(filePath: string): PathSegment[] {
   if (filePath.endsWith(".rs")) {
@@ -217,19 +220,32 @@ function pathSegments(filePath: string): PathSegment[] {
   if (filePath.endsWith(".java")) {
     return javaGroupingSegments(filePath);
   }
-  if (filePath.endsWith(".go")) {
-    return defaultGroupingSegments(filePath, ".go");
-  }
-  return defaultGroupingSegments(filePath, null);
+  return defaultGroupingSegments(filePath, KNOWN_EXTENSIONS);
 }
 
 /**
- * Filesystem grouping with optional file-extension stripping on
- * the leaf. When `dropExt` is null, the leaf keeps its full name
- * (extension included) so similar-named files (`Foo.tsx` vs
- * `Foo.ts`) stay distinguishable.
+ * Extensions we strip on the file leaf so the displayed name is
+ * the file's logical (extension-less) identity, matching how
+ * Python/Go/Java/Rust render. Order matters for compound suffixes
+ * like `.d.ts` — longest match wins.
  */
-function defaultGroupingSegments(filePath: string, dropExt: string | null): PathSegment[] {
+const KNOWN_EXTENSIONS = [
+  ".d.ts",
+  ".tsx", ".ts",
+  ".jsx", ".js", ".mjs", ".cjs",
+  ".go",
+  ".cpp", ".cxx", ".cc",
+  ".hpp", ".hxx", ".hh",
+  ".c", ".h",
+];
+
+/**
+ * Filesystem grouping with optional file-extension stripping on
+ * the leaf. `dropExts` is tried longest-match-first, so compound
+ * suffixes like `.d.ts` collapse before `.ts` would. Pass an
+ * empty array to keep extensions on.
+ */
+function defaultGroupingSegments(filePath: string, dropExts: readonly string[]): PathSegment[] {
   const parts = filePath.split("/");
   const out: PathSegment[] = [];
   let cum = "";
@@ -239,9 +255,13 @@ function defaultGroupingSegments(filePath: string, dropExt: string | null): Path
     out.push({ label: p, refPath: cum, kind: "dir" });
   }
   const fileName = parts[parts.length - 1] ?? filePath;
-  const leafLabel = dropExt && fileName.endsWith(dropExt)
-    ? fileName.slice(0, -dropExt.length)
-    : fileName;
+  let leafLabel = fileName;
+  for (const ext of dropExts) {
+    if (fileName.endsWith(ext)) {
+      leafLabel = fileName.slice(0, -ext.length);
+      break;
+    }
+  }
   out.push({ label: leafLabel, refPath: filePath, kind: "file" });
   return out;
 }
@@ -263,7 +283,7 @@ function javaGroupingSegments(filePath: string): PathSegment[] {
     if (parts[i] === "java") { javaIdx = i; break; }
   }
   if (javaIdx < 0) {
-    return defaultGroupingSegments(filePath, ".java");
+    return defaultGroupingSegments(filePath, [".java"]);
   }
   const preDirs = parts.slice(0, javaIdx);
   const pkgParts = parts.slice(javaIdx + 1, parts.length - 1);
