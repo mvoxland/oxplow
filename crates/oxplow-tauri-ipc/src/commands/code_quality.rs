@@ -151,6 +151,11 @@ pub struct AnalyzedFunction {
     pub complexity: f64,
     pub parameter_count: u32,
     pub nloc: u32,
+    /// Outer-to-inner names of the named-declaration ancestors this
+    /// function lives inside (class / impl / module / namespace).
+    /// Empty for top-level functions; used to render the Functions
+    /// card hierarchically.
+    pub container_path: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -217,6 +222,7 @@ fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
             // We don't compute non-comment line count separately;
             // approximate as length. Renderer treats it as informational.
             nloc: m.length,
+            container_path: m.container_path,
         })
         .collect()
 }

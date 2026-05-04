@@ -22,11 +22,22 @@ emit three findings:
 `extra.functionName` carries the function identifier so the UI can
 group all three back together.
 
+`FunctionMetrics.container_path` (and `AnalyzedFunction.container_path`
+on the IPC surface) carries the outer-to-inner names of the named-
+declaration ancestors a function lives inside (class / impl / trait /
+mod / namespace / interface / enum / record). The Change Analysis
+Functions card uses it to render a `path > container > … > function`
+tree so the user can scan high-level constructs first and drill in.
+Top-level functions report an empty `container_path`. The set of
+container kinds is per-language — `LanguageSpec.container_kinds` plus
+`container_name_fields` in `crates/oxplow-code-metrics/src/spec.rs`.
+Go and C have no class-like containers and use an empty list.
+
 Languages: Rust, TypeScript (incl. TSX), JavaScript, Python, Go,
 Java, C, C++. Adding a language is one entry in
 `crates/oxplow-code-metrics/src/spec.rs` listing the function /
-parameter / decision-point AST node names plus a grammar loader.
-Files in unsupported languages are silently skipped.
+parameter / decision-point / container AST node names plus a grammar
+loader. Files in unsupported languages are silently skipped.
 
 **Duplicate blocks** (tool name `"duplication"`) — handled by
 `oxplow-code-dup`. Pipeline:
