@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import type { BranchChangeEntry, GitFileStatus } from "../../api.js";
 import { HierarchyView, type HierarchyNode, type HierarchyStatus } from "../HierarchyView/HierarchyView.js";
+import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
+import { fileRef } from "../../tabs/pageRefs.js";
 
 interface Props {
   files: BranchChangeEntry[];
@@ -14,7 +16,20 @@ interface Props {
  * toggle, and the status badges all match the Semantic view exactly.
  */
 export function ChangeAnalysisFileTree({ files, onOpenFile }: Props) {
-  const tree = useMemo(() => buildTree(files, onOpenFile), [files, onOpenFile]);
+  const ctxNav = useOptionalPageNavigation();
+  // Default click semantic: navigate **in-tab** via the page-context
+  // chokepoint so the active Change Analysis page swaps to a file
+  // tab instead of leaking a new tab. Cmd/Ctrl-click escapes to a
+  // new tab. Outside a PageNavigationContext we fall back to the
+  // host's onOpenFile (rail/test surfaces don't have a current tab).
+  const openFile = (path: string, opts: { newTab: boolean }) => {
+    if (ctxNav) {
+      ctxNav.navigate(fileRef(path), { newTab: opts.newTab });
+    } else {
+      onOpenFile(path, { newTab: opts.newTab });
+    }
+  };
+  const tree = useMemo(() => buildTree(files, openFile), [files, openFile]);
   const total = files.length;
   return (
     <HierarchyView
@@ -40,7 +55,7 @@ interface RawDirNode {
 
 function buildTree(
   files: BranchChangeEntry[],
-  onOpenFile: (path: string, opts?: { newTab?: boolean }) => void,
+  openFile: (path: string, opts: { newTab: boolean }) => void,
 ): HierarchyNode[] {
   const root: RawDirNode = { name: "", path: "", files: [], dirs: new Map() };
   for (const file of files) {
@@ -59,20 +74,20 @@ function buildTree(
     }
     cursor.files.push({ name: fileName, entry: file });
   }
-  return materialize(root, "", onOpenFile);
+  return materialize(root, "", openFile);
 }
 
 function materialize(
   node: RawDirNode,
   idPrefix: string,
-  onOpenFile: (path: string, opts?: { newTab?: boolean }) => void,
+  openFile: (path: string, opts: { newTab: boolean }) => void,
 ): HierarchyNode[] {
   const out: HierarchyNode[] = [];
   // Directories first, alphabetical.
   const dirsSorted = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
   for (const d of dirsSorted) {
     const id = `${idPrefix}/dir:${d.path}`;
-    const children = materialize(d, id, onOpenFile);
+    const children = materialize(d, id, openFile);
     const summary = summarize(d);
     out.push({
       id,
@@ -94,15 +109,10 @@ function materialize(
       statuses: gitStatusToHierarchy(f.entry.status),
       detail: formatAddDel(f.entry.additions ?? 0, f.entry.deletions ?? 0),
       onDrill: (e) => {
-        const newTab = e.metaKey || e.ctrlKey;
-        // We don't have a useRouteDispatch here because the host
-        // surface isn't a Page tab — `onOpenFile` is the contract.
-        // But the modifier still escape-hatches to a new tab.
-        // (Hierarchy nodes don't carry refs.)
-        if (newTab) {
-          // Will be honored by the host's onOpenFile semantics.
-        }
-        onOpenFile(f.entry.path, { newTab });
+        // Plain click → in-tab navigate (handled by openFile via the
+        // PageNavigationContext chokepoint when present). Cmd/Ctrl-
+        // click → new-tab escape. Lists never default-open new tabs.
+        openFile(f.entry.path, { newTab: e.metaKey || e.ctrlKey });
       },
       drillTitle: `Open ${f.entry.path}`,
       children: [],
