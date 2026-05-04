@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
-import type { BranchChangeEntry, WorkspaceEntry } from "../../api.js";
-import { TreeEntries } from "../LeftPanel/FileTree.js";
-import type { ContextMenuTarget } from "../LeftPanel/shared.js";
+import { useMemo } from "react";
+import type { BranchChangeEntry, GitFileStatus } from "../../api.js";
+import { HierarchyView, type HierarchyNode, type HierarchyStatus } from "../HierarchyView/HierarchyView.js";
 
 interface Props {
   files: BranchChangeEntry[];
@@ -9,204 +8,165 @@ interface Props {
 }
 
 /**
- * Hierarchical file list for the Change Analysis drilldown. Wraps the
- * shared `TreeEntries` component with a synthesized entriesByDir map
- * so the existing StatusBadge / row chrome / sibling-navigation
- * plumbing reuses 1:1.
- *
- * Each `BranchChangeEntry` becomes a leaf `WorkspaceEntry` carrying
- * its `gitStatus`; intermediate directories are synthesized with
- * `gitStatus: null` (the existing StatusBadge skips null). Adding the
- * search filter prunes paths that don't match (case-insensitive,
- * substring); ancestors of matched paths stay so the hit context
- * remains visible.
+ * Tree-style file list for the Change Analysis drilldown. Builds a
+ * directory > file hierarchy and renders it through `HierarchyView`
+ * so the toolbar (filter + Expand all / Collapse all), the chevron
+ * toggle, and the status badges all match the Semantic view exactly.
  */
 export function ChangeAnalysisFileTree({ files, onOpenFile }: Props) {
-  const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return files;
-    const needle = search.toLowerCase();
-    return files.filter((f) => f.path.toLowerCase().includes(needle));
-  }, [files, search]);
-
-  const { entriesByDir, allDirs } = useMemo(() => buildEntriesByDir(filtered), [filtered]);
-
-  // Default: every directory expanded. The user's explicit collapse
-  // overrides via the `collapsed` set. Search-filtered trees stay
-  // fully expanded so matches are visible in context.
-  const expandedDirs = useMemo(() => {
-    const map: Record<string, boolean> = { "": true };
-    for (const d of allDirs) map[d] = !collapsed.has(d);
-    return map;
-  }, [allDirs, collapsed]);
-
-  const toggleDir = (path: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  const handleExpandAll = () => setCollapsed(new Set());
-  const handleCollapseAll = () => setCollapsed(new Set(allDirs));
-
-  const rootEntries = entriesByDir[""] ?? [];
-
+  const tree = useMemo(() => buildTree(files, onOpenFile), [files, onOpenFile]);
+  const total = files.length;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={toolbarRow}>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter by path…"
-          data-testid="change-analysis-file-search"
-          style={searchInput}
-        />
-        <button
-          type="button"
-          onClick={handleExpandAll}
-          data-testid="change-analysis-file-expand-all"
-          style={smallButton}
-          title="Expand all directories"
-        >
-          Expand all
-        </button>
-        <button
-          type="button"
-          onClick={handleCollapseAll}
-          data-testid="change-analysis-file-collapse-all"
-          style={smallButton}
-          title="Collapse all directories"
-        >
-          Collapse all
-        </button>
-        <span style={{ color: "var(--text-muted)", fontSize: 11, marginLeft: "auto" }}>
-          {filtered.length} of {files.length} file{files.length === 1 ? "" : "s"}
+    <HierarchyView
+      nodes={tree}
+      testIdPrefix="change-analysis-file"
+      searchPlaceholder="Filter by path…"
+      emptyLabel="No files match the filter."
+      toolbarExtra={
+        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+          {total} file{total === 1 ? "" : "s"}
         </span>
-      </div>
-      {rootEntries.length === 0 ? (
-        <div style={{ color: "var(--text-muted)", fontSize: 12, padding: 8 }}>
-          {search.trim() ? "No files match the filter." : "No files."}
-        </div>
-      ) : (
-        <TreeEntries
-          parentPath=""
-          entries={rootEntries}
-          entriesByDir={entriesByDir}
-          expandedDirs={expandedDirs}
-          loadingDirs={{}}
-          selectedFilePath={null}
-          generatedSet={EMPTY_SET}
-          onToggleDirectory={toggleDir}
-          onOpenFile={onOpenFile}
-          onOpenMenu={noopMenu}
-        />
-      )}
-    </div>
+      }
+    />
   );
 }
 
-const EMPTY_SET = new Set<string>();
-function noopMenu(_target: ContextMenuTarget | null) {}
-
-/**
- * Build a `{ dirPath -> WorkspaceEntry[] }` map from a flat list of
- * changed-file entries. Files keep their actual gitStatus so the
- * existing StatusBadge renders A/M/D/R/U; directories are synthesized
- * with `gitStatus: null`. Returned `allDirs` is the set of every
- * directory path that appears anywhere in the synthesized tree.
- */
-function buildEntriesByDir(files: BranchChangeEntry[]): {
-  entriesByDir: Record<string, WorkspaceEntry[]>;
-  allDirs: string[];
-} {
-  const entriesByDir: Record<string, WorkspaceEntry[]> = {};
-  const dirSet = new Set<string>();
-  // Make sure every directory entry appears as a child of its parent
-  // exactly once. Files dedupe by path.
-  const seenInDir = new Map<string, Set<string>>();
-
-  function ensureSlot(dir: string) {
-    if (!entriesByDir[dir]) entriesByDir[dir] = [];
-    if (!seenInDir.has(dir)) seenInDir.set(dir, new Set());
-  }
-
-  for (const file of files) {
-    const segments = file.path.split("/");
-    // Synthesize each ancestor directory entry up the chain.
-    let parentPath = "";
-    for (let i = 0; i < segments.length - 1; i++) {
-      const seg = segments[i]!;
-      const fullPath = parentPath ? `${parentPath}/${seg}` : seg;
-      ensureSlot(parentPath);
-      const seen = seenInDir.get(parentPath)!;
-      if (!seen.has(fullPath)) {
-        seen.add(fullPath);
-        entriesByDir[parentPath]!.push({
-          name: seg,
-          path: fullPath,
-          kind: "directory",
-          gitStatus: null,
-          hasChanges: true,
-        });
-      }
-      dirSet.add(fullPath);
-      parentPath = fullPath;
-    }
-    // File leaf.
-    ensureSlot(parentPath);
-    const fileName = segments[segments.length - 1] ?? file.path;
-    const seen = seenInDir.get(parentPath)!;
-    if (!seen.has(file.path)) {
-      seen.add(file.path);
-      entriesByDir[parentPath]!.push({
-        name: fileName,
-        path: file.path,
-        kind: "file",
-        gitStatus: file.status,
-        hasChanges: true,
-      });
-    }
-  }
-  // Sort each directory's children: directories first, then files,
-  // alphabetical within each kind.
-  for (const dir of Object.keys(entriesByDir)) {
-    entriesByDir[dir]!.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-  }
-  return { entriesByDir, allDirs: [...dirSet] };
+interface RawDirNode {
+  name: string;
+  path: string;
+  files: Array<{ name: string; entry: BranchChangeEntry }>;
+  dirs: Map<string, RawDirNode>;
 }
 
-const toolbarRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  paddingBottom: 4,
-};
-const searchInput: React.CSSProperties = {
-  flex: 1,
-  minWidth: 120,
-  maxWidth: 320,
-  padding: "4px 8px",
-  background: "var(--surface-app)",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 4,
-  fontSize: 12,
-};
-const smallButton: React.CSSProperties = {
-  padding: "4px 10px",
-  background: "var(--surface-card)",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontSize: 12,
-};
+function buildTree(
+  files: BranchChangeEntry[],
+  onOpenFile: (path: string, opts?: { newTab?: boolean }) => void,
+): HierarchyNode[] {
+  const root: RawDirNode = { name: "", path: "", files: [], dirs: new Map() };
+  for (const file of files) {
+    const segments = file.path.split("/");
+    const fileName = segments[segments.length - 1] ?? file.path;
+    let cursor = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const seg = segments[i]!;
+      let next = cursor.dirs.get(seg);
+      if (!next) {
+        const dirPath = cursor.path ? `${cursor.path}/${seg}` : seg;
+        next = { name: seg, path: dirPath, files: [], dirs: new Map() };
+        cursor.dirs.set(seg, next);
+      }
+      cursor = next;
+    }
+    cursor.files.push({ name: fileName, entry: file });
+  }
+  return materialize(root, "", onOpenFile);
+}
+
+function materialize(
+  node: RawDirNode,
+  idPrefix: string,
+  onOpenFile: (path: string, opts?: { newTab?: boolean }) => void,
+): HierarchyNode[] {
+  const out: HierarchyNode[] = [];
+  // Directories first, alphabetical.
+  const dirsSorted = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
+  for (const d of dirsSorted) {
+    const id = `${idPrefix}/dir:${d.path}`;
+    const children = materialize(d, id, onOpenFile);
+    const summary = summarize(d);
+    out.push({
+      id,
+      label: `${d.name}/`,
+      icon: <FolderIcon />,
+      statuses: summary.statuses,
+      count: summary.count,
+      children,
+    });
+  }
+  // Then files.
+  const filesSorted = [...node.files].sort((a, b) => a.name.localeCompare(b.name));
+  for (const f of filesSorted) {
+    const id = `${idPrefix}/file:${f.entry.path}`;
+    out.push({
+      id,
+      label: f.name,
+      icon: <FileIcon />,
+      statuses: gitStatusToHierarchy(f.entry.status),
+      detail: formatAddDel(f.entry.additions ?? 0, f.entry.deletions ?? 0),
+      onDrill: (e) => {
+        const newTab = e.metaKey || e.ctrlKey;
+        // We don't have a useRouteDispatch here because the host
+        // surface isn't a Page tab — `onOpenFile` is the contract.
+        // But the modifier still escape-hatches to a new tab.
+        // (Hierarchy nodes don't carry refs.)
+        if (newTab) {
+          // Will be honored by the host's onOpenFile semantics.
+        }
+        onOpenFile(f.entry.path, { newTab });
+      },
+      drillTitle: `Open ${f.entry.path}`,
+      children: [],
+    });
+  }
+  return out;
+}
+
+interface DirSummary {
+  count: number;
+  statuses: Set<HierarchyStatus>;
+}
+
+function summarize(node: RawDirNode): DirSummary {
+  const statuses = new Set<HierarchyStatus>();
+  let count = 0;
+  for (const file of node.files) {
+    const fileStatuses = gitStatusToHierarchy(file.entry.status);
+    for (const s of fileStatuses) statuses.add(s);
+    count += 1;
+  }
+  for (const child of node.dirs.values()) {
+    const inner = summarize(child);
+    for (const s of inner.statuses) statuses.add(s);
+    count += inner.count;
+  }
+  return { count, statuses };
+}
+
+function gitStatusToHierarchy(status: GitFileStatus): Set<HierarchyStatus> {
+  if (status === "added" || status === "untracked") return new Set(["added"]);
+  if (status === "deleted") return new Set(["deleted"]);
+  // modified, renamed → "modified"
+  return new Set(["modified"]);
+}
+
+function formatAddDel(adds: number, dels: number): string {
+  if (adds === 0 && dels === 0) return "";
+  return `+${adds} −${dels}`;
+}
+
+function FolderIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden style={{ display: "block" }}>
+      <path
+        d="M1.5 3.5 a1 1 0 0 1 1 -1 h3.5 l1.5 1.5 h6.5 a1 1 0 0 1 1 1 v8 a1 1 0 0 1 -1 1 h-11.5 a1 1 0 0 1 -1 -1 z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden style={{ display: "block" }}>
+      <path
+        d="M3.5 1.5 h6 l3 3 v10 a1 1 0 0 1 -1 1 h-8 a1 1 0 0 1 -1 -1 v-12 a1 1 0 0 1 1 -1 z M9.5 1.5 v3 h3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
