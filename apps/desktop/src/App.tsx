@@ -2123,23 +2123,33 @@ export function App() {
     // id, looked up by the diff render branch below.
     const pageTabStartIdx = tabs.length;
     const pageTabsForThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-    for (const ref of pageTabsForThread) {
-      // Default for any in-page navigation: replace the current page in this
-      // tab (browser-style). Cmd/Ctrl/middle/right-click in RouteLink and
-      // BacklinksList still escape to a new tab via PageNavigationContext.
+    // Pre-build the per-slot stack ([...back, current, ...forward]) so
+    // back/forward stack entries get their own tab body that stays
+    // mounted alongside the current page. This preserves state
+    // (scroll, expanded trees, draft text) across in-tab navigation.
+    // After the loop we tag non-current tabs as hidden so they don't
+    // appear in the strip.
+    const perThreadHistoryForBuilder = selectedThreadId ? threadPageHistory[selectedThreadId] ?? {} : {};
+    const stripVisibleIds = new Set<string>(["agent"]);
+    for (const slotRef of pageTabsForThread) stripVisibleIds.add(slotRef.id);
+    for (const slotRef of pageTabsForThread) {
+      const histEntry = perThreadHistoryForBuilder[slotRef.id] ?? { back: [], forward: [], siblings: null };
+      const slotStack = [...histEntry.back, slotRef, ...histEntry.forward];
+      // Closures bind navigation to the SLOT's current ref id so that
+      // when a back-stack page (still mounted, hidden) navigates, it
+      // mutates the slot — same behavior as the visible page.
       const navOpen = (newRef: TabRef, opts?: { newTab?: boolean }) => {
         if (opts?.newTab) handleOpenPage(newRef);
-        else handleNavigateInTab(ref.id, newRef);
+        else handleNavigateInTab(slotRef.id, newRef);
       };
-      // For file-list pages: plain click → in-tab nav (back returns to
-      // the list); modifier-click → new file tab.
       const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
         if (opts?.newTab) handleOpenPage(fileRef(path));
-        else handleNavigateInTab(ref.id, fileRef(path));
+        else handleNavigateInTab(slotRef.id, fileRef(path));
       };
       const navRevealCommit = (sha: string) => {
         navOpen(gitCommitRef(sha));
       };
+      for (const ref of slotStack) {
       if (ref.kind === "diff") {
         // Diff that arrived via in-tab navigation. Look up the
         // registered spec; skip if missing (the registration path is
@@ -2640,6 +2650,14 @@ export function App() {
             />
           ),
         });
+      }
+      } // end inner stack loop
+    }
+    // Tag back/forward stack entries as hidden so they don't appear in
+    // the tab strip but their bodies stay mounted (preserving state).
+    for (let i = pageTabStartIdx; i < tabs.length; i++) {
+      if (!stripVisibleIds.has(tabs[i]!.id)) {
+        tabs[i] = { ...tabs[i]!, hidden: true };
       }
     }
     // Wrap each page-tab render with PageNavigationContext so descendants
