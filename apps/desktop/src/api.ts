@@ -407,6 +407,10 @@ export async function listStreams(): Promise<Stream[]> {
   return unwrap(await commands.listStreams());
 }
 
+export async function listThreads(streamId: string): Promise<Thread[]> {
+  return unwrap(await commands.listThreads(streamId)) as unknown as Thread[];
+}
+
 export async function getCurrentStream(): Promise<Stream> {
   const cur = unwrap(await commands.getCurrentStream());
   if (cur) return cur;
