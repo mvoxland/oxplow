@@ -2169,8 +2169,12 @@ export function App() {
               spec={spec}
               visible={effectiveCenterActive === ref.id}
               onJumpToSource={(p) => {
-                void handleOpenFile(p);
-                closeDiffTab(ref.id);
+                // In-tab navigation: replace the slot's diff with
+                // the file. Back returns to the diff. Browser-tab
+                // semantics; do NOT close the diff manually here —
+                // handleNavigateInTab takes care of swapping the
+                // slot's ref while keeping the diff in the back stack.
+                navOpenFile(p);
               }}
             />
           ) : null,
@@ -2469,7 +2473,7 @@ export function App() {
               threadWork={selectedThreadWork}
               onClosed={() => closePageTab(ref.id)}
               onOpenWikiPage={handleOpenNote}
-              onOpenFile={(p) => { void handleOpenFile(p); }}
+              onOpenFile={navOpenFile}
               onOpenDirectory={handleOpenDirectory}
               onOpenPage={noteNavOpen}
               onOpenCommit={handleOpenCommit}
@@ -2521,7 +2525,7 @@ export function App() {
               items={items}
               threadWork={selectedThreadWork}
               onOpenPage={navOpen}
-              onOpenFile={handleOpenFile}
+              onOpenFile={(p) => navOpenFile(p)}
               onShowInHistory={handleShowSnapshotInHistory}
               onOpenDiff={handleOpenDiff}
               onOpenCommitDiff={handleOpenDiff}
@@ -2540,7 +2544,7 @@ export function App() {
               findingId={findingId}
               threadWork={selectedThreadWork}
               onOpenPage={navOpen}
-              onOpenFileAtLine={(p) => { void handleOpenFile(p); }}
+              onOpenFileAtLine={(p) => { navOpenFile(p); }}
             />
           ),
         });
