@@ -2146,6 +2146,12 @@ export function App() {
         if (opts?.newTab) handleOpenPage(fileRef(path));
         else handleNavigateInTab(slotRef.id, fileRef(path));
       };
+      // Open a diff *in this slot* — slot navigates to the diff,
+      // back returns to the originating page. Used by pages that
+      // surface a diff (work items, wiki, local history, etc.).
+      const navOpenDiff = (spec: DiffSpec) => {
+        handleOpenDiffInTab(slotRef.id, spec);
+      };
       const navRevealCommit = (sha: string) => {
         navOpen(gitCommitRef(sha));
       };
@@ -2234,7 +2240,7 @@ export function App() {
           render: () => (
             <LocalHistoryPage
               stream={stream}
-              onOpenDiff={handleOpenDiff}
+              onOpenDiff={navOpenDiff}
               revealSnapshotId={snapshotsReveal}
               onRequestEditWorkItem={handleRequestEditWorkItem}
             />
@@ -2292,8 +2298,8 @@ export function App() {
               scope={scope}
               onOpenPage={navOpen}
               onOpenFile={navOpenFile}
-              onOpenDiff={handleOpenDiff}
-              onOpenDiffInTab={(spec) => handleOpenDiffInTab(ref.id, spec)}
+              onOpenDiff={navOpenDiff}
+              onOpenDiffInTab={navOpenDiff}
             />
           ),
         });
@@ -2308,7 +2314,7 @@ export function App() {
               stream={stream}
               sha={sha}
               threadWork={selectedThreadWork}
-              onOpenDiff={handleOpenDiff}
+              onOpenDiff={navOpenDiff}
               onOpenPage={navOpen}
             />
           ),
@@ -2340,7 +2346,7 @@ export function App() {
               selectedFilePath={selectedFilePath}
               generatedDirs={generatedDirs}
               onOpenFile={navOpenFile}
-              onOpenDiff={handleOpenDiff}
+              onOpenDiff={navOpenDiff}
               onCreateFile={handleCreateFile}
               onCreateDirectory={handleCreateDirectory}
               onRenamePath={handleRenamePath}
@@ -2527,8 +2533,8 @@ export function App() {
               onOpenPage={navOpen}
               onOpenFile={(p) => navOpenFile(p)}
               onShowInHistory={handleShowSnapshotInHistory}
-              onOpenDiff={handleOpenDiff}
-              onOpenCommitDiff={handleOpenDiff}
+              onOpenDiff={navOpenDiff}
+              onOpenCommitDiff={navOpenDiff}
             />
           ),
         });
