@@ -3,6 +3,8 @@ import type { CSSProperties } from "react";
 import type { EffortDetail, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { deleteButtonStyle, inputStyle, miniButtonStyle } from "./plan-utils.js";
+import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
+import { fileRef } from "../../tabs/pageRefs.js";
 
 /**
  * One entry in the work-item Activity timeline. Each effort
@@ -173,6 +175,11 @@ export function ActivityTimeline({
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(snapshotId: string): void;
 }) {
+  const ctxNav = useOptionalPageNavigation();
+  const openFile = (path: string) => {
+    if (ctxNav) ctxNav.navigate(fileRef(path), { newTab: false });
+    else void onOpenFile?.(path);
+  };
   const rows = buildActivityTimeline(efforts);
   if (rows.length === 0) {
     return (
@@ -213,6 +220,11 @@ function ActivityEffortRow({
   onOpenFile?(path: string): void | Promise<void>;
   onShowInHistory?(snapshotId: string): void;
 }) {
+  const ctxNav = useOptionalPageNavigation();
+  const openFile = (path: string) => {
+    if (ctxNav) ctxNav.navigate(fileRef(path), { newTab: false });
+    else void onOpenFile?.(path);
+  };
   const endSnapshotId = detail.effort.end_snapshot_id;
   const counts = detail.counts;
   const totalChanged = counts.created + counts.updated + counts.deleted;
@@ -260,7 +272,7 @@ function ActivityEffortRow({
               {onOpenFile ? (
                 <button
                   type="button"
-                  onClick={() => void onOpenFile(path)}
+                  onClick={() => openFile(path)}
                   style={{ background: "transparent", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", textAlign: "left", font: "inherit", textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}
                 >
                   {path}

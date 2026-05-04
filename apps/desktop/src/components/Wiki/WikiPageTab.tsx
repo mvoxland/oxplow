@@ -10,7 +10,8 @@ import {
 } from "../../api.js";
 import { MarkdownView } from "./MarkdownView.js";
 import { recordOpError } from "../opErrorsStore.js";
-import { usePageTitle } from "../../tabs/PageNavigationContext.js";
+import { usePageTitle, useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
+import { fileRef } from "../../tabs/pageRefs.js";
 
 type FreshnessStatus = WikiPageSummary["freshness"];
 
@@ -266,6 +267,11 @@ function BacklinksFooter({
   summary: WikiPageSummary;
   onOpenFile: (path: string) => void;
 }) {
+  const ctxNav = useOptionalPageNavigation();
+  const openFile = (path: string) => {
+    if (ctxNav) ctxNav.navigate(fileRef(path), { newTab: false });
+    else onOpenFile(path);
+  };
   const changed = useMemo(() => new Set(summary.changed_refs ?? []), [summary.changed_refs]);
   const deleted = useMemo(() => new Set(summary.deleted_refs ?? []), [summary.deleted_refs]);
   const referencedFiles = summary.referenced_files ?? [];
@@ -299,7 +305,7 @@ function BacklinksFooter({
             type="button"
             onClick={() => {
               if (status === "deleted") return;
-              onOpenFile(path);
+              openFile(path);
             }}
             disabled={status === "deleted"}
             title={
