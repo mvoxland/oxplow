@@ -6,6 +6,7 @@ import { SummaryCard } from "./SummaryCard.js";
 import { FunctionsCard } from "./FunctionsCard.js";
 import { DuplicationCard } from "./DuplicationCard.js";
 import { TestsCard } from "./TestsCard.js";
+import { ChangeAnalysisFileTree } from "./FileTreeView.js";
 import { buildFilePivots, summarizeTests, type FunctionsBuckets } from "./analysisHelpers.js";
 import type { GitFileStatus } from "../../api-types.js";
 
@@ -137,7 +138,7 @@ export function ChangeAnalysisDrilldown({
               : undefined}
           />
         ) : (
-          <FileList
+          <ChangeAnalysisFileTree
             files={filesAfterStatus}
             onOpenFile={onOpenFile}
           />
@@ -150,52 +151,11 @@ export function ChangeAnalysisDrilldown({
   );
 }
 
-function FileList({
-  files,
-  onOpenFile,
-}: {
-  files: ChangeAnalysisState["files"];
-  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
-}) {
-  const sorted = useMemo(() => [...files].sort((a, b) => a.path.localeCompare(b.path)), [files]);
-  return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      {sorted.map((file) => (
-        <button
-          key={file.path}
-          type="button"
-          data-testid="change-analysis-file-row"
-          onClick={(e) => onOpenFile(file.path, { newTab: e.metaKey || e.ctrlKey })}
-          style={fileRow}
-        >
-          <span style={{ width: 16, color: "var(--text-muted)" }}>{statusBadge(file.status)}</span>
-          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {file.path}
-          </span>
-          <span style={addCol}>+{file.additions ?? 0}</span>
-          <span style={delCol}>−{file.deletions ?? 0}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function matchesStatusFilter(status: GitFileStatus, filter: StatusFilter): boolean {
   if (filter === "added") return status === "added" || status === "untracked";
   if (filter === "modified") return status === "modified" || status === "renamed";
   if (filter === "deleted") return status === "deleted";
   return true;
-}
-
-function statusBadge(status: GitFileStatus): string {
-  switch (status) {
-    case "modified": return "M";
-    case "added": return "A";
-    case "deleted": return "D";
-    case "renamed": return "R";
-    case "untracked": return "U";
-    default: return "·";
-  }
 }
 
 function capitalize(s: string): string {
@@ -234,17 +194,3 @@ const activeTab: React.CSSProperties = {
   borderColor: "var(--text-link, #2563eb)",
 };
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
-const fileRow: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  padding: "4px 6px",
-  fontSize: 12,
-  background: "transparent",
-  border: "none",
-  textAlign: "left",
-  cursor: "pointer",
-  color: "var(--text-primary)",
-};
-const addCol: React.CSSProperties = { color: "var(--text-success, #16a34a)", width: 56, textAlign: "right", fontSize: 12 };
-const delCol: React.CSSProperties = { color: "var(--text-danger, #dc2626)", width: 56, textAlign: "right", fontSize: 12 };
