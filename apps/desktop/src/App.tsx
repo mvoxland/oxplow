@@ -2223,15 +2223,20 @@ export function App() {
           ),
         });
       } else if (ref.kind === "change-analysis") {
-        const target = (ref.payload as { target?: string } | null)?.target ?? "working";
+        const payload = (ref.payload as { target?: string; scope?: { kind: "ext" | "dir" | "status"; value: string } } | null) ?? null;
+        const target = payload?.target ?? "working";
+        const scope = payload?.scope ?? undefined;
+        const baseLabel = target === "working" ? "Analysis: Uncommitted" : `Analysis: ${target.slice(0, 7)}`;
+        const label = scope ? `${baseLabel} — ${scope.value}` : baseLabel;
         tabs.push({
           id: ref.id,
-          label: target === "working" ? "Analysis: Uncommitted" : `Analysis: ${target.slice(0, 7)}`,
+          label,
           closable: true,
           render: () => (
             <ChangeAnalysisPage
               stream={stream}
               target={target}
+              scope={scope}
               onOpenPage={navOpen}
               onOpenFile={navOpenFile}
               onOpenDiff={handleOpenDiff}

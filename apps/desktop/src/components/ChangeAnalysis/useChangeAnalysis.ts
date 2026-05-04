@@ -20,17 +20,44 @@ import { commands } from "../../tauri-bridge/index.js";
 import {
   buildFilePivots,
   diffFunctions,
+  fileExtension,
   indexSides,
   summarizeTests,
+  topDirectory,
   type FilePivots,
   type FunctionsBuckets,
   type TestSummary,
 } from "./analysisHelpers.js";
+import type { ChangeAnalysisScope } from "../../tabs/pageRefs.js";
 
 export interface UseChangeAnalysisInput {
   streamId: string | null;
   /** "working" or a commit SHA. */
   target: string;
+  /** Optional drilldown filter applied before pivots / functions /
+   *  duplication / tests are computed. When omitted the hook returns
+   *  unfiltered dashboard-mode data. */
+  scope?: ChangeAnalysisScope;
+}
+
+/** Predicate that matches a file against a drilldown scope. Pure;
+ *  exported for tests. */
+export function fileMatchesScope(
+  file: BranchChangeEntry,
+  scope: ChangeAnalysisScope | undefined,
+): boolean {
+  if (!scope) return true;
+  if (scope.kind === "ext") {
+    const ext = fileExtension(file.path) || "(none)";
+    return ext === scope.value;
+  }
+  if (scope.kind === "dir") {
+    return topDirectory(file.path) === scope.value;
+  }
+  if (scope.kind === "status") {
+    return file.status === scope.value;
+  }
+  return true;
 }
 
 export interface ChangeAnalysisState {
@@ -110,7 +137,7 @@ async function fetchFiles(
 }
 
 export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysisState {
-  const { streamId, target } = input;
+  const { streamId, target, scope } = input;
   const [files, setFiles] = useState<BranchChangeEntry[]>(EMPTY_FILES);
   const [functions, setFunctions] = useState<FunctionsBuckets>(EMPTY_BUCKETS);
   const [duplication, setDuplication] = useState<{
@@ -257,28 +284,52 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     }
   }, [streamId]);
 
+  // Apply the drilldown scope (if any) once and feed the filtered file
+  // list into every downstream derivation. Pivots remain unfiltered so
+  // dashboards can show the full breakdown even when nested inside a
+  // drilldown caller — but the drilldown page isn't supposed to render
+  // pivots anyway, and the dashboard never passes a scope.
+  const filteredFiles = useMemo(
+    () => (scope ? files.filter((f) => fileMatchesScope(f, scope)) : files),
+    [files, scope],
+  );
+  const filteredPathSet = useMemo(() => new Set(filteredFiles.map((f) => f.path)), [filteredFiles]);
+  const filteredFunctions = useMemo<FunctionsBuckets>(() => {
+    if (!scope) return functions;
+    return {
+      added: functions.added.filter((fn) => filteredPathSet.has(fn.path)),
+      deleted: functions.deleted.filter((fn) => filteredPathSet.has(fn.path)),
+      modifiedSignature: functions.modifiedSignature.filter((fn) => filteredPathSet.has(fn.path)),
+      modifiedBody: functions.modifiedBody.filter((fn) => filteredPathSet.has(fn.path)),
+    };
+  }, [functions, filteredPathSet, scope]);
+  const filteredDupFindings = useMemo(
+    () => (scope ? duplication.findings.filter((f) => filteredPathSet.has(f.path)) : duplication.findings),
+    [duplication.findings, filteredPathSet, scope],
+  );
+
   const totals = useMemo(() => {
     let add = 0;
     let del = 0;
-    for (const f of files) {
+    for (const f of filteredFiles) {
       add += f.additions ?? 0;
       del += f.deletions ?? 0;
     }
     return { additions: add, deletions: del };
-  }, [files]);
+  }, [filteredFiles]);
 
-  const pivots = useMemo(() => buildFilePivots(files), [files]);
-  const tests = useMemo(() => summarizeTests(files), [files]);
+  const pivots = useMemo(() => buildFilePivots(filteredFiles), [filteredFiles]);
+  const tests = useMemo(() => summarizeTests(filteredFiles), [filteredFiles]);
 
   return {
     loading,
     error,
-    files,
+    files: filteredFiles,
     totals,
     pivots,
-    functions,
+    functions: filteredFunctions,
     duplication: {
-      findings: duplication.findings,
+      findings: filteredDupFindings,
       scanAgeMs: duplication.scanAgeMs,
       scanning,
       refresh: triggerScan,

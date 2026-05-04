@@ -95,7 +95,27 @@ export function uncommittedChangesRef(): TabRef {
  */
 export type ChangeAnalysisTarget = "working" | string;
 
-export function changeAnalysisRef(target: ChangeAnalysisTarget): TabRef {
+/**
+ * Drilldown scope for the focused Change Analysis page. The dashboard
+ * uses no scope; clicking a row in any pivot routes to a page whose
+ * ref carries one of these.
+ */
+export type ChangeAnalysisScope =
+  | { kind: "ext"; value: string }
+  | { kind: "dir"; value: string }
+  | { kind: "status"; value: string };
+
+export function changeAnalysisRef(
+  target: ChangeAnalysisTarget,
+  scope?: ChangeAnalysisScope,
+): TabRef {
+  if (scope) {
+    return {
+      id: `change-analysis:${target}:${scope.kind}:${scope.value}`,
+      kind: "change-analysis",
+      payload: { target, scope },
+    };
+  }
   return {
     id: `change-analysis:${target}`,
     kind: "change-analysis",
