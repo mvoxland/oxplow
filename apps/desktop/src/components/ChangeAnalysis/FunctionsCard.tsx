@@ -1,7 +1,13 @@
-import { useState } from "react";
+import { useMemo } from "react";
 import type { FunctionsBuckets } from "./analysisHelpers.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { changeAnalysisRef, type ChangeAnalysisTarget } from "../../tabs/pageRefs.js";
+import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
+import {
+  HierarchyView,
+  type HierarchyNode,
+  type HierarchyStatus,
+} from "../HierarchyView/HierarchyView.js";
 
 interface FunctionsCardProps {
   functions: FunctionsBuckets;
@@ -23,15 +29,18 @@ interface RowEntry {
   path: string;
   containerPath: string[];
   startLine: number;
-  /** Function name (no metric annotations). */
   name: string;
-  /** Free-form metric tail rendered after the name in muted text. */
   detail: string;
   status: RowStatus;
 }
 
 export function FunctionsCard({ functions, onOpenFile, onOpenFunctionDiff, target }: FunctionsCardProps) {
-  const rows = flattenRows(functions);
+  const ctxNav = useOptionalPageNavigation();
+  const rows = useMemo(() => flattenRows(functions), [functions]);
+  const nodes = useMemo(
+    () => buildNodes(rows, target, onOpenFile, onOpenFunctionDiff, ctxNav),
+    [rows, target, onOpenFile, onOpenFunctionDiff, ctxNav],
+  );
 
   return (
     <section data-testid="change-analysis-functions" style={card}>
@@ -41,7 +50,12 @@ export function FunctionsCard({ functions, onOpenFile, onOpenFunctionDiff, targe
           No function-level changes detected (the changed files may be in unsupported languages).
         </div>
       ) : (
-        <Tree rows={rows} onOpenFile={onOpenFile} onOpenFunctionDiff={onOpenFunctionDiff} target={target} />
+        <HierarchyView
+          nodes={nodes}
+          testIdPrefix="change-analysis-fn"
+          searchPlaceholder="Filter by name…"
+          emptyLabel="No functions match the filter."
+        />
       )}
     </section>
   );
@@ -53,8 +67,6 @@ export function FunctionsCard({ functions, onOpenFile, onOpenFunctionDiff, targe
  * `modifiedBody` shows up once with a combined detail string.
  */
 function flattenRows(functions: FunctionsBuckets): RowEntry[] {
-  // Key on (path, containerPath joined, name) so the same function in
-  // sibling classes stays separate but a sig+body match merges.
   const keyOf = (path: string, container: string[], name: string) =>
     `${path}::${container.join("::")}::${name}`;
   const out = new Map<string, RowEntry>();
@@ -78,7 +90,6 @@ function flattenRows(functions: FunctionsBuckets): RowEntry[] {
       status: "deleted",
     });
   }
-  // Modified = sig OR body. If both, combine the detail.
   const sigByKey = new Map<string, string>();
   for (const fn of functions.modifiedSignature) {
     sigByKey.set(
@@ -95,7 +106,7 @@ function flattenRows(functions: FunctionsBuckets): RowEntry[] {
   }
   const allModKeys = new Set<string>([...sigByKey.keys(), ...bodyByKey.keys()]);
   for (const key of allModKeys) {
-    if (out.has(key)) continue; // already covered as added/deleted
+    if (out.has(key)) continue;
     const fn = [...functions.modifiedSignature, ...functions.modifiedBody].find(
       (f) => keyOf(f.path, f.containerPath, f.name) === key,
     );
@@ -115,38 +126,23 @@ function flattenRows(functions: FunctionsBuckets): RowEntry[] {
   return [...out.values()];
 }
 
-interface TreeNode {
-  /** Display label for this node — directory segment(s), filename, or
-   *  container name. */
+interface RawNode {
   label: string;
-  /** Repo-relative file path — non-null on file leaves and container
-   *  branches; null on pure directory branches that span multiple
-   *  files. */
-  path: string | null;
-  /** Cumulative directory path for `kind === "dir"` nodes, e.g.
-   *  "apps/desktop/src/components". Used to build the dir-scoped
-   *  drilldown ref. Null for non-dir nodes. */
+  /** Cumulative directory path for `kind === "dir"` nodes. */
   dirPath: string | null;
-  /** Node kind drives the indent icon + label color. */
+  /** Repo-relative file path on file leaves and container branches. */
+  filePath: string | null;
   kind: "dir" | "file" | "container";
-  children: Map<string, TreeNode>;
-  /** Function rows attached at this depth (always inside a container
-   *  or directly under a file leaf). */
+  children: Map<string, RawNode>;
   rows: RowEntry[];
 }
 
-function emptyNode(
-  label: string,
-  kind: TreeNode["kind"],
-  path: string | null,
-  dirPath: string | null = null,
-): TreeNode {
-  return { label, kind, path, dirPath, children: new Map(), rows: [] };
+function emptyRaw(label: string, kind: RawNode["kind"], filePath: string | null, dirPath: string | null = null): RawNode {
+  return { label, kind, filePath, dirPath, children: new Map(), rows: [] };
 }
 
-/** Build the unified tree: dir1 > dir2 > file > container > rows. */
-function buildTree(rows: RowEntry[]): TreeNode {
-  const root: TreeNode = emptyNode("", "dir", null, "");
+function buildRawTree(rows: RowEntry[]): RawNode {
+  const root = emptyRaw("", "dir", null, "");
   for (const row of rows) {
     const segments = row.path.split("/");
     const dirSegments = segments.slice(0, -1);
@@ -157,7 +153,7 @@ function buildTree(rows: RowEntry[]): TreeNode {
       let next = cursor.children.get(seg);
       const childDirPath = cursorDirPath ? `${cursorDirPath}/${seg}` : seg;
       if (!next) {
-        next = emptyNode(seg, "dir", null, childDirPath);
+        next = emptyRaw(seg, "dir", null, childDirPath);
         cursor.children.set(seg, next);
       }
       cursor = next;
@@ -165,14 +161,14 @@ function buildTree(rows: RowEntry[]): TreeNode {
     }
     let fileNode = cursor.children.get(fileSegment);
     if (!fileNode) {
-      fileNode = emptyNode(fileSegment, "file", row.path);
+      fileNode = emptyRaw(fileSegment, "file", row.path);
       cursor.children.set(fileSegment, fileNode);
     }
     let containerCursor = fileNode;
     for (const seg of row.containerPath) {
       let next = containerCursor.children.get(seg);
       if (!next) {
-        next = emptyNode(seg, "container", row.path);
+        next = emptyRaw(seg, "container", row.path);
         containerCursor.children.set(seg, next);
       }
       containerCursor = next;
@@ -183,24 +179,13 @@ function buildTree(rows: RowEntry[]): TreeNode {
   return root;
 }
 
-/**
- * Collapse runs of single-child directory nodes (e.g. `apps > desktop
- * > src > components`) into a single segment so the tree doesn't have
- * a long ladder of one-child branches before the first interesting
- * split. Only collapses dir → dir; files / containers stay as-is.
- */
-function collapseSingleChildDirs(node: TreeNode): void {
+/** Collapse runs of single-child dir nodes into one segment. */
+function collapseSingleChildDirs(node: RawNode): void {
   for (const [key, child] of node.children) {
-    if (
-      child.kind === "dir" &&
-      child.children.size === 1 &&
-      child.rows.length === 0
-    ) {
-      const [_onlyKey, onlyChild] = [...child.children.entries()][0]!;
+    if (child.kind === "dir" && child.children.size === 1 && child.rows.length === 0) {
+      const [, onlyChild] = [...child.children.entries()][0]!;
       if (onlyChild.kind === "dir") {
-        // Preserve the inner dirPath as the merged node's full path,
-        // so the dir-scope drill matches every file under it.
-        const merged = emptyNode(
+        const merged = emptyRaw(
           `${child.label}/${onlyChild.label}`,
           "dir",
           null,
@@ -209,7 +194,6 @@ function collapseSingleChildDirs(node: TreeNode): void {
         merged.children = onlyChild.children;
         merged.rows = onlyChild.rows;
         node.children.set(key, merged);
-        // Recurse on the merged node in case it can collapse further.
         collapseSingleChildDirs(node);
         return;
       }
@@ -218,285 +202,176 @@ function collapseSingleChildDirs(node: TreeNode): void {
   }
 }
 
-interface NodeSummary {
+interface RawSummary {
   count: number;
-  statuses: Set<RowStatus>;
+  statuses: Set<HierarchyStatus>;
 }
-
-function summarizeNode(node: TreeNode): NodeSummary {
-  const statuses = new Set<RowStatus>();
+function summarize(node: RawNode): RawSummary {
+  const statuses = new Set<HierarchyStatus>();
   let count = 0;
   for (const row of node.rows) {
     statuses.add(row.status);
     count += 1;
   }
   for (const child of node.children.values()) {
-    const s = summarizeNode(child);
-    for (const st of s.statuses) statuses.add(st);
-    count += s.count;
+    const inner = summarize(child);
+    for (const s of inner.statuses) statuses.add(s);
+    count += inner.count;
   }
   return { count, statuses };
 }
 
-function Tree({
-  rows,
-  onOpenFile,
-  onOpenFunctionDiff,
-  target,
-}: {
-  rows: RowEntry[];
-  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
-  onOpenFunctionDiff?(path: string, line: number): void;
-  target?: ChangeAnalysisTarget;
-}) {
-  const root = buildTree(rows);
-  const topLevel = [...root.children.values()].sort((a, b) => a.label.localeCompare(b.label));
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-      {topLevel.map((node) => (
-        <TreeBranch
-          key={`${node.kind}:${node.label}`}
-          node={node}
-          depth={0}
-          onOpenFile={onOpenFile}
-          onOpenFunctionDiff={onOpenFunctionDiff}
-          target={target}
-        />
-      ))}
-    </div>
-  );
+function buildNodes(
+  rows: RowEntry[],
+  target: ChangeAnalysisTarget | undefined,
+  onOpenFile: (path: string, opts?: { newTab?: boolean }) => void,
+  onOpenFunctionDiff: ((path: string, line: number) => void) | undefined,
+  ctxNav: ReturnType<typeof useOptionalPageNavigation>,
+): HierarchyNode[] {
+  const tree = buildRawTree(rows);
+  const top = [...tree.children.values()].sort((a, b) => a.label.localeCompare(b.label));
+  return top.map((c) => toHierarchyNode(c, "", target, onOpenFile, onOpenFunctionDiff, ctxNav));
 }
 
-function TreeBranch({
-  node,
-  depth,
-  onOpenFile,
-  onOpenFunctionDiff,
-  target,
-}: {
-  node: TreeNode;
-  depth: number;
-  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
-  onOpenFunctionDiff?(path: string, line: number): void;
-  target?: ChangeAnalysisTarget;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  const summary = summarizeNode(node);
+function toHierarchyNode(
+  node: RawNode,
+  idPrefix: string,
+  target: ChangeAnalysisTarget | undefined,
+  onOpenFile: (path: string, opts?: { newTab?: boolean }) => void,
+  onOpenFunctionDiff: ((path: string, line: number) => void) | undefined,
+  ctxNav: ReturnType<typeof useOptionalPageNavigation>,
+): HierarchyNode {
+  const id = `${idPrefix}/${node.kind}:${node.label}`;
   const sortedChildren = [...node.children.values()].sort((a, b) => {
-    // Directories first, then files, then containers — within each
-    // kind alphabetical.
-    const kindRank = (k: TreeNode["kind"]) => (k === "dir" ? 0 : k === "file" ? 1 : 2);
-    const r = kindRank(a.kind) - kindRank(b.kind);
+    const rank = (k: RawNode["kind"]) => (k === "dir" ? 0 : k === "file" ? 1 : 2);
+    const r = rank(a.kind) - rank(b.kind);
     if (r !== 0) return r;
     return a.label.localeCompare(b.label);
   });
-
-  // Directory branches route to the dir-scoped Change Analysis
-  // drilldown when a target is in scope. Hook is called
-  // unconditionally to keep render order stable; the placeholder ref
-  // is unused unless `target` is set.
-  const dirRef = node.kind === "dir" && node.dirPath != null && target
-    ? changeAnalysisRef(target, { kind: "dir", value: node.dirPath })
-    : null;
-  const dirDispatch = useRouteDispatch(
-    dirRef ?? changeAnalysisRef(target ?? "working"),
-    {
-      onNavigate: () => { /* no rail fallback for this surface */ },
-    },
+  const childNodes: HierarchyNode[] = sortedChildren.map((c) =>
+    toHierarchyNode(c, id, target, onOpenFile, onOpenFunctionDiff, ctxNav),
   );
+  // Function leaves attached at this depth.
+  const leafRows = node.rows
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map<HierarchyNode>((row, i) => ({
+      id: `${id}/fn:${row.name}:${i}`,
+      label: row.name,
+      icon: <FnIcon />,
+      statuses: new Set<HierarchyStatus>([row.status]),
+      detail: row.detail,
+      onDrill: (e) => {
+        if (e.metaKey || e.ctrlKey) {
+          onOpenFile(row.path, { newTab: true });
+          return;
+        }
+        if (onOpenFunctionDiff && row.startLine > 0) {
+          onOpenFunctionDiff(row.path, row.startLine);
+        } else {
+          onOpenFile(row.path);
+        }
+      },
+      drillTitle: row.startLine > 0 ? `Open diff at line ${row.startLine}` : "Open diff",
+      testId: "change-analysis-fn-row",
+      children: [],
+    }));
+  const summary = summarize(node);
+  const childrenAll = [...childNodes, ...leafRows];
+  const label = node.kind === "dir" ? `${node.label}/` : node.label;
 
-  // File branches drill into the file's diff (line 1) on click;
-  // directory branches drill into the directory-scoped Change
-  // Analysis page; container branches don't have an obvious drill
-  // target, so their label area is inert (chevron still toggles).
-  const handleBranchDrill = (e: React.MouseEvent) => {
-    if (node.kind === "file" && node.path) {
+  // Drill behavior:
+  //   - file → file diff at line 1
+  //   - dir  → directory-scoped Change Analysis page (in-tab via context)
+  //   - container → no drill
+  let onDrill: ((e: React.MouseEvent) => void) | undefined;
+  let drillTitle: string | undefined;
+  if (node.kind === "file" && node.filePath) {
+    const filePath = node.filePath;
+    onDrill = (e) => {
       if (e.metaKey || e.ctrlKey) {
-        onOpenFile(node.path, { newTab: true });
+        onOpenFile(filePath, { newTab: true });
         return;
       }
-      if (onOpenFunctionDiff) {
-        onOpenFunctionDiff(node.path, 1);
+      if (onOpenFunctionDiff) onOpenFunctionDiff(filePath, 1);
+      else onOpenFile(filePath);
+    };
+    drillTitle = `Open diff for ${filePath}`;
+  } else if (node.kind === "dir" && node.dirPath != null && target) {
+    const dirPath = node.dirPath;
+    const ref = changeAnalysisRef(target, { kind: "dir", value: dirPath });
+    onDrill = (e) => {
+      const newTab = e.metaKey || e.ctrlKey;
+      if (ctxNav) {
+        ctxNav.navigate(ref, { newTab });
       } else {
-        onOpenFile(node.path);
+        // No page-context fallback — open via onOpenFile is wrong,
+        // so silently no-op when used outside a Page.
       }
-      return;
-    }
-    if (node.kind === "dir" && dirRef) {
-      dirDispatch.dispatch(e.metaKey || e.ctrlKey);
-    }
+    };
+    drillTitle = `Drill into ${dirPath}/`;
+  }
+
+  return {
+    id,
+    label,
+    icon: iconFor(node.kind),
+    statuses: summary.statuses,
+    count: summary.count,
+    onDrill,
+    drillTitle,
+    children: childrenAll,
   };
-  const branchClickable =
-    (node.kind === "file" && !!node.path) ||
-    (node.kind === "dir" && !!dirRef);
-
-  return (
-    <div>
-      <div style={branchRow(depth)}>
-        <ChevronToggle expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
-        <StatusBadges statuses={summary.statuses} />
-        {branchClickable ? (
-          <button
-            type="button"
-            data-testid="change-analysis-fn-branch"
-            onClick={handleBranchDrill}
-            title={
-              node.kind === "file"
-                ? `Open diff for ${node.path}`
-                : `Drill into ${node.dirPath}/`
-            }
-            style={branchLabelButton(node.kind)}
-          >
-            {node.label}
-            {node.kind === "dir" ? "/" : ""}
-          </button>
-        ) : (
-          <span style={labelStyle(node.kind)}>
-            {node.label}
-            {node.kind === "dir" ? "/" : ""}
-          </span>
-        )}
-        <span style={{ color: "var(--text-muted)", marginLeft: 6, fontSize: 11 }}>
-          ({summary.count})
-        </span>
-      </div>
-      {expanded ? (
-        <>
-          {sortedChildren.map((child) => (
-            <TreeBranch
-              key={`${child.kind}:${child.label}`}
-              node={child}
-              depth={depth + 1}
-              onOpenFile={onOpenFile}
-              onOpenFunctionDiff={onOpenFunctionDiff}
-              target={target}
-            />
-          ))}
-          {node.rows
-            .slice()
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((row, i) => (
-              <button
-                key={`${row.name}:${i}`}
-                type="button"
-                data-testid="change-analysis-fn-row"
-                onClick={(e) => {
-                  // Cmd/Ctrl-click → open the file directly. Default →
-                  // open the diff at the function's line.
-                  if (e.metaKey || e.ctrlKey) {
-                    onOpenFile(row.path, { newTab: true });
-                    return;
-                  }
-                  if (onOpenFunctionDiff && row.startLine > 0) {
-                    onOpenFunctionDiff(row.path, row.startLine);
-                  } else {
-                    onOpenFile(row.path);
-                  }
-                }}
-                style={{ ...fnRow, paddingLeft: 14 + (depth + 1) * 12 + CHEVRON_GUTTER }}
-                title={row.startLine > 0 ? `Open diff at line ${row.startLine}` : "Open diff"}
-              >
-                <StatusBadges statuses={new Set([row.status])} />
-                <span style={{ color: "var(--text-primary)" }}>{row.name}</span>
-                {row.detail ? (
-                  <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>{row.detail}</span>
-                ) : null}
-              </button>
-            ))}
-        </>
-      ) : null}
-    </div>
-  );
 }
 
-function ChevronToggle({ expanded, onToggle }: { expanded: boolean; onToggle(): void }) {
-  return (
-    <button
-      type="button"
-      data-testid={`change-analysis-fn-chevron-${expanded ? "open" : "closed"}`}
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle();
-      }}
-      title={expanded ? "Collapse" : "Expand"}
-      aria-label={expanded ? "Collapse" : "Expand"}
-      aria-expanded={expanded}
-      style={chevronButton}
-    >
-      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 120ms ease" }}>
-        <path d="M3 1.5 L7 5 L3 8.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </button>
-  );
+function iconFor(kind: RawNode["kind"]) {
+  if (kind === "dir") return <FolderIcon />;
+  if (kind === "file") return <FileIcon />;
+  return <ContainerIcon />;
 }
 
-function StatusBadges({ statuses }: { statuses: Set<RowStatus> }) {
-  const order: RowStatus[] = ["added", "modified", "deleted"];
+function FolderIcon() {
   return (
-    <span style={{ display: "inline-flex", gap: 2, marginRight: 6, flexShrink: 0 }}>
-      {order
-        .filter((s) => statuses.has(s))
-        .map((s) => (
-          <StatusBadge key={s} status={s} />
-        ))}
+    <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden style={{ display: "block" }}>
+      <path
+        d="M1.5 3.5 a1 1 0 0 1 1 -1 h3.5 l1.5 1.5 h6.5 a1 1 0 0 1 1 1 v8 a1 1 0 0 1 -1 1 h-11.5 a1 1 0 0 1 -1 -1 z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+function FileIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden style={{ display: "block" }}>
+      <path
+        d="M3.5 1.5 h6 l3 3 v10 a1 1 0 0 1 -1 1 h-8 a1 1 0 0 1 -1 -1 v-12 a1 1 0 0 1 1 -1 z M9.5 1.5 v3 h3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function ContainerIcon() {
+  // Squarish glyph for class/impl/module/namespace containers.
+  return (
+    <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden style={{ display: "block" }}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M2.5 6 h11 M6 2.5 v11" stroke="currentColor" strokeWidth="0.9" fill="none" opacity="0.7" />
+    </svg>
+  );
+}
+function FnIcon() {
+  // ƒ glyph for functions — keep it within 1em so the row height
+  // doesn't grow.
+  return (
+    <span style={{ fontFamily: "serif", fontStyle: "italic", fontSize: "1em", lineHeight: 1 }}>
+      ƒ
     </span>
   );
-}
-
-function StatusBadge({ status }: { status: RowStatus }) {
-  const cfg = STATUS_STYLE[status];
-  return (
-    <span
-      title={cfg.title}
-      data-testid={`fn-badge-${status}`}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 14,
-        height: 14,
-        borderRadius: 3,
-        fontSize: 9,
-        fontWeight: 700,
-        color: cfg.fg,
-        background: cfg.bg,
-      }}
-    >
-      {cfg.glyph}
-    </span>
-  );
-}
-
-const STATUS_STYLE: Record<RowStatus, { glyph: string; fg: string; bg: string; title: string }> = {
-  added: {
-    glyph: "A",
-    fg: "var(--text-success, #16a34a)",
-    bg: "rgba(22, 163, 74, 0.18)",
-    title: "Added",
-  },
-  modified: {
-    glyph: "M",
-    fg: "var(--text-link, #2563eb)",
-    bg: "rgba(37, 99, 235, 0.18)",
-    title: "Modified",
-  },
-  deleted: {
-    glyph: "D",
-    fg: "var(--text-danger, #dc2626)",
-    bg: "rgba(220, 38, 38, 0.18)",
-    title: "Deleted",
-  },
-};
-
-function labelStyle(kind: TreeNode["kind"]): React.CSSProperties {
-  if (kind === "dir") {
-    return { color: "var(--text-muted)", fontSize: 12 };
-  }
-  if (kind === "file") {
-    return { color: "var(--text-primary)", fontSize: 12, fontWeight: 500 };
-  }
-  // container
-  return { color: "var(--text-primary)", fontSize: 12, fontWeight: 500, fontStyle: "italic" };
 }
 
 const card: React.CSSProperties = {
@@ -507,48 +382,3 @@ const card: React.CSSProperties = {
 };
 const header: React.CSSProperties = { fontWeight: 600, marginBottom: 8 };
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };
-const CHEVRON_GUTTER = 18;
-const branchRow = (depth: number): React.CSSProperties => ({
-  display: "flex",
-  alignItems: "center",
-  fontSize: 12,
-  padding: "2px 0",
-  paddingLeft: depth * 12,
-  userSelect: "none",
-});
-const chevronButton: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: CHEVRON_GUTTER,
-  height: 16,
-  padding: 0,
-  background: "transparent",
-  border: "none",
-  color: "var(--text-muted)",
-  cursor: "pointer",
-  flexShrink: 0,
-};
-const branchLabelButton = (kind: TreeNode["kind"]): React.CSSProperties => ({
-  ...labelStyle(kind),
-  background: "transparent",
-  border: "none",
-  padding: "0 2px",
-  cursor: "pointer",
-  textAlign: "left",
-});
-const fnRow: React.CSSProperties = {
-  textAlign: "left",
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  padding: "2px 4px",
-  fontSize: 12,
-  color: "var(--text-primary)",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  display: "flex",
-  alignItems: "center",
-  width: "100%",
-};
