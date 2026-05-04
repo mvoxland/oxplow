@@ -98,6 +98,7 @@ import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { ChangeAnalysisPage } from "./pages/ChangeAnalysisPage.js";
+import { AgentPage } from "./pages/AgentPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { DirectoryPage } from "./pages/DirectoryPage.js";
@@ -2050,32 +2051,14 @@ export function App() {
             run: () => setAgentTransportMode((prev) => prev === "direct" ? "tmux" : "direct"),
           },
         ] : undefined,
-        render: () =>
-          selectedThread ? (
-            <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-              <div style={{ flex: 1, minHeight: 0 }}>
-                {/* Key on thread.id so switching to a different thread
-                 *  remounts the terminal — pane_target alone collides
-                 *  ("working" for every thread), so without the key
-                 *  React reuses the same xterm + PTY session and the
-                 *  user keeps seeing the old thread's transcript even
-                 *  though the backend would happily attach a different
-                 *  per-thread session (session_key includes thread_id;
-                 *  see crates/oxplow-tauri-ipc/src/commands/terminal.rs). */}
-                <TerminalPane
-                  key={selectedThread.id}
-                  paneTarget={selectedThread.pane_target}
-                  visible={effectiveCenterActive === "agent"}
-                  transportMode={agentTransportMode}
-                  onUserInterrupt={() => {
-                    void recordUserInterrupt(selectedThread.id, stream?.id ?? null);
-                  }}
-                />
-              </div>
-            </div>
-          ) : (
-            <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>
-          ),
+        render: () => (
+          <AgentPage
+            thread={selectedThread}
+            stream={stream}
+            visible={effectiveCenterActive === "agent"}
+            transportMode={agentTransportMode}
+          />
+        ),
       },
     ];
     // Files that already appear as a page-tab (because the user
