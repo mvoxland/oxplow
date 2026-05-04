@@ -353,11 +353,28 @@ adapter-component pattern from `CommitGraphTable`'s
 
 ## Linking between tabs — single chokepoint rule
 
+**Browser-tab semantics are non-negotiable: plain-click navigates
+in-tab; only Cmd/Ctrl-click + middle-click + right-click open a new
+tab.** This rule has regressed several times — every regression has
+the same root cause: a list/tree row called `onOpenFile` /
+`onOpenPage` directly instead of dispatching through the page-
+context chokepoint, and the host's callback always opens a new tab.
+
 **Any clickable row that targets another `TabRef` MUST go through
 `RouteLink` or `useRouteDispatch`.** Don't write raw
 `onClick={() => onOpenPage(...)}` / `onClick={() => onOpenFile(...)}`
 on rows: that path always opens a new tab and never gets right-click
 or modifier-click semantics.
+
+When `useRouteDispatch` isn't structurally available (e.g. the row
+is built inside a `useMemo` where hooks can't be called), grab the
+nav context once at the top of the host component
+(`const ctxNav = useOptionalPageNavigation()`) and have the row's
+`onClick` call `ctxNav.navigate(ref, { newTab })`. Falling back to
+the host's `onOpenFile` / `onOpenPage` callback is **only**
+acceptable when no PageNavigationContext is present (rail HUD,
+palette) — those callbacks always open new tabs and that's correct
+for those surfaces.
 
 The pattern, depending on the row's markup:
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { FunctionsBuckets, FunctionVisibility } from "./analysisHelpers.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
-import { changeAnalysisRef, type ChangeAnalysisTarget } from "../../tabs/pageRefs.js";
+import { changeAnalysisRef, fileRef, type ChangeAnalysisTarget } from "../../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import {
   HierarchyView,
@@ -293,17 +293,19 @@ function toHierarchyNode(
       statuses: new Set<HierarchyStatus>([row.status]),
       detail: row.detail,
       onDrill: (e) => {
-        if (e.metaKey || e.ctrlKey) {
-          onOpenFile(row.path, { newTab: true });
-          return;
-        }
-        if (onOpenFunctionDiff && row.startLine > 0) {
-          onOpenFunctionDiff(row.path, row.startLine);
+        // Plain click → open the file in-tab via the page-context
+        // chokepoint (browser-tab semantics: clicking around stays in
+        // the same tab). Cmd/Ctrl-click → new tab. We don't open the
+        // diff view from function rows by default because that opens
+        // a separate diff tab and the user wants in-tab navigation.
+        const newTab = e.metaKey || e.ctrlKey;
+        if (ctxNav && !newTab) {
+          ctxNav.navigate(fileRef(row.path), { newTab: false });
         } else {
-          onOpenFile(row.path);
+          onOpenFile(row.path, { newTab });
         }
       },
-      drillTitle: row.startLine > 0 ? `Open diff at line ${row.startLine}` : "Open diff",
+      drillTitle: `Open ${row.path}`,
       testId: "change-analysis-fn-row",
       children: [],
     }));
@@ -320,14 +322,16 @@ function toHierarchyNode(
   if (node.kind === "file" && node.filePath) {
     const filePath = node.filePath;
     onDrill = (e) => {
-      if (e.metaKey || e.ctrlKey) {
-        onOpenFile(filePath, { newTab: true });
-        return;
+      // File branches open the file in-tab via context (same browser-
+      // tab semantic as the file-list view). Cmd/Ctrl → new tab.
+      const newTab = e.metaKey || e.ctrlKey;
+      if (ctxNav && !newTab) {
+        ctxNav.navigate(fileRef(filePath), { newTab: false });
+      } else {
+        onOpenFile(filePath, { newTab });
       }
-      if (onOpenFunctionDiff) onOpenFunctionDiff(filePath, 1);
-      else onOpenFile(filePath);
     };
-    drillTitle = `Open diff for ${filePath}`;
+    drillTitle = `Open ${filePath}`;
   } else if (node.kind === "dir" && node.dirPath != null && target) {
     const dirPath = node.dirPath;
     const ref = changeAnalysisRef(target, { kind: "dir", value: dirPath });
