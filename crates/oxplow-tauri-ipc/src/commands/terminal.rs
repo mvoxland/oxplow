@@ -59,9 +59,12 @@ pub async fn open_terminal_session(
         None => state.streams.ensure_primary().await?,
     };
 
-    // Pull the selected thread (if any) so the system prompt the
-    // agent sees matches what the renderer is showing.
-    let thread_id = state.threads.selected(&stream.id).await?;
+    // Pull the selected thread so the system prompt the agent sees
+    // matches what the renderer is showing. Fall back to the stream's
+    // active writer thread when no explicit selection has been made,
+    // so the agent always knows its thread id (it shows up in the
+    // `<session-context>` block + OXPLOW_THREAD_ID env).
+    let thread_id = state.threads.selected_or_active(&stream.id).await?;
     let thread = match thread_id.clone() {
         Some(id) => state.thread_store.get(&id).await?,
         None => None,

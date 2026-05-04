@@ -16,7 +16,10 @@ pub mod work_item;
 
 pub use error::DomainError;
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
-pub use ids::{AgentTurnId, EffortId, HookEventId, NoteId, StreamId, ThreadId, WorkItemId};
+pub use ids::{
+    classify_id, AgentTurnId, EffortId, HookEventId, IdKind, NoteId, StreamId, ThreadId,
+    WorkItemId,
+};
 pub use stream::{Stream, StreamKind};
 pub use thread::{Thread, ThreadStatus};
 pub use time::Timestamp;
