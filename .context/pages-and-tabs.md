@@ -454,6 +454,170 @@ a stream. The file content + dirty state continues to be shared
 across threads via fileSessions, so closing a file in one thread
 doesn't lose unsaved edits if it's still open in another.
 
+## Inventory: where each piece of state lives
+
+The unified tab store lives in `App.tsx`. Each slot has a single
+owner; this list captures who reads / writes what so future tab
+kinds slot in without re-discovering the layout.
+
+### Tab membership + order
+- **`threadPageTabs: Record<string, TabRef[]>`** — per-thread tab
+  list, keyed by `threadId`. The single source of truth for "what
+  tabs exist in this thread, in what order." Every tab kind
+  (`file`, `diff`, `note`, `work-item`, `change-analysis`,
+  `git-commit`, `tasks`, `git-history`, …) lives here. Mutated by
+  `handleOpenPage`, `handleOpenFile`, `handleOpenDiff`,
+  `handleNavigateInTab`, `handleStepSibling`, `closePageTab`. Read
+  by the `centerTabs` builder + the `effectiveCenterActive`
+  derivation.
+- **`threadCenterActive: Record<string, string>`** — per-thread
+  active tab id. Switching threads restores each thread's last
+  active tab. Mutated by `setCenterActive` (which writes into the
+  per-thread map for the current thread). The agent's `"agent"`
+  literal is the default fallback when nothing else is selected.
+
+### Per-tab navigation history
+- **`threadPageHistory: Record<string, Record<string, { back: TabRef[], forward: TabRef[], siblings: NavSiblings | null }>>`**
+  — keyed by `threadId` then by the tab's current id. `back` is
+  pushed when `handleNavigateInTab` swaps the tab's ref; `forward`
+  is populated by `handleGoBack`. `siblings` carries the list-
+  originated prev/next list (cleared on back/forward; preserved on
+  sibling-step). New tab kinds participate automatically — the
+  history entry is created the first time the tab is navigated.
+
+### Spec / content registries (look-aside)
+- **`fileSessions: Record<string, FileSessionState>`** —
+  **stream-scoped** (`streamId → session`) content + dirty-state
+  cache for open files. Each `FileSessionState` carries
+  `files: Record<path, { savedContent, draftContent, isLoading,
+  loadError }>` plus `selectedPath` and a legacy `openOrder`. After
+  the unification:
+  - **Tab membership** is driven by `threadPageTabs` (each open
+    file is a `kind: "file"` ref there). `openOrder` is no longer
+    consulted by the renderer.
+  - **Content** stays in `fileSessions` because the same buffer
+    needs to survive thread switches within a stream — closing a
+    file in thread A while it's open + dirty in thread B must not
+    drop the draft.
+  - `closePageTab` clears the file from `fileSessions[stream.id]`
+    only when the file isn't open in any other tab in the same
+    stream. (Today closePageTab unconditionally closes — see the
+    "known follow-ups" below.)
+- **`diffTabs: Array<{ id, spec: DiffSpec }>`** — a spec registry
+  indexed by id. `handleOpenDiff` and `handleCompareWithClipboard`
+  register specs here; the page-tab renderer's `ref.kind === "diff"`
+  branch looks up the spec by id to render `DiffPage`. Specs persist
+  across tab close/reopen (cheap; the array is small) so navigating
+  back to a previously-closed diff via history works without
+  re-registering.
+
+### Per-tab metadata
+- **`pageTitles: Record<string, string>`** — per-tab title
+  registered via `usePageTitle(...)` from the page body. Drives
+  both the chrome header and the tab strip label.
+- **Bookmarks** — separate `bookmarksStore` (per-scope: thread /
+  stream / global), keyed by `ref.id`. Cleared via the tab nav-bar
+  star button.
+
+### Renderers
+- **`AgentPage`** — `apps/desktop/src/pages/AgentPage.tsx`. Wraps
+  `TerminalPane` inside `Page` with `showNavBar={false}` /
+  `showHeader={false}`. Currently mounted directly as `tabs[0]` in
+  the `centerTabs` builder (always present, not in `threadPageTabs`).
+- **Page-tab loop** (`for (const ref of pageTabsForThread)`) —
+  switches on `ref.kind` to render the appropriate `*Page`
+  component. Wraps each tab in `PageNavigationContext.Provider`
+  with `navigate` / `goBack` / `goForward` / `siblings` / `setTitle`
+  bindings keyed to the tab's id.
+
+## Data flow: opening, navigating, closing
+
+For every tab kind the path is:
+
+**Open from a list / palette / rail / menu:**
+```
+caller
+  └→ handleOpenPage(ref) | handleOpenFile(path) | handleOpenDiff(spec)
+       ├→ register payload (fileSessions / diffTabs) if needed
+       ├→ push ref into threadPageTabs[selectedThreadId]
+       └→ setCenterActive(ref.id)
+```
+
+**Navigate in-tab (browser-tab semantic):**
+```
+in-page row click
+  └→ useRouteDispatch / ctxNav.navigate(ref, { newTab: false, siblings? })
+       └→ handleNavigateInTab(currentTabId, ref, siblings?)
+            ├→ register payload if needed (file: handleOpenFile;
+            │   diff: handleOpenDiffInTab — both register before
+            │   calling handleNavigateInTab)
+            ├→ push prior ref onto back stack
+            ├→ replace tab's current ref
+            └→ setCenterActive(ref.id)
+```
+
+**Sibling step (no history mutation):**
+```
+nav bar ↑/↓ click
+  └→ ctxNav.goPrevSibling() | goNextSibling()
+       └→ handleStepSibling(currentTabId, targetIndex)
+            ├→ swap tab ref to siblings[targetIndex]
+            └→ update siblings.index in place; back/forward untouched
+```
+
+**Close:**
+```
+tab kebab × | menu close
+  └→ closePageTab(id)
+       ├→ if id starts with "file:": close in fileSessions
+       ├→ remove from threadPageTabs
+       ├→ drop threadPageHistory entry
+       ├→ drop pageTitles entry
+       └→ snap centerActive to "agent" if it was the closed tab
+```
+
+## Known follow-ups + invariants
+
+- **Agent ref doesn't live in threadPageTabs yet.** It's the only
+  special case in `centerTabs`. Lifting it would need a
+  closable=false flag on the unified-tab record (or a
+  per-PageKind table).
+- **fileSessions close on closePageTab is not refcounted.** If the
+  same file is open in two threads of the same stream and one
+  thread closes its tab, the buffer is dropped for both. Should be
+  a refcount or a stream-scoped check that another thread still
+  holds the path.
+- **Diff specs are not GC'd.** `diffTabs` grows monotonically per
+  session. Cleanup hook on closePageTab could prune.
+- **Stream switch consequences.** When the user changes streams,
+  the rendered thread tabs come from the new stream's selected
+  thread. `fileSessions` is per-stream, so file content is correct;
+  `threadPageTabs` is per-thread, so the *list* is correct. Diff
+  specs are per-session (single global registry) — works because
+  diff ids embed the spec details, but theoretically a bug if two
+  streams produced colliding ids; today this doesn't happen because
+  diff ids include the leftRef which is stream-specific in practice.
+
+## Adding a new tab kind: checklist
+
+1. Extend `PageKind` in `tabs/tabState.ts`.
+2. Add a `pageRefs.ts` helper (`fooRef(...)`) and document the id
+   format in the table above.
+3. Build a `*Page` component in `apps/desktop/src/pages/` that
+   wraps the body in `<Page>` and (typically) registers a title
+   via `usePageTitle`.
+4. Add a `ref.kind === "..."` branch in the `centerTabs` page-tab
+   loop in `App.tsx` to render the page.
+5. Plumb any list rows that target the new kind through
+   `useRouteDispatch` / `RouteLink` so plain-click navigates in-tab.
+6. If the page exposes data that other pages should backlink to,
+   register a provider in `appPageBacklinks.ts`.
+
+Do **not** introduce a parallel state slot for the new kind's tab
+list (no new `fooTabs` array). Look-aside registries are fine if
+the kind needs runtime data the ref payload can't carry (like
+diff specs), but tab membership goes in `threadPageTabs`.
+
 ## When to update this doc
 
 - Add a new page kind: extend `PageKind`, add a `pageRefs.ts` helper,
