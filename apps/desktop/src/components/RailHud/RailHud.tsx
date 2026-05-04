@@ -67,7 +67,7 @@ export interface RailHudProps {
  * - Search button (placeholder for ⌘K palette)
  * - Active item summary
  * - Since you last looked  (TBD; placeholder for now)
- * - Up next
+ * - Ready
  * - Recent files
  * - Pages directory
  */
@@ -701,7 +701,7 @@ function UpNextSection({
 }) {
   return (
     <>
-      <SectionHeading>Up next</SectionHeading>
+      <SectionHeading>Ready</SectionHeading>
       <div data-testid="rail-up-next" style={{ paddingBottom: 8 }}>
         {items.map((item) => (
           <button
