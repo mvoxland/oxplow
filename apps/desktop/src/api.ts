@@ -1485,11 +1485,12 @@ export async function listWorkspaceFiles(streamId: string): Promise<{
   files: WorkspaceIndexedFile[];
   summary: WorkspaceStatusSummary;
 }> {
-  const raw = unwrap(await commands.listWorkspaceFiles(streamId || null)) as unknown as {
-    files: WorkspaceIndexedFile[];
-    summary: WorkspaceStatusSummary;
-  };
-  return raw;
+  const [filesRes, summary] = await Promise.all([
+    commands.listWorkspaceFiles(streamId || null),
+    getWorkspaceStatusSummary(streamId),
+  ]);
+  const files = unwrap(filesRes) as unknown as WorkspaceIndexedFile[];
+  return { files, summary };
 }
 
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {
