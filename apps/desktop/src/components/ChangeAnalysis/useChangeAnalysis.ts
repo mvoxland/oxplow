@@ -52,7 +52,12 @@ export function fileMatchesScope(
     return ext === scope.value;
   }
   if (scope.kind === "dir") {
-    return topDirectory(file.path) === scope.value;
+    // Match the literal directory path or any descendant. The
+    // dashboard's pivot rows pass the first segment (so this still
+    // matches "apps" → "apps/desktop/..."); the semantic tree can
+    // pass deeper paths like "apps/desktop/src/components".
+    if (file.path === scope.value) return true;
+    return file.path.startsWith(`${scope.value}/`);
   }
   if (scope.kind === "status") {
     return file.status === scope.value;

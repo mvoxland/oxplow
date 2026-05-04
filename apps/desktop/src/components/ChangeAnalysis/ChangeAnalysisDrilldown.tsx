@@ -118,6 +118,7 @@ export function ChangeAnalysisDrilldown({
         ) : viewMode === "semantic" ? (
           <FunctionsCard
             functions={functionsAfterStatus}
+            target={target}
             onOpenFile={onOpenFile}
             onOpenFunctionDiff={onOpenDiff
               ? (path, line) => {
