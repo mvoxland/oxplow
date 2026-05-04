@@ -205,6 +205,30 @@ export function GitDashboardPage({ stream, onOpenPage, onRevealCommit }: GitDash
     };
   }, [streamId, scheduleRefresh]);
 
+  // Other-stream rows (the dashboard's worktrees / siblings list) read
+  // uncommitted + ahead/behind for every other stream. Without
+  // subscribing to those streams' watcher events, a commit done from
+  // inside another stream's tab leaves the dashboard showing stale
+  // uncommitted counts. Subscribe to every other-stream id once we
+  // know the list, so any change triggers the same debounced refresh.
+  const otherStreamIds = useMemo(
+    () => (data?.streams ?? []).map((row) => row.stream.id).join(","),
+    [data?.streams],
+  );
+  useEffect(() => {
+    if (!otherStreamIds) return;
+    const ids = otherStreamIds.split(",").filter(Boolean);
+    const unsubs = ids.flatMap((id) => [
+      subscribeGitRefsEvents(id, scheduleRefresh),
+      subscribeWorkspaceEvents(id, scheduleRefresh),
+    ]);
+    return () => {
+      for (const fn of unsubs) {
+        try { fn(); } catch { /* ignore unsubscribe errors */ }
+      }
+    };
+  }, [otherStreamIds, scheduleRefresh]);
+
   useEffect(() => {
     let cancelled = false;
     void listAgentStatuses().then((entries) => {
