@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use oxplow_code_metrics::language_for_path;
-use tree_sitter::{Node, Parser};
+use tree_sitter::Parser;
 
 mod tokenize;
 
@@ -79,7 +79,7 @@ where
         let Some(tree) = parser.parse(source.as_ref(), None) else {
             continue;
         };
-        let tokens = tokenize_source(tree.root_node(), source.as_ref().as_bytes());
+        let tokens = tokenize_source(tree.root_node());
         if tokens.len() < opts.k {
             continue;
         }
@@ -261,9 +261,6 @@ fn detect_across_docs(docs: &[Doc], opts: DupOptions) -> Vec<DuplicateBlock> {
     });
     blocks
 }
-
-#[allow(dead_code)]
-fn ensure_trees<'a>(_n: Node<'a>) {}
 
 #[cfg(test)]
 mod tests;

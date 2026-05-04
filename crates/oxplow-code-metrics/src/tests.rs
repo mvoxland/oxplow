@@ -133,6 +133,75 @@ fn unsupported_language_returns_empty() {
 }
 
 #[test]
+fn extensionless_path_is_not_classified() {
+    // Regression: previously a path like "rs" (no extension) was
+    // misclassified as Rust because `rsplit('.').next()` returned
+    // the whole string.
+    let m = analyze_file("rs", "fn x() {}");
+    assert!(m.is_empty());
+    let m = analyze_file("Makefile", "all: foo\n");
+    assert!(m.is_empty());
+}
+
+#[test]
+fn c_function_name_is_just_the_identifier() {
+    let src = r#"
+int classify(int x) {
+    if (x > 0) return 1;
+    if (x < 0) return -1;
+    return 0;
+}
+"#;
+    let m = analyze_file("src/x.c", src);
+    let f = m.iter().find(|f| f.name == "classify").unwrap_or_else(|| {
+        panic!("expected name 'classify', got {:?}", m.iter().map(|f| &f.name).collect::<Vec<_>>())
+    });
+    assert_eq!(f.parameter_count, 1);
+    assert!(f.complexity >= 3);
+}
+
+#[test]
+fn cpp_function_name_strips_declarator_decoration() {
+    let src = r#"
+int Foo::bar(int x, int y) {
+    if (x > y) return x;
+    return y;
+}
+"#;
+    let m = analyze_file("src/x.cpp", src);
+    let names: Vec<_> = m.iter().map(|f| f.name.as_str()).collect();
+    // The qualified id parses as `Foo::bar`; the inner identifier is
+    // `bar`. Either is acceptable as long as we don't return the
+    // whole declarator including parameters.
+    assert!(
+        names.iter().any(|n| *n == "bar" || *n == "Foo::bar"),
+        "got {:?}",
+        names
+    );
+    assert!(!names.iter().any(|n| n.contains('(')), "name leaked declarator parens: {:?}", names);
+}
+
+#[test]
+fn rust_else_chain_does_not_double_count() {
+    // Regression: previously `if/else if/else` was scored as
+    // `if + else + if + else` = 4. McCabe says +2 (the two ifs).
+    let src = r#"
+fn classify(x: i32) -> &'static str {
+    if x > 0 {
+        "pos"
+    } else if x < 0 {
+        "neg"
+    } else {
+        "zero"
+    }
+}
+"#;
+    let m = analyze_file("src/x.rs", src);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].complexity, 3, "got {}", m[0].complexity);
+}
+
+#[test]
 fn nested_functions_each_get_their_own_record() {
     let src = r#"
 fn outer() {

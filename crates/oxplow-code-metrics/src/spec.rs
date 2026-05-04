@@ -67,7 +67,9 @@ impl Language {
 
 /// Cheap path-extension check.
 pub fn language_for_path(path: &str) -> Option<Language> {
-    let ext = path.rsplit('.').next()?;
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())?;
     Some(match ext.to_ascii_lowercase().as_str() {
         "rs" => Language::Rust,
         "ts" => Language::TypeScript,
@@ -91,7 +93,9 @@ static RUST: LanguageSpec = LanguageSpec {
     parameter_kinds: &["parameter", "self_parameter"],
     decision_kinds: &[
         "if_expression",
-        "else_clause",
+        // `else_clause` deliberately excluded — McCabe counts only
+        // condition-bearing branches, so an `if/else if/else` chain
+        // adds 2 (the two ifs), not 4.
         "match_arm",
         "while_expression",
         "for_expression",
@@ -154,7 +158,7 @@ static JS_PARAM_KINDS: &[&str] = &[
 ];
 static JS_DECISION_KINDS: &[&str] = &[
     "if_statement",
-    "else_clause",
+    // `else_clause` deliberately excluded for the same reason as Rust.
     "switch_case",
     "switch_default",
     "for_statement",
