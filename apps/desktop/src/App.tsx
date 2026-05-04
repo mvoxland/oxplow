@@ -147,6 +147,13 @@ const FILE_SESSIONS_STORAGE_KEY = "oxplow.layout.v1.fileSessions";
 // "agent" if the saved id is no longer resolvable (diff tabs never persist,
 // and a file tab may have failed to reopen).
 const CENTER_ACTIVE_STORAGE_KEY = "oxplow.layout.v1.centerActive";
+// Persists the per-thread tab list (TabRef[]) and per-tab history
+// across restarts. Pages mount fresh — no per-page snapshot yet. The
+// snapshot layer is a follow-up that will rehydrate scroll positions,
+// expanded trees, view toggles, etc.
+const THREAD_TABS_STORAGE_KEY = "oxplow.layout.v1.threadPageTabs";
+const THREAD_HISTORY_STORAGE_KEY = "oxplow.layout.v1.threadPageHistory";
+const DIFF_SPECS_STORAGE_KEY = "oxplow.layout.v1.diffSpecs";
 
 /**
  * Take a caller-supplied siblings record, snap its `index` to the
@@ -169,6 +176,95 @@ function resolveSiblings(
     return siblings;
   }
   return { entries: siblings.entries, index: matchIdx };
+}
+
+/** Read persisted per-thread tab lists. Returns an empty record on
+ *  parse failure or absence — the user lands with no page tabs. */
+function readPersistedThreadPageTabs(): Record<string, TabRef[]> {
+  try {
+    const raw = window.localStorage.getItem(THREAD_TABS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, TabRef[]> = {};
+    for (const [threadId, refs] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof threadId !== "string" || !Array.isArray(refs)) continue;
+      const clean = refs.filter((r): r is TabRef =>
+        !!r && typeof r === "object" && typeof (r as TabRef).id === "string" && typeof (r as TabRef).kind === "string",
+      );
+      if (clean.length > 0) out[threadId] = clean;
+    }
+    return out;
+  } catch (err) {
+    logUi("warn", "failed to parse persisted threadPageTabs", { error: String(err) });
+    return {};
+  }
+}
+
+function writePersistedThreadPageTabs(tabs: Record<string, TabRef[]>): void {
+  try {
+    // Drop empty thread entries to keep the blob small.
+    const out: Record<string, TabRef[]> = {};
+    for (const [threadId, refs] of Object.entries(tabs)) {
+      if (refs.length > 0) out[threadId] = refs;
+    }
+    window.localStorage.setItem(THREAD_TABS_STORAGE_KEY, JSON.stringify(out));
+  } catch (err) {
+    logUi("warn", "failed to write persisted threadPageTabs", { error: String(err) });
+  }
+}
+
+function readPersistedThreadPageHistory(): Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>> {
+  try {
+    const raw = window.localStorage.getItem(THREAD_HISTORY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>>;
+  } catch (err) {
+    logUi("warn", "failed to parse persisted threadPageHistory", { error: String(err) });
+    return {};
+  }
+}
+
+function writePersistedThreadPageHistory(
+  history: Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>>,
+): void {
+  try {
+    window.localStorage.setItem(THREAD_HISTORY_STORAGE_KEY, JSON.stringify(history));
+  } catch (err) {
+    logUi("warn", "failed to write persisted threadPageHistory", { error: String(err) });
+  }
+}
+
+function readPersistedDiffSpecs(): Array<{ id: string; spec: DiffSpec }> {
+  try {
+    const raw = window.localStorage.getItem(DIFF_SPECS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is { id: string; spec: DiffSpec } =>
+      !!entry && typeof entry === "object" &&
+      typeof (entry as { id?: unknown }).id === "string" &&
+      !!(entry as { spec?: unknown }).spec,
+    );
+  } catch (err) {
+    logUi("warn", "failed to parse persisted diff specs", { error: String(err) });
+    return [];
+  }
+}
+
+function writePersistedDiffSpecs(specs: Array<{ id: string; spec: DiffSpec }>): void {
+  try {
+    // Drop clipboard / synthetic specs that carry inline content too
+    // large to persist comfortably; their `leftContent` / `rightContent`
+    // are runtime-only. Keep ref-based diffs (fromRef/toRef paths) which
+    // can be re-resolved on boot by reading the git refs.
+    const persistable = specs.filter((s) => !s.spec.leftContent && !s.spec.rightContent);
+    window.localStorage.setItem(DIFF_SPECS_STORAGE_KEY, JSON.stringify(persistable));
+  } catch (err) {
+    logUi("warn", "failed to write persisted diff specs", { error: String(err) });
+  }
 }
 
 function readPersistedFileSessionPaths(): Record<string, string[]> {
@@ -234,7 +330,7 @@ export function App() {
   // index/dashboard pages). Stored as TabRef so the rendering side can
   // dispatch by kind. Independent of the legacy noteTabs/diffTabs lists,
   // which still drive the tabs they own.
-  const [threadPageTabs, setThreadPageTabs] = useState<Record<string, TabRef[]>>({});
+  const [threadPageTabs, setThreadPageTabs] = useState<Record<string, TabRef[]>>(() => readPersistedThreadPageTabs());
   // Per-tab page titles, keyed by tab id. Pages register their title via
   // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
   // the tab strip label and the shared chrome header so the title lives in
@@ -249,8 +345,8 @@ export function App() {
   // notes, diffs, and the agent tab don't participate.
   const [threadPageHistory, setThreadPageHistory] = useState<
     Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>>
-  >({});
-  const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>([]);
+  >(() => readPersistedThreadPageHistory());
+  const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>(() => readPersistedDiffSpecs());
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
   const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
@@ -981,6 +1077,19 @@ export function App() {
   useEffect(() => {
     writePersistedCenterActive(centerActive);
   }, [centerActive]);
+
+  // Persist the per-thread tab list + per-tab history. Pages mount
+  // fresh on the next boot — the snapshot layer is a follow-up that
+  // will rehydrate scroll positions, expanded trees, etc.
+  useEffect(() => {
+    writePersistedThreadPageTabs(threadPageTabs);
+  }, [threadPageTabs]);
+  useEffect(() => {
+    writePersistedThreadPageHistory(threadPageHistory);
+  }, [threadPageHistory]);
+  useEffect(() => {
+    writePersistedDiffSpecs(diffTabs);
+  }, [diffTabs]);
 
   // After the first stream has had its file sessions rebuilt, verify the
   // initial (localStorage-seeded) centerActive is still resolvable. If it
