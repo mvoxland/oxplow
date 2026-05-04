@@ -34,6 +34,12 @@ pub fn derive_thread_status(events: &[HookEvent]) -> AgentStatusState {
     // flip status back to waiting — the parent is genuinely still
     // working. Mirrors main's `pendingTasks`.
     let mut pending_tasks: i32 = 0;
+    // ExitPlanMode is Claude Code's built-in plan-approval prompt.
+    // PreToolUse fires when the agent invokes it; PostToolUse only
+    // arrives once the user approves or rejects. While that gap is
+    // open the agent is genuinely waiting on the user, so override
+    // the derived state at the end.
+    let mut pending_exit_plan_mode: i32 = 0;
 
     for ev in sorted {
         match ev.kind {
@@ -42,16 +48,20 @@ pub fn derive_thread_status(events: &[HookEvent]) -> AgentStatusState {
             }
             HookKind::PreToolUse => {
                 state = AgentStatusState::Running;
-                if payload_tool_name(&ev.payload_json).as_deref() == Some("Task") {
-                    pending_tasks += 1;
+                match payload_tool_name(&ev.payload_json).as_deref() {
+                    Some("Task") => pending_tasks += 1,
+                    Some("ExitPlanMode") => pending_exit_plan_mode += 1,
+                    _ => {}
                 }
             }
             HookKind::PostToolUse => {
                 state = AgentStatusState::Running;
-                if payload_tool_name(&ev.payload_json).as_deref() == Some("Task")
-                    && pending_tasks > 0
-                {
-                    pending_tasks -= 1;
+                match payload_tool_name(&ev.payload_json).as_deref() {
+                    Some("Task") if pending_tasks > 0 => pending_tasks -= 1,
+                    Some("ExitPlanMode") if pending_exit_plan_mode > 0 => {
+                        pending_exit_plan_mode -= 1;
+                    }
+                    _ => {}
                 }
             }
             HookKind::Stop => {
@@ -74,15 +84,21 @@ pub fn derive_thread_status(events: &[HookEvent]) -> AgentStatusState {
             HookKind::Interrupt => {
                 state = AgentStatusState::Idle;
                 pending_tasks = 0;
+                pending_exit_plan_mode = 0;
             }
             HookKind::AgentBoot => {
                 state = AgentStatusState::Idle;
                 pending_tasks = 0;
+                pending_exit_plan_mode = 0;
             }
         }
     }
 
-    state
+    if pending_exit_plan_mode > 0 {
+        AgentStatusState::AwaitingUser
+    } else {
+        state
+    }
 }
 
 fn payload_tool_name(payload: &str) -> Option<String> {
@@ -175,6 +191,31 @@ mod tests {
             ev(HookKind::Interrupt, 3, "{}"),
         ];
         assert_eq!(derive_thread_status(&events), AgentStatusState::Idle);
+    }
+
+    #[test]
+    fn exit_plan_mode_pending_shows_awaiting_user() {
+        // Claude Code's built-in plan-mode approval: PreToolUse fires
+        // when the agent calls ExitPlanMode, but the matching
+        // PostToolUse only arrives once the user approves. Until
+        // then, we are waiting on the user, not working.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
+        ];
+        assert_eq!(derive_thread_status(&events), AgentStatusState::AwaitingUser);
+    }
+
+    #[test]
+    fn exit_plan_mode_completed_no_longer_awaiting_user() {
+        // After PostToolUse(ExitPlanMode), the user has answered;
+        // status falls back to whatever the last hook implies.
+        let events = [
+            ev(HookKind::UserPromptSubmit, 1, "{}"),
+            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
+            ev(HookKind::PostToolUse, 3, r#"{"tool_name":"ExitPlanMode"}"#),
+        ];
+        assert_eq!(derive_thread_status(&events), AgentStatusState::Running);
     }
 
     #[test]
