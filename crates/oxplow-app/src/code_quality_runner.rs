@@ -22,10 +22,17 @@ use walkdir::WalkDir;
 #[derive(Debug, Error)]
 pub enum CodeQualityError {
     /// Surfaces a failure inside the spawn_blocking pool (panic or
-    /// joining error). Renamed from "parse" historically.
+    /// joining error).
     #[error("scan task failed: {0}")]
     Task(String),
+    /// The scan exceeded the configured wall-clock budget.
+    #[error("scan timed out after {0:?}")]
+    Timeout(std::time::Duration),
 }
+
+/// Default wall-clock budget for a single scan. Tunable via
+/// `RunOptions::timeout`.
+const DEFAULT_SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// One finding the renderer surfaces in the code-quality panel.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -46,7 +53,7 @@ pub struct CodeQualityFinding {
 pub struct RunOptions {
     /// Subset of repo-relative paths. Empty = scan whole repo.
     pub files: Vec<String>,
-    /// Reserved for future use.
+    /// Wall-clock budget. `None` uses [`DEFAULT_SCAN_TIMEOUT`].
     pub timeout: Option<std::time::Duration>,
 }
 
@@ -141,9 +148,10 @@ pub async fn run_metrics_scan(
     opts: RunOptions,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let project = project_dir.to_path_buf();
+    let timeout = opts.timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
     // The metric pass is CPU-bound; punt to a blocking pool so we
     // don't stall the tokio runtime on large repos.
-    let findings = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
+    let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
         let files = collect_supported_files(&project, &opts);
         let mut metrics = Vec::new();
         for path in files {
@@ -157,10 +165,12 @@ pub async fn run_metrics_scan(
             ));
         }
         Ok(metrics_to_findings(&project, metrics))
-    })
-    .await
-    .map_err(|e| CodeQualityError::Task(format!("metrics task: {e}")))??;
-    Ok(findings)
+    });
+    match tokio::time::timeout(timeout, task).await {
+        Ok(Ok(inner)) => inner,
+        Ok(Err(join_err)) => Err(CodeQualityError::Task(format!("metrics task: {join_err}"))),
+        Err(_) => Err(CodeQualityError::Timeout(timeout)),
+    }
 }
 
 /// Duplicate-block scan: runs the tree-sitter winnowing detector
@@ -171,7 +181,8 @@ pub async fn run_duplication_scan(
     opts: RunOptions,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let project = project_dir.to_path_buf();
-    let findings = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
+    let timeout = opts.timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
+    let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
         let paths = collect_supported_files(&project, &opts);
         // Read all sources up front; the dup detector wants
         // (path, content) pairs.
@@ -190,10 +201,12 @@ pub async fn run_duplication_scan(
         }
         let blocks = detect_duplicates(inputs, DupOptions::default());
         Ok(blocks_to_findings(blocks))
-    })
-    .await
-    .map_err(|e| CodeQualityError::Task(format!("duplication task: {e}")))??;
-    Ok(findings)
+    });
+    match tokio::time::timeout(timeout, task).await {
+        Ok(Ok(inner)) => inner,
+        Ok(Err(join_err)) => Err(CodeQualityError::Task(format!("duplication task: {join_err}"))),
+        Err(_) => Err(CodeQualityError::Timeout(timeout)),
+    }
 }
 
 fn blocks_to_findings(blocks: Vec<oxplow_code_dup::DuplicateBlock>) -> Vec<CodeQualityFinding> {
@@ -294,6 +307,105 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             "expected at least one paired duplicate, got {:?}",
             findings
         );
+    }
+
+    #[tokio::test]
+    async fn metrics_scan_returns_timeout_error_when_budget_exceeded() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}").unwrap();
+        // 1ns budget — the spawn_blocking task can't complete that fast,
+        // even with one trivial file.
+        let opts = RunOptions {
+            files: Vec::new(),
+            timeout: Some(std::time::Duration::from_nanos(1)),
+        };
+        let err = run_metrics_scan(dir.path(), opts).await.unwrap_err();
+        assert!(
+            matches!(err, CodeQualityError::Timeout(_)),
+            "expected Timeout, got {err:?}"
+        );
+    }
+
+    /// Integration: a small multi-file fixture exercises both scanners
+    /// end-to-end (file walker + relative-path stripping + finding fan-out
+    /// + cross-doc dup matching all in one pass).
+    #[tokio::test]
+    async fn end_to_end_fixture_scan_metrics_and_duplication() {
+        let dir = tempfile::tempdir().unwrap();
+        // File A: a function with branching.
+        std::fs::write(
+            dir.path().join("a.rs"),
+            r#"
+fn process(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 {
+            out.push(item * 2);
+        } else if item < 0 {
+            out.push(item * -1);
+        } else {
+            out.push(0);
+        }
+    }
+    out
+}
+"#,
+        )
+        .unwrap();
+        // File B: same function body with renamed identifiers (clone).
+        std::fs::write(
+            dir.path().join("b.rs"),
+            r#"
+fn handle(values: Vec<i32>) -> Vec<i32> {
+    let mut output = Vec::new();
+    for v in values {
+        if v > 0 {
+            output.push(v * 2);
+        } else if v < 0 {
+            output.push(v * -1);
+        } else {
+            output.push(0);
+        }
+    }
+    output
+}
+"#,
+        )
+        .unwrap();
+        // File C: an unsupported language — must not appear anywhere.
+        std::fs::write(dir.path().join("README.md"), "# heading\nsome text\n").unwrap();
+        // Nested skipped dir — must not be scanned.
+        std::fs::create_dir_all(dir.path().join("target/debug")).unwrap();
+        std::fs::write(dir.path().join("target/debug/should_skip.rs"), "fn x() {}").unwrap();
+
+        let metrics = run_metrics_scan(dir.path(), RunOptions::default())
+            .await
+            .unwrap();
+        // Two functions × three metric kinds = 6 findings.
+        let function_kinds: Vec<_> = metrics.iter().map(|f| f.kind.as_str()).collect();
+        assert!(function_kinds.iter().filter(|k| **k == "complexity").count() == 2);
+        assert!(function_kinds.iter().filter(|k| **k == "function-length").count() == 2);
+        // Both functions take one argument.
+        assert!(function_kinds.iter().filter(|k| **k == "parameter-count").count() == 2);
+        // Paths are repo-relative (not absolute, not under target/).
+        for f in &metrics {
+            assert!(!f.path.starts_with('/'), "leaked absolute path: {}", f.path);
+            assert!(!f.path.contains("target/"), "scanned skipped dir: {}", f.path);
+        }
+        assert!(metrics.iter().all(|f| f.path == "a.rs" || f.path == "b.rs"));
+
+        let duplication = run_duplication_scan(dir.path(), RunOptions::default())
+            .await
+            .unwrap();
+        let dups: Vec<_> = duplication
+            .iter()
+            .filter(|f| f.kind == "duplicate-block")
+            .collect();
+        assert!(dups.len() >= 2, "expected paired duplicate, got {duplication:?}");
+        for f in &duplication {
+            assert!(!f.path.starts_with('/'));
+            assert!(!f.path.contains("target/"));
+        }
     }
 
     #[tokio::test]

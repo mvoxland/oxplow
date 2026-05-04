@@ -2862,14 +2862,6 @@ version = "0.3.0"
 dependencies = [
  "oxplow-code-metrics",
  "tree-sitter",
- "tree-sitter-c",
- "tree-sitter-cpp",
- "tree-sitter-go",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
 ]
 
 [[package]]
