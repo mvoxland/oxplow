@@ -19,6 +19,7 @@ export interface ChangeAnalysisDrilldownProps {
   analysis: ChangeAnalysisState;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
+  onOpenDiffInTab?(spec: DiffSpec): void;
 }
 
 export function ChangeAnalysisDrilldown({
@@ -27,6 +28,7 @@ export function ChangeAnalysisDrilldown({
   analysis,
   onOpenFile,
   onOpenDiff,
+  onOpenDiffInTab,
 }: ChangeAnalysisDrilldownProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("semantic");
   const initialStatus: StatusFilter = scope.kind === "status"
@@ -70,6 +72,33 @@ export function ChangeAnalysisDrilldown({
     ...analysis.duplication,
     findings: analysis.duplication.findings.filter((f) => filteredPathSet.has(f.path)),
   }), [analysis.duplication, filteredPathSet]);
+
+  /**
+   * Open the diff for `path` at `line` *in the current tab*. The
+   * preferred path is `onOpenDiffInTab` — that swaps the tab's ref
+   * with the diff so back returns to this analysis page. Falls
+   * through to `onOpenDiff` (separate tab) if the host didn't
+   * supply the in-tab variant, and to plain file-open if neither
+   * the diff handler nor refs are available.
+   */
+  const openDiffAt = (path: string, line: number) => {
+    if (!analysis.refs) {
+      onOpenFile(path);
+      return;
+    }
+    const { baseRef, headRef } = analysis.refs;
+    const rightKind: DiffSpec["rightKind"] = headRef ? { ref: headRef } : "working";
+    const spec: DiffSpec = {
+      path,
+      leftRef: baseRef,
+      rightKind,
+      baseLabel: target === "working" ? "working tree" : `parent of ${target.toString().slice(0, 7)}`,
+      revealLine: line,
+    };
+    if (onOpenDiffInTab) onOpenDiffInTab(spec);
+    else if (onOpenDiff) onOpenDiff(spec);
+    else onOpenFile(path);
+  };
 
   return (
     <>
@@ -120,28 +149,13 @@ export function ChangeAnalysisDrilldown({
             functions={functionsAfterStatus}
             target={target}
             onOpenFile={onOpenFile}
-            onOpenFunctionDiff={onOpenDiff
-              ? (path, line) => {
-                if (!analysis.refs) {
-                  onOpenFile(path);
-                  return;
-                }
-                const { baseRef, headRef } = analysis.refs;
-                const rightKind: DiffSpec["rightKind"] = headRef ? { ref: headRef } : "working";
-                onOpenDiff({
-                  path,
-                  leftRef: baseRef,
-                  rightKind,
-                  baseLabel: target === "working" ? "working tree" : `parent of ${target.toString().slice(0, 7)}`,
-                  revealLine: line,
-                });
-              }
-              : undefined}
+            onOpenFunctionDiff={openDiffAt}
           />
         ) : (
           <ChangeAnalysisFileTree
             files={filesAfterStatus}
             onOpenFile={onOpenFile}
+            onOpenFileDiff={(path) => openDiffAt(path, 1)}
           />
         )}
       </section>
