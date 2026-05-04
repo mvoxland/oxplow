@@ -181,17 +181,32 @@ interface PathSegment {
 }
 
 /**
- * Compute the grouping segments for a file path. For Rust files
- * inside `crates/<crate-name>/src/...`, this returns the crate +
- * module path (e.g. `[oxplow_app, services, stream]`) so the
- * semantic tree groups by language-level structure rather than
- * filesystem layout. Falls back to filesystem segments for every
- * other file.
+ * Compute the grouping segments for a file path. Languages with a
+ * language-level grouping above the file (Rust crate::module,
+ * Python package.module) get their own segment producer. Everything
+ * else falls back to filesystem segments because there's no
+ * meaningful "package" above the file:
+ *
+ * - **TS / JS / TSX**: each file *is* a module; there's no
+ *   language-level container above it. Workspace structure is
+ *   conventional (directories), which the filesystem path already
+ *   reflects 1:1.
+ * - **Go**: each directory is a package; all `.go` files in a dir
+ *   share the same package. The dir IS the grouping; files inside
+ *   are still meaningful units, so we keep them as separate leaves.
+ * - **Java**: `package com.x.y;` matches the directory chain in
+ *   well-formed projects (under `src/main/java/` etc.). Parsing
+ *   the package declaration would just confirm the dir layout.
+ * - **C / C++**: no namespace-like grouping above the file (C++
+ *   namespaces live INSIDE files and are already in `containerPath`).
  */
 function pathSegments(filePath: string): PathSegment[] {
   if (filePath.endsWith(".rs")) {
     const rust = rustGroupingSegments(filePath);
     if (rust) return rust;
+  }
+  if (filePath.endsWith(".py") || filePath.endsWith(".pyi")) {
+    return pythonGroupingSegments(filePath);
   }
   const parts = filePath.split("/");
   const out: PathSegment[] = [];
@@ -202,6 +217,43 @@ function pathSegments(filePath: string): PathSegment[] {
     out.push({ label: p, refPath: cum, kind: "dir" });
   }
   out.push({ label: parts[parts.length - 1] ?? filePath, refPath: filePath, kind: "file" });
+  return out;
+}
+
+/**
+ * Python grouping: directories with `__init__.py` files form
+ * packages; `.py` modules within a package are leaves named after
+ * the file (extension dropped). `__init__.py` itself collapses
+ * into the parent directory's name (the package's own functions).
+ *
+ * We can't actually verify `__init__.py` exists from the file path
+ * alone, so the heuristic is: every intermediate directory IS a
+ * package (treated as a label without `/`), and the leaf strips
+ * `.py` / `.pyi`. `__init__.py` collapses by reusing the parent's
+ * label as the file leaf — the parent dir node is dropped.
+ */
+function pythonGroupingSegments(filePath: string): PathSegment[] {
+  const parts = filePath.split("/");
+  const fileName = parts[parts.length - 1] ?? filePath;
+  const dirParts = parts.slice(0, -1);
+  // Strip .py / .pyi.
+  const moduleName = fileName.replace(/\.(py|pyi)$/, "");
+  const out: PathSegment[] = [];
+  let cum = "";
+  // `__init__.py` represents the parent package — drop the trailing
+  // dir from the segments (it'll become the file leaf instead).
+  const isInit = moduleName === "__init__";
+  const intermediateDirs = isInit ? dirParts.slice(0, -1) : dirParts;
+  for (const p of intermediateDirs) {
+    cum = cum ? `${cum}/${p}` : p;
+    out.push({ label: p, refPath: cum, kind: "dir" });
+  }
+  if (isInit) {
+    const pkgName = dirParts[dirParts.length - 1] ?? moduleName;
+    out.push({ label: pkgName, refPath: filePath, kind: "file" });
+  } else {
+    out.push({ label: moduleName, refPath: filePath, kind: "file" });
+  }
   return out;
 }
 
