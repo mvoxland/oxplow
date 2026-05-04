@@ -30,7 +30,7 @@ export function deriveDefaultLabel(ref: TabRef): string {
     case "stream-settings": return "Stream Settings";
     case "thread-settings": return "Thread Settings";
     case "new-stream": return "New Stream";
-    case "new-work-item": return "New Work Item";
+    case "new-work-item": return "New Task";
     case "dashboard": {
       const variant = (ref.payload as { variant?: string } | null)?.variant ?? "";
       return variant ? `Dashboard: ${variant}` : "Dashboard";

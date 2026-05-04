@@ -105,7 +105,7 @@ export function computeActiveEpicContext(
 
 /**
  * Return the next-up `ready` items, sorted by sort_index ascending,
- * truncated to `limit`. The "Up next" rail section uses this.
+ * truncated to `limit`. The "Ready" rail section uses this.
  */
 export function computeUpNext(state: ThreadWorkState | null, limit = 5): WorkItem[] {
   if (!state) return [];
