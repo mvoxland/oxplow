@@ -28,7 +28,7 @@ import type { MenuItem } from "../../menu.js";
  *
  * Drag-reorder rewrites `sort_index` globally. Dragging a work item across
  * section boundaries also changes its status to that section's default
- * (toDo → ready, done → done) so the user can
+ * (ready → ready, done → done) so the user can
  * triage straight from the Work panel. InProgress rejects drop-in: the
  * agent owns that status and in-progress items are drag-locked. Empty
  * sections stay hidden until a drag is active, at which point they appear
@@ -44,7 +44,7 @@ interface SectionBucket {
 
 const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
-  { kind: "toDo", label: "To Do" },
+  { kind: "ready", label: "Ready" },
   { kind: "blocked", label: "Blocked" },
   { kind: "done", label: "Done" },
 ];
@@ -103,7 +103,7 @@ export function WorkGroupList({
   isSectionCollapsed: (kind: PlanSectionKey) => boolean;
   onToggleSectionCollapsed: (kind: PlanSectionKey) => void;
   /** Transient agent follow-ups for this thread (in-memory on the
-   *  runtime, lost on restart). Rendered at the very top of the To Do
+   *  runtime, lost on restart). Rendered at the very top of the Ready
    *  section as italic muted "↳ follow-up: …" lines with a single ✕
    *  dismiss button. Only the root group renders them — children of
    *  epics inherit nothing. */
@@ -144,7 +144,7 @@ export function WorkGroupList({
       kind: "work" as const, id: item.id, sortIndex: item.sort_index, item,
     }));
     const buckets: Record<WorkItemSectionKind, QueueRow[]> = {
-      inProgress: [], toDo: [], blocked: [], done: [],
+      inProgress: [], ready: [], blocked: [], done: [],
     };
     for (const row of work) {
       // Epics roll up their children's statuses into an effective section
@@ -241,7 +241,7 @@ export function WorkGroupList({
     // new status into finalizeReorderIds below — otherwise the dragged row
     // would still look like its old section to the run detector, which
     // miscomputes the descending-run flips (regression when dragging out of
-    // Done back to To Do).
+    // Done back to Ready).
     const statusOverrides = new Map<string, WorkItemStatus>();
     // Cross-section drop — change status to match the target section.
     // When it's a multi-drag, apply the status change to every marked item.
@@ -436,7 +436,7 @@ export function WorkGroupList({
       const children = epicChildrenMap.get(row.item.id) ?? [];
       // Surface stale-epic-children: when the epic is closed but
       // children are still ready/in_progress the rollup pulls the
-      // epic back into To Do, hiding the closed state. The banner
+      // epic back into Ready, hiding the closed state. The banner
       // gives the user a one-click cascade fix.
       const epicStatus = row.item.status;
       const staleChildren =
@@ -526,7 +526,7 @@ export function WorkGroupList({
     <div>
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
-        const alwaysShow = section.kind === "toDo" || section.kind === "done" || section.kind === "inProgress" || section.kind === "blocked";
+        const alwaysShow = section.kind === "ready" || section.kind === "done" || section.kind === "inProgress" || section.kind === "blocked";
         if (empty && !alwaysShow && !draggedWorkItem) {
           return null;
         }
@@ -572,10 +572,6 @@ export function WorkGroupList({
           : 0;
         const customActions = sectionActions?.[section.kind];
         const isCollapsed = isSectionCollapsed(section.kind);
-        // For Done, count visible rows (excluding archived unless the
-        // user toggled them on).
-        const countRows = isDone ? visibleDoneRows : section.rows;
-        const itemCount = countRows.length;
         return (
           <Fragment key={section.kind}>
           <div data-testid={`plan-section-${section.kind}`}>
@@ -587,9 +583,6 @@ export function WorkGroupList({
             >
               <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
                 <span>{section.label}</span>
-                <span style={{ color: "var(--muted)", fontWeight: 400, letterSpacing: 0 }}>
-                  {itemCount}
-                </span>
               </span>
               {customActions || (isDone && !hideArchiveToggle) ? (
                 <span
@@ -617,7 +610,7 @@ export function WorkGroupList({
             </div>
             {!isCollapsed || empty ? (
               <>
-                {!isCollapsed && section.kind === "toDo" && followups && followups.length > 0
+                {!isCollapsed && section.kind === "ready" && followups && followups.length > 0
                   ? followups.map((fu) => (
                       <FollowupRow
                         key={fu.id}
@@ -668,7 +661,7 @@ function BrailleSpinner() {
   );
 }
 
-/** Transient follow-up line inside the To Do section. Italic muted prefix
+/** Transient follow-up line inside the Ready section. Italic muted prefix
  *  ↳ follow-up: + the note, plus a single ✕ dismiss button. No status
  *  icon, no drag, no context menu — these aren't durable rows.
  *  See followup-store.ts for the lifecycle. */
@@ -1283,7 +1276,7 @@ function StaleEpicChildrenBanner({
   staleChildren: WorkItem[];
   onCascade: (targetStatus: WorkItemStatus) => void;
 }) {
-  // The classifyEpic rollup will pull this epic back into To Do because
+  // The classifyEpic rollup will pull this epic back into Ready because
   // its children are still ready/in_progress, so the rail counts will
   // misrepresent the closed state. Surface a one-click cascade fix that
   // mirrors the server-side cascade guard the MCP tools enforce.
@@ -1307,7 +1300,7 @@ function StaleEpicChildrenBanner({
       }}
     >
       <span style={{ flex: 1, color: "var(--text-warning, var(--fg))" }}>
-        Epic closed but {n} {noun} still {n === 1 ? "is" : "are"} pending — rollup will pull it back into To Do.
+        Epic closed but {n} {noun} still {n === 1 ? "is" : "are"} pending — rollup will pull it back into Ready.
       </span>
       <button
         type="button"

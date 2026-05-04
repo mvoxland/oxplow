@@ -62,7 +62,7 @@ export function TasksPage({ onOpenPage, onMoveBacklogItemToThread, ...rest }: Ta
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
           <TasksList
             {...rest}
-            visibleSections={["toDo", "blocked", "done"]}
+            visibleSections={["ready", "blocked", "done"]}
             sectionItemLimit={{ done: PREVIEW_LIMIT }}
             sectionLabelOverrides={{ done: "Recently Done" }}
             extraSectionLinks={{ done: viewAllDone }}
