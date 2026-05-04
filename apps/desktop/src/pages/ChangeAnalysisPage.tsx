@@ -1,19 +1,22 @@
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import type { Stream } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, uncommittedChangesRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
 import { FilesPivot } from "../components/ChangeAnalysis/FilesPivot.js";
-import { FunctionsCard } from "../components/ChangeAnalysis/FunctionsCard.js";
-import { DuplicationCard } from "../components/ChangeAnalysis/DuplicationCard.js";
-import { TestsCard } from "../components/ChangeAnalysis/TestsCard.js";
+import { ChangeAnalysisHeader } from "../components/ChangeAnalysis/ChangeAnalysisHeader.js";
+import { ChangeAnalysisDrilldown } from "../components/ChangeAnalysis/ChangeAnalysisDrilldown.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
 export interface ChangeAnalysisPageProps {
   stream: Stream | null;
   target: string;
+  /** Optional drilldown scope. When present, the page renders the
+   *  focused layout (semantic / file-list toggle, status filter,
+   *  duplication + tests cards). Absent → dashboard layout. */
+  scope?: ChangeAnalysisScope;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   /** Open the diff for a path between the analysis's resolved base
@@ -22,38 +25,20 @@ export interface ChangeAnalysisPageProps {
   onOpenDiff?(spec: DiffSpec): void;
 }
 
-export function ChangeAnalysisPage({ stream, target, onOpenPage, onOpenFile, onOpenDiff }: ChangeAnalysisPageProps) {
+export function ChangeAnalysisPage({ stream, target, scope, onOpenPage, onOpenFile, onOpenDiff }: ChangeAnalysisPageProps) {
   const streamId = stream?.id ?? null;
-  const analysis = useChangeAnalysis({ streamId, target });
+  const analysis = useChangeAnalysis({ streamId, target, scope });
 
   const headerLabel = useMemo(() => {
-    if (target === "working") return "Uncommitted Changes";
-    return `Commit ${target.slice(0, 7)}`;
-  }, [target]);
+    const base = target === "working" ? "Uncommitted Changes" : `Commit ${target.slice(0, 7)}`;
+    if (!scope) return base;
+    return `${base} — ${formatScope(scope)}`;
+  }, [target, scope]);
 
   const sourceLink = useMemo<TabRef | null>(() => {
     if (target === "working") return uncommittedChangesRef();
     return gitCommitRef(target);
   }, [target]);
-
-  const handleOpenFunctionDiff = useCallback(
-    (path: string, line: number) => {
-      if (!onOpenDiff || !analysis.refs) {
-        onOpenFile(path);
-        return;
-      }
-      const { baseRef, headRef } = analysis.refs;
-      const rightKind: DiffSpec["rightKind"] = headRef ? { ref: headRef } : "working";
-      onOpenDiff({
-        path,
-        leftRef: baseRef,
-        rightKind,
-        baseLabel: target === "working" ? "working tree" : `parent of ${target.slice(0, 7)}`,
-        revealLine: line,
-      });
-    },
-    [onOpenDiff, onOpenFile, analysis.refs, target],
-  );
 
   if (!streamId) {
     return (
@@ -66,30 +51,13 @@ export function ChangeAnalysisPage({ stream, target, onOpenPage, onOpenFile, onO
   return (
     <Page testId="page-change-analysis" title={`Change Analysis: ${headerLabel}`}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            {target === "working" ? "Working tree (HEAD vs uncommitted)" : `Parent vs ${target.slice(0, 12)}`}
-          </span>
-          <button
-            type="button"
-            data-testid="change-analysis-refresh"
-            onClick={() => void analysis.refresh()}
-            disabled={analysis.loading}
-            style={smallButton}
-          >
-            {analysis.loading ? "Loading…" : "Refresh"}
-          </button>
-          {sourceLink ? (
-            <button
-              type="button"
-              data-testid="change-analysis-open-source"
-              onClick={() => onOpenPage(sourceLink)}
-              style={linkButton}
-            >
-              {target === "working" ? "Open Uncommitted →" : "Open Commit →"}
-            </button>
-          ) : null}
-        </div>
+        <ChangeAnalysisHeader
+          target={target}
+          loading={analysis.loading}
+          onRefresh={() => void analysis.refresh()}
+          sourceLink={sourceLink}
+          onOpenPage={onOpenPage}
+        />
 
         {analysis.error ? <div style={errorBanner}>{analysis.error}</div> : null}
 
@@ -97,8 +65,20 @@ export function ChangeAnalysisPage({ stream, target, onOpenPage, onOpenFile, onO
           <div style={muted}>Loading…</div>
         ) : analysis.files.length === 0 ? (
           <div style={muted}>
-            {target === "working" ? "Working tree is clean." : "No file changes in this commit."}
+            {scope
+              ? `No files match ${formatScope(scope)}.`
+              : target === "working"
+                ? "Working tree is clean."
+                : "No file changes in this commit."}
           </div>
+        ) : scope ? (
+          <ChangeAnalysisDrilldown
+            scope={scope}
+            target={target}
+            analysis={analysis}
+            onOpenFile={onOpenFile}
+            onOpenDiff={onOpenDiff}
+          />
         ) : (
           <>
             <SummaryCard
@@ -108,22 +88,18 @@ export function ChangeAnalysisPage({ stream, target, onOpenPage, onOpenFile, onO
               byStatus={analysis.pivots.byStatus}
               tests={analysis.tests}
             />
-            <FilesPivot pivots={analysis.pivots} files={analysis.files} onOpenFile={onOpenFile} />
-            <FunctionsCard
-              functions={analysis.functions}
-              onOpenFile={onOpenFile}
-              onOpenFunctionDiff={handleOpenFunctionDiff}
-            />
-            <DuplicationCard
-              duplication={analysis.duplication}
-              onOpenFile={onOpenFile}
-            />
-            <TestsCard tests={analysis.tests} onOpenFile={onOpenFile} />
+            <FilesPivot pivots={analysis.pivots} target={target} />
           </>
         )}
       </div>
     </Page>
   );
+}
+
+function formatScope(scope: ChangeAnalysisScope): string {
+  if (scope.kind === "ext") return `.${scope.value} files`;
+  if (scope.kind === "dir") return `${scope.value}/`;
+  return scope.value;
 }
 
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13, padding: 16 };
@@ -132,21 +108,4 @@ const errorBanner: React.CSSProperties = {
   background: "var(--surface-warning, #fef3c7)",
   color: "var(--text-warning, #92400e)",
   borderRadius: 4,
-};
-const smallButton: React.CSSProperties = {
-  padding: "4px 10px",
-  background: "var(--surface-card)",
-  color: "var(--text-primary)",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontSize: 12,
-};
-const linkButton: React.CSSProperties = {
-  padding: 0,
-  background: "transparent",
-  border: "none",
-  color: "var(--text-link, #2563eb)",
-  fontSize: 12,
-  cursor: "pointer",
 };
