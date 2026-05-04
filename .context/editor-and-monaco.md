@@ -193,6 +193,16 @@ LSP is also exposed to **agents** via `buildLspMcpTools`
 (`crates/oxplow-mcp/src/lib.rs`) so they can run definition/reference queries
 without shelling out.
 
+## Monaco workers
+
+`apps/desktop/src/main.tsx` installs `self.MonacoEnvironment.getWorker`
+that returns Vite-bundled `?worker` modules for the editor core plus
+the JSON / CSS / HTML / TypeScript language services. Without this,
+Monaco logs "You must define a function MonacoEnvironment.getWorkerUrl
+or MonacoEnvironment.getWorker" and runs language services on the main
+thread, blocking input during heavy parsing. New Monaco language
+contributions need a matching `case` here.
+
 ## Editor focus tracking
 
 `EditorPane` pushes the user's current file/selection/caret to the

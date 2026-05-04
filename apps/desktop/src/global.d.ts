@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 // `window.oxplowDesktop` is a tiny gating flag a few legacy spots (scheduled for removal)
 // use to detect "are we running inside the desktop shell". Under
 // Tauri the answer is always yes, but the type stays around until
