@@ -215,22 +215,53 @@ function writePersistedThreadPageTabs(tabs: Record<string, TabRef[]>): void {
   }
 }
 
-function readPersistedThreadPageHistory(): Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>> {
+/** A single back/forward stack frame. Stores both the ref and the
+ *  siblings record from when that page was active, so going back
+ *  restores the originating list's prev/next chain instead of
+ *  dropping it. */
+type HistoryFrame = { ref: TabRef; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null };
+type ThreadHistory = Record<string, Record<string, { back: HistoryFrame[]; forward: HistoryFrame[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>>;
+
+function readPersistedThreadPageHistory(): ThreadHistory {
   try {
     const raw = window.localStorage.getItem(THREAD_HISTORY_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
-    return parsed as Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>>;
+    // Persisted blob may be the older shape (TabRef[] for back/
+    // forward) — coerce on the fly so old data still restores.
+    const out: ThreadHistory = {};
+    for (const [threadId, perThread] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof threadId !== "string" || !perThread || typeof perThread !== "object") continue;
+      const inner: ThreadHistory[string] = {};
+      for (const [tabId, raw] of Object.entries(perThread as Record<string, unknown>)) {
+        if (!raw || typeof raw !== "object") continue;
+        const entry = raw as { back?: unknown; forward?: unknown; siblings?: unknown };
+        const coerce = (arr: unknown): HistoryFrame[] => {
+          if (!Array.isArray(arr)) return [];
+          return arr.map((item) => {
+            if (item && typeof item === "object" && "ref" in (item as object)) {
+              return item as HistoryFrame;
+            }
+            return { ref: item as TabRef, siblings: null };
+          });
+        };
+        inner[tabId] = {
+          back: coerce(entry.back),
+          forward: coerce(entry.forward),
+          siblings: (entry.siblings ?? null) as ThreadHistory[string][string]["siblings"],
+        };
+      }
+      out[threadId] = inner;
+    }
+    return out;
   } catch (err) {
     logUi("warn", "failed to parse persisted threadPageHistory", { error: String(err) });
     return {};
   }
 }
 
-function writePersistedThreadPageHistory(
-  history: Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>>,
-): void {
+function writePersistedThreadPageHistory(history: ThreadHistory): void {
   try {
     window.localStorage.setItem(THREAD_HISTORY_STORAGE_KEY, JSON.stringify(history));
   } catch (err) {
@@ -344,9 +375,7 @@ export function App() {
   // the tab's *current* ref id; when an in-tab navigation replaces a tab's
   // ref, the entry is migrated to the new id along with the swap. Files,
   // notes, diffs, and the agent tab don't participate.
-  const [threadPageHistory, setThreadPageHistory] = useState<
-    Record<string, Record<string, { back: TabRef[]; forward: TabRef[]; siblings: import("./tabs/PageNavigationContext.js").NavSiblings | null }>>
-  >(() => readPersistedThreadPageHistory());
+  const [threadPageHistory, setThreadPageHistory] = useState<ThreadHistory>(() => readPersistedThreadPageHistory());
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>(() => readPersistedDiffSpecs());
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
@@ -1638,8 +1667,13 @@ export function App() {
 
   const handleOpenDiff = (request: DiffSpec) => {
     const id = computeDiffId(request);
+    // Always (re)write the spec so per-click metadata that doesn't
+    // affect the id (e.g. revealLine pointing at a specific function)
+    // is honored on subsequent clicks of the same diff.
     setDiffTabs((prev) => {
-      if (prev.some((tab) => tab.id === id)) return prev;
+      if (prev.some((tab) => tab.id === id)) {
+        return prev.map((tab) => (tab.id === id ? { id, spec: request } : tab));
+      }
       return [...prev, { id, spec: request }];
     });
     // Diff tabs live in threadPageTabs as the primary track now —
@@ -1995,7 +2029,10 @@ export function App() {
         [selectedThreadId]: {
           ...rest,
           [ref.id]: {
-            back: [...old.back, oldRef],
+            // Capture the prior page's ref AND its siblings so going
+            // back later restores the originating list's prev/next
+            // chain instead of dropping it.
+            back: [...old.back, { ref: oldRef, siblings: old.siblings }],
             forward: [],
             siblings: resolvedSiblings,
           },
@@ -2019,8 +2056,13 @@ export function App() {
     siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
   ) => {
     const id = computeDiffId(spec);
+    // Always rewrite the spec so per-click metadata that doesn't
+    // affect the id (e.g. revealLine pointing at a function's start
+    // line) is honored on subsequent clicks of the same diff.
     setDiffTabs((prev) => {
-      if (prev.some((tab) => tab.id === id)) return prev;
+      if (prev.some((tab) => tab.id === id)) {
+        return prev.map((tab) => (tab.id === id ? { id, spec } : tab));
+      }
       return [...prev, { id, spec }];
     });
     const ref: TabRef = {
@@ -2091,7 +2133,8 @@ export function App() {
     const perThread = threadPageHistory[selectedThreadId] ?? {};
     const entry = perThread[currentTabId];
     if (!entry || entry.back.length === 0) return;
-    const target = entry.back[entry.back.length - 1]!;
+    const targetFrame = entry.back[entry.back.length - 1]!;
+    const target = targetFrame.ref;
     const existing = threadPageTabs[selectedThreadId] ?? [];
     const idx = existing.findIndex((t) => t.id === currentTabId);
     if (idx < 0) return;
@@ -2111,10 +2154,12 @@ export function App() {
           ...rest,
           [target.id]: {
             back: entry.back.slice(0, -1),
-            forward: [...entry.forward, oldRef],
-            // Going back drops siblings — the target predates the
-            // list-originated chain.
-            siblings: null,
+            // Push the page we're leaving onto the forward stack
+            // along with its siblings so a re-forward also restores.
+            forward: [...entry.forward, { ref: oldRef, siblings: entry.siblings }],
+            // Restore the back-target's original siblings — keep
+            // up/down arrows alive on the page we're returning to.
+            siblings: targetFrame.siblings,
           },
         },
       };
@@ -2127,7 +2172,8 @@ export function App() {
     const perThread = threadPageHistory[selectedThreadId] ?? {};
     const entry = perThread[currentTabId];
     if (!entry || entry.forward.length === 0) return;
-    const target = entry.forward[entry.forward.length - 1]!;
+    const targetFrame = entry.forward[entry.forward.length - 1]!;
+    const target = targetFrame.ref;
     const existing = threadPageTabs[selectedThreadId] ?? [];
     const idx = existing.findIndex((t) => t.id === currentTabId);
     if (idx < 0) return;
@@ -2146,9 +2192,9 @@ export function App() {
         [selectedThreadId]: {
           ...rest,
           [target.id]: {
-            back: [...entry.back, oldRef],
+            back: [...entry.back, { ref: oldRef, siblings: entry.siblings }],
             forward: entry.forward.slice(0, -1),
-            siblings: null,
+            siblings: targetFrame.siblings,
           },
         },
       };
@@ -2248,7 +2294,14 @@ export function App() {
     for (const slotRef of pageTabsForThread) stripVisibleIds.add(slotRef.id);
     for (const slotRef of pageTabsForThread) {
       const histEntry = perThreadHistoryForBuilder[slotRef.id] ?? { back: [], forward: [], siblings: null };
-      const slotStack = [...histEntry.back, slotRef, ...histEntry.forward];
+      // back/forward are HistoryFrame[] (ref + siblings); we only
+      // need the refs for the render pass — siblings are restored
+      // by handleGoBack/Forward when the user actually navigates.
+      const slotStack = [
+        ...histEntry.back.map((f) => f.ref),
+        slotRef,
+        ...histEntry.forward.map((f) => f.ref),
+      ];
       // Closures bind navigation to the SLOT's current ref id so that
       // when a back-stack page (still mounted, hidden) navigates, it
       // mutates the slot — same behavior as the visible page.

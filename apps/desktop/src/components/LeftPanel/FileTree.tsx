@@ -94,6 +94,7 @@ export function TreeEntries({
   onToggleDirectory,
   onOpenFile,
   onOpenMenu,
+  parentPath,
 }: {
   parentPath: string;
   entries: WorkspaceEntry[];
@@ -120,7 +121,11 @@ export function TreeEntries({
           ? siblingEntries.findIndex((s) => s.ref.id === fileRef(entry.path).id)
           : -1;
         const rowSiblings: NavSiblings | undefined = fileSiblingIdx >= 0
-          ? { entries: siblingEntries, index: fileSiblingIdx }
+          ? {
+              entries: siblingEntries,
+              index: fileSiblingIdx,
+              title: parentPath ? `Files in ${parentPath}` : "Files at the project root",
+            }
           : undefined;
         // "Marked" = this directory's name itself is in the config list.
         // "Inside" = some ancestor segment matches, so this path is being

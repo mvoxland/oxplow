@@ -26,6 +26,11 @@ export interface NavSiblings {
   entries: NavSiblingEntry[];
   /** 0-based position of the page being navigated to. */
   index: number;
+  /** Human-readable label for the originating list — surfaced as a
+   *  hover tooltip on the prev/next indicator so the user can tell
+   *  what they're stepping through ("Recently modified",
+   *  "Backlinks", "Files in apps/desktop/src/components", etc.). */
+  title?: string;
 }
 
 export interface BookmarkBinding {

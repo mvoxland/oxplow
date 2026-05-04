@@ -190,7 +190,7 @@ export function BacklinksList({
             if ((e.metaKey || e.ctrlKey) || !ctxNav) {
               onOpenPage(entry.ref);
             } else {
-              ctxNav.navigate(entry.ref, { siblings: { entries: siblingsList.entries, index: idx } });
+              ctxNav.navigate(entry.ref, { siblings: { entries: siblingsList.entries, index: idx, title: "Backlinks" } });
             }
           }}
           onAuxClick={(e: MouseEvent) => {

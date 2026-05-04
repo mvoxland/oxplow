@@ -232,7 +232,7 @@ function PlanningSections({
               label={item.title}
               subtitle={item.priority}
               navRef={workItemRef(item.id)}
-              siblings={{ entries: siblingEntries, index: i }}
+              siblings={{ entries: siblingEntries, index: i, title: "Ready in This Thread" }}
               onNavigate={(ref) => onOpenPage(ref)}
               onClick={() => onOpenPage(workItemRef(item.id))}
             />
@@ -250,7 +250,7 @@ function PlanningSections({
               label={item.title}
               subtitle={item.priority}
               navRef={workItemRef(item.id)}
-              siblings={{ entries: siblingEntries, index: i }}
+              siblings={{ entries: siblingEntries, index: i, title: "Backlog" }}
               onNavigate={(ref) => onOpenPage(ref)}
               onClick={() => onOpenPage(workItemRef(item.id))}
             />
@@ -268,7 +268,7 @@ function PlanningSections({
               label={note.title || note.slug}
               subtitle={note.freshness}
               navRef={wikiPageRef(note.slug)}
-              siblings={{ entries: siblingEntries, index: i }}
+              siblings={{ entries: siblingEntries, index: i, title: "Recent Notes" }}
               onNavigate={(ref) => onOpenPage(ref)}
               onClick={() => onOpenPage(wikiPageRef(note.slug))}
             />

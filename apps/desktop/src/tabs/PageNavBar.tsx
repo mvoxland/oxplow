@@ -18,6 +18,9 @@ export interface PageNavBarProps {
     onNext?(): void;
     /** "3 of 12" indicator rendered between the buttons. */
     indicator?: string;
+    /** Hover-tooltip on the indicator describing the originating
+     *  list (e.g. "Recently modified", "Backlinks"). */
+    indicatorTitle?: string;
   };
   /** Page title rendered to the right of the back/forward arrows. */
   title?: ReactNode;
@@ -127,11 +130,13 @@ export function PageNavBar({
           {siblings.indicator ? (
             <span
               data-testid="page-nav-sibling-indicator"
+              title={siblings.indicatorTitle}
               style={{
                 fontSize: 11,
                 color: "var(--text-secondary)",
                 marginLeft: 2,
                 fontVariantNumeric: "tabular-nums",
+                cursor: siblings.indicatorTitle ? "help" : "default",
               }}
             >
               {siblings.indicator}
