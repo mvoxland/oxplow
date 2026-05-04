@@ -52,7 +52,7 @@ export interface WorkItemGroup {
   epicChildren: Map<string, WorkItem[]>;
 }
 
-export type WorkItemSectionKind = "inProgress" | "toDo" | "blocked" | "done";
+export type WorkItemSectionKind = "inProgress" | "ready" | "blocked" | "done";
 
 export interface WorkItemSection {
   kind: WorkItemSectionKind;
@@ -64,7 +64,7 @@ export interface WorkItemSection {
 // renderer; empty sections are skipped there.
 const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
-  { kind: "toDo", label: "To Do" },
+  { kind: "ready", label: "Ready" },
   { kind: "blocked", label: "Blocked" },
   { kind: "done", label: "Done" },
 ];
@@ -72,7 +72,7 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
 export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
   switch (status) {
     case "in_progress": return "inProgress";
-    case "ready": return "toDo";
+    case "ready": return "ready";
     case "blocked": return "blocked";
     // `archived` rolls into the Done section — the done-section header
     // owns a "Show archived" toggle that controls whether those rows are
@@ -93,10 +93,10 @@ export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
  *   2. all children terminal (done/canceled/archived) → done
  *   3. any child in_progress, or any done child mixed with non-done
  *      non-blocked siblings → inProgress
- *   4. all children ready → toDo
+ *   4. all children ready → ready
  *
  * Edge cases: an epic with no children falls back to its own literal
- * status; an empty epic that's `ready` goes to To Do, etc.
+ * status; an empty epic that's `ready` goes to Ready, etc.
  */
 export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSectionKind {
   if (children.length === 0) return classifyWorkItem(epic.status);
@@ -116,7 +116,7 @@ export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSect
   if (anyBlocked) return "blocked";
   if (allTerminal) return "done";
   if (anyInProgress || anyDone) return "inProgress";
-  if (allReady) return "toDo";
+  if (allReady) return "ready";
   return "inProgress";
 }
 
@@ -126,7 +126,7 @@ export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSect
 export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStatus | null {
   switch (section) {
     case "inProgress": return null;
-    case "toDo": return "ready";
+    case "ready": return "ready";
     case "blocked": return "blocked";
     case "done": return "done";
   }
@@ -150,7 +150,7 @@ export function classifyRow(
 
 export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
   const buckets: Record<WorkItemSectionKind, WorkItem[]> = {
-    inProgress: [], toDo: [], blocked: [], done: [],
+    inProgress: [], ready: [], blocked: [], done: [],
   };
   for (const item of items) buckets[classifyWorkItem(item.status)].push(item);
   const sections: WorkItemSection[] = [];
@@ -217,7 +217,7 @@ export function finalizeReorderIds(
 export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] {
   // Always yield exactly one root group, even when the backlog is empty or
   // `state` is still loading — the Plan pane renders the section chrome
-  // (To Do / Done / etc. + the "⋯ New task" menu) through WorkGroupList,
+  // (Ready / Done / etc. + the "⋯ New task" menu) through WorkGroupList,
   // which only runs when a group exists. Without a group the empty backlog
   // would fall back to a blank "Backlog is empty." label with no way to
   // create the first task.
@@ -335,7 +335,7 @@ export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[]
 // the user sees goes through this helper so tweaks land in one place.
 export function statusLabel(status: WorkItemStatus): string {
   switch (status) {
-    case "ready": return "To Do";
+    case "ready": return "Ready";
     case "in_progress": return "In Progress";
     case "blocked": return "Blocked";
     case "done": return "Done";

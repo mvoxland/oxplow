@@ -35,14 +35,14 @@ function item(id: string, status: WorkItemStatus, sort_index: number): WorkItem 
 
 test("classifyWorkItem buckets each status into exactly one section", () => {
   expect(classifyWorkItem("in_progress")).toBe("inProgress");
-  expect(classifyWorkItem("ready")).toBe("toDo");
+  expect(classifyWorkItem("ready")).toBe("ready");
   expect(classifyWorkItem("blocked")).toBe("blocked");
   expect(classifyWorkItem("done")).toBe("done");
   expect(classifyWorkItem("canceled")).toBe("done");
   expect(classifyWorkItem("archived")).toBe("done");
 });
 
-test("splitIntoSections returns sections in fixed order: inProgress → toDo → blocked → done", () => {
+test("splitIntoSections returns sections in fixed order: inProgress → ready → blocked → done", () => {
   const sections = splitIntoSections([
     item("d1", "done", 3),
     item("b1", "blocked", 2),
@@ -51,7 +51,7 @@ test("splitIntoSections returns sections in fixed order: inProgress → toDo →
   ]);
   expect(sections.map((section) => section.kind)).toEqual([
     "inProgress",
-    "toDo",
+    "ready",
     "blocked",
     "done",
   ]);
@@ -63,7 +63,7 @@ test("splitIntoSections skips empty sections entirely so no header renders for t
     item("w2", "ready", 1),
   ]);
   expect(sections).toHaveLength(1);
-  expect(sections[0]?.kind).toBe("toDo");
+  expect(sections[0]?.kind).toBe("ready");
 });
 
 test("splitIntoSections sorts items within a section by sort_index", () => {
@@ -76,7 +76,7 @@ test("splitIntoSections sorts items within a section by sort_index", () => {
 });
 
 test("sectionDefaultStatus maps drop-target sections to landing statuses; in-progress is blocked", () => {
-  expect(sectionDefaultStatus("toDo")).toBe("ready");
+  expect(sectionDefaultStatus("ready")).toBe("ready");
   expect(sectionDefaultStatus("blocked")).toBe("blocked");
   expect(sectionDefaultStatus("done")).toBe("done");
   // The agent owns in_progress and its items are drag-locked — reject drops.
@@ -169,16 +169,16 @@ test("classifyEpic: mixed done + non-blocked unfinished → inProgress", () => {
   ])).toBe("inProgress");
 });
 
-test("classifyEpic: all children ready → toDo", () => {
+test("classifyEpic: all children ready → ready", () => {
   const epic = epicItem("e1", 0);
   expect(classifyEpic(epic, [
     item("c1", "ready", 1),
     item("c2", "ready", 2),
-  ])).toBe("toDo");
+  ])).toBe("ready");
 });
 
 test("classifyEpic: empty epic falls back to its literal status", () => {
-  expect(classifyEpic(epicItem("e1", 0, "ready"), [])).toBe("toDo");
+  expect(classifyEpic(epicItem("e1", 0, "ready"), [])).toBe("ready");
   expect(classifyEpic(epicItem("e1", 0, "in_progress"), [])).toBe("inProgress");
 });
 

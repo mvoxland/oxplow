@@ -34,7 +34,7 @@ import {
   type WorkItemSectionKind,
 } from "./plan-utils.js";
 
-const STATUS_RANK: Record<string, number> = { inProgress: 0, toDo: 1, blocked: 2, done: 3 };
+const STATUS_RANK: Record<string, number> = { inProgress: 0, ready: 1, blocked: 2, done: 3 };
 function statusOrderRank(status: WorkItemStatus): number {
   return STATUS_RANK[classifyWorkItem(status)] ?? 0;
 }
@@ -86,8 +86,8 @@ interface Props {
    *  pre-IA-redesign Plan pane. Epics are always kept so their children
    *  don't silently lose their container row. */
   hideAuto?: boolean;
-  /** Restrict the visible sections (To Do / Blocked / etc). Used by the
-   *  page split: Plan Work shows toDo+blocked+done previews,
+  /** Restrict the visible sections (Ready / Blocked / etc). Used by the
+   *  page split: Plan Work shows ready+blocked+done previews,
    *  Done Work / Archived show only "done", etc. Default = all four. */
   visibleSections?: WorkItemSectionKind[];
   /** Cap the number of items rendered per section after sort. Used by
@@ -522,7 +522,7 @@ export function PlanPane({
           groups.map((group) => {
             const isRootThread = mode === "thread";
             const isActive = isRootThread && thread?.id === activeThreadId;
-            const toDoMenuItems: MenuItem[] = [
+            const readyMenuItems: MenuItem[] = [
               {
                 id: "plan-new-task",
                 label: "New task",
@@ -531,13 +531,13 @@ export function PlanPane({
                 run: () => openCreateModal(),
               },
             ];
-            const toDoActions = (
+            const readyActions = (
               <span data-testid="plan-add-points-bar">
-                <SectionHeaderMenu items={toDoMenuItems} testId="plan-todo-menu" />
+                <SectionHeaderMenu items={readyMenuItems} testId="plan-ready-menu" />
               </span>
             );
             const sectionActions: Partial<Record<WorkItemSectionKind, React.ReactNode>> = {
-              toDo: toDoActions,
+              ready: readyActions,
             };
             if (extraSectionLinks) {
               for (const [k, node] of Object.entries(extraSectionLinks) as Array<[WorkItemSectionKind, React.ReactNode]>) {
