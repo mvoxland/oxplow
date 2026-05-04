@@ -124,7 +124,13 @@ fn function_metrics(
 fn function_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<String> {
     for field in spec.name_fields {
         if let Some(name_node) = node.child_by_field_name(field) {
-            if let Ok(text) = name_node.utf8_text(src) {
+            // C/C++ functions store the name inside a nested
+            // `function_declarator` subtree, not directly on the
+            // declarator field. Descend until we find a leaf
+            // identifier so we report `foo` rather than the whole
+            // `foo(int x)` declarator text.
+            let leaf = innermost_identifier(name_node).unwrap_or(name_node);
+            if let Ok(text) = leaf.utf8_text(src) {
                 return Some(text.to_string());
             }
         }
@@ -132,12 +138,35 @@ fn function_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<Stri
     None
 }
 
+/// Walk down a declarator subtree to the innermost identifier-like
+/// node. Used by C/C++ where the `declarator` field is a composite.
+fn innermost_identifier<'a>(node: Node<'a>) -> Option<Node<'a>> {
+    if matches!(
+        node.kind(),
+        "identifier" | "field_identifier" | "type_identifier" | "destructor_name" | "operator_name"
+    ) {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(found) = innermost_identifier(child) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 fn count_parameters(node: Node<'_>, spec: &LanguageSpec) -> u32 {
-    let Some(params_node) = spec
+    // First try a direct field lookup; falls through to a recursive
+    // descendant search for grammars (C/C++) where the parameter list
+    // is nested inside a `function_declarator` rather than reachable
+    // via a field on the function node itself.
+    let params_node = spec
         .param_list_fields
         .iter()
         .find_map(|f| node.child_by_field_name(f))
-    else {
+        .or_else(|| find_parameter_list(node));
+    let Some(params_node) = params_node else {
         return 0;
     };
     let mut cursor = params_node.walk();
@@ -150,15 +179,28 @@ fn count_parameters(node: Node<'_>, spec: &LanguageSpec) -> u32 {
     count
 }
 
-fn count_decision_points(node: Node<'_>, spec: &LanguageSpec) -> u32 {
-    let mut count = 0u32;
+/// Recursively look for a `parameter_list` node in a function's
+/// declarator subtree. Used for C/C++ where the structure is
+/// `function_definition > declarator(function_declarator) > parameters(parameter_list)`.
+fn find_parameter_list<'a>(node: Node<'a>) -> Option<Node<'a>> {
+    if node.kind() == "parameter_list" {
+        return Some(node);
+    }
     let mut cursor = node.walk();
-    if spec.decision_kinds.contains(&node.kind()) {
-        // Don't count the function node itself.
-        if cursor.node().id() != node.id() {
-            count += 1;
+    for child in node.named_children(&mut cursor) {
+        if let Some(found) = find_parameter_list(child) {
+            return Some(found);
         }
     }
+    None
+}
+
+fn count_decision_points(node: Node<'_>, spec: &LanguageSpec) -> u32 {
+    // We never want to count the function node itself (function kinds
+    // never appear in `decision_kinds` anyway), so just descend into
+    // children and tally there.
+    let mut count = 0u32;
+    let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         count += count_decision_subtree(child, spec, node.id());
     }
@@ -180,22 +222,6 @@ fn count_decision_subtree(node: Node<'_>, spec: &LanguageSpec, root_id: usize) -
         count += count_decision_subtree(child, spec, root_id);
     }
     count
-}
-
-/// Entry point used by `analyze_functions_at_refs` — analyzes a
-/// (path, content) batch on a single side and returns one record
-/// per detected function. Files in unsupported languages produce
-/// no records.
-pub fn analyze_batch<I, S>(files: I) -> Vec<FunctionMetrics>
-where
-    I: IntoIterator<Item = (S, S)>,
-    S: AsRef<str>,
-{
-    let mut out = Vec::new();
-    for (path, source) in files {
-        out.extend(analyze_file(path.as_ref(), source.as_ref()));
-    }
-    out
 }
 
 /// Convenience: peek at a path's extension to decide whether we

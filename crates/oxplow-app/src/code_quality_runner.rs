@@ -21,10 +21,10 @@ use walkdir::WalkDir;
 
 #[derive(Debug, Error)]
 pub enum CodeQualityError {
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("parse: {0}")]
-    Parse(String),
+    /// Surfaces a failure inside the spawn_blocking pool (panic or
+    /// joining error). Renamed from "parse" historically.
+    #[error("scan task failed: {0}")]
+    Task(String),
 }
 
 /// One finding the renderer surfaces in the code-quality panel.
@@ -99,26 +99,25 @@ fn metrics_to_findings(
             r#"{{"functionName":{}}}"#,
             serde_json::to_string(&m.name).unwrap_or_else(|_| "\"\"".into())
         );
-        if m.complexity > 0 {
-            out.push(CodeQualityFinding {
-                path: path.clone(),
-                start_line: m.start_line,
-                end_line: m.end_line,
-                kind: "complexity".into(),
-                metric_value: m.complexity as f64,
-                extra_json: Some(extra.clone()),
-            });
-        }
-        if m.length > 0 {
-            out.push(CodeQualityFinding {
-                path: path.clone(),
-                start_line: m.start_line,
-                end_line: m.end_line,
-                kind: "function-length".into(),
-                metric_value: m.length as f64,
-                extra_json: Some(extra.clone()),
-            });
-        }
+        // Complexity is always >=1 in our model (decision points + 1)
+        // and length is always >=1 (end_line - start_line + 1), so both
+        // findings unconditionally emit. Only parameter-count is gated.
+        out.push(CodeQualityFinding {
+            path: path.clone(),
+            start_line: m.start_line,
+            end_line: m.end_line,
+            kind: "complexity".into(),
+            metric_value: m.complexity as f64,
+            extra_json: Some(extra.clone()),
+        });
+        out.push(CodeQualityFinding {
+            path: path.clone(),
+            start_line: m.start_line,
+            end_line: m.end_line,
+            kind: "function-length".into(),
+            metric_value: m.length as f64,
+            extra_json: Some(extra.clone()),
+        });
         if m.parameter_count > 0 {
             out.push(CodeQualityFinding {
                 path,
@@ -160,7 +159,7 @@ pub async fn run_metrics_scan(
         Ok(metrics_to_findings(&project, metrics))
     })
     .await
-    .map_err(|e| CodeQualityError::Parse(format!("metrics task: {e}")))??;
+    .map_err(|e| CodeQualityError::Task(format!("metrics task: {e}")))??;
     Ok(findings)
 }
 
@@ -193,7 +192,7 @@ pub async fn run_duplication_scan(
         Ok(blocks_to_findings(blocks))
     })
     .await
-    .map_err(|e| CodeQualityError::Parse(format!("duplication task: {e}")))??;
+    .map_err(|e| CodeQualityError::Task(format!("duplication task: {e}")))??;
     Ok(findings)
 }
 

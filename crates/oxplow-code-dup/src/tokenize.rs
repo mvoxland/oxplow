@@ -14,7 +14,7 @@ pub struct Token {
     pub end_line: u32,
 }
 
-pub fn tokenize_source(root: Node<'_>, _src: &[u8]) -> Vec<Token> {
+pub fn tokenize_source(root: Node<'_>) -> Vec<Token> {
     let mut out = Vec::new();
     let mut cursor = root.walk();
     walk(&mut cursor, &mut out);
