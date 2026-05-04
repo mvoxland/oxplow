@@ -36,7 +36,7 @@ const chipOnStyle: CSSProperties = {
 
 /**
  * Filter bar shown above the Tasks page list. Renders priority chips
- * only; the section split (To Do / Blocked / Done preview) and drag-
+ * only; the section split (Ready / Blocked / Done preview) and drag-
  * reorder cover what the search/status/hide-auto/show-closed knobs
  * used to do, so they were removed.
  *

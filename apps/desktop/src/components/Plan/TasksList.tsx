@@ -15,7 +15,7 @@ type PlanPaneProps = ComponentProps<typeof PlanPane>;
  * Composed list shell for the Tasks page: priority filter bar above
  * + PlanPane below. Holds the filter state, persists it to local-
  * storage, and preprocesses `threadWork.items` by priority before
- * handing it to PlanPane. The section split (To Do / Blocked / Done
+ * handing it to PlanPane. The section split (Ready / Blocked / Done
  * preview) replaces what the search/status/hide-auto/show-closed
  * controls used to provide.
  */
@@ -40,7 +40,7 @@ export function TasksList(props: Omit<PlanPaneProps, "hideAuto" | "onlyStatuses"
   }, [props.threadWork, filters]);
 
   // visibleSections in props takes precedence — Tasks page passes
-  // ["toDo", "blocked", "done"] and we don't override.
+  // ["ready", "blocked", "done"] and we don't override.
   return (
     <div
       data-tasks-roomy

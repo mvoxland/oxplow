@@ -1112,7 +1112,7 @@ export function App() {
     return unsubscribe;
   }, []);
 
-  // Followups are transient (in-memory), but we still want the To Do
+  // Followups are transient (in-memory), but we still want the Ready
   // section to live-update when the agent adds/removes one mid-turn.
   // Re-fetch the same ThreadWorkState envelope (followups are layered
   // in by the work-item API wrapper) after every followup.changed
