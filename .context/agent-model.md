@@ -421,6 +421,20 @@ unless you specifically need an epic/subtask/bug/note. Forcing the
 field on every call produced a guaranteed first-call failure for
 trivial fixes.
 
+**Id-kind validation at the boundary.** Every tool that takes an id
+string (`thread_id`, `stream_id`, `id`, `parent_id`, `from_id`, etc.)
+calls `expect_id_kind(tool, param, value, expected_kind)` before
+constructing the typed id. The check uses `oxplow_domain::classify_id`
+on the prefix segment (`s-` → stream, `b-` → thread, `wi-` → work
+item, `n-` → note, …). When a caller passes the wrong kind — e.g. a
+stream id where a thread id was expected — the tool returns an
+`invalid_params` error that names the tool, the parameter, the value
+passed, the inferred kind, and the expected kind. This converts what
+would otherwise surface as an opaque downstream `FOREIGN KEY
+constraint failed` into something actionable. Add the same call at
+the top of any new tool handler — see the `IdKind` enum in
+`crates/oxplow-domain/src/ids.rs` for the canonical list.
+
 `update_work_item` accepts `blocked → in_progress` directly (deliberate
 unblock gesture; no separate hop through `ready` required). Only
 terminal states (`done`/`canceled`/`archived`) still require an
@@ -590,6 +604,15 @@ oxplow hooks, and are **not suppressible** from the plugin side:
   Code adds a customization hook.
 
 ## Session-context injection
+
+The thread id always resolves to *something* at agent-spawn time: the
+Tauri commands (`open_terminal_session`, `ensure_agent_pane`) call
+`ThreadService::selected_or_active(&stream_id)`, which falls back from
+the user's explicit selection → the writer (active) thread → the first
+queued thread. This guarantees `OXPLOW_THREAD_ID` and the
+`<session-context>` block's `thread_id=…` line are populated for any
+stream that has at least one thread (boot seeds a "Default" thread for
+every primary stream, so this is always true in practice).
 
 On every `UserPromptSubmit`, the runtime builds a fresh
 `<session-context>` block (stream/thread/writer flag) and returns it as

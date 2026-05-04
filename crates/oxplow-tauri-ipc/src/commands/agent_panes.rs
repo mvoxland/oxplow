@@ -61,7 +61,7 @@ pub async fn ensure_agent_pane(
     // selected thread, or the stream's active thread.
     let thread_id = match req.thread_id {
         Some(t) => Some(t),
-        None => state.threads.selected(&req.stream_id).await?,
+        None => state.threads.selected_or_active(&req.stream_id).await?,
     };
     let thread = match &thread_id {
         Some(id) => state.thread_store.get(id).await?,

@@ -205,6 +205,29 @@ impl ThreadService {
         Ok(self.threads.selected_for_stream(stream).await?)
     }
 
+    /// Resolve the thread-id the agent should run under. Falls back
+    /// through three layers:
+    ///   1. The user's explicit selection (`selected_for_stream`).
+    ///   2. The stream's writer (active) thread.
+    ///   3. The first non-closed thread on the stream (queued / reader).
+    ///
+    /// Returns `None` only when the stream has no usable threads at all,
+    /// which should not happen for a stream that boot-time seeded the
+    /// "Default" thread.
+    pub async fn selected_or_active(
+        &self,
+        stream: &StreamId,
+    ) -> Result<Option<ThreadId>, ThreadError> {
+        if let Some(id) = self.threads.selected_for_stream(stream).await? {
+            return Ok(Some(id));
+        }
+        let mut all = self.threads.list_for_stream(stream).await?;
+        // Prefer the writer (active) thread; fall back to the first
+        // queued thread (sorted by ascending sort_index, which list_for_stream returns).
+        all.sort_by_key(|t| (t.status != ThreadStatus::Active, t.sort_index));
+        Ok(all.into_iter().next().map(|t| t.id))
+    }
+
     pub async fn select(
         &self,
         stream: &StreamId,
@@ -252,6 +275,33 @@ mod tests {
         streams.upsert(&s).await.unwrap();
         let svc = ThreadService::new(Arc::new(SqliteThreadStore::new(db)));
         (svc, s.id)
+    }
+
+    #[tokio::test]
+    async fn selected_or_active_returns_writer_when_no_explicit_selection() {
+        let (svc, sid) = fixture().await;
+        let a = svc.create(&sid, "a", "working").await.unwrap();
+        let _b = svc.create(&sid, "b", "working").await.unwrap();
+        // No `select()` call — fall-back path should return the active writer (`a`).
+        assert_eq!(svc.selected(&sid).await.unwrap(), None);
+        let id = svc.selected_or_active(&sid).await.unwrap();
+        assert_eq!(id, Some(a.id));
+    }
+
+    #[tokio::test]
+    async fn selected_or_active_prefers_explicit_selection() {
+        let (svc, sid) = fixture().await;
+        let _a = svc.create(&sid, "a", "working").await.unwrap();
+        let b = svc.create(&sid, "b", "working").await.unwrap();
+        svc.select(&sid, Some(&b.id)).await.unwrap();
+        let id = svc.selected_or_active(&sid).await.unwrap();
+        assert_eq!(id, Some(b.id));
+    }
+
+    #[tokio::test]
+    async fn selected_or_active_returns_none_when_stream_has_no_threads() {
+        let (svc, sid) = fixture().await;
+        assert_eq!(svc.selected_or_active(&sid).await.unwrap(), None);
     }
 
     #[tokio::test]
