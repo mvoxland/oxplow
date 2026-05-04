@@ -48,8 +48,47 @@ pub struct LanguageSpec {
     /// `impl_item` exposes the type via `type` instead, so we try
     /// multiple fields.
     pub container_name_fields: &'static [&'static str],
+    /// Strategy used to classify a function's visibility (public /
+    /// private / unknown). The strategy is language-specific because
+    /// each language encodes "private" differently — modifier nodes
+    /// (Java/TS/Rust), name conventions (Python `_foo`, Go
+    /// capitalization), or scope-based (C `static`, TS top-level
+    /// `export`).
+    pub visibility: VisibilityStrategy,
     /// Loader for the bundled tree-sitter grammar.
     grammar: fn() -> TsLanguage,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum VisibilityStrategy {
+    /// Look for a `visibility_modifier` child whose text starts with
+    /// `pub`. Present → public; absent → private.
+    RustModifier,
+    /// Look for an `accessibility_modifier` child on class/method
+    /// nodes (`private`, `protected`, `public`). Present → mapped
+    /// directly. Absent on a method inside a class → public (TS
+    /// default). Absent on a top-level function → check enclosing
+    /// `export_statement` ancestor.
+    TsClassModifier,
+    /// Java-style: look for an `identifier`-typed `modifiers` child
+    /// containing `private`/`protected`/`public`.
+    JavaModifier,
+    /// Walk up to the nearest `class_specifier` and look at the
+    /// preceding `access_specifier` to decide. C++ default is
+    /// private inside a `class`, public inside a `struct`.
+    CppAccessSpecifier,
+    /// Capitalization of the identifier first letter. Uppercase →
+    /// public; lowercase → private.
+    GoCapitalization,
+    /// Leading-underscore convention. Function name starts with `_`
+    /// → private.
+    PythonUnderscore,
+    /// `static` storage class on the function definition → private
+    /// (file-scope). Anything else → public.
+    CStatic,
+    /// All functions reported as Unknown — used for languages where
+    /// no clean signal exists.
+    Unknown,
 }
 
 impl LanguageSpec {
@@ -137,6 +176,7 @@ static RUST: LanguageSpec = LanguageSpec {
     ],
     container_kinds: &["impl_item", "trait_item", "mod_item"],
     container_name_fields: &["name", "type"],
+    visibility: VisibilityStrategy::RustModifier,
     grammar: || tree_sitter_rust::LANGUAGE.into(),
 };
 
@@ -150,6 +190,7 @@ static TYPESCRIPT: LanguageSpec = LanguageSpec {
     decision_kinds: JS_DECISION_KINDS,
     container_kinds: TS_CONTAINER_KINDS,
     container_name_fields: JS_NAME_FIELDS,
+    visibility: VisibilityStrategy::TsClassModifier,
     grammar: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
 };
 
@@ -161,6 +202,7 @@ static TSX: LanguageSpec = LanguageSpec {
     decision_kinds: JS_DECISION_KINDS,
     container_kinds: TS_CONTAINER_KINDS,
     container_name_fields: JS_NAME_FIELDS,
+    visibility: VisibilityStrategy::TsClassModifier,
     grammar: || tree_sitter_typescript::LANGUAGE_TSX.into(),
 };
 
@@ -172,6 +214,7 @@ static JAVASCRIPT: LanguageSpec = LanguageSpec {
     decision_kinds: JS_DECISION_KINDS,
     container_kinds: JS_CONTAINER_KINDS,
     container_name_fields: JS_NAME_FIELDS,
+    visibility: VisibilityStrategy::TsClassModifier,
     grammar: || tree_sitter_javascript::LANGUAGE.into(),
 };
 
@@ -250,6 +293,7 @@ static PYTHON: LanguageSpec = LanguageSpec {
     ],
     container_kinds: &["class_definition"],
     container_name_fields: &["name"],
+    visibility: VisibilityStrategy::PythonUnderscore,
     grammar: || tree_sitter_python::LANGUAGE.into(),
 };
 
@@ -274,6 +318,7 @@ static GO: LanguageSpec = LanguageSpec {
     // the file level so there's nothing meaningful to attach.
     container_kinds: &[],
     container_name_fields: &["name"],
+    visibility: VisibilityStrategy::GoCapitalization,
     grammar: || tree_sitter_go::LANGUAGE.into(),
 };
 
@@ -307,6 +352,7 @@ static JAVA: LanguageSpec = LanguageSpec {
         "annotation_type_declaration",
     ],
     container_name_fields: &["name"],
+    visibility: VisibilityStrategy::JavaModifier,
     grammar: || tree_sitter_java::LANGUAGE.into(),
 };
 
@@ -328,6 +374,7 @@ static C: LanguageSpec = LanguageSpec {
     // C has no class-like containers — top-level functions only.
     container_kinds: &[],
     container_name_fields: &["name"],
+    visibility: VisibilityStrategy::CStatic,
     grammar: || tree_sitter_c::LANGUAGE.into(),
 };
 
@@ -357,5 +404,6 @@ static CPP: LanguageSpec = LanguageSpec {
         "namespace_definition",
     ],
     container_name_fields: &["name"],
+    visibility: VisibilityStrategy::CppAccessSpecifier,
     grammar: || tree_sitter_cpp::LANGUAGE.into(),
 };

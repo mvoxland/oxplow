@@ -2,7 +2,7 @@ use oxplow_app::code_quality_runner::{
     run_duplication_scan, run_metrics_scan, RunOptions,
 };
 use oxplow_app::{CodeQualityScanPhase, OxplowEvent};
-use oxplow_code_metrics::{analyze_file, FunctionMetrics};
+use oxplow_code_metrics::{analyze_file, FunctionMetrics, Visibility};
 use oxplow_db::{CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -156,6 +156,11 @@ pub struct AnalyzedFunction {
     /// Empty for top-level functions; used to render the Functions
     /// card hierarchically.
     pub container_path: Vec<String>,
+    /// Heuristic public/private classification — see
+    /// `oxplow_code_metrics::Visibility`. Frontend uses this to
+    /// drive a "Show private" filter on the Semantic view.
+    /// Serialized as `"public"` / `"private"` / `"unknown"`.
+    pub visibility: String,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -223,6 +228,11 @@ fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
             // approximate as length. Renderer treats it as informational.
             nloc: m.length,
             container_path: m.container_path,
+            visibility: match m.visibility {
+                Visibility::Public => "public",
+                Visibility::Private => "private",
+                Visibility::Unknown => "unknown",
+            }.to_string(),
         })
         .collect()
 }

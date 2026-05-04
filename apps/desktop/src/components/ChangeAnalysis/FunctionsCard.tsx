@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import type { FunctionsBuckets } from "./analysisHelpers.js";
+import { useMemo, useState } from "react";
+import type { FunctionsBuckets, FunctionVisibility } from "./analysisHelpers.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { changeAnalysisRef, type ChangeAnalysisTarget } from "../../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
@@ -32,22 +32,49 @@ interface RowEntry {
   name: string;
   detail: string;
   status: RowStatus;
+  visibility: FunctionVisibility;
 }
 
 export function FunctionsCard({ functions, onOpenFile, onOpenFunctionDiff, target }: FunctionsCardProps) {
   const ctxNav = useOptionalPageNavigation();
-  const rows = useMemo(() => flattenRows(functions), [functions]);
+  const [showPrivate, setShowPrivate] = useState(true);
+  const allRows = useMemo(() => flattenRows(functions), [functions]);
+  const visibleRows = useMemo(
+    () => (showPrivate ? allRows : allRows.filter((r) => r.visibility !== "private")),
+    [allRows, showPrivate],
+  );
   const nodes = useMemo(
-    () => buildNodes(rows, target, onOpenFile, onOpenFunctionDiff, ctxNav),
-    [rows, target, onOpenFile, onOpenFunctionDiff, ctxNav],
+    () => buildNodes(visibleRows, target, onOpenFile, onOpenFunctionDiff, ctxNav),
+    [visibleRows, target, onOpenFile, onOpenFunctionDiff, ctxNav],
+  );
+  const privateCount = useMemo(
+    () => allRows.filter((r) => r.visibility === "private").length,
+    [allRows],
   );
 
   return (
     <section data-testid="change-analysis-functions" style={card}>
-      <div style={header}>Functions</div>
-      {rows.length === 0 ? (
+      <div style={headerRow}>
+        <span style={{ fontWeight: 600 }}>Functions</span>
+        {privateCount > 0 ? (
+          <label style={toggleLabel} title="Heuristic per language. See language-specific notes for what 'private' means.">
+            <input
+              type="checkbox"
+              data-testid="change-analysis-show-private"
+              checked={showPrivate}
+              onChange={(e) => setShowPrivate(e.target.checked)}
+            />
+            <span>Show private ({privateCount})</span>
+          </label>
+        ) : null}
+      </div>
+      {allRows.length === 0 ? (
         <div style={muted}>
           No function-level changes detected (the changed files may be in unsupported languages).
+        </div>
+      ) : visibleRows.length === 0 ? (
+        <div style={muted}>
+          All function changes are private. Toggle "Show private" to see them.
         </div>
       ) : (
         <HierarchyView
@@ -78,6 +105,7 @@ function flattenRows(functions: FunctionsBuckets): RowEntry[] {
       name: fn.name,
       detail: `cc=${fn.complexity}, p=${fn.paramCount}`,
       status: "added",
+      visibility: fn.visibility,
     });
   }
   for (const fn of functions.deleted) {
@@ -88,6 +116,7 @@ function flattenRows(functions: FunctionsBuckets): RowEntry[] {
       name: fn.name,
       detail: "",
       status: "deleted",
+      visibility: fn.visibility,
     });
   }
   const sigByKey = new Map<string, string>();
@@ -121,6 +150,7 @@ function flattenRows(functions: FunctionsBuckets): RowEntry[] {
       name: fn.name,
       detail: detailParts.join("; "),
       status: "modified",
+      visibility: fn.visibility,
     });
   }
   return [...out.values()];
@@ -258,7 +288,7 @@ function toHierarchyNode(
     .map<HierarchyNode>((row, i) => ({
       id: `${id}/fn:${row.name}:${i}`,
       label: row.name,
-      icon: <FnIcon />,
+      icon: <FnIcon visibility={row.visibility} />,
       statuses: new Set<HierarchyStatus>([row.status]),
       detail: row.detail,
       onDrill: (e) => {
@@ -364,11 +394,31 @@ function ContainerIcon() {
     </svg>
   );
 }
-function FnIcon() {
-  // ƒ glyph for functions — keep it within 1em so the row height
-  // doesn't grow.
+function FnIcon({ visibility }: { visibility?: FunctionVisibility }) {
+  // ƒ glyph for functions — colored by visibility so the user can
+  // see at a glance which rows are public vs private. Stays within
+  // 1em so the row height doesn't grow.
+  const color = visibility === "private"
+    ? "var(--text-muted)"
+    : visibility === "public"
+      ? "var(--text-primary)"
+      : "var(--text-secondary)";
+  const title = visibility === "private"
+    ? "Private (heuristic)"
+    : visibility === "public"
+      ? "Public (heuristic)"
+      : "Visibility unknown";
   return (
-    <span style={{ fontFamily: "serif", fontStyle: "italic", fontSize: "1em", lineHeight: 1 }}>
+    <span
+      title={title}
+      style={{
+        fontFamily: "serif",
+        fontStyle: "italic",
+        fontSize: "1em",
+        lineHeight: 1,
+        color,
+      }}
+    >
       ƒ
     </span>
   );
@@ -380,5 +430,19 @@ const card: React.CSSProperties = {
   borderRadius: 6,
   padding: 12,
 };
-const header: React.CSSProperties = { fontWeight: 600, marginBottom: 8 };
+const headerRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  marginBottom: 8,
+};
+const toggleLabel: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  fontSize: 11,
+  color: "var(--text-muted)",
+  cursor: "pointer",
+  marginLeft: "auto",
+};
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };

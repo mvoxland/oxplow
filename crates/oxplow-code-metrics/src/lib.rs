@@ -19,7 +19,17 @@ use tree_sitter::{Node, Parser};
 
 mod spec;
 
-pub use spec::{Language, LanguageSpec, language_for_path};
+pub use spec::{Language, LanguageSpec, VisibilityStrategy, language_for_path};
+
+/// Coarse public/private classification. Heuristic per language —
+/// see the comment on `LanguageSpec::visibility` for the strategy
+/// table. The frontend uses this to drive a "Show private" filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    Public,
+    Private,
+    Unknown,
+}
 
 /// One per-function metric record. The caller is responsible for
 /// fanning this out into the three downstream finding kinds
@@ -45,6 +55,8 @@ pub struct FunctionMetrics {
     /// Empty for top-level functions. Language-specific — see
     /// `LanguageSpec::container_kinds`.
     pub container_path: Vec<String>,
+    /// Coarse public/private classification (heuristic per language).
+    pub visibility: Visibility,
 }
 
 /// Analyze a single file. Returns an empty Vec for unsupported
@@ -115,6 +127,7 @@ fn function_metrics(
     let parameter_count = count_parameters(node, spec);
     let complexity = count_decision_points(node, spec) + 1;
     let container_path = container_path(node, src, spec);
+    let visibility = visibility_for(node, src, spec, &name);
 
     Some(FunctionMetrics {
         path: path.into(),
@@ -125,7 +138,196 @@ fn function_metrics(
         start_line,
         end_line,
         container_path,
+        visibility,
     })
+}
+
+fn visibility_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec, name: &str) -> Visibility {
+    match spec.visibility {
+        VisibilityStrategy::Unknown => Visibility::Unknown,
+        VisibilityStrategy::RustModifier => rust_visibility(node),
+        VisibilityStrategy::TsClassModifier => ts_visibility(node, src),
+        VisibilityStrategy::JavaModifier => java_visibility(node, src),
+        VisibilityStrategy::CppAccessSpecifier => cpp_visibility(node, src),
+        VisibilityStrategy::GoCapitalization => go_visibility(name),
+        VisibilityStrategy::PythonUnderscore => python_visibility(name),
+        VisibilityStrategy::CStatic => c_visibility(node, src),
+    }
+}
+
+fn rust_visibility(node: Node<'_>) -> Visibility {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "visibility_modifier" {
+            return Visibility::Public;
+        }
+    }
+    // Closures + items without `pub` → module-private.
+    if matches!(node.kind(), "function_item" | "function_signature_item") {
+        return Visibility::Private;
+    }
+    Visibility::Unknown
+}
+
+fn ts_visibility(node: Node<'_>, src: &[u8]) -> Visibility {
+    // Method inside a class: look for `accessibility_modifier` child.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "accessibility_modifier" {
+            if let Ok(text) = child.utf8_text(src) {
+                if text == "private" || text == "protected" {
+                    return Visibility::Private;
+                }
+                if text == "public" {
+                    return Visibility::Public;
+                }
+            }
+        }
+    }
+    // JS/TS class field/method names starting with `#` are hard-private.
+    if let Some(name_node) = node.child_by_field_name("name") {
+        if let Ok(text) = name_node.utf8_text(src) {
+            if text.starts_with('#') {
+                return Visibility::Private;
+            }
+        }
+    }
+    // If this method sits inside a class, default = public.
+    if has_ancestor_kind(
+        node,
+        &[
+            "class_declaration",
+            "abstract_class_declaration",
+            "class",
+        ],
+    ) {
+        return Visibility::Public;
+    }
+    // Top-level function: check whether an enclosing
+    // `export_statement` covers this declaration.
+    if has_ancestor_kind(node, &["export_statement"]) {
+        return Visibility::Public;
+    }
+    // Otherwise it's a non-exported top-level function (or arrow
+    // assigned to a const without export) → file-private.
+    Visibility::Private
+}
+
+fn java_visibility(node: Node<'_>, _src: &[u8]) -> Visibility {
+    // `modifiers` child (if any) groups every declaration modifier.
+    // Look up the literal `private` / `protected` / `public` keyword
+    // by walking that node's children.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "modifiers" {
+            let mut inner = child.walk();
+            for m in child.children(&mut inner) {
+                let kind = m.kind();
+                if kind == "private" || kind == "protected" {
+                    return Visibility::Private;
+                }
+                if kind == "public" {
+                    return Visibility::Public;
+                }
+            }
+        }
+    }
+    // Java default (package-private) — treat as Private since it's
+    // not generally callable from outside the package.
+    Visibility::Private
+}
+
+fn cpp_visibility(node: Node<'_>, src: &[u8]) -> Visibility {
+    // C++ function definitions outside any class are file/scope
+    // public (no class access spec applies).
+    let mut current = node.parent();
+    let mut class_kind: Option<&str> = None;
+    while let Some(parent) = current {
+        let kind = parent.kind();
+        if matches!(kind, "class_specifier" | "struct_specifier") {
+            class_kind = Some(kind);
+            break;
+        }
+        current = parent.parent();
+    }
+    let Some(class_kind) = class_kind else {
+        return Visibility::Public;
+    };
+    // Default visibility: private inside class, public inside struct.
+    let default_vis = if class_kind == "class_specifier" {
+        Visibility::Private
+    } else {
+        Visibility::Public
+    };
+    // Walk the class body looking for the most recent
+    // access_specifier preceding `node`.
+    let class_node = current.unwrap();
+    let body = class_node.child_by_field_name("body").unwrap_or(class_node);
+    let target_start = node.start_byte();
+    let mut cursor = body.walk();
+    let mut current_vis = default_vis;
+    for child in body.children(&mut cursor) {
+        if child.start_byte() > target_start {
+            break;
+        }
+        if child.kind() == "access_specifier" {
+            if let Ok(text) = child.utf8_text(src) {
+                let trimmed = text.trim_end_matches(':').trim();
+                current_vis = match trimmed {
+                    "public" => Visibility::Public,
+                    "private" => Visibility::Private,
+                    "protected" => Visibility::Private,
+                    _ => current_vis,
+                };
+            }
+        }
+    }
+    current_vis
+}
+
+fn go_visibility(name: &str) -> Visibility {
+    let first = name.chars().next();
+    match first {
+        Some(c) if c.is_uppercase() => Visibility::Public,
+        Some(c) if c.is_lowercase() => Visibility::Private,
+        _ => Visibility::Unknown,
+    }
+}
+
+fn python_visibility(name: &str) -> Visibility {
+    if name.starts_with('_') {
+        Visibility::Private
+    } else {
+        Visibility::Public
+    }
+}
+
+fn c_visibility(node: Node<'_>, src: &[u8]) -> Visibility {
+    // Look for a `storage_class_specifier` whose text is `static`
+    // among the function definition's children. Tree-sitter-c puts
+    // it directly on the function_definition node.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "storage_class_specifier" {
+            if let Ok(text) = child.utf8_text(src) {
+                if text == "static" {
+                    return Visibility::Private;
+                }
+            }
+        }
+    }
+    Visibility::Public
+}
+
+fn has_ancestor_kind(node: Node<'_>, kinds: &[&str]) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if kinds.contains(&parent.kind()) {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
 }
 
 /// Walk parents of `node` and collect outer-to-inner names of every
