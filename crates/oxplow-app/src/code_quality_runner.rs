@@ -213,7 +213,7 @@ fn blocks_to_findings(blocks: Vec<oxplow_code_dup::DuplicateBlock>) -> Vec<CodeQ
     let mut out = Vec::with_capacity(blocks.len() * 2);
     for b in blocks {
         let extra_a = format!(
-            r#"{{"peer":{{"path":{:?},"startLine":{},"endLine":{}}}}}"#,
+            r#"{{"peerPath":{:?},"peerStartLine":{},"peerEndLine":{}}}"#,
             b.b_path, b.b_start_line, b.b_end_line
         );
         out.push(CodeQualityFinding {
@@ -225,7 +225,7 @@ fn blocks_to_findings(blocks: Vec<oxplow_code_dup::DuplicateBlock>) -> Vec<CodeQ
             extra_json: Some(extra_a),
         });
         let extra_b = format!(
-            r#"{{"peer":{{"path":{:?},"startLine":{},"endLine":{}}}}}"#,
+            r#"{{"peerPath":{:?},"peerStartLine":{},"peerEndLine":{}}}"#,
             b.a_path, b.a_start_line, b.a_end_line
         );
         out.push(CodeQualityFinding {
@@ -307,6 +307,27 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             "expected at least one paired duplicate, got {:?}",
             findings
         );
+        // Each finding's extra_json must carry the peer side as flat
+        // keys (peerPath / peerStartLine / peerEndLine) — the panel
+        // renderer reads them directly off `extra` without unwrapping
+        // a nested object.
+        for f in &dups {
+            let raw = f.extra_json.as_deref().expect("extra_json present");
+            let parsed: serde_json::Value = serde_json::from_str(raw)
+                .expect("extra_json parses as JSON");
+            assert!(
+                parsed.get("peerPath").and_then(|v| v.as_str()).is_some(),
+                "expected peerPath in extra_json, got {raw}"
+            );
+            assert!(
+                parsed.get("peerStartLine").and_then(|v| v.as_i64()).is_some(),
+                "expected peerStartLine in extra_json, got {raw}"
+            );
+            assert!(
+                parsed.get("peerEndLine").and_then(|v| v.as_i64()).is_some(),
+                "expected peerEndLine in extra_json, got {raw}"
+            );
+        }
     }
 
     #[tokio::test]

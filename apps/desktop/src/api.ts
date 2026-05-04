@@ -1143,9 +1143,30 @@ export async function listCodeQualityFindings(input: {
   paths?: string[];
   scanId?: number;
 }): Promise<CodeQualityFindingRow[]> {
-  return unwrap(
+  const raw = unwrap(
     await commands.listCodeQualityFindings(input.scanId ?? 0),
-  ) as unknown as CodeQualityFindingRow[];
+  );
+  return raw.map((r) => ({
+    id: r.id,
+    scanId: r.scan_id,
+    path: r.path,
+    startLine: r.start_line,
+    endLine: r.end_line,
+    kind: r.kind as CodeQualityFindingKind,
+    metricValue: r.metric_value,
+    extra: r.extra_json ? safeParseJsonObject(r.extra_json) : null,
+  }));
+}
+
+function safeParseJsonObject(s: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === "object" && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listCodeQualityScans(input: {
