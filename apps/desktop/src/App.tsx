@@ -195,7 +195,17 @@ function readPersistedThreadPageTabs(): Record<string, TabRef[]> {
       const clean = refs.filter((r): r is TabRef =>
         !!r && typeof r === "object" && typeof (r as TabRef).id === "string" && typeof (r as TabRef).kind === "string",
       );
-      if (clean.length > 0) out[threadId] = clean;
+      // Dedupe by id at read time so any pre-existing corrupted
+      // state (the duplicate-git-dashboard bug) self-heals on
+      // next launch. First occurrence wins so order is preserved.
+      const seen = new Set<string>();
+      const deduped: TabRef[] = [];
+      for (const r of clean) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        deduped.push(r);
+      }
+      if (deduped.length > 0) out[threadId] = deduped;
     }
     return out;
   } catch (err) {
@@ -2343,16 +2353,38 @@ export function App() {
     const perThreadHistoryForBuilder = selectedThreadId ? threadPageHistory[selectedThreadId] ?? {} : {};
     const stripVisibleIds = new Set<string>(["agent"]);
     for (const slotRef of pageTabsForThread) stripVisibleIds.add(slotRef.id);
+    // Tab ids must be unique across the whole rendered list — they
+    // back React keys, the active-tab lookup, and the close-button
+    // handler. Duplicates make all three break: React warns about
+    // duplicate keys, only one of the rendered tabs becomes
+    // selectable, and the close button fires against an arbitrary
+    // matching record. Track ids globally so a back-stack entry
+    // that shares an id with another slot (or with its own slot's
+    // current ref, which can happen when the same ref appears in
+    // back+current after a malformed history transition) only
+    // contributes one tab to the render.
+    const renderedTabIds = new Set<string>(["agent"]);
     for (const slotRef of pageTabsForThread) {
       const histEntry = perThreadHistoryForBuilder[slotRef.id] ?? { back: [], forward: [], siblings: null };
       // back/forward are HistoryFrame[] (ref + siblings); we only
       // need the refs for the render pass — siblings are restored
       // by handleGoBack/Forward when the user actually navigates.
-      const slotStack = [
+      const rawSlotStack = [
         ...histEntry.back.map((f) => f.ref),
         slotRef,
         ...histEntry.forward.map((f) => f.ref),
       ];
+      // Per-slot dedup: if back/forward contains an entry with the
+      // same id as the slot's current ref (shouldn't happen in
+      // normal flow, but corrupted history can produce it), keep
+      // only the slot's current ref so we don't render two copies.
+      const seenInSlot = new Set<string>();
+      const slotStack: TabRef[] = [];
+      for (const r of rawSlotStack) {
+        if (seenInSlot.has(r.id)) continue;
+        seenInSlot.add(r.id);
+        slotStack.push(r);
+      }
       // Closures bind navigation to the SLOT's current ref id so that
       // when a back-stack page (still mounted, hidden) navigates, it
       // mutates the slot — same behavior as the visible page.
@@ -2374,6 +2406,11 @@ export function App() {
         navOpen(gitCommitRef(sha));
       };
       for (const ref of slotStack) {
+      // Global dedup across all slots — never push two tabs with
+      // the same id, even if multiple slots' stacks happen to
+      // contain it.
+      if (renderedTabIds.has(ref.id)) continue;
+      renderedTabIds.add(ref.id);
       if (ref.kind === "diff") {
         // Diff that arrived via in-tab navigation. Look up the
         // registered spec; skip if missing (the registration path is
