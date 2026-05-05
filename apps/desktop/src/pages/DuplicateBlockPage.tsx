@@ -45,15 +45,22 @@ export interface DuplicateBlockPageProps {
  * side-by-side.
  */
 /**
- * Shared scroll-sync bus. Each DuplicateSide registers its editor on
- * mount via `set(side, editor)` and unregisters on unmount. When one
- * side fires `onDidScrollChange`, it pushes its scrollTop to the
- * other; the `lock` flag prevents the mirrored setScrollTop from
- * looping back through the second side's listener.
+ * Shared scroll-sync bus. Mirrors scroll DELTA (not absolute
+ * scrollTop) between the two sides — the duplicate ranges live at
+ * different absolute Y offsets in their files, so absolute mirroring
+ * would jerk the peer to a position that doesn't correspond to its
+ * own duplicate range. Each side records the scrollTop at initial
+ * alignment as its anchor; subsequent scrolls propagate the delta
+ * from anchor to anchor. The `lock` flag breaks the otherwise
+ * infinite ping-pong.
  */
+interface ScrollSyncSide {
+  editor: any;
+  anchor: number;
+}
 interface ScrollSyncBus {
-  left: any;
-  right: any;
+  left: ScrollSyncSide | null;
+  right: ScrollSyncSide | null;
   lock: boolean;
 }
 
@@ -170,21 +177,23 @@ function DuplicateSide({
         scrollBeyondLastLine: false,
       });
       editorRef.current = editor;
-      syncRef.current[side] = editor;
-      // Mirror scroll position to the peer side. The bus's `lock`
-      // flag breaks the feedback loop: when we programmatically push
-      // scrollTop to the other editor, that editor's listener fires
-      // synchronously, sees the lock, and bails out instead of
-      // pushing the value back here.
+      syncRef.current[side] = { editor, anchor: 0 };
+      // Mirror scroll DELTA from this side's anchor to the peer's
+      // anchor. The duplicate ranges live at different absolute Y
+      // in their respective files, so naive absolute mirroring
+      // would jump the peer off its highlight.
       editor.onDidScrollChange((e: any) => {
         const bus = syncRef.current;
         if (bus.lock) return;
+        const self = bus[side];
         const peer = side === "left" ? bus.right : bus.left;
-        if (!peer) return;
+        if (!self || !peer) return;
+        const delta = e.scrollTop - self.anchor;
+        const target = Math.max(0, peer.anchor + delta);
         bus.lock = true;
         try {
-          peer.setScrollTop(e.scrollTop, 1 /* Immediate */);
-          peer.setScrollLeft(e.scrollLeft, 1);
+          peer.editor.setScrollTop(target, 1 /* Immediate */);
+          peer.editor.setScrollLeft(e.scrollLeft, 1);
         } finally {
           bus.lock = false;
         }
@@ -197,7 +206,7 @@ function DuplicateSide({
       const model = modelRef.current;
       editorRef.current = null;
       modelRef.current = null;
-      if (syncRef.current[side] === editor) {
+      if (syncRef.current[side]?.editor === editor) {
         syncRef.current[side] = null;
       }
       editor?.setModel(null);
@@ -240,18 +249,27 @@ function DuplicateSide({
           ],
         );
         // Pin the duplicate's start line at exactly PAD_LINES from
-        // the top of the viewport on both sides. revealLineNearTop()
-        // leaves padding to Monaco's discretion, so two sides with
-        // different content above the start line land at slightly
-        // different scroll offsets — visibly out of sync. Computing
-        // a deterministic scrollTop from the line number + a fixed
-        // line-height padding makes both editors land identically.
+        // the top of the viewport on each side. Each side computes
+        // its own deterministic scrollTop and records it as the
+        // scroll-sync anchor — subsequent user scrolls propagate
+        // delta-from-anchor to the peer, keeping the highlights at
+        // the same screen Y as the user scrolls.
         const PAD_LINES = 2;
         const lineHeight: number = editor.getOption(
           monaco.editor.EditorOption.lineHeight,
         );
         const top: number = editor.getTopForLineNumber(safeStart);
-        editor.setScrollTop(Math.max(0, top - lineHeight * PAD_LINES), 1 /* Immediate */);
+        const anchorTop = Math.max(0, top - lineHeight * PAD_LINES);
+        const bus = syncRef.current;
+        bus.lock = true;
+        try {
+          editor.setScrollTop(anchorTop, 1 /* Immediate */);
+        } finally {
+          bus.lock = false;
+        }
+        if (bus[side]) {
+          bus[side]!.anchor = anchorTop;
+        }
         editor.setPosition({ lineNumber: safeStart, column: 1 });
         setError(null);
       } catch (e) {
