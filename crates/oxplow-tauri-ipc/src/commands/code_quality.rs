@@ -3,7 +3,7 @@ use std::sync::Arc;
 use oxplow_app::code_quality_runner::{
     run_duplication_scan, run_duplication_scan_scoped, run_metrics_scan, RunOptions,
 };
-use oxplow_app::{CodeQualityScanPhase, OxplowEvent};
+use oxplow_app::{BackgroundTaskKind, CodeQualityScanPhase, OxplowEvent, StartInput};
 use oxplow_code_metrics::{analyze_file, FunctionMetrics, Visibility};
 use oxplow_db::{CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus};
 use oxplow_tree_source::{
@@ -231,6 +231,22 @@ pub async fn run_duplication_scan_at(
         scope: scope.clone(),
         phase: CodeQualityScanPhase::Started,
     });
+    // Surface to the StatusBar's BackgroundTaskIndicator so the user
+    // gets the standard "running" affordance while the scan runs.
+    let bg_label = match &tree_version {
+        TreeVersion::Disk => "Scanning duplicates (working tree)".to_string(),
+        TreeVersion::Ref { r#ref } => {
+            let short = if r#ref.len() > 12 { &r#ref[..7] } else { r#ref.as_str() };
+            format!("Scanning duplicates @{short}")
+        }
+        TreeVersion::Snapshot { id } => format!("Scanning duplicates @snapshot {id}"),
+    };
+    let bg_task = state.background_tasks.start(StartInput {
+        kind: BackgroundTaskKind::CodeQuality,
+        label: bg_label,
+        detail: Some(format!("scope: {scope}")),
+        progress: None,
+    });
 
     match run_duplication_scan_scoped(source, filter, None, None).await {
         Ok(findings) => {
@@ -263,6 +279,7 @@ pub async fn run_duplication_scan_at(
                 scope,
                 phase: CodeQualityScanPhase::Completed,
             });
+            state.background_tasks.complete(&bg_task.id, None);
             Ok(scan_id)
         }
         Err(e) => {
@@ -277,6 +294,9 @@ pub async fn run_duplication_scan_at(
                 scope,
                 phase: CodeQualityScanPhase::Failed,
             });
+            state
+                .background_tasks
+                .fail(&bg_task.id, e.to_string(), None);
             Err(IpcError::internal(e.to_string()))
         }
     }
