@@ -36,23 +36,22 @@ export function DuplicationCard({ duplication, scanVersion, onOpenFile }: Duplic
     <section data-testid="change-analysis-duplication" style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div style={header}>Duplication</div>
-        {!duplication.hasScan ? (
+        {!duplication.hasScan && !duplication.scanning ? (
           <button
             type="button"
             data-testid="change-analysis-duplication-refresh"
             onClick={() => void duplication.refresh()}
-            disabled={duplication.scanning}
             style={smallButton}
           >
-            {duplication.scanning ? "Scanning…" : "Scan for duplicates"}
+            Scan for duplicates
           </button>
         ) : null}
       </div>
       {!duplication.hasScan ? (
         <div style={muted}>
-          No duplication scan has run against {versionLabel} for these files. Click
-          “Scan” above to run one now — duplicate-block findings only show when the
-          scan's tree version matches what you're analyzing.
+          {duplication.scanning
+            ? `Scanning ${versionLabel} for duplicates… progress is shown in the status bar at the bottom.`
+            : `No duplication scan has run against ${versionLabel} for these files. Click “Scan for duplicates” above — duplicate-block findings only show when the scan's tree version matches what you're analyzing.`}
         </div>
       ) : dupes.length === 0 ? (
         <div style={muted}>
