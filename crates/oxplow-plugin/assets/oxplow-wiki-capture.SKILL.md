@@ -84,27 +84,59 @@ Files referenced: `src/foo.ts`, `src/bar/baz.ts`
 
 - Append entries with `## <date> — <focus>` headings.
 - Inline file references as **wikilinks** with workspace-relative
-  paths: `[[src/foo.ts]]`. The renderer turns these into clickable
-  links that open the file in an editor tab, and the watcher's parser
-  picks them up so the note shows backlinks and tracks freshness.
+  paths AND an explicit `@<version>`. The renderer turns these into
+  clickable links that open the file at the pinned version, and the
+  parser strips the version to keep backlinks-by-path working.
 - Backticks stay reserved for code-ish things (identifiers, types,
   shell commands, config keys) — `EditorPane`, `bun test`,
   `NODE_ENV`. If it's a path the reader should be able to click,
   use a wikilink, not backticks.
-- Wikilink target shapes:
-  - `[[src/foo.ts]]` — file
-  - `[[src/foo.ts:42]]` — file at line 42
-  - `[[src/foo.ts|the foo helper]]` — custom display text
-  - `[[dir:src/components]]` — directory (opens a directory page
-    listing the folder contents). The `dir:` prefix is the explicit
-    directory marker, mirroring `git:` for commits — no heuristic.
-    A trailing `/` on the path is tolerated (`[[dir:src/components/]]`)
-    but not required.
-  - `[[abc1234]]` or `[[git:abc1234]]` — git commit (SHA, 7-40 hex)
-  - `[[some-other-note]]` — link to another wiki page by slug
-- Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]]
-  calls `onDrop` after validating the target. See [[dir:src/ui/components]]
-  for the rest of that surface."
+
+### Required: every file wikilink declares a version
+
+A file wikilink is a snapshot of understanding. Without a version
+the link is implicitly "whatever's in the working tree right now,"
+which silently rots the moment that file changes. **Always pin a
+version**, picking explicitly between two cases:
+
+1. **Run `git status --porcelain <path>` first.** (Or, if you read
+   the file via Read this turn and saw it was committed cleanly,
+   you can skip the porcelain check — but err toward checking.)
+2. **If the path is clean** (no working-tree edits), use the
+   committed sha: `[[src/foo.ts@<HEAD-7-or-full>]]`. If you don't
+   know the sha, use the literal `@HEAD`: `[[src/foo.ts@HEAD]]`.
+   That pins the link to the commit that's checked out at note-write
+   time (resolves at click time).
+3. **If the path is modified, added, or untracked**, use
+   `[[src/foo.ts@disk]]`. This explicitly says "the working-tree
+   version when this note was written." The reader knows the link
+   is local-state-dependent.
+
+Bare `[[path]]` (no `@`) is forbidden in new wiki pages. Existing
+notes that use bare paths are tolerated (parser back-fills `@disk`
+for legacy compat) but shouldn't be propagated — when you append
+to an existing note, write your *new* lines with explicit versions.
+
+Wikilink target shapes:
+
+- `[[src/foo.ts@HEAD]]` — file at HEAD (use this for clean files)
+- `[[src/foo.ts@<sha>]]` — file at a specific commit
+- `[[src/foo.ts@<branch>]]` — file at the tip of a branch
+- `[[src/foo.ts@disk]]` — file as it sits on disk right now
+  (use this when the working tree differs from HEAD)
+- `[[src/foo.ts@disk:42]]` / `[[src/foo.ts@HEAD:42]]` — version + line
+- `[[src/foo.ts@disk|the foo helper]]` — custom display text
+- `[[dir:src/components]]` — directory (no version; directories are
+  navigation targets, not content snapshots)
+- `[[abc1234]]` or `[[git:abc1234]]` — git commit reference
+- `[[some-other-note]]` — link to another wiki page by slug
+
+Example: "The drag handler in
+[[src/ui/components/Tabs.tsx@disk:88]] calls `onDrop` after
+validating the target — currently being modified in this thread,
+so we pin to `@disk` until it lands. The committed entry point
+[[src/ui/index.tsx@HEAD]] is unchanged. See
+[[dir:src/ui/components]] for the rest of that surface."
 
 ## Write mechanics
 

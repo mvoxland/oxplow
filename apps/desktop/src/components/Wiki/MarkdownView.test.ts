@@ -37,11 +37,44 @@ test("parseMarkdownLink: internal that resolves to empty slug", () => {
 });
 
 test("parseMarkdownLink: file: scheme with plain path", () => {
-  expect(parseMarkdownLink("file:src/foo.ts")).toEqual({ kind: "file", path: "src/foo.ts" });
+  expect(parseMarkdownLink("file:src/foo.ts")).toEqual({ kind: "file", path: "src/foo.ts", version: null });
 });
 
 test("parseMarkdownLink: file: scheme with line suffix", () => {
-  expect(parseMarkdownLink("file:src/foo.ts:42")).toEqual({ kind: "file", path: "src/foo.ts", line: 42 });
+  expect(parseMarkdownLink("file:src/foo.ts:42")).toEqual({ kind: "file", path: "src/foo.ts", line: 42, version: null });
+});
+
+test("parseMarkdownLink: file: scheme with @disk version", () => {
+  expect(parseMarkdownLink("file:src/foo.ts@disk")).toEqual({
+    kind: "file",
+    path: "src/foo.ts",
+    version: { kind: "disk" },
+  });
+});
+
+test("parseMarkdownLink: file: scheme with @<sha> version", () => {
+  expect(parseMarkdownLink("file:src/foo.ts@abc1234")).toEqual({
+    kind: "file",
+    path: "src/foo.ts",
+    version: { kind: "ref", ref: "abc1234" },
+  });
+});
+
+test("parseMarkdownLink: file: scheme with @HEAD version + line", () => {
+  expect(parseMarkdownLink("file:src/foo.ts@HEAD:42")).toEqual({
+    kind: "file",
+    path: "src/foo.ts",
+    line: 42,
+    version: { kind: "ref", ref: "HEAD" },
+  });
+});
+
+test("parseMarkdownLink: file: scheme with @local alias", () => {
+  expect(parseMarkdownLink("file:src/foo.ts@local")).toEqual({
+    kind: "file",
+    path: "src/foo.ts",
+    version: { kind: "disk" },
+  });
 });
 
 test("parseMarkdownLink: file: scheme with empty target", () => {
@@ -56,6 +89,15 @@ test("preprocessWikilinks: rewrites file path target to file: link", () => {
 test("preprocessWikilinks: file path with line suffix", () => {
   expect(preprocessWikilinks("see [[src/foo.ts:88]]"))
     .toBe("see [src/foo.ts:88](file:src/foo.ts:88)");
+});
+
+test("preprocessWikilinks: file path with @version is preserved verbatim", () => {
+  // The version segment passes through to the file: URL; the click
+  // handler decodes it back into a FileVersion via parseMarkdownLink.
+  expect(preprocessWikilinks("see [[src/foo.ts@HEAD]]"))
+    .toBe("see [src/foo.ts@HEAD](file:src/foo.ts@HEAD)");
+  expect(preprocessWikilinks("see [[src/foo.ts@disk:42]]"))
+    .toBe("see [src/foo.ts@disk:42](file:src/foo.ts@disk:42)");
 });
 
 test("preprocessWikilinks: |display syntax", () => {
