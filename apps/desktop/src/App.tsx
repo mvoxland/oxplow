@@ -2481,7 +2481,9 @@ export function App() {
               stream={stream}
               payload={payload}
               visible={effectiveCenterActive === ref.id}
-              onJumpToSource={(p) => navOpenFile(p)}
+              onJumpToSource={(p, v) => {
+                handleNavigateInTab(slotRef.id, fileRef(p, v));
+              }}
             />
           ) : null,
         });
