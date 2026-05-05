@@ -33,6 +33,25 @@ export function diffRef(payload: DiffPayload): TabRef {
   return { id: `diff:${key}`, kind: "diff", payload };
 }
 
+export interface DuplicateBlockPayload {
+  leftPath: string;
+  leftStart: number;
+  leftEnd: number;
+  rightPath: string;
+  rightStart: number;
+  rightEnd: number;
+}
+
+/**
+ * Side-by-side view of a duplicate-block finding. Both ranges are
+ * loaded from the workspace and highlighted; the editors are scrolled
+ * so the two start lines line up at the top of the viewport.
+ */
+export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
+  const id = `dup:${payload.leftPath}:${payload.leftStart}-${payload.leftEnd}::${payload.rightPath}:${payload.rightStart}-${payload.rightEnd}`;
+  return { id, kind: "duplicate-block", payload };
+}
+
 export function wikiPageRef(slug: string): TabRef {
   return { id: `note:${slug}`, kind: "note", payload: { slug } };
 }

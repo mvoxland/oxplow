@@ -86,6 +86,7 @@ import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { DiffPage } from "./pages/DiffPage.js";
+import { DuplicateBlockPage } from "./pages/DuplicateBlockPage.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
@@ -2349,6 +2350,26 @@ export function App() {
                 // slot's ref while keeping the diff in the back stack.
                 navOpenFile(p);
               }}
+            />
+          ) : null,
+        });
+        continue;
+      }
+      if (ref.kind === "duplicate-block") {
+        const payload = ref.payload as import("./tabs/pageRefs.js").DuplicateBlockPayload | null;
+        if (!payload) continue;
+        const leftBase = payload.leftPath.split("/").pop() ?? payload.leftPath;
+        const rightBase = payload.rightPath.split("/").pop() ?? payload.rightPath;
+        tabs.push({
+          id: ref.id,
+          label: `${leftBase} ↔ ${rightBase}`,
+          closable: true,
+          render: () => stream ? (
+            <DuplicateBlockPage
+              stream={stream}
+              payload={payload}
+              visible={effectiveCenterActive === ref.id}
+              onJumpToSource={(p) => navOpenFile(p)}
             />
           ) : null,
         });
