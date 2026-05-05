@@ -77,9 +77,11 @@ loader. Files in unsupported languages are silently skipped.
    largest matching subtree between them — so a whole-function
    clone subsumes the inner-loop and inner-branch matches that
    would otherwise pile up.
-4. Filter by `min_lines` (default 10) and `min_nodes` (default
-   30 AST nodes — small enough that a real extracted helper still
-   surfaces, large enough that 5-line idioms don't).
+4. Filter by `min_lines` (default 5) and `min_nodes` (default 30
+   AST nodes). The line floor is aggressive on purpose — function-
+   anchoring + the node-count floor already filter top-level
+   boilerplate and trivial expression subtrees, so the line floor
+   doesn't have to do that work too.
 
 Output is two `duplicate-block` findings per pair (one per side)
 with `extra.peerPath` / `extra.peerStartLine` / `extra.peerEndLine`
