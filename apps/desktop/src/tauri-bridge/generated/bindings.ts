@@ -254,16 +254,21 @@ export const commands = {
 	 */
 	runCodeQualityScan: (tool: string, scope: string, files: string[] | null) => typedError<number, IpcError>(__TAURI_INVOKE("run_code_quality_scan", { tool, scope, files })),
 	/**
-	 *  Run a duplicate-block scan against `tree_version`, restricted to
-	 *  the corpus described by `file_filter`. Persists the scan row with
-	 *  the version + filter columns so [`find_latest_done_scan`] can pick
-	 *  it up on the next page load. Returns the scan id.
+	 *  Run a duplicate-block scan against `tree_version`, scoped by
+	 *  `file_filter`. The corpus is the WHOLE tree at the requested
+	 *  version — `file_filter` defines which files findings are
+	 *  anchored to (the renderer's "side A"). A copy-paste from an
+	 *  unchanged peer file surfaces because that peer is in the corpus
+	 *  even though it's outside scope. Same-path matches (a file vs
+	 *  itself) are dropped. Persists the scan row with the version +
+	 *  filter columns so [`find_latest_done_scan`] can pick it up on
+	 *  the next page load. Returns the scan id.
 	 * 
 	 *  The renderer wires this to the "Scan now" button on the
-	 *  duplication card. There is intentionally no auto-trigger: scanning
-	 *  a commit's tree with libgit2 + tree-sitter is slow on a large
-	 *  repo, so we keep it user-initiated until that becomes interactive
-	 *  enough to make implicit.
+	 *  duplication card. There is intentionally no auto-trigger:
+	 *  scanning a commit's tree with libgit2 + tree-sitter is slow on a
+	 *  large repo, so we keep it user-initiated until that becomes
+	 *  interactive enough to make implicit.
 	 */
 	runDuplicationScanAt: (treeVersion: TreeVersion, fileFilter: FileFilterSpec, scope: string) => typedError<number, IpcError>(__TAURI_INVOKE("run_duplication_scan_at", { treeVersion, fileFilter, scope })),
 	/**
@@ -578,10 +583,30 @@ export type AnalyzeFileSpec = {
 	path: string,
 	base_content: string | null,
 	head_content: string | null,
+	/**
+	 *  Optional unified diff (`git diff base -- path`) for per-
+	 *  function churn attribution. When present, the result's
+	 *  `churn` array gets a row for this file with added /
+	 *  deleted / modified line counts attributed back to head-side
+	 *  functions. When absent, no churn entry is produced.
+	 */
+	unified_diff?: string | null,
 };
 
 export type AnalyzeFunctionsResult = {
 	sides: AnalyzedFileSide[],
+	/**
+	 *  One entry per `AnalyzeFileSpec` whose `unified_diff` was
+	 *  non-empty. Files without a diff supplied are omitted.
+	 */
+	churn?: AnalyzedFileChurn[],
+};
+
+export type AnalyzedFileChurn = {
+	path: string,
+	file_added: number,
+	file_deleted: number,
+	functions: AnalyzedFunctionChurn[],
 };
 
 export type AnalyzedFileSide = {
@@ -613,6 +638,15 @@ export type AnalyzedFunction = {
 	 *  Serialized as `"public"` / `"private"` / `"unknown"`.
 	 */
 	visibility: string,
+};
+
+export type AnalyzedFunctionChurn = {
+	name: string,
+	container_path: string[],
+	start_line_head: number,
+	added_lines: number,
+	deleted_lines: number,
+	modified_lines: number,
 };
 
 export type AppVersion = {

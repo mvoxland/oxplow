@@ -329,6 +329,13 @@ pub struct AnalyzeFileSpec {
     pub path: String,
     pub base_content: Option<String>,
     pub head_content: Option<String>,
+    /// Optional unified diff (`git diff base -- path`) for per-
+    /// function churn attribution. When present, the result's
+    /// `churn` array gets a row for this file with added /
+    /// deleted / modified line counts attributed back to head-side
+    /// functions. When absent, no churn entry is produced.
+    #[serde(default)]
+    pub unified_diff: Option<String>,
 }
 
 /// Function metadata for one (path, side) pair.
@@ -361,8 +368,30 @@ pub struct AnalyzedFileSide {
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
+pub struct AnalyzedFunctionChurn {
+    pub name: String,
+    pub container_path: Vec<String>,
+    pub start_line_head: u32,
+    pub added_lines: u32,
+    pub deleted_lines: u32,
+    pub modified_lines: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct AnalyzedFileChurn {
+    pub path: String,
+    pub file_added: u32,
+    pub file_deleted: u32,
+    pub functions: Vec<AnalyzedFunctionChurn>,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzeFunctionsResult {
     pub sides: Vec<AnalyzedFileSide>,
+    /// One entry per `AnalyzeFileSpec` whose `unified_diff` was
+    /// non-empty. Files without a diff supplied are omitted.
+    #[serde(default)]
+    pub churn: Vec<AnalyzedFileChurn>,
 }
 
 /// Compute per-function metadata for the Change Analysis dashboard,
@@ -374,34 +403,76 @@ pub async fn analyze_functions_at_refs(
     files: Vec<AnalyzeFileSpec>,
 ) -> Result<AnalyzeFunctionsResult, IpcError> {
     if files.is_empty() {
-        return Ok(AnalyzeFunctionsResult { sides: Vec::new() });
+        return Ok(AnalyzeFunctionsResult {
+            sides: Vec::new(),
+            churn: Vec::new(),
+        });
     }
-    let sides = tokio::task::spawn_blocking(move || analyze_sides(files))
+    let result = tokio::task::spawn_blocking(move || analyze_files(files))
         .await
         .map_err(|e| IpcError::internal(format!("analyze task: {e}")))?;
-    Ok(AnalyzeFunctionsResult { sides })
+    Ok(result)
 }
 
-fn analyze_sides(files: Vec<AnalyzeFileSpec>) -> Vec<AnalyzedFileSide> {
-    let mut out = Vec::new();
+fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
+    let mut sides: Vec<AnalyzedFileSide> = Vec::new();
+    let mut churn: Vec<AnalyzedFileChurn> = Vec::new();
     for spec in files {
-        if let Some(content) = spec.base_content.as_deref() {
-            out.push(AnalyzedFileSide {
+        // Run analyze_file once per side (working metrics for churn
+        // attribution — we don't want to re-parse).
+        let base_metrics = spec
+            .base_content
+            .as_deref()
+            .map(|c| analyze_file(&spec.path, c))
+            .unwrap_or_default();
+        let head_metrics = spec
+            .head_content
+            .as_deref()
+            .map(|c| analyze_file(&spec.path, c))
+            .unwrap_or_default();
+
+        if spec.base_content.is_some() {
+            sides.push(AnalyzedFileSide {
                 path: spec.path.clone(),
                 side: "base".into(),
-                functions: to_analyzed(analyze_file(&spec.path, content)),
+                functions: to_analyzed(base_metrics.clone()),
             });
         }
-        if let Some(content) = spec.head_content.as_deref() {
-            out.push(AnalyzedFileSide {
+        if spec.head_content.is_some() {
+            sides.push(AnalyzedFileSide {
                 path: spec.path.clone(),
                 side: "head".into(),
-                functions: to_analyzed(analyze_file(&spec.path, content)),
+                functions: to_analyzed(head_metrics.clone()),
             });
         }
+
+        if let Some(diff) = spec.unified_diff.as_deref() {
+            if !diff.is_empty() {
+                let fc =
+                    crate::commands::churn::compute_file_churn(&spec.path, &base_metrics, &head_metrics, diff);
+                churn.push(AnalyzedFileChurn {
+                    path: fc.path,
+                    file_added: fc.file_added,
+                    file_deleted: fc.file_deleted,
+                    functions: fc
+                        .functions
+                        .into_iter()
+                        .map(|f| AnalyzedFunctionChurn {
+                            name: f.name,
+                            container_path: f.container_path,
+                            start_line_head: f.start_line_head,
+                            added_lines: f.added_lines,
+                            deleted_lines: f.deleted_lines,
+                            modified_lines: f.modified_lines,
+                        })
+                        .collect(),
+                });
+            }
+        }
     }
-    out.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.side.cmp(&b.side)));
-    out
+    sides.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.side.cmp(&b.side)));
+    churn.sort_by(|a, b| a.path.cmp(&b.path));
+    AnalyzeFunctionsResult { sides, churn }
 }
 
 fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
@@ -438,6 +509,7 @@ mod tests {
             head_content: Some(
                 "fn a() { if true { 1; } }".into(),
             ),
+            unified_diff: None,
         }];
         let result = analyze_functions_at_refs(files).await.unwrap();
         assert_eq!(result.sides.len(), 2);
@@ -456,6 +528,7 @@ mod tests {
             path: "src/new.py".into(),
             base_content: None,
             head_content: Some("def f(x):\n    return x\n".into()),
+            unified_diff: None,
         }];
         let result = analyze_functions_at_refs(files).await.unwrap();
         assert_eq!(result.sides.len(), 1);
@@ -468,6 +541,7 @@ mod tests {
             path: "README.md".into(),
             base_content: Some("# old".into()),
             head_content: Some("# new".into()),
+            unified_diff: None,
         }];
         let result = analyze_functions_at_refs(files).await.unwrap();
         // We still emit empty sides so the caller can see "we looked".
