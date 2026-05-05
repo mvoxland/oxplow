@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
+import { DISK } from "../../file-version.js";
 import {
   getSnapshotPairDiff,
   getSnapshotSummary,
@@ -110,8 +111,9 @@ export function SnapshotDetailSlideover({
         : `initial → ${snapshotId.slice(-6)}`;
       onOpenDiff({
         path,
-        leftRef: "",
-        rightKind: "working",
+        // Inline-content diff; the version is unused by the loader.
+        leftVersion: DISK,
+        rightVersion: DISK,
         baseLabel: label,
         leftContent: renderDiffSide(result.before, result.beforeState),
         rightContent: renderDiffSide(result.after, result.afterState),

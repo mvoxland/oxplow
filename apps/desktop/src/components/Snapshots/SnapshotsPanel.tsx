@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
+import { DISK } from "../../file-version.js";
 import {
   getEffortFiles,
   getSnapshotPairDiff,
@@ -221,8 +222,10 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
         : `initial → ${selectedId.slice(-6)}`;
       onOpenDiff({
         path,
-        leftRef: "",
-        rightKind: "working",
+        // Inline content paths bypass the version dispatcher; DISK is
+        // a satisfy-the-shape sentinel.
+        leftVersion: DISK,
+        rightVersion: DISK,
         baseLabel: label,
         leftContent: renderDiffSide(result.before, result.beforeState),
         rightContent: renderDiffSide(result.after, result.afterState),

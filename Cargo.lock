@@ -2833,6 +2833,7 @@ dependencies = [
  "oxplow-runtime",
  "oxplow-session",
  "oxplow-tmux",
+ "oxplow-tree-source",
  "parking_lot",
  "serde",
  "serde_json",
@@ -3126,6 +3127,7 @@ dependencies = [
  "oxplow-git",
  "oxplow-plugin",
  "oxplow-session",
+ "oxplow-tree-source",
  "serde",
  "serde_json",
  "specta",
@@ -3152,6 +3154,18 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "oxplow-tree-source"
+version = "0.3.0"
+dependencies = [
+ "git2",
+ "serde",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.18",
+ "walkdir",
 ]
 
 [[package]]

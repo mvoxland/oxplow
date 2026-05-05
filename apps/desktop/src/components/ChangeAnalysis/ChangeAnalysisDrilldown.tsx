@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { ChangeAnalysisScope, ChangeAnalysisTarget } from "../../tabs/pageRefs.js";
 import type { ChangeAnalysisState } from "./useChangeAnalysis.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
+import { DISK, refVersion, type FileVersion } from "../../file-version.js";
 import { SummaryCard } from "./SummaryCard.js";
 import { FunctionsCard } from "./FunctionsCard.js";
 import { DuplicationCard } from "./DuplicationCard.js";
@@ -105,11 +106,11 @@ export function ChangeAnalysisDrilldown({
       return;
     }
     const { baseRef, headRef } = analysis.refs;
-    const rightKind: DiffSpec["rightKind"] = headRef ? { ref: headRef } : "working";
+    const rightVersion: FileVersion = headRef ? refVersion(headRef) : DISK;
     const spec: DiffSpec = {
       path,
-      leftRef: baseRef,
-      rightKind,
+      leftVersion: refVersion(baseRef),
+      rightVersion,
       baseLabel: target === "working" ? "working tree" : `parent of ${target.toString().slice(0, 7)}`,
       revealLine: line,
     };
@@ -117,6 +118,13 @@ export function ChangeAnalysisDrilldown({
     else if (onOpenDiff) onOpenDiff(spec);
     else onOpenFile(path);
   };
+
+  // The duplication card needs to know which tree version the scan
+  // ran against so it can stamp every duplicate-block ref with that
+  // version (the side-by-side viewer reads file content at this
+  // version). For working-tree analysis it's `disk`; for a commit it
+  // matches the analyzed commit's tree.
+  const scanVersion: FileVersion = target === "working" ? DISK : refVersion(target);
 
   return (
     <>
@@ -178,7 +186,7 @@ export function ChangeAnalysisDrilldown({
         )}
       </section>
 
-      <DuplicationCard duplication={dupAfterStatus} onOpenFile={onOpenFile} />
+      <DuplicationCard duplication={dupAfterStatus} scanVersion={scanVersion} onOpenFile={onOpenFile} />
       <TestsCard tests={testsAfterStatus} onOpenFile={onOpenFile} />
     </>
   );

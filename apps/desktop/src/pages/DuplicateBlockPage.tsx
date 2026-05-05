@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
-import { readWorkspaceFile, type Stream } from "../api.js";
+import { readFile, type Stream } from "../api.js";
 import { languageForPath } from "../editor-language.js";
+import type { FileVersion } from "../file-version.js";
 import type { DuplicateBlockPayload } from "../tabs/pageRefs.js";
 
 const HIGHLIGHT_STYLE_ID = "oxplow-duplicate-block-style";
@@ -75,6 +76,7 @@ export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }:
           <DuplicateSide
             stream={stream}
             path={payload.leftPath}
+            version={payload.leftVersion}
             startLine={payload.leftStart}
             endLine={payload.leftEnd}
             onJumpToSource={onJumpToSource}
@@ -83,6 +85,7 @@ export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }:
           <DuplicateSide
             stream={stream}
             path={payload.rightPath}
+            version={payload.rightVersion}
             startLine={payload.rightStart}
             endLine={payload.rightEnd}
             onJumpToSource={onJumpToSource}
@@ -96,12 +99,13 @@ export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }:
 interface SideProps {
   stream: Stream;
   path: string;
+  version: FileVersion;
   startLine: number;
   endLine: number;
   onJumpToSource(path: string): void;
 }
 
-function DuplicateSide({ stream, path, startLine, endLine, onJumpToSource }: SideProps) {
+function DuplicateSide({ stream, path, version, startLine, endLine, onJumpToSource }: SideProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
@@ -144,13 +148,13 @@ function DuplicateSide({ stream, path, startLine, endLine, onJumpToSource }: Sid
     let cancelled = false;
     (async () => {
       try {
-        const file = await readWorkspaceFile(stream.id, path);
+        const content = await readFile(stream.id, path, version);
         if (cancelled) return;
         const monaco = monacoRef.current;
         const editor = editorRef.current;
         if (!monaco || !editor) return;
         const language = languageForPath(path) ?? "plaintext";
-        const model = monaco.editor.createModel(file.content ?? "", language);
+        const model = monaco.editor.createModel(content ?? "", language);
         const previous = modelRef.current;
         editor.setModel(model);
         modelRef.current = model;
@@ -183,7 +187,16 @@ function DuplicateSide({ stream, path, startLine, endLine, onJumpToSource }: Sid
     return () => {
       cancelled = true;
     };
-  }, [editorReady, stream.id, path, startLine, endLine]);
+  }, [
+    editorReady,
+    stream.id,
+    path,
+    version.kind,
+    version.kind === "ref" ? version.ref : null,
+    version.kind === "snapshot" ? version.id : null,
+    startLine,
+    endLine,
+  ]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>

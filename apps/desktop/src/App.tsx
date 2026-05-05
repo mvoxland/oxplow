@@ -131,6 +131,7 @@ import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { deriveDefaultLabel, NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
+import { DISK } from "./file-version.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { getCommandIdForShortcut } from "./keybindings.js";
@@ -276,11 +277,44 @@ function readPersistedDiffSpecs(): Array<{ id: string; spec: DiffSpec }> {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry): entry is { id: string; spec: DiffSpec } =>
-      !!entry && typeof entry === "object" &&
-      typeof (entry as { id?: unknown }).id === "string" &&
-      !!(entry as { spec?: unknown }).spec,
-    );
+    const out: Array<{ id: string; spec: DiffSpec }> = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== "object") continue;
+      const id = (entry as { id?: unknown }).id;
+      const rawSpec = (entry as { spec?: unknown }).spec;
+      if (typeof id !== "string" || !rawSpec || typeof rawSpec !== "object") continue;
+      const s = rawSpec as Record<string, unknown>;
+      // Coerce pre-versioning persisted specs (leftRef + rightKind)
+      // into the new (leftVersion, rightVersion) shape. Existing
+      // tabs survive a restart without losing their target.
+      let leftVersion = (s.leftVersion ?? null) as DiffSpec["leftVersion"] | null;
+      let rightVersion = (s.rightVersion ?? null) as DiffSpec["rightVersion"] | null;
+      if (!leftVersion) {
+        const lr = typeof s.leftRef === "string" ? s.leftRef : null;
+        leftVersion = lr ? { kind: "ref", ref: lr } : { kind: "disk" };
+      }
+      if (!rightVersion) {
+        const rk = s.rightKind;
+        if (rk === "working") rightVersion = { kind: "disk" };
+        else if (rk && typeof rk === "object" && typeof (rk as { ref?: unknown }).ref === "string") {
+          rightVersion = { kind: "ref", ref: (rk as { ref: string }).ref };
+        } else {
+          rightVersion = { kind: "disk" };
+        }
+      }
+      out.push({
+        id,
+        spec: {
+          path: typeof s.path === "string" ? s.path : "",
+          leftVersion,
+          rightVersion,
+          baseLabel: typeof s.baseLabel === "string" ? s.baseLabel : "",
+          labelOverride: typeof s.labelOverride === "string" ? s.labelOverride : undefined,
+          revealLine: typeof s.revealLine === "number" ? s.revealLine : undefined,
+        },
+      });
+    }
+    return out;
   } catch (err) {
     logUi("warn", "failed to parse persisted diff specs", { error: String(err) });
     return [];
@@ -1661,9 +1695,20 @@ export function App() {
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
   const computeDiffId = (request: DiffSpec): string => {
-    const rightKey = request.rightKind === "working" ? "working" : `ref:${request.rightKind.ref}`;
+    const left =
+      request.leftVersion.kind === "disk"
+        ? "disk"
+        : request.leftVersion.kind === "ref"
+          ? `ref:${request.leftVersion.ref}`
+          : `snap:${request.leftVersion.id}`;
+    const right =
+      request.rightVersion.kind === "disk"
+        ? "disk"
+        : request.rightVersion.kind === "ref"
+          ? `ref:${request.rightVersion.ref}`
+          : `snap:${request.rightVersion.id}`;
     const labelKey = request.labelOverride ? `:${request.labelOverride}` : "";
-    return `diff:${request.leftRef}:${rightKey}:${request.path}${labelKey}`;
+    return `diff:${left}:${right}:${request.path}${labelKey}`;
   };
 
   const handleOpenDiff = (request: DiffSpec) => {
@@ -1687,8 +1732,8 @@ export function App() {
         kind: "diff",
         payload: {
           path: request.path,
-          fromRef: request.leftRef,
-          toRef: request.rightKind === "working" ? null : request.rightKind.ref,
+          leftVersion: request.leftVersion,
+          rightVersion: request.rightVersion,
           labelOverride: request.labelOverride ?? null,
         },
       };
@@ -1716,8 +1761,13 @@ export function App() {
     const ts = Date.now();
     const spec: DiffSpec = {
       path,
-      leftRef: "",
-      rightKind: "working",
+      // The compare-with-clipboard view never reads either side from
+      // disk/git — the inline `leftContent` / `rightContent` literals
+      // bypass the version dispatcher entirely. We still need to
+      // satisfy the `FileVersion` shape; DISK is a harmless sentinel
+      // here.
+      leftVersion: DISK,
+      rightVersion: DISK,
       baseLabel: "clipboard",
       leftContent: selection,
       rightContent: clipboard,
@@ -2071,8 +2121,8 @@ export function App() {
       kind: "diff",
       payload: {
         path: spec.path,
-        fromRef: spec.leftRef,
-        toRef: spec.rightKind === "working" ? null : spec.rightKind.ref,
+        leftVersion: spec.leftVersion,
+        rightVersion: spec.rightVersion,
         labelOverride: spec.labelOverride ?? null,
       },
     };

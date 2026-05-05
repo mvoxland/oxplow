@@ -4,13 +4,30 @@
  */
 
 import type { TabRef } from "./tabState.js";
+import { DISK, type FileVersion, versionIdFragment } from "../file-version.js";
 
 export function agentRef(): TabRef {
   return { id: "agent", kind: "agent", payload: null };
 }
 
-export function fileRef(path: string): TabRef {
-  return { id: `file:${path}`, kind: "file", payload: { path } };
+/**
+ * Construct a file-tab ref. `version` is required: callers MUST
+ * declare which version of the tree they want to view, even if the
+ * answer is `DISK` (the working tree). This rule exists because the
+ * "implicit working tree" assumption is what made the duplication
+ * scan show stale, mismatched line ranges in commit-target analysis.
+ *
+ * Disk-version files use the legacy `file:<path>` id so existing
+ * persistence and history continue to land on the same tab; non-disk
+ * versions get a `:@<version>` suffix so a working-tree view and a
+ * historical view of the same path are distinct tabs.
+ */
+export function fileRef(path: string, version: FileVersion = DISK): TabRef {
+  const id =
+    version.kind === "disk"
+      ? `file:${path}`
+      : `file:${path}:@${versionIdFragment(version)}`;
+  return { id, kind: "file", payload: { path, version } };
 }
 
 export function directoryRef(path: string): TabRef {
@@ -37,18 +54,27 @@ export interface DuplicateBlockPayload {
   leftPath: string;
   leftStart: number;
   leftEnd: number;
+  /** Tree version the LEFT side was scanned against. The page reads
+   *  file content at this version so highlighted line ranges match
+   *  the displayed text — never silently substitutes the working
+   *  tree. */
+  leftVersion: FileVersion;
   rightPath: string;
   rightStart: number;
   rightEnd: number;
+  rightVersion: FileVersion;
 }
 
 /**
  * Side-by-side view of a duplicate-block finding. Both ranges are
- * loaded from the workspace and highlighted; the editors are scrolled
- * so the two start lines line up at the top of the viewport.
+ * loaded at the version the scan ran against and highlighted; the
+ * editors are scrolled so the two start lines line up at the top of
+ * the viewport.
  */
 export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
-  const id = `dup:${payload.leftPath}:${payload.leftStart}-${payload.leftEnd}::${payload.rightPath}:${payload.rightStart}-${payload.rightEnd}`;
+  const lv = versionIdFragment(payload.leftVersion);
+  const rv = versionIdFragment(payload.rightVersion);
+  const id = `dup:${payload.leftPath}:${payload.leftStart}-${payload.leftEnd}@${lv}::${payload.rightPath}:${payload.rightStart}-${payload.rightEnd}@${rv}`;
   return { id, kind: "duplicate-block", payload };
 }
 
