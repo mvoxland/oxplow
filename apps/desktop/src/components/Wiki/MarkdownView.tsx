@@ -19,6 +19,7 @@ import { Kebab } from "../Kebab.js";
 import type { MenuItem } from "../../menu.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
+import { DISK, type FileVersion } from "../../file-version.js";
 
 // Mermaid is loaded lazily so this module is safe to import in
 // non-DOM test environments (parseMarkdownLink is the main reason
@@ -133,7 +134,16 @@ export type ParsedLink =
   | { kind: "anchor" }
   | { kind: "external" }
   | { kind: "internal"; slug: string }
-  | { kind: "file"; path: string; line?: number }
+  | {
+      kind: "file";
+      path: string;
+      line?: number;
+      /** Tree version the wikilink pinned. `null` means the wikilink
+       *  was bare (`[[path]]`) — host falls back to `DISK` (working
+       *  tree) for back-compat. Non-null carries the author's intent
+       *  exactly. */
+      version: import("../../file-version.js").FileVersion | null;
+    }
   | { kind: "directory"; path: string }
   | { kind: "git-commit"; sha: string };
 
@@ -165,11 +175,40 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
   if (rawHref.startsWith("file:")) {
     const raw = rawHref.slice("file:".length);
     if (!raw) return { kind: "empty" };
-    const lineMatch = raw.match(/^(.+?):(\d+)$/);
-    if (lineMatch) {
-      return { kind: "file", path: lineMatch[1]!, line: Number(lineMatch[2]) };
+    // The preprocessed href shape is `file:<path>[@<version>][:<line>]`.
+    // Pull the version off first since it can contain hex / branch
+    // names that the line regex would mishandle.
+    let body = raw;
+    let version: import("../../file-version.js").FileVersion | null = null;
+    const atIdx = body.indexOf("@");
+    if (atIdx > 0) {
+      const versionPart = body.slice(atIdx + 1);
+      body = body.slice(0, atIdx);
+      // Version may have a trailing `:<line>` anchor.
+      const colonIdx = versionPart.lastIndexOf(":");
+      let versionToken = versionPart;
+      let trailingLine: string | null = null;
+      if (colonIdx >= 0) {
+        const maybeLine = versionPart.slice(colonIdx + 1);
+        if (/^\d+$/.test(maybeLine)) {
+          versionToken = versionPart.slice(0, colonIdx);
+          trailingLine = maybeLine;
+        }
+      }
+      if (versionToken.toLowerCase() === "disk" || versionToken.toLowerCase() === "local") {
+        version = { kind: "disk" };
+      } else if (versionToken) {
+        version = { kind: "ref", ref: versionToken };
+      }
+      if (trailingLine != null) {
+        body = `${body}:${trailingLine}`;
+      }
     }
-    return { kind: "file", path: raw };
+    const lineMatch = body.match(/^(.+?):(\d+)$/);
+    if (lineMatch) {
+      return { kind: "file", path: lineMatch[1]!, line: Number(lineMatch[2]), version };
+    }
+    return { kind: "file", path: body, version };
   }
   if (rawHref.startsWith("dir:")) {
     const raw = rawHref.slice("dir:".length).replace(/\/+$/, "");
@@ -193,11 +232,16 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
  * extension; bare slugs like `architecture` are routed to wiki navigation.
  */
 function looksLikeFilePath(target: string): boolean {
-  if (target.includes("/")) return true;
+  // Strip a trailing `@<version>` segment before the heuristic
+  // checks; the version isn't part of the path's slash/extension
+  // shape but does sit on the same token.
+  const atIdx = target.indexOf("@");
+  const path = atIdx > 0 ? target.slice(0, atIdx) : target;
+  if (path.includes("/")) return true;
   // Tail extension other than .md → file. .md → wiki note.
-  const dot = target.lastIndexOf(".");
+  const dot = path.lastIndexOf(".");
   if (dot <= 0) return false;
-  const ext = target.slice(dot + 1).toLowerCase();
+  const ext = path.slice(dot + 1).toLowerCase();
   return ext.length > 0 && ext !== "md" && /^[a-z0-9]+$/i.test(ext);
 }
 
@@ -252,6 +296,9 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
         }
       }
       if (looksLikeFilePath(target)) {
+        // The target may carry a `@<version>` segment; the file:
+        // URL preserves it verbatim and parseMarkdownLink decodes it
+        // back into a FileVersion at click time.
         return `[${display}](file:${target})`;
       }
       // Treat as wiki note slug.
@@ -340,8 +387,13 @@ export function MarkdownView({
     }
     const newTab = event.metaKey || event.ctrlKey || event.button === 1;
     if (parsed.kind === "file") {
+      // Bare wikilinks (no `@version`) coerce to DISK; explicit
+      // versions flow through as authored. The chokepoint here is
+      // critical: a wikilink that pinned `@HEAD` must NOT be
+      // silently substituted with the working tree.
+      const version: FileVersion = parsed.version ?? DISK;
       if (ctxNav && !newTab) {
-        ctxNav.navigate(fileRef(parsed.path), { newTab: false });
+        ctxNav.navigate(fileRef(parsed.path, version), { newTab: false });
         return;
       }
       onOpenFile?.(parsed.path, parsed.line);

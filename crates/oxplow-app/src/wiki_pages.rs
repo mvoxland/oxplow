@@ -27,11 +27,45 @@ use std::path::{Path, PathBuf};
 use oxplow_db::{SqliteWikiPageStore, WikiPage};
 use oxplow_domain::{DomainError, Timestamp};
 
+/// Tree version a wikilink references. Mirrors the cross-cutting
+/// `oxplow_tree_source::TreeVersion` shape; defined inline here so
+/// the wiki parser doesn't pull in tree-source as a hard dep, but
+/// the variants and serde tags line up so consumers can convert
+/// freely.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WikiVersion {
+    /// Working-tree version. The "local" version in user terms — the
+    /// file as it sits on disk right now, possibly with uncommitted
+    /// edits. Authored as `@disk` in the wikilink.
+    Disk,
+    /// A git ref: sha, branch, tag, or `HEAD`. Authored as
+    /// `@<spec>` in the wikilink.
+    Ref(String),
+}
+
+/// One file reference parsed out of a wikilink. The version captures
+/// the author's intent at write time: `@disk` says "the working tree
+/// when this note was written," `@<sha>` pins a specific committed
+/// version. A bare `[[path]]` is treated as `Disk` for back-compat
+/// with notes written before the syntax existed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WikiFileRef {
+    pub path: String,
+    pub version: WikiVersion,
+    pub line: Option<u32>,
+}
+
 /// Refs extracted from a note body.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedRefs {
-    /// Workspace-relative file paths (`src/foo.ts`).
+    /// Workspace-relative file paths (`src/foo.ts`), version-stripped
+    /// for backlinks lookup. The DB stores this list — backlinks
+    /// match by path regardless of which version a note pinned.
     pub file_refs: Vec<String>,
+    /// Rich form for renderers and version-aware consumers. Each
+    /// entry carries the path + intended version + optional line
+    /// anchor, exactly as written in the markdown body.
+    pub file_refs_detail: Vec<WikiFileRef>,
     /// Workspace-relative directory paths (`src/components`). Source
     /// form in markdown is `[[dir:src/components]]` — the `dir:`
     /// prefix is the explicit directory marker (mirrors `git:` for
@@ -42,6 +76,58 @@ pub struct ParsedRefs {
     pub related_notes: Vec<String>,
 }
 
+/// Parse a wikilink interior of the form `path[@version][:line]` into
+/// a structured `WikiFileRef`, or `None` if the interior doesn't look
+/// like a file path. The version slot is `@disk` (working tree) or
+/// `@<git-ref>` (sha / branch / tag / `HEAD`); a bare interior with
+/// no `@` defaults to `Disk` so legacy notes don't break.
+pub fn parse_wiki_file_ref(interior: &str) -> Option<WikiFileRef> {
+    let trimmed = interior.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Split off the `@<version>` segment first; the version may
+    // contain `:` (e.g. submodule sha), so we can't naively split on
+    // `:` for the line anchor without doing version first.
+    let (path_and_line, version) = match trimmed.split_once('@') {
+        Some((path_part, version_part)) => {
+            // The line anchor lives on the version side: `path@<v>:42`.
+            let (v, line_part) = match version_part.split_once(':') {
+                Some((v, l)) => (v, Some(l)),
+                None => (version_part, None),
+            };
+            let v = v.trim();
+            let parsed_version = if v.eq_ignore_ascii_case("disk") || v.eq_ignore_ascii_case("local") {
+                WikiVersion::Disk
+            } else if !v.is_empty() {
+                WikiVersion::Ref(v.to_string())
+            } else {
+                WikiVersion::Disk
+            };
+            // Reattach the line anchor (if any) to the path so the
+            // existing line-stripping path below still applies.
+            let pl = match line_part {
+                Some(l) => format!("{path_part}:{l}"),
+                None => path_part.to_string(),
+            };
+            (pl, parsed_version)
+        }
+        None => (trimmed.to_string(), WikiVersion::Disk),
+    };
+
+    // Strip the `:line` anchor.
+    let (bare, line) = match path_and_line.rsplit_once(':') {
+        Some((p, l)) if l.chars().all(|c| c.is_ascii_digit()) && !l.is_empty() => {
+            (p.to_string(), l.parse::<u32>().ok())
+        }
+        _ => (path_and_line.clone(), None),
+    };
+    if bare.is_empty() || !looks_like_file(&bare) {
+        return None;
+    }
+    Some(WikiFileRef { path: bare, version, line })
+}
+
 /// Parse `[[…]]` wikilinks + inline file paths out of `body`.
 pub fn parse_refs(body: &str) -> ParsedRefs {
     if body.is_empty() {
@@ -50,6 +136,10 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
     let mut files = BTreeSet::new();
     let mut dirs = BTreeSet::new();
     let mut notes = BTreeSet::new();
+    // Detail entries preserve insertion order (first-seen wins on
+    // duplicates) so the renderer can show them in author order.
+    let mut details: Vec<WikiFileRef> = Vec::new();
+    let mut details_seen: BTreeSet<(String, String, Option<u32>)> = BTreeSet::new();
 
     // 1. [[wikilinks]] first — they take priority, and we want to
     //    avoid double-counting an inline path that's also wrapped.
@@ -58,34 +148,59 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
         if interior.is_empty() {
             continue;
         }
-        // Directory form: trailing slash. Check before stripping the
-        // `:line` anchor (a directory wikilink wouldn't carry one).
+        // Directory form. Directories don't carry @version yet; the
+        // `dir:` prefix lives outside the path-and-anchor grammar.
         if let Some(dir) = looks_like_dir(interior) {
             dirs.insert(dir);
             continue;
         }
-        // Strip trailing `:line` anchor (numeric or symbol).
-        let bare = interior.split(':').next().unwrap_or(interior);
-        if bare.is_empty() {
+        // Try the rich file form first. `parse_wiki_file_ref` handles
+        // `path@<version>[:line]` and bare `path[:line]`, returning
+        // None if the interior doesn't shape like a file.
+        if let Some(rich) = parse_wiki_file_ref(interior) {
+            files.insert(rich.path.clone());
+            let key = (
+                rich.path.clone(),
+                match &rich.version {
+                    WikiVersion::Disk => "disk".to_string(),
+                    WikiVersion::Ref(r) => format!("ref:{r}"),
+                },
+                rich.line,
+            );
+            if details_seen.insert(key) {
+                details.push(rich);
+            }
             continue;
         }
-        if looks_like_file(bare) {
-            files.insert(bare.to_string());
-        } else if looks_like_slug(bare) {
+        // Not a file — try slug form (`bare-slug`). Strip the line
+        // anchor; slugs don't carry versions.
+        let bare = interior.split(':').next().unwrap_or(interior);
+        if !bare.is_empty() && looks_like_slug(bare) {
             notes.insert(bare.to_string());
         }
         // Drop git-commit refs (`[[abc1234]]` — 7-40 hex) silently;
         // they're for the renderer, not wiki indexing.
     }
 
-    // 2. Inline file paths.
+    // 2. Inline file paths. These don't carry a version; they're
+    //    legacy free-text mentions, treat as Disk.
     let stripped = strip_urls(body);
     for path in find_inline_paths(&stripped) {
-        files.insert(path);
+        if files.insert(path.clone()) {
+            let key = (path.clone(), "disk".into(), None);
+            if details_seen.insert(key) {
+                details.push(WikiFileRef {
+                    path,
+                    version: WikiVersion::Disk,
+                    line: None,
+                });
+            }
+        }
     }
 
     ParsedRefs {
         file_refs: files.into_iter().collect(),
+        file_refs_detail: details,
         dir_refs: dirs.into_iter().collect(),
         related_notes: notes.into_iter().collect(),
     }
@@ -451,6 +566,83 @@ mod tests {
     fn parse_skips_urls() {
         let refs = parse_refs("see https://example.com/path.json for details");
         assert!(refs.file_refs.is_empty());
+    }
+
+    #[test]
+    fn parse_wikilink_with_disk_version_emits_disk_in_detail() {
+        let refs = parse_refs("see [[src/foo.ts@disk]] for the live version");
+        assert_eq!(refs.file_refs, vec!["src/foo.ts"]);
+        assert_eq!(refs.file_refs_detail.len(), 1);
+        let d = &refs.file_refs_detail[0];
+        assert_eq!(d.path, "src/foo.ts");
+        assert_eq!(d.version, WikiVersion::Disk);
+        assert_eq!(d.line, None);
+    }
+
+    #[test]
+    fn parse_wikilink_with_local_alias_treated_as_disk() {
+        // `@local` is accepted as an alias for `@disk` because the
+        // user-facing terminology in the capture skill says "local
+        // version" — both must round-trip to the same WikiVersion.
+        let refs = parse_refs("[[src/foo.ts@local]]");
+        assert_eq!(refs.file_refs_detail[0].version, WikiVersion::Disk);
+    }
+
+    #[test]
+    fn parse_wikilink_with_sha_version() {
+        let refs = parse_refs("[[crates/oxplow-app/src/lib.rs@abc1234]]");
+        let d = &refs.file_refs_detail[0];
+        assert_eq!(d.path, "crates/oxplow-app/src/lib.rs");
+        assert_eq!(d.version, WikiVersion::Ref("abc1234".into()));
+    }
+
+    #[test]
+    fn parse_wikilink_with_head_version() {
+        let refs = parse_refs("[[src/foo.ts@HEAD]]");
+        assert_eq!(refs.file_refs_detail[0].version, WikiVersion::Ref("HEAD".into()));
+    }
+
+    #[test]
+    fn parse_wikilink_with_branch_version() {
+        let refs = parse_refs("[[src/foo.ts@main]]");
+        assert_eq!(refs.file_refs_detail[0].version, WikiVersion::Ref("main".into()));
+    }
+
+    #[test]
+    fn parse_wikilink_version_with_line_anchor() {
+        let refs = parse_refs("[[src/foo.ts@HEAD:42]]");
+        let d = &refs.file_refs_detail[0];
+        assert_eq!(d.path, "src/foo.ts");
+        assert_eq!(d.version, WikiVersion::Ref("HEAD".into()));
+        assert_eq!(d.line, Some(42));
+    }
+
+    #[test]
+    fn parse_wikilink_bare_path_defaults_to_disk() {
+        let refs = parse_refs("[[src/foo.ts]]");
+        let d = &refs.file_refs_detail[0];
+        assert_eq!(d.version, WikiVersion::Disk);
+        assert_eq!(d.line, None);
+    }
+
+    #[test]
+    fn parse_wikilink_bare_with_line() {
+        let refs = parse_refs("[[src/foo.ts:42]]");
+        let d = &refs.file_refs_detail[0];
+        assert_eq!(d.line, Some(42));
+        assert_eq!(d.version, WikiVersion::Disk);
+    }
+
+    #[test]
+    fn parse_wikilink_strips_version_from_backlinks_path() {
+        // The DB-stored `file_refs` path list MUST be version-stripped
+        // so backlinks_for_file("src/foo.ts") matches notes that pinned
+        // any version of foo.ts. The detail list keeps the version.
+        let refs = parse_refs(
+            "see [[src/foo.ts@HEAD]] and [[src/foo.ts@disk]] and [[src/foo.ts@abc1234]]",
+        );
+        assert_eq!(refs.file_refs, vec!["src/foo.ts"]);
+        assert_eq!(refs.file_refs_detail.len(), 3);
     }
 
     #[test]
