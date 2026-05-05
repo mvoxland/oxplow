@@ -1,9 +1,53 @@
 use oxplow_git::{
     GitFileStatus, WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile, WorkspaceStatusSummary,
 };
+use oxplow_tree_source::TreeVersion;
 
 use crate::error::IpcError;
 use crate::state::AppState;
+
+/// Versioned file read. Dispatches on `version`:
+/// - `Disk` → `read_workspace_file` (working tree, possibly dirty).
+/// - `Ref { ref }` → `read_file_at_ref` (committed blob).
+/// - `Snapshot { id }` → not yet implemented.
+///
+/// Returns `Ok(None)` if the path doesn't exist at that version.
+/// Callers MUST pass an explicit version — there is no implicit
+/// "current working tree" default. This is the chokepoint that makes
+/// it impossible to forget which version you're reading, the way the
+/// duplication-scan bug did against `readWorkspaceFile`.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_file(
+    state: tauri::State<'_, AppState>,
+    stream_id: Option<String>,
+    relative_path: String,
+    version: TreeVersion,
+) -> Result<Option<String>, IpcError> {
+    match version {
+        TreeVersion::Disk => match state
+            .git
+            .read_workspace_file(stream_id.as_deref(), relative_path)
+            .await
+        {
+            Ok(file) => Ok(Some(file.content)),
+            Err(e) => {
+                // The git facade returns NotFound as an error; surface
+                // that as Ok(None) so the IPC contract matches the
+                // ref-reader's None semantics.
+                if e.to_string().to_lowercase().contains("not found") {
+                    Ok(None)
+                } else {
+                    Err(IpcError::internal(e.to_string()))
+                }
+            }
+        },
+        TreeVersion::Ref { r#ref } => Ok(state.git.read_file_at_ref(r#ref, relative_path).await),
+        TreeVersion::Snapshot { .. } => Err(IpcError::invalid(
+            "snapshot tree version is not yet implemented",
+        )),
+    }
+}
 
 #[tauri::command]
 #[specta::specta]
