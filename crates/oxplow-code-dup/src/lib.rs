@@ -69,10 +69,13 @@ pub struct DupOptions {
 impl Default for DupOptions {
     fn default() -> Self {
         Self {
-            // Keep the production line floor we already settled on:
-            // small enough that a real extracted helper surfaces,
-            // large enough that 5-line idioms don't.
-            min_lines: 10,
+            // 5 lines surfaces small extracted helpers. Lower-bound
+            // noise is held back by min_nodes (subtree must contain
+            // 30 AST nodes) plus the function-anchoring (top-level
+            // boilerplate isn't in the corpus at all), so the line
+            // floor can be aggressive without generating the noise
+            // 5 produced under the prior token-window detector.
+            min_lines: 5,
             // 30 nodes ≈ a small but nontrivial block (a 5-7 line
             // body with branching). Below this is mostly
             // `return foo()` / property accesses / single
