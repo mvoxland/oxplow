@@ -1,5 +1,17 @@
 use super::*;
 
+/// Detection-mechanic tests use short fixtures (~5-line bodies); the
+/// production default of 10 would filter them out. Lower the bar to 5
+/// so we test what we mean to test (k-gram matching, rename
+/// resilience, skip tolerance, scope semantics) without the
+/// boilerplate-suppression knob obscuring the result.
+fn detect_opts() -> DupOptions {
+    DupOptions {
+        min_lines: 5,
+        ..DupOptions::default()
+    }
+}
+
 #[test]
 fn detects_obvious_clone_across_two_files() {
     let body = r#"
@@ -21,7 +33,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         ("src/a.rs".to_string(), body.to_string()),
         ("src/b.rs".to_string(), body.to_string()),
     ];
-    let blocks = detect_duplicates(files, DupOptions::default());
+    let blocks = detect_duplicates(files, detect_opts());
     assert!(!blocks.is_empty(), "expected at least one duplicate");
     let b = &blocks[0];
     assert_eq!(b.a_path, "src/a.rs");
@@ -66,7 +78,7 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             ("src/a.rs".to_string(), original.to_string()),
             ("src/b.rs".to_string(), renamed.to_string()),
         ],
-        DupOptions::default(),
+        detect_opts(),
     );
     assert!(!blocks.is_empty(), "renamed clones should still match");
 }
@@ -199,7 +211,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             ("src/a.rs".to_string(), a.to_string()),
             ("src/b.rs".to_string(), b.to_string()),
         ],
-        DupOptions::default(),
+        detect_opts(),
     );
     assert!(!blocks.is_empty(), "near-clone should still match");
 }
@@ -248,7 +260,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             ("src/c.rs".to_string(), body.to_string()),
         ],
         &scope,
-        DupOptions::default(),
+        detect_opts(),
     );
     assert!(!blocks.is_empty(), "expected at least one scoped match");
     // Every reported block must touch a scope path.

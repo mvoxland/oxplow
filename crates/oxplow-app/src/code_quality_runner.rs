@@ -71,6 +71,9 @@ pub struct RunOptions {
     pub files: Vec<String>,
     /// Wall-clock budget. `None` uses [`DEFAULT_SCAN_TIMEOUT`].
     pub timeout: Option<std::time::Duration>,
+    /// Override the duplicate-detector tunables. `None` uses
+    /// `DupOptions::default()` (production: min_lines=10).
+    pub dup_options: Option<DupOptions>,
 }
 
 /// Build the file list to analyze: either the explicit list, or every
@@ -208,8 +211,10 @@ pub async fn run_duplication_scan_with(
     source: Arc<dyn TreeSource>,
     filter: Arc<dyn FileFilter>,
     timeout: Option<std::time::Duration>,
+    dup_options: Option<DupOptions>,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let timeout = timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
+    let dup_opts = dup_options.unwrap_or_default();
     let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
         let corpus = collect_corpus(source.as_ref(), filter.as_ref())?;
         // Drop entries the metrics layer can't parse — the detector
@@ -219,7 +224,7 @@ pub async fn run_duplication_scan_with(
             .into_iter()
             .filter(|(p, _)| oxplow_code_metrics::is_supported_path(Path::new(p)))
             .collect();
-        let blocks = detect_duplicates(inputs, DupOptions::default());
+        let blocks = detect_duplicates(inputs, dup_opts);
         Ok(blocks_to_findings(blocks))
     });
     match tokio::time::timeout(timeout, task).await {
@@ -246,8 +251,10 @@ pub async fn run_duplication_scan_scoped(
     source: Arc<dyn TreeSource>,
     scope_filter: Arc<dyn FileFilter>,
     timeout: Option<std::time::Duration>,
+    dup_options: Option<DupOptions>,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let timeout = timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
+    let dup_opts = dup_options.unwrap_or_default();
     let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
         // The corpus deliberately uses AllFiles — the scope filter
         // determines which findings we keep, NOT which files we
@@ -264,7 +271,7 @@ pub async fn run_duplication_scan_scoped(
             .map(|(p, _)| p.clone())
             .filter(|p| scope_filter.keep(p))
             .collect();
-        let blocks = detect_duplicates_scoped(inputs, &scope, DupOptions::default());
+        let blocks = detect_duplicates_scoped(inputs, &scope, dup_opts);
         Ok(blocks_to_findings(blocks))
     });
     match tokio::time::timeout(timeout, task).await {
@@ -288,7 +295,7 @@ pub async fn run_duplication_scan(
     } else {
         Arc::new(oxplow_tree_source::ExplicitPaths::new(opts.files.iter().cloned()))
     };
-    run_duplication_scan_with(source, filter, opts.timeout).await
+    run_duplication_scan_with(source, filter, opts.timeout, opts.dup_options).await
 }
 
 fn blocks_to_findings(blocks: Vec<oxplow_code_dup::DuplicateBlock>) -> Vec<CodeQualityFinding> {
@@ -377,7 +384,11 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 "#;
         std::fs::write(dir.path().join("a.rs"), body).unwrap();
         std::fs::write(dir.path().join("b.rs"), body).unwrap();
-        let findings = run_duplication_scan(dir.path(), RunOptions::default())
+        let opts = RunOptions {
+            dup_options: Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+            ..RunOptions::default()
+        };
+        let findings = run_duplication_scan(dir.path(), opts)
             .await
             .unwrap();
         let dups: Vec<_> = findings
@@ -421,6 +432,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         let opts = RunOptions {
             files: Vec::new(),
             timeout: Some(std::time::Duration::from_nanos(1)),
+            dup_options: None,
         };
         let err = run_metrics_scan(dir.path(), opts).await.unwrap_err();
         assert!(
@@ -497,7 +509,11 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
         }
         assert!(metrics.iter().all(|f| f.path == "a.rs" || f.path == "b.rs"));
 
-        let duplication = run_duplication_scan(dir.path(), RunOptions::default())
+        let dup_opts = RunOptions {
+            dup_options: Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+            ..RunOptions::default()
+        };
+        let duplication = run_duplication_scan(dir.path(), dup_opts)
             .await
             .unwrap();
         let dups: Vec<_> = duplication
@@ -568,9 +584,14 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         // target.
         let scope: Arc<dyn FileFilter> =
             Arc::new(ExplicitPaths::new(vec!["changed.rs".to_string()]));
-        let findings = run_duplication_scan_scoped(source, scope, None)
-            .await
-            .unwrap();
+        let findings = run_duplication_scan_scoped(
+            source,
+            scope,
+            None,
+            Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+        )
+        .await
+        .unwrap();
         let dups: Vec<_> = findings
             .iter()
             .filter(|f| f.kind == "duplicate-block")
@@ -621,7 +642,7 @@ fn case_b(items: Vec<i32>) -> Vec<i32> {
             Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
         let scope: Arc<dyn FileFilter> =
             Arc::new(ExplicitPaths::new(vec!["only.rs".to_string()]));
-        let findings = run_duplication_scan_scoped(source, scope, None)
+        let findings = run_duplication_scan_scoped(source, scope, None, None)
             .await
             .unwrap();
         // Even if the engine surfaces in-file matches, the scoped
@@ -680,7 +701,14 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 
         let source: Arc<dyn TreeSource> = Arc::new(GitTreeSource::new(path, "HEAD"));
         let filter: Arc<dyn FileFilter> = Arc::new(AllFiles);
-        let findings = run_duplication_scan_with(source, filter, None).await.unwrap();
+        let findings = run_duplication_scan_with(
+            source,
+            filter,
+            None,
+            Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+        )
+        .await
+        .unwrap();
         let dups: Vec<_> = findings
             .iter()
             .filter(|f| f.kind == "duplicate-block")

@@ -17,8 +17,9 @@
 //!    fingerprint subsets).
 //! 6. **Filter** runs whose line span is shorter than `min_lines`.
 //!
-//! Tunables are exposed on `DupOptions` (K=20, W=4, min_lines=5 by
-//! default).
+//! Tunables are exposed on `DupOptions` (K=20, W=4, min_lines=10 by
+//! default — small enough that a real extracted helper still surfaces,
+//! large enough that thiserror enum boilerplate / 5-line idioms don't).
 //!
 //! # Multi-way clones
 //!
@@ -67,7 +68,7 @@ impl Default for DupOptions {
         Self {
             k: 20,
             w: 4,
-            min_lines: 5,
+            min_lines: 10,
         }
     }
 }
