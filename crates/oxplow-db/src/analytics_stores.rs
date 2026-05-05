@@ -510,6 +510,15 @@ pub struct CodeQualityScan {
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,
     pub error: Option<String>,
+    /// Tree version the scan ran against. `"disk" | "ref" | "snapshot"`.
+    /// Backfilled to `"disk"` for pre-V9 rows.
+    pub tree_version_kind: String,
+    /// Identifier for the version: ref-spec or snapshot id; null for
+    /// disk.
+    pub tree_version_value: Option<String>,
+    /// File filter applied: `"all"` or `"explicit:<sha-of-paths>"`.
+    /// Backfilled to `"all"` for pre-V9 rows.
+    pub file_filter: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -522,6 +531,45 @@ pub struct CodeQualityFinding {
     pub kind: String,
     pub metric_value: f64,
     pub extra_json: Option<String>,
+}
+
+fn row_to_scan(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeQualityScan> {
+    let id: i64 = row.get(0)?;
+    let tool: String = row.get(1)?;
+    let scope: String = row.get(2)?;
+    let status: String = row.get(3)?;
+    let started_at: String = row.get(4)?;
+    let ended_at: Option<String> = row.get(5)?;
+    let error: Option<String> = row.get(6)?;
+    let tree_version_kind: Option<String> = row.get(7)?;
+    let tree_version_value: Option<String> = row.get(8)?;
+    let file_filter: Option<String> = row.get(9)?;
+    let status = match status.as_str() {
+        "pending" => CodeQualityScanStatus::Pending,
+        "running" => CodeQualityScanStatus::Running,
+        "done" => CodeQualityScanStatus::Done,
+        _ => CodeQualityScanStatus::Failed,
+    };
+    let map_err = |e: DomainError| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(e),
+        )
+    };
+    Ok(CodeQualityScan {
+        id,
+        tool,
+        scope,
+        status,
+        started_at: string_to_ts(&started_at).map_err(map_err)?,
+        ended_at: ended_at.map(|s| string_to_ts(&s)).transpose().map_err(map_err)?,
+        error,
+        // Default backfill matches the V9 migration's UPDATE.
+        tree_version_kind: tree_version_kind.unwrap_or_else(|| "disk".into()),
+        tree_version_value,
+        file_filter: file_filter.unwrap_or_else(|| "all".into()),
+    })
 }
 
 #[derive(Clone)]
@@ -539,16 +587,47 @@ impl SqliteCodeQualityStore {
         tool: &str,
         scope: &str,
     ) -> Result<i64, DomainError> {
+        // Legacy entry point: callers that haven't been ported to the
+        // versioned API land here. Default to ("disk", null, "all"),
+        // matching the implicit pre-V9 behavior.
+        self.create_scan_with(tool, scope, "disk", None, "all").await
+    }
+
+    /// Versioned create_scan. Tags the row with the tree version it
+    /// ran against (`disk` / `ref:<spec>` / `snapshot:<id>`) and the
+    /// file filter applied (`all` / `explicit:<sha>`), so consumers
+    /// can ask for "the latest scan at this commit" without confusing
+    /// results from a different version.
+    pub async fn create_scan_with(
+        &self,
+        tool: &str,
+        scope: &str,
+        tree_version_kind: &str,
+        tree_version_value: Option<&str>,
+        file_filter: &str,
+    ) -> Result<i64, DomainError> {
         let db = self.db.clone();
         let tool = tool.to_string();
         let scope = scope.to_string();
+        let kind = tree_version_kind.to_string();
+        let value = tree_version_value.map(str::to_string);
+        let filter = file_filter.to_string();
         tokio::task::spawn_blocking(move || {
             let now = Timestamp::now();
             db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO code_quality_scan (tool, scope, status, started_at)
-                     VALUES (?1, ?2, 'pending', ?3)",
-                    params![tool, scope, ts_to_string(now)],
+                    "INSERT INTO code_quality_scan
+                       (tool, scope, status, started_at,
+                        tree_version_kind, tree_version_value, file_filter)
+                     VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6)",
+                    params![
+                        tool,
+                        scope,
+                        ts_to_string(now),
+                        kind,
+                        value,
+                        filter,
+                    ],
                 )?;
                 Ok(conn.last_insert_rowid())
             })
@@ -618,41 +697,54 @@ impl SqliteCodeQualityStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, tool, scope, status, started_at, ended_at, error
+                    "SELECT id, tool, scope, status, started_at, ended_at, error,
+                            tree_version_kind, tree_version_value, file_filter
                      FROM code_quality_scan ORDER BY started_at DESC LIMIT ?1",
                 )?;
-                let rows = stmt.query_map(params![limit as i64], |row| {
-                    let id: i64 = row.get(0)?;
-                    let tool: String = row.get(1)?;
-                    let scope: String = row.get(2)?;
-                    let status: String = row.get(3)?;
-                    let started_at: String = row.get(4)?;
-                    let ended_at: Option<String> = row.get(5)?;
-                    let error: Option<String> = row.get(6)?;
-                    let status = match status.as_str() {
-                        "pending" => CodeQualityScanStatus::Pending,
-                        "running" => CodeQualityScanStatus::Running,
-                        "done" => CodeQualityScanStatus::Done,
-                        _ => CodeQualityScanStatus::Failed,
-                    };
-                    let map_err = |e: DomainError| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            0,
-                            rusqlite::types::Type::Text,
-                            Box::new(e),
-                        )
-                    };
-                    Ok(CodeQualityScan {
-                        id,
-                        tool,
-                        scope,
-                        status,
-                        started_at: string_to_ts(&started_at).map_err(map_err)?,
-                        ended_at: ended_at.map(|s| string_to_ts(&s)).transpose().map_err(map_err)?,
-                        error,
-                    })
-                })?;
+                let rows = stmt.query_map(params![limit as i64], row_to_scan)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Find the most recent `done` scan for `(tool, treeVersion,
+    /// fileFilter)`. Returns `None` if there's no matching scan, so
+    /// the caller can render a "Scan now" CTA instead of an empty
+    /// findings list.
+    pub async fn find_latest_done_scan(
+        &self,
+        tool: &str,
+        tree_version_kind: &str,
+        tree_version_value: Option<&str>,
+        file_filter: &str,
+    ) -> Result<Option<CodeQualityScan>, DomainError> {
+        let db = self.db.clone();
+        let tool = tool.to_string();
+        let kind = tree_version_kind.to_string();
+        let value = tree_version_value.map(str::to_string);
+        let filter = file_filter.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, tool, scope, status, started_at, ended_at, error,
+                            tree_version_kind, tree_version_value, file_filter
+                     FROM code_quality_scan
+                     WHERE tool = ?1
+                       AND status = 'done'
+                       AND tree_version_kind = ?2
+                       AND ((?3 IS NULL AND tree_version_value IS NULL)
+                            OR tree_version_value = ?3)
+                       AND file_filter = ?4
+                     ORDER BY started_at DESC LIMIT 1",
+                )?;
+                let mut rows = stmt.query_map(params![tool, kind, value, filter], row_to_scan)?;
+                match rows.next() {
+                    Some(Ok(scan)) => Ok(Some(scan)),
+                    Some(Err(e)) => Err(e),
+                    None => Ok(None),
+                }
             })
         })
         .await
