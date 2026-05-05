@@ -44,12 +44,27 @@ export interface DuplicateBlockPageProps {
  * diff would line up unrelated lines. We want literal range-aligned
  * side-by-side.
  */
+/**
+ * Shared scroll-sync bus. Each DuplicateSide registers its editor on
+ * mount via `set(side, editor)` and unregisters on unmount. When one
+ * side fires `onDidScrollChange`, it pushes its scrollTop to the
+ * other; the `lock` flag prevents the mirrored setScrollTop from
+ * looping back through the second side's listener.
+ */
+interface ScrollSyncBus {
+  left: any;
+  right: any;
+  lock: boolean;
+}
+
 export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }: DuplicateBlockPageProps) {
   const leftBase = payload.leftPath.split("/").pop() ?? payload.leftPath;
   const rightBase = payload.rightPath.split("/").pop() ?? payload.rightPath;
   usePageTitle(`${leftBase} ↔ ${rightBase} (duplicate)`);
 
   void visible;
+
+  const syncRef = useRef<ScrollSyncBus>({ left: null, right: null, lock: false });
 
   return (
     <Page testId="page-duplicate-block" kind="duplicate-block">
@@ -90,6 +105,8 @@ export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }:
             startLine={payload.leftStart}
             endLine={payload.leftEnd}
             onJumpToSource={onJumpToSource}
+            side="left"
+            syncRef={syncRef}
           />
           <div style={{ width: 1, background: "var(--border-subtle)" }} />
           <DuplicateSide
@@ -99,6 +116,8 @@ export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }:
             startLine={payload.rightStart}
             endLine={payload.rightEnd}
             onJumpToSource={onJumpToSource}
+            side="right"
+            syncRef={syncRef}
           />
         </div>
       </div>
@@ -113,9 +132,20 @@ interface SideProps {
   startLine: number;
   endLine: number;
   onJumpToSource(path: string, version: FileVersion): void;
+  side: "left" | "right";
+  syncRef: React.MutableRefObject<ScrollSyncBus>;
 }
 
-function DuplicateSide({ stream, path, version, startLine, endLine, onJumpToSource }: SideProps) {
+function DuplicateSide({
+  stream,
+  path,
+  version,
+  startLine,
+  endLine,
+  onJumpToSource,
+  side,
+  syncRef,
+}: SideProps) {
   const versionLabel = shortLabelForVersion(version);
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
@@ -140,6 +170,25 @@ function DuplicateSide({ stream, path, version, startLine, endLine, onJumpToSour
         scrollBeyondLastLine: false,
       });
       editorRef.current = editor;
+      syncRef.current[side] = editor;
+      // Mirror scroll position to the peer side. The bus's `lock`
+      // flag breaks the feedback loop: when we programmatically push
+      // scrollTop to the other editor, that editor's listener fires
+      // synchronously, sees the lock, and bails out instead of
+      // pushing the value back here.
+      editor.onDidScrollChange((e: any) => {
+        const bus = syncRef.current;
+        if (bus.lock) return;
+        const peer = side === "left" ? bus.right : bus.left;
+        if (!peer) return;
+        bus.lock = true;
+        try {
+          peer.setScrollTop(e.scrollTop, 1 /* Immediate */);
+          peer.setScrollLeft(e.scrollLeft, 1);
+        } finally {
+          bus.lock = false;
+        }
+      });
       setEditorReady(true);
     })();
     return () => {
@@ -148,11 +197,14 @@ function DuplicateSide({ stream, path, version, startLine, endLine, onJumpToSour
       const model = modelRef.current;
       editorRef.current = null;
       modelRef.current = null;
+      if (syncRef.current[side] === editor) {
+        syncRef.current[side] = null;
+      }
       editor?.setModel(null);
       editor?.dispose();
       model?.dispose();
     };
-  }, []);
+  }, [side, syncRef]);
 
   useEffect(() => {
     if (!editorReady) return;
