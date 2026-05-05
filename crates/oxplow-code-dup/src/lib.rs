@@ -110,7 +110,7 @@ where
         let Some(tree) = parser.parse(source.as_ref(), None) else {
             continue;
         };
-        let tokens = tokenize_source(tree.root_node());
+        let tokens = tokenize_source(tree.root_node(), lang);
         if tokens.len() < opts.k {
             continue;
         }
