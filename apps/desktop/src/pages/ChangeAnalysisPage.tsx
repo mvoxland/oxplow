@@ -8,6 +8,8 @@ import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
 import { FilesPivot } from "../components/ChangeAnalysis/FilesPivot.js";
 import { ChangeAnalysisHeader } from "../components/ChangeAnalysis/ChangeAnalysisHeader.js";
 import { ChangeAnalysisDrilldown } from "../components/ChangeAnalysis/ChangeAnalysisDrilldown.js";
+import { LookHereFirstCard } from "../components/ChangeAnalysis/LookHereFirstCard.js";
+import { FileChurnCard } from "../components/ChangeAnalysis/FileChurnCard.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
 export interface ChangeAnalysisPageProps {
@@ -86,6 +88,11 @@ export function ChangeAnalysisPage({ stream, target, scope, onOpenPage, onOpenFi
           />
         ) : (
           <>
+            <LookHereFirstCard
+              files={analysis.files}
+              fileScores={analysis.fileScores}
+              onOpenFile={onOpenFile}
+            />
             <SummaryCard
               fileCount={analysis.files.length}
               additions={analysis.totals.additions}
@@ -93,6 +100,7 @@ export function ChangeAnalysisPage({ stream, target, scope, onOpenPage, onOpenFi
               byStatus={analysis.pivots.byStatus}
               tests={analysis.tests}
             />
+            <FileChurnCard files={analysis.files} onOpenFile={onOpenFile} />
             <FilesPivot pivots={analysis.pivots} target={target} />
           </>
         )}

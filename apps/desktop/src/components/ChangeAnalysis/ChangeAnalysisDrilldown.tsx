@@ -8,7 +8,12 @@ import { FunctionsCard } from "./FunctionsCard.js";
 import { DuplicationCard } from "./DuplicationCard.js";
 import { TestsCard } from "./TestsCard.js";
 import { ChangeAnalysisFileTree } from "./FileTreeView.js";
-import { buildFilePivots, summarizeTests, type FunctionsBuckets } from "./analysisHelpers.js";
+import { LookHereFirstCard } from "./LookHereFirstCard.js";
+import { FileChurnCard } from "./FileChurnCard.js";
+import { FunctionChurnCard } from "./FunctionChurnCard.js";
+import { ComplexitySpikesCard } from "./ComplexitySpikesCard.js";
+import { OtherSmellsCard } from "./OtherSmellsCard.js";
+import { buildFilePivots, summarizeTests, type FunctionChurnRow, type FunctionsBuckets } from "./analysisHelpers.js";
 import type { GitFileStatus } from "../../api-types.js";
 import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
 
@@ -92,6 +97,11 @@ export function ChangeAnalysisDrilldown({
     findings: analysis.duplication.findings.filter((f) => filteredPathSet.has(f.path)),
   }), [analysis.duplication, filteredPathSet]);
 
+  const churnAfterStatus = useMemo<FunctionChurnRow[]>(
+    () => analysis.functionChurn.filter((c) => filteredPathSet.has(c.path)),
+    [analysis.functionChurn, filteredPathSet],
+  );
+
   /**
    * Open the diff for `path` at `line` *in the current tab*. The
    * preferred path is `onOpenDiffInTab` — that swaps the tab's ref
@@ -128,6 +138,11 @@ export function ChangeAnalysisDrilldown({
 
   return (
     <>
+      <LookHereFirstCard
+        files={filesAfterStatus}
+        fileScores={analysis.fileScores}
+        onOpenFile={onOpenFile}
+      />
       <SummaryCard
         fileCount={filesAfterStatus.length}
         additions={totalsAfterStatus.additions}
@@ -135,6 +150,7 @@ export function ChangeAnalysisDrilldown({
         byStatus={pivotsAfterStatus.byStatus}
         tests={testsAfterStatus}
       />
+      <FileChurnCard files={filesAfterStatus} onOpenFile={onOpenFile} />
 
       <section style={card}>
         <div style={toolbarRow}>
@@ -186,6 +202,21 @@ export function ChangeAnalysisDrilldown({
         )}
       </section>
 
+      {viewMode === "semantic" ? (
+        <>
+          <FunctionChurnCard
+            churn={churnAfterStatus}
+            functions={functionsAfterStatus}
+            onOpenFile={onOpenFile}
+          />
+          <ComplexitySpikesCard functions={functionsAfterStatus} onOpenFile={onOpenFile} />
+          <OtherSmellsCard
+            functions={functionsAfterStatus}
+            tests={testsAfterStatus}
+            onOpenFile={onOpenFile}
+          />
+        </>
+      ) : null}
       <DuplicationCard duplication={dupAfterStatus} scanVersion={scanVersion} onOpenFile={onOpenFile} />
       <TestsCard tests={testsAfterStatus} onOpenFile={onOpenFile} />
     </>

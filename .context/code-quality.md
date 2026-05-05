@@ -140,6 +140,49 @@ not appear in the Code Quality panel or share scan IDs. Callers
 that want persistent rollups should use `runCodeQualityScan`
 instead.
 
+The result also carries a `churn: Vec<AnalyzedFileChurn>` rollup
+— one entry per file where both `base_content` and
+`head_content` were supplied. Each rollup has `file_added` /
+`file_deleted` totals and a `functions[]` breakdown attributing
+added / deleted / modified line counts to the head-side function
+whose `[start_line, end_line]` interval contains each line.
+Deletions on the base side map to the corresponding head-side
+function via qualified-name match
+(`container::container::name`); base-only functions count toward
+`file_deleted` but produce no per-function row. `modified_lines`
+= `min(added_lines, deleted_lines)` per function — a cheap,
+explainable "edited both ways" signal.
+
+The diff itself is computed inside the IPC via
+`similar::TextDiff::from_lines` (no separate `git diff` invocation
+needed). Source: `crates/oxplow-tauri-ipc/src/commands/churn.rs`.
+
+## Change Analysis: interestingness scoring
+
+The dashboard's `LookHereFirstCard` ranks files by a CRAP-flavored
+multiplicative score so a single hot factor dominates:
+
+```
+sizeFactor      = log2(1 + additions + deletions)
+complexitySpike = sum(complexityDelta where >0) across this file's modifiedBody
+paramSpike      = sum(after-before where >0) across modifiedSignature
+longNewFn       = max(0, max(added.length where length>60) - 60) / 40
+untestedMul     = hasMatchingTest ? 1.0 : 1.5
+
+base    = 1 + sizeFactor
+spike   = (1 + 0.6 * complexitySpike) * (1 + 0.4 * paramSpike) * (1 + longNewFn)
+score   = base * spike * untestedMul
+```
+
+Each multiplier ≥ 1.2 contributes a hover-readable `reason` —
+"complexity +14 across 3 fns", "no test in same dir", etc. All
+weights live in `INTERESTINGNESS_WEIGHTS`
+(`apps/desktop/src/components/ChangeAnalysis/interestingness.ts`)
+so they're tuneable from one place.
+
+Per-function variant `functionInterestingness` uses the same
+shape but with churn lines + length on a single function. Used
+by `FunctionChurnCard` for tiebreak ordering.
 
 ## Adding a third analysis kind
 
