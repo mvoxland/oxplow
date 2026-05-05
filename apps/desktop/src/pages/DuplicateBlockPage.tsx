@@ -3,7 +3,7 @@ import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import { readFile, type Stream } from "../api.js";
 import { languageForPath } from "../editor-language.js";
-import type { FileVersion } from "../file-version.js";
+import { shortLabelForVersion, type FileVersion } from "../file-version.js";
 import type { DuplicateBlockPayload } from "../tabs/pageRefs.js";
 
 const HIGHLIGHT_STYLE_ID = "oxplow-duplicate-block-style";
@@ -28,7 +28,7 @@ export interface DuplicateBlockPageProps {
   stream: Stream;
   payload: DuplicateBlockPayload;
   visible: boolean;
-  onJumpToSource(path: string): void;
+  onJumpToSource(path: string, version: FileVersion): void;
 }
 
 /**
@@ -71,6 +71,16 @@ export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }:
               {payload.leftEnd - payload.leftStart + 1} lines
             </strong>
           </span>
+          {(() => {
+            const leftLabel = shortLabelForVersion(payload.leftVersion);
+            const rightLabel = shortLabelForVersion(payload.rightVersion);
+            const combined = leftLabel === rightLabel
+              ? `Both at @${leftLabel}`
+              : `Left @${leftLabel}, right @${rightLabel}`;
+            return (
+              <span style={{ color: "var(--text-muted)" }}>{combined}</span>
+            );
+          })()}
         </div>
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
           <DuplicateSide
@@ -102,10 +112,11 @@ interface SideProps {
   version: FileVersion;
   startLine: number;
   endLine: number;
-  onJumpToSource(path: string): void;
+  onJumpToSource(path: string, version: FileVersion): void;
 }
 
 function DuplicateSide({ stream, path, version, startLine, endLine, onJumpToSource }: SideProps) {
+  const versionLabel = shortLabelForVersion(version);
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
   const modelRef = useRef<any>(null);
@@ -216,11 +227,23 @@ function DuplicateSide({ stream, path, version, startLine, endLine, onJumpToSour
         <span style={{ color: "var(--text-muted)" }}>
           :{startLine}-{endLine}
         </span>
+        <span
+          style={{
+            fontFamily: "ui-monospace, monospace",
+            color: "var(--text-muted)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 3,
+            padding: "0 6px",
+          }}
+          title={`Version: ${versionLabel}`}
+        >
+          @{versionLabel}
+        </span>
         {error ? <span style={{ color: "#ff6b6b" }}>{error}</span> : null}
         <span style={{ flex: 1 }} />
         <button
           type="button"
-          onClick={() => onJumpToSource(path)}
+          onClick={() => onJumpToSource(path, version)}
           style={{
             background: "var(--surface-card)",
             color: "var(--text-primary)",
