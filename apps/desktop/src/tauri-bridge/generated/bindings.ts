@@ -254,6 +254,48 @@ export const commands = {
 	 */
 	runCodeQualityScan: (tool: string, scope: string, files: string[] | null) => typedError<number, IpcError>(__TAURI_INVOKE("run_code_quality_scan", { tool, scope, files })),
 	/**
+	 *  Run a duplicate-block scan against `tree_version`, restricted to
+	 *  the corpus described by `file_filter`. Persists the scan row with
+	 *  the version + filter columns so [`find_latest_done_scan`] can pick
+	 *  it up on the next page load. Returns the scan id.
+	 * 
+	 *  The renderer wires this to the "Scan now" button on the
+	 *  duplication card. There is intentionally no auto-trigger: scanning
+	 *  a commit's tree with libgit2 + tree-sitter is slow on a large
+	 *  repo, so we keep it user-initiated until that becomes interactive
+	 *  enough to make implicit.
+	 */
+	runDuplicationScanAt: (treeVersion: TreeVersion, fileFilter: FileFilterSpec, scope: string) => typedError<number, IpcError>(__TAURI_INVOKE("run_duplication_scan_at", { treeVersion, fileFilter, scope })),
+	/**
+	 *  Look up the most recent successful scan for `(tool, treeVersion,
+	 *  fileFilter)`. The renderer uses this to decide whether to show
+	 *  findings or a "Scan now" CTA.
+	 */
+	findLatestCodeQualityScan: (tool: string, treeVersion: TreeVersion, fileFilter: FileFilterSpec) => typedError<{
+	id: number,
+	tool: string,
+	scope: string,
+	status: CodeQualityScanStatus,
+	started_at: Timestamp,
+	ended_at: Timestamp | null,
+	error: string | null,
+	/**
+	 *  Tree version the scan ran against. `"disk" | "ref" | "snapshot"`.
+	 *  Backfilled to `"disk"` for pre-V9 rows.
+	 */
+	tree_version_kind: string,
+	/**
+	 *  Identifier for the version: ref-spec or snapshot id; null for
+	 *  disk.
+	 */
+	tree_version_value: string | null,
+	/**
+	 *  File filter applied: `"all"` or `"explicit:<sha-of-paths>"`.
+	 *  Backfilled to `"all"` for pre-V9 rows.
+	 */
+	file_filter: string,
+} | null, IpcError>(__TAURI_INVOKE("find_latest_code_quality_scan", { tool, treeVersion, fileFilter })),
+	/**
 	 *  Compute per-function metadata for the Change Analysis dashboard,
 	 *  for both sides of the diff. Pure in-process call: walks each
 	 *  (path, content) pair through tree-sitter.
@@ -363,6 +405,19 @@ export const commands = {
 	listWorkspaceEntries: (streamId: string | null, relativePath: string) => typedError<WorkspaceEntry[], IpcError>(__TAURI_INVOKE("list_workspace_entries", { streamId, relativePath })),
 	listWorkspaceFiles: (streamId: string | null) => typedError<WorkspaceIndexedFile[], IpcError>(__TAURI_INVOKE("list_workspace_files", { streamId })),
 	readWorkspaceFile: (streamId: string | null, relativePath: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("read_workspace_file", { streamId, relativePath })),
+	/**
+	 *  Versioned file read. Dispatches on `version`:
+	 *  - `Disk` → `read_workspace_file` (working tree, possibly dirty).
+	 *  - `Ref { ref }` → `read_file_at_ref` (committed blob).
+	 *  - `Snapshot { id }` → not yet implemented.
+	 * 
+	 *  Returns `Ok(None)` if the path doesn't exist at that version.
+	 *  Callers MUST pass an explicit version — there is no implicit
+	 *  "current working tree" default. This is the chokepoint that makes
+	 *  it impossible to forget which version you're reading, the way the
+	 *  duplication-scan bug did against `readWorkspaceFile`.
+	 */
+	readFile: (streamId: string | null, relativePath: string, version: TreeVersion) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file", { streamId, relativePath, version })),
 	writeWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("write_workspace_file", { streamId, relativePath, content })),
 	createWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("create_workspace_file", { streamId, relativePath, content })),
 	createWorkspaceDirectory: (streamId: string | null, relativePath: string) => typedError<string, IpcError>(__TAURI_INVOKE("create_workspace_directory", { streamId, relativePath })),
@@ -683,6 +738,21 @@ export type CodeQualityScan = {
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
 	error: string | null,
+	/**
+	 *  Tree version the scan ran against. `"disk" | "ref" | "snapshot"`.
+	 *  Backfilled to `"disk"` for pre-V9 rows.
+	 */
+	tree_version_kind: string,
+	/**
+	 *  Identifier for the version: ref-spec or snapshot id; null for
+	 *  disk.
+	 */
+	tree_version_value: string | null,
+	/**
+	 *  File filter applied: `"all"` or `"explicit:<sha-of-paths>"`.
+	 *  Backfilled to `"all"` for pre-V9 rows.
+	 */
+	file_filter: string,
 };
 
 export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
@@ -762,6 +832,14 @@ export type EnsureAgentPaneResponse = {
 	target: string,
 	created: boolean,
 };
+
+/**
+ *  File filter the renderer can request: `all` (whole corpus) or an
+ *  explicit set of repo-relative paths. The serialized shape mirrors
+ *  the persisted `file_filter` column — callers pass `kind: "all"` or
+ *  `{ kind: "explicit", paths: [...] }`.
+ */
+export type FileFilterSpec = { kind: "all" } | { kind: "explicit"; paths: string[] };
 
 export type FileSnapshot = {
 	id: number,
@@ -1204,6 +1282,23 @@ export type ThreadWorkState = {
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
+
+/**
+ *  Identifies which version of the tree a `TreeSource` represents.
+ *  Carried alongside scan results so consumers can re-read the same
+ *  content without ambiguity.
+ */
+export type TreeVersion = 
+// Working tree on disk.
+{ kind: "disk" } | 
+// A git ref — sha, branch, tag, or `HEAD`.
+{ kind: "ref"; ref: string } | 
+/**
+ *  A local-history snapshot. Wired through the type system so
+ *  callers can match exhaustively, but no source impl ships in
+ *  this crate yet — see [`SnapshotTreeSource`].
+ */
+{ kind: "snapshot"; id: string };
 
 export type UiLogEntry = {
 	clientId: string | null,

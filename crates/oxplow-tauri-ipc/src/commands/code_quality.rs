@@ -1,9 +1,14 @@
+use std::sync::Arc;
+
 use oxplow_app::code_quality_runner::{
-    run_duplication_scan, run_metrics_scan, RunOptions,
+    run_duplication_scan, run_duplication_scan_with, run_metrics_scan, RunOptions,
 };
 use oxplow_app::{CodeQualityScanPhase, OxplowEvent};
 use oxplow_code_metrics::{analyze_file, FunctionMetrics, Visibility};
 use oxplow_db::{CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus};
+use oxplow_tree_source::{
+    AllFiles, DiskTreeSource, ExplicitPaths, FileFilter, GitTreeSource, TreeSource, TreeVersion,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -131,6 +136,164 @@ pub async fn run_code_quality_scan(
         }
     }
     Ok(scan_id)
+}
+
+/// File filter the renderer can request: `all` (whole corpus) or an
+/// explicit set of repo-relative paths. The serialized shape mirrors
+/// the persisted `file_filter` column — callers pass `kind: "all"` or
+/// `{ kind: "explicit", paths: [...] }`.
+#[derive(Debug, Clone, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum FileFilterSpec {
+    All,
+    Explicit { paths: Vec<String> },
+}
+
+impl FileFilterSpec {
+    fn fingerprint(&self) -> String {
+        match self {
+            FileFilterSpec::All => "all".into(),
+            FileFilterSpec::Explicit { paths } => {
+                use std::hash::{Hash, Hasher};
+                let mut sorted: Vec<&String> = paths.iter().collect();
+                sorted.sort();
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                for p in &sorted {
+                    p.hash(&mut hasher);
+                }
+                format!("explicit:{:016x}", hasher.finish())
+            }
+        }
+    }
+
+    fn into_filter(self) -> Arc<dyn FileFilter> {
+        match self {
+            FileFilterSpec::All => Arc::new(AllFiles),
+            FileFilterSpec::Explicit { paths } => Arc::new(ExplicitPaths::new(paths)),
+        }
+    }
+}
+
+/// Run a duplicate-block scan against `tree_version`, restricted to
+/// the corpus described by `file_filter`. Persists the scan row with
+/// the version + filter columns so [`find_latest_done_scan`] can pick
+/// it up on the next page load. Returns the scan id.
+///
+/// The renderer wires this to the "Scan now" button on the
+/// duplication card. There is intentionally no auto-trigger: scanning
+/// a commit's tree with libgit2 + tree-sitter is slow on a large
+/// repo, so we keep it user-initiated until that becomes interactive
+/// enough to make implicit.
+#[tauri::command]
+#[specta::specta]
+pub async fn run_duplication_scan_at(
+    state: tauri::State<'_, AppState>,
+    tree_version: TreeVersion,
+    file_filter: FileFilterSpec,
+    scope: String,
+) -> Result<i64, IpcError> {
+    let project = state.layout.project_dir.clone();
+    let kind_tag = tree_version.kind_tag().to_string();
+    let value_str = tree_version.value().map(str::to_string);
+    let filter_fp = file_filter.fingerprint();
+    let filter = file_filter.into_filter();
+
+    let source: Arc<dyn TreeSource> = match &tree_version {
+        TreeVersion::Disk => Arc::new(DiskTreeSource::new(project.clone())),
+        TreeVersion::Ref { r#ref } => Arc::new(GitTreeSource::new(project.clone(), r#ref.clone())),
+        TreeVersion::Snapshot { .. } => {
+            return Err(IpcError::invalid(
+                "snapshot tree version is not yet implemented",
+            ));
+        }
+    };
+
+    let scan_id = state
+        .code_quality_store
+        .create_scan_with(
+            "duplication",
+            &scope,
+            &kind_tag,
+            value_str.as_deref(),
+            &filter_fp,
+        )
+        .await?;
+    state.events.emit(OxplowEvent::CodeQualityScanned {
+        stream_id: None,
+        scan_id,
+        tool: "duplication".into(),
+        scope: scope.clone(),
+        phase: CodeQualityScanPhase::Started,
+    });
+
+    match run_duplication_scan_with(source, filter, None).await {
+        Ok(findings) => {
+            for f in findings {
+                state
+                    .code_quality_store
+                    .append_finding(
+                        scan_id,
+                        oxplow_db::CodeQualityFinding {
+                            id: 0,
+                            scan_id,
+                            path: f.path,
+                            start_line: f.start_line as i32,
+                            end_line: f.end_line as i32,
+                            kind: f.kind,
+                            metric_value: f.metric_value,
+                            extra_json: f.extra_json,
+                        },
+                    )
+                    .await?;
+            }
+            state
+                .code_quality_store
+                .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
+                .await?;
+            state.events.emit(OxplowEvent::CodeQualityScanned {
+                stream_id: None,
+                scan_id,
+                tool: "duplication".into(),
+                scope,
+                phase: CodeQualityScanPhase::Completed,
+            });
+            Ok(scan_id)
+        }
+        Err(e) => {
+            state
+                .code_quality_store
+                .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.to_string()))
+                .await?;
+            state.events.emit(OxplowEvent::CodeQualityScanned {
+                stream_id: None,
+                scan_id,
+                tool: "duplication".into(),
+                scope,
+                phase: CodeQualityScanPhase::Failed,
+            });
+            Err(IpcError::internal(e.to_string()))
+        }
+    }
+}
+
+/// Look up the most recent successful scan for `(tool, treeVersion,
+/// fileFilter)`. The renderer uses this to decide whether to show
+/// findings or a "Scan now" CTA.
+#[tauri::command]
+#[specta::specta]
+pub async fn find_latest_code_quality_scan(
+    state: tauri::State<'_, AppState>,
+    tool: String,
+    tree_version: TreeVersion,
+    file_filter: FileFilterSpec,
+) -> Result<Option<CodeQualityScan>, IpcError> {
+    let kind_tag = tree_version.kind_tag().to_string();
+    let value_str = tree_version.value().map(str::to_string);
+    let filter_fp = file_filter.fingerprint();
+    Ok(state
+        .code_quality_store
+        .find_latest_done_scan(&tool, &kind_tag, value_str.as_deref(), &filter_fp)
+        .await?)
 }
 
 /// One file's content at one side of the diff. `content == None` means

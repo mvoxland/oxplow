@@ -103,6 +103,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::code_quality::list_code_quality_scans,
         commands::code_quality::list_code_quality_findings,
         commands::code_quality::run_code_quality_scan,
+        commands::code_quality::run_duplication_scan_at,
+        commands::code_quality::find_latest_code_quality_scan,
         commands::code_quality::analyze_functions_at_refs,
         // snapshots
         commands::snapshot::list_snapshots,
@@ -171,6 +173,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::workspace::list_workspace_entries,
         commands::workspace::list_workspace_files,
         commands::workspace::read_workspace_file,
+        commands::workspace::read_file,
         commands::workspace::write_workspace_file,
         commands::workspace::create_workspace_file,
         commands::workspace::create_workspace_directory,
