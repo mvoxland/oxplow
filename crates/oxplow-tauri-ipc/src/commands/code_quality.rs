@@ -50,6 +50,7 @@ pub async fn run_code_quality_scan(
     let opts = RunOptions {
         files: files.unwrap_or_default(),
         timeout: None,
+        dup_options: None,
     };
     let scan_id = state
         .code_quality_store
@@ -231,7 +232,7 @@ pub async fn run_duplication_scan_at(
         phase: CodeQualityScanPhase::Started,
     });
 
-    match run_duplication_scan_scoped(source, filter, None).await {
+    match run_duplication_scan_scoped(source, filter, None, None).await {
         Ok(findings) => {
             for f in findings {
                 state
