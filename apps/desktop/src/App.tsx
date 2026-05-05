@@ -87,6 +87,7 @@ import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.j
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { DiffPage } from "./pages/DiffPage.js";
 import { DuplicateBlockPage } from "./pages/DuplicateBlockPage.js";
+import { FileViewerPage } from "./pages/FileViewerPage.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { PageNavigationContext } from "./tabs/PageNavigationContext.js";
@@ -1983,8 +1984,24 @@ export function App() {
         setCenterActive("agent");
         return;
       case "file": {
-        const payload = ref.payload as { path?: string } | null;
-        if (payload?.path) void handleOpenFile(payload.path);
+        const payload = ref.payload as { path?: string; version?: import("./file-version.js").FileVersion } | null;
+        if (!payload?.path) return;
+        const version = payload.version ?? DISK;
+        if (version.kind === "disk") {
+          void handleOpenFile(payload.path);
+          return;
+        }
+        // Non-disk: register the ref directly without going through
+        // the disk-only fileSessions cache. The render branch picks
+        // FileViewerPage based on the payload version.
+        if (selectedThreadId) {
+          setThreadPageTabs((prev) => {
+            const existing = prev[selectedThreadId] ?? [];
+            if (existing.some((t) => t.id === ref.id)) return prev;
+            return { ...prev, [selectedThreadId]: [...existing, ref] };
+          });
+          setCenterActive(ref.id);
+        }
         return;
       }
       case "note":
@@ -2063,8 +2080,15 @@ export function App() {
       return;
     }
     if (ref.kind === "file") {
-      const payload = ref.payload as { path?: string } | null;
-      if (payload?.path) void handleOpenFile(payload.path);
+      const payload = ref.payload as { path?: string; version?: import("./file-version.js").FileVersion } | null;
+      // Only the disk version needs to populate the fileSessions
+      // dirty-state cache + LSP wiring. Non-disk versions render
+      // through FileViewerPage which loads content directly via
+      // readFile(version) — calling handleOpenFile here would
+      // pollute the cache with disk content the user didn't ask
+      // for.
+      const isDisk = !payload?.version || payload.version.kind === "disk";
+      if (payload?.path && isDisk) void handleOpenFile(payload.path);
     }
     const oldRef = existing[idx]!;
     setThreadPageTabs((prev) => {
@@ -2156,8 +2180,9 @@ export function App() {
     if (idx < 0) return;
     if (target.id === currentTabId) return;
     if (target.kind === "file") {
-      const payload = target.payload as { path?: string } | null;
-      if (payload?.path) void handleOpenFile(payload.path);
+      const payload = target.payload as { path?: string; version?: import("./file-version.js").FileVersion } | null;
+      const isDisk = !payload?.version || payload.version.kind === "disk";
+      if (payload?.path && isDisk) void handleOpenFile(payload.path);
     }
     setThreadPageTabs((prev) => {
       const list = prev[selectedThreadId] ?? [];
@@ -2463,9 +2488,39 @@ export function App() {
         continue;
       }
       if (ref.kind === "file") {
-        const path = (ref.payload as { path?: string } | null)?.path;
+        const payload = ref.payload as { path?: string; version?: import("./file-version.js").FileVersion } | null;
+        const path = payload?.path;
         if (!path) continue;
+        const version = payload?.version ?? DISK;
         const basename = path.split("/").pop() ?? path;
+        // Non-disk versions render through FileViewerPage — read-only,
+        // no dirty state, no save plumbing. The EditorPane / save
+        // pipeline stays disk-only on purpose so the dirty cache,
+        // LSP, find-in-file, etc. don't have to grow "is this read
+        // only?" branches.
+        if (version.kind !== "disk") {
+          const versionLabel =
+            version.kind === "ref"
+              ? version.ref.length > 12
+                ? version.ref.slice(0, 7)
+                : version.ref
+              : `snap:${version.id.slice(0, 7)}`;
+          tabs.push({
+            id: ref.id,
+            label: `${basename} (${versionLabel})`,
+            closable: true,
+            reorderGroup: "file",
+            render: () => stream ? (
+              <FileViewerPage
+                stream={stream}
+                path={path}
+                version={version}
+                visible={effectiveCenterActive === ref.id}
+              />
+            ) : null,
+          });
+          continue;
+        }
         const file = currentSession.files[path];
         const dirty = !!file && file.draftContent !== file.savedContent;
         tabs.push({
