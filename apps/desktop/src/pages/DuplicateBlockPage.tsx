@@ -239,8 +239,19 @@ function DuplicateSide({
             },
           ],
         );
-        // Reveal the start line near the top so both editors line up.
-        editor.revealLineNearTop(safeStart);
+        // Pin the duplicate's start line at exactly PAD_LINES from
+        // the top of the viewport on both sides. revealLineNearTop()
+        // leaves padding to Monaco's discretion, so two sides with
+        // different content above the start line land at slightly
+        // different scroll offsets — visibly out of sync. Computing
+        // a deterministic scrollTop from the line number + a fixed
+        // line-height padding makes both editors land identically.
+        const PAD_LINES = 2;
+        const lineHeight: number = editor.getOption(
+          monaco.editor.EditorOption.lineHeight,
+        );
+        const top: number = editor.getTopForLineNumber(safeStart);
+        editor.setScrollTop(Math.max(0, top - lineHeight * PAD_LINES), 1 /* Immediate */);
         editor.setPosition({ lineNumber: safeStart, column: 1 });
         setError(null);
       } catch (e) {
