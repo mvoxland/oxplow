@@ -56,12 +56,63 @@ export interface DuplicateBlockPageProps {
  */
 interface ScrollSyncSide {
   editor: any;
+  /** Pixel offset of this side's highlight start from line 1.
+   *  Set once at align time; used by `recomputeAlignment` to pick
+   *  a shared pad that respects both sides' headroom. */
+  topForStart: number;
+  /** Line height in pixels — used by recomputeAlignment to bound
+   *  the pad. Both sides should report the same value (same
+   *  theme/font), but we read it per-side and use the minimum. */
+  lineHeight: number;
+  /** Scroll position the side is "at" when the highlight is
+   *  first revealed; subsequent user scrolls compute delta from
+   *  this. Recomputed whenever the shared pad changes. */
   anchor: number;
 }
 interface ScrollSyncBus {
   left: ScrollSyncSide | null;
   right: ScrollSyncSide | null;
   lock: boolean;
+}
+
+const PAD_LINES = 2;
+
+/**
+ * Pick a shared pad both sides can satisfy and apply it.
+ *
+ * The "natural" pad is `PAD_LINES * lineHeight` (highlight starts a
+ * couple of lines below the viewport top). But if either side's
+ * highlight is too close to the top of its file (e.g. line 1), the
+ * editor can't scroll to a negative offset — the best it can do is
+ * pin the highlight at the very top. To keep the two highlights at
+ * the SAME screen Y we use the smaller of (left.top, right.top,
+ * natural_pad) as the effective pad on both sides.
+ */
+function recomputeAlignment(bus: ScrollSyncBus): void {
+  const { left, right } = bus;
+  if (!left && !right) return;
+  const natural = PAD_LINES * Math.min(
+    left?.lineHeight ?? Infinity,
+    right?.lineHeight ?? Infinity,
+  );
+  const cap = Math.min(
+    left?.topForStart ?? Infinity,
+    right?.topForStart ?? Infinity,
+  );
+  const pad = Math.min(natural, cap);
+  bus.lock = true;
+  try {
+    if (left) {
+      left.anchor = Math.max(0, left.topForStart - pad);
+      left.editor.setScrollTop(left.anchor, 1 /* Immediate */);
+    }
+    if (right) {
+      right.anchor = Math.max(0, right.topForStart - pad);
+      right.editor.setScrollTop(right.anchor, 1);
+    }
+  } finally {
+    bus.lock = false;
+  }
 }
 
 export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }: DuplicateBlockPageProps) {
@@ -177,7 +228,7 @@ function DuplicateSide({
         scrollBeyondLastLine: false,
       });
       editorRef.current = editor;
-      syncRef.current[side] = { editor, anchor: 0 };
+      syncRef.current[side] = { editor, topForStart: 0, lineHeight: 18, anchor: 0 };
       // Mirror scroll DELTA from this side's anchor to the peer's
       // anchor. The duplicate ranges live at different absolute Y
       // in their respective files, so naive absolute mirroring
@@ -248,28 +299,22 @@ function DuplicateSide({
             },
           ],
         );
-        // Pin the duplicate's start line at exactly PAD_LINES from
-        // the top of the viewport on each side. Each side computes
-        // its own deterministic scrollTop and records it as the
-        // scroll-sync anchor — subsequent user scrolls propagate
-        // delta-from-anchor to the peer, keeping the highlights at
-        // the same screen Y as the user scrolls.
-        const PAD_LINES = 2;
+        // Record this side's pixel-top-for-start in the bus, then
+        // ask `recomputeAlignment` to pick a shared pad both sides
+        // can satisfy and apply it. When only one side is loaded
+        // we align that side immediately; when the second side
+        // arrives, recompute also pulls the first side back into
+        // alignment if the pad shrunk.
         const lineHeight: number = editor.getOption(
           monaco.editor.EditorOption.lineHeight,
         );
         const top: number = editor.getTopForLineNumber(safeStart);
-        const anchorTop = Math.max(0, top - lineHeight * PAD_LINES);
         const bus = syncRef.current;
-        bus.lock = true;
-        try {
-          editor.setScrollTop(anchorTop, 1 /* Immediate */);
-        } finally {
-          bus.lock = false;
-        }
         if (bus[side]) {
-          bus[side]!.anchor = anchorTop;
+          bus[side]!.topForStart = top;
+          bus[side]!.lineHeight = lineHeight;
         }
+        recomputeAlignment(bus);
         editor.setPosition({ lineNumber: safeStart, column: 1 });
         setError(null);
       } catch (e) {
