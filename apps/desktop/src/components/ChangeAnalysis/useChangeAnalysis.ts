@@ -3,10 +3,8 @@ import {
   getBranchChanges,
   getCommitDetail,
   listCodeQualityFindings,
-  listCodeQualityScans,
   readFileAtRef,
   readWorkspaceFile,
-  runCodeQualityScan,
   subscribeCodeQualityEvents,
   subscribeGitRefsEvents,
   subscribeWorkspaceEvents,
@@ -17,6 +15,7 @@ import type {
   CodeQualityScanRow,
 } from "../../api-types.js";
 import { commands } from "../../tauri-bridge/index.js";
+import { DISK, refVersion, type FileVersion } from "../../file-version.js";
 import {
   buildFilePivots,
   diffFunctions,
@@ -76,7 +75,18 @@ export interface ChangeAnalysisState {
     findings: CodeQualityFindingRow[];
     scanAgeMs: number | null;
     scanning: boolean;
+    /** Run a duplication scan against the analyzed tree version,
+     *  restricted to the changed files. Triggered by the user — the
+     *  card never auto-scans on open because libgit2 + tree-sitter
+     *  on a large repo isn't fast enough to make that feel
+     *  background. */
     refresh: () => Promise<void>;
+    /** True iff a `done` scan exists for this exact (treeVersion,
+     *  filter) combination. When false, the duplication card should
+     *  render a "Scan at <commit>" CTA instead of an empty findings
+     *  list — the data the card had previously been surfacing was
+     *  stale findings from a *different* scan. */
+    hasScan: boolean;
   };
   tests: TestSummary;
   refresh: () => Promise<void>;
@@ -148,18 +158,28 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   const [duplication, setDuplication] = useState<{
     findings: CodeQualityFindingRow[];
     scanAgeMs: number | null;
-  }>({ findings: [], scanAgeMs: null });
+    hasScan: boolean;
+  }>({ findings: [], scanAgeMs: null, hasScan: false });
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resolvedRefs, setResolvedRefs] = useState<{ baseRef: string; headRef: string | null } | null>(null);
   const reqIdRef = useRef(0);
 
+  // Derive the tree version + file filter the duplication scan is
+  // expected to run against. Working-tree → DISK; commit sha → that
+  // ref. The filter is "all changed files in this analysis" — both
+  // the lookup and the trigger use the same value so they line up.
+  const treeVersion: FileVersion = useMemo(
+    () => (target === "working" ? DISK : refVersion(target)),
+    [target],
+  );
+
   const refresh = useCallback(async () => {
     if (!streamId) {
       setFiles(EMPTY_FILES);
       setFunctions(EMPTY_BUCKETS);
-      setDuplication({ findings: [], scanAgeMs: null });
+      setDuplication({ findings: [], scanAgeMs: null, hasScan: false });
       setLoading(false);
       return;
     }
@@ -228,26 +248,41 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
         setFunctions(diffFunctions(indexSides(sides)));
       }
 
-      // Duplication: read latest duplication scan + its findings,
-      // filter to changed files. No fresh scan unless the user clicks
-      // Refresh.
-      const scans = await listCodeQualityScans({ streamId, limit: 50 });
-      const latestDup = scans.find(
-        (s) => s.tool === "duplication" && s.status === "done",
+      // Duplication: look up the latest `done` scan for THIS exact
+      // (treeVersion, filter) combination. The legacy "show whatever
+      // duplication scan was run last in this stream" path was the
+      // root cause of the wrong-tree bug — a scan that ran against
+      // the working tree would surface in a commit-target analysis
+      // page with line ranges that didn't match the commit's
+      // content. With the version+filter columns the lookup now
+      // refuses to substitute.
+      const filterPaths = fileList.map((f) => f.path);
+      const filterSpec = filterPaths.length > 0
+        ? { kind: "explicit" as const, paths: filterPaths }
+        : { kind: "all" as const };
+      const scanResult = await commands.findLatestCodeQualityScan(
+        "duplication",
+        treeVersion,
+        filterSpec,
       );
-      if (latestDup) {
+      if (scanResult.status === "error") {
+        if (reqId === reqIdRef.current) {
+          setDuplication({ findings: [], scanAgeMs: null, hasScan: false });
+        }
+      } else if (scanResult.data) {
+        const scan = scanResult.data as unknown as CodeQualityScanRow;
         const findings = await listCodeQualityFindings({
           streamId,
-          scanId: latestDup.id,
+          scanId: scan.id,
         });
         const changed = new Set(fileList.map((f) => f.path));
         const filtered = findings.filter((f) => changed.has(f.path));
-        const scanAgeMs = scanAgeFor(latestDup);
+        const scanAgeMs = scanAgeFor(scan);
         if (reqId === reqIdRef.current) {
-          setDuplication({ findings: filtered, scanAgeMs });
+          setDuplication({ findings: filtered, scanAgeMs, hasScan: true });
         }
       } else if (reqId === reqIdRef.current) {
-        setDuplication({ findings: [], scanAgeMs: null });
+        setDuplication({ findings: [], scanAgeMs: null, hasScan: false });
       }
     } catch (err) {
       if (reqId !== reqIdRef.current) return;
@@ -255,7 +290,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [streamId, target]);
+  }, [streamId, target, treeVersion]);
 
   useEffect(() => {
     void refresh();
@@ -286,11 +321,28 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     if (!streamId) return;
     setScanning(true);
     try {
-      await runCodeQualityScan({ streamId, tool: "duplication", scope: "diff" });
+      // Scan against the analyzed tree version, restricted to the
+      // currently-known changed files. `files` is derived state — by
+      // the time the user clicks the button, refresh() has populated
+      // it from the commit detail (or workspace).
+      const filterPaths = files.map((f) => f.path);
+      const filterSpec = filterPaths.length > 0
+        ? { kind: "explicit" as const, paths: filterPaths }
+        : { kind: "all" as const };
+      const result = await commands.runDuplicationScanAt(
+        treeVersion,
+        filterSpec,
+        "diff",
+      );
+      if (result.status === "error") {
+        setError(typeof result.error === "string" ? result.error : "Scan failed.");
+      }
+      // The CodeQualityScanned event will fire `refresh()` which
+      // re-pulls the new findings.
     } finally {
       setScanning(false);
     }
-  }, [streamId]);
+  }, [streamId, files, treeVersion]);
 
   // Apply the drilldown scope (if any) once and feed the filtered file
   // list into every downstream derivation. Pivots remain unfiltered so
@@ -341,6 +393,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
       scanAgeMs: duplication.scanAgeMs,
       scanning,
       refresh: triggerScan,
+      hasScan: duplication.hasScan,
     },
     tests,
     refresh,
