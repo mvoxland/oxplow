@@ -11,9 +11,13 @@
 //! `"metrics"` and `"duplication"`.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use oxplow_code_dup::{detect_duplicates, DupOptions};
 use oxplow_code_metrics::FunctionMetrics;
+use oxplow_tree_source::{
+    collect_corpus, AllFiles, DiskTreeSource, FileFilter, TreeError, TreeSource,
+};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
@@ -28,6 +32,16 @@ pub enum CodeQualityError {
     /// The scan exceeded the configured wall-clock budget.
     #[error("scan timed out after {0:?}")]
     Timeout(std::time::Duration),
+    /// Tree source enumeration / read failed (git error, IO error,
+    /// snapshot stub).
+    #[error("tree source failed: {0}")]
+    TreeSource(String),
+}
+
+impl From<TreeError> for CodeQualityError {
+    fn from(e: TreeError) -> Self {
+        CodeQualityError::TreeSource(format!("{e}"))
+    }
 }
 
 /// Default wall-clock budget for a single scan. Tunable via
@@ -173,32 +187,34 @@ pub async fn run_metrics_scan(
     }
 }
 
-/// Duplicate-block scan: runs the tree-sitter winnowing detector
-/// across every supported file and emits two findings per duplicate
-/// pair (one per side).
-pub async fn run_duplication_scan(
-    project_dir: &Path,
-    opts: RunOptions,
+/// Duplicate-block scan against an arbitrary tree version.
+///
+/// `source` enumerates files and reads their content (Disk = working
+/// tree, GitRef = a commit's tree, …); `filter` decides which paths
+/// from the source make it into the corpus. The detector itself is
+/// unchanged — we just route content through the trait so the same
+/// scan logic works for working tree, a commit, and (eventually) a
+/// snapshot.
+///
+/// The whole scan runs on `spawn_blocking` because tree-sitter and
+/// libgit2 are CPU/IO-bound; the trait objects are `Send + Sync` so
+/// `Arc`-wrapping them lets us move references into the blocking
+/// pool.
+pub async fn run_duplication_scan_with(
+    source: Arc<dyn TreeSource>,
+    filter: Arc<dyn FileFilter>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
-    let project = project_dir.to_path_buf();
-    let timeout = opts.timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
+    let timeout = timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
     let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
-        let paths = collect_supported_files(&project, &opts);
-        // Read all sources up front; the dup detector wants
-        // (path, content) pairs.
-        let mut inputs: Vec<(String, String)> = Vec::with_capacity(paths.len());
-        for path in paths {
-            let Ok(source) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            // Re-derive repo-relative path so peer references in the
-            // findings match the panel's other rows.
-            let rel = match path.strip_prefix(&project) {
-                Ok(rel) => rel.to_string_lossy().to_string(),
-                Err(_) => path.to_string_lossy().to_string(),
-            };
-            inputs.push((rel, source));
-        }
+        let corpus = collect_corpus(source.as_ref(), filter.as_ref())?;
+        // Drop entries the metrics layer can't parse — the detector
+        // tolerates unsupported files but we'd rather not feed them
+        // through tree-sitter at all.
+        let inputs: Vec<(String, String)> = corpus
+            .into_iter()
+            .filter(|(p, _)| oxplow_code_metrics::is_supported_path(Path::new(p)))
+            .collect();
         let blocks = detect_duplicates(inputs, DupOptions::default());
         Ok(blocks_to_findings(blocks))
     });
@@ -207,6 +223,23 @@ pub async fn run_duplication_scan(
         Ok(Err(join_err)) => Err(CodeQualityError::Task(format!("duplication task: {join_err}"))),
         Err(_) => Err(CodeQualityError::Timeout(timeout)),
     }
+}
+
+/// Backward-compat thin wrapper for callers that still pass a
+/// project_dir: defaults to `DiskTreeSource` + `AllFiles`. New
+/// callers should construct the source/filter explicitly via
+/// [`run_duplication_scan_with`].
+pub async fn run_duplication_scan(
+    project_dir: &Path,
+    opts: RunOptions,
+) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
+    let source: Arc<dyn TreeSource> = Arc::new(DiskTreeSource::new(project_dir.to_path_buf()));
+    let filter: Arc<dyn FileFilter> = if opts.files.is_empty() {
+        Arc::new(AllFiles)
+    } else {
+        Arc::new(oxplow_tree_source::ExplicitPaths::new(opts.files.iter().cloned()))
+    };
+    run_duplication_scan_with(source, filter, opts.timeout).await
 }
 
 fn blocks_to_findings(blocks: Vec<oxplow_code_dup::DuplicateBlock>) -> Vec<CodeQualityFinding> {
@@ -446,5 +479,68 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             .await
             .unwrap();
         assert!(findings.is_empty());
+    }
+
+    /// The dup scan must read content from the supplied tree source,
+    /// not from disk. Set up a git repo whose committed `a.rs` and
+    /// `b.rs` are intentional clones of each other, then mutate the
+    /// disk versions to be unique. A scan against `HEAD` via
+    /// `GitTreeSource` should still report the duplicates; a scan
+    /// against `Disk` would not.
+    #[tokio::test]
+    async fn duplication_scan_reads_from_tree_source_not_disk() {
+        use oxplow_tree_source::{AllFiles, GitTreeSource};
+        use std::process::Command;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?} failed: {:?}", out);
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "user.email", "t@t"]);
+        run(&["config", "user.name", "t"]);
+        let body = r#"
+fn helper(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 {
+            out.push(item * 2);
+        } else if item < 0 {
+            out.push(item * -1);
+        } else {
+            out.push(0);
+        }
+    }
+    out
+}
+"#;
+        std::fs::write(path.join("a.rs"), body).unwrap();
+        std::fs::write(path.join("b.rs"), body).unwrap();
+        run(&["add", "a.rs", "b.rs"]);
+        run(&["commit", "-q", "-m", "first"]);
+        // After commit: stomp the disk versions so they're no longer
+        // duplicates. Any scan that secretly reads disk would now
+        // emit zero findings.
+        std::fs::write(path.join("a.rs"), "fn unique_a() {}").unwrap();
+        std::fs::write(path.join("b.rs"), "fn unique_b() {}").unwrap();
+
+        let source: Arc<dyn TreeSource> = Arc::new(GitTreeSource::new(path, "HEAD"));
+        let filter: Arc<dyn FileFilter> = Arc::new(AllFiles);
+        let findings = run_duplication_scan_with(source, filter, None).await.unwrap();
+        let dups: Vec<_> = findings
+            .iter()
+            .filter(|f| f.kind == "duplicate-block")
+            .collect();
+        assert!(
+            dups.len() >= 2,
+            "expected dup findings from HEAD content, got {findings:?}"
+        );
     }
 }
