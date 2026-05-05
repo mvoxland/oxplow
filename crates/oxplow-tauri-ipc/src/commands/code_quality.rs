@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use oxplow_app::code_quality_runner::{
-    run_duplication_scan, run_duplication_scan_with, run_metrics_scan, RunOptions,
+    run_duplication_scan, run_duplication_scan_scoped, run_metrics_scan, RunOptions,
 };
 use oxplow_app::{CodeQualityScanPhase, OxplowEvent};
 use oxplow_code_metrics::{analyze_file, FunctionMetrics, Visibility};
@@ -174,16 +174,21 @@ impl FileFilterSpec {
     }
 }
 
-/// Run a duplicate-block scan against `tree_version`, restricted to
-/// the corpus described by `file_filter`. Persists the scan row with
-/// the version + filter columns so [`find_latest_done_scan`] can pick
-/// it up on the next page load. Returns the scan id.
+/// Run a duplicate-block scan against `tree_version`, scoped by
+/// `file_filter`. The corpus is the WHOLE tree at the requested
+/// version — `file_filter` defines which files findings are
+/// anchored to (the renderer's "side A"). A copy-paste from an
+/// unchanged peer file surfaces because that peer is in the corpus
+/// even though it's outside scope. Same-path matches (a file vs
+/// itself) are dropped. Persists the scan row with the version +
+/// filter columns so [`find_latest_done_scan`] can pick it up on
+/// the next page load. Returns the scan id.
 ///
 /// The renderer wires this to the "Scan now" button on the
-/// duplication card. There is intentionally no auto-trigger: scanning
-/// a commit's tree with libgit2 + tree-sitter is slow on a large
-/// repo, so we keep it user-initiated until that becomes interactive
-/// enough to make implicit.
+/// duplication card. There is intentionally no auto-trigger:
+/// scanning a commit's tree with libgit2 + tree-sitter is slow on a
+/// large repo, so we keep it user-initiated until that becomes
+/// interactive enough to make implicit.
 #[tauri::command]
 #[specta::specta]
 pub async fn run_duplication_scan_at(
@@ -226,7 +231,7 @@ pub async fn run_duplication_scan_at(
         phase: CodeQualityScanPhase::Started,
     });
 
-    match run_duplication_scan_with(source, filter, None).await {
+    match run_duplication_scan_scoped(source, filter, None).await {
         Ok(findings) => {
             for f in findings {
                 state
