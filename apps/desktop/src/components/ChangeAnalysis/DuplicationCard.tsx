@@ -9,6 +9,11 @@ interface DuplicationCardProps {
     scanAgeMs: number | null;
     scanning: boolean;
     refresh(): Promise<void>;
+    /** True iff a `done` scan exists for this exact version+filter
+     *  combination. When false the card hides any stale findings
+     *  list and renders the "Scan now" CTA — never substitutes a
+     *  scan from a different version. */
+    hasScan: boolean;
   };
   /** Tree version the scan ran against — gets stamped onto every
    *  duplicate-block ref so the side-by-side page reads files at the
@@ -19,15 +24,25 @@ interface DuplicationCardProps {
 
 export function DuplicationCard({ duplication, scanVersion, onOpenFile }: DuplicationCardProps) {
   const dupes = duplication.findings.filter((f) => f.kind === "duplicate-block");
+  const versionLabel =
+    scanVersion.kind === "disk"
+      ? "the working tree"
+      : scanVersion.kind === "ref"
+        ? scanVersion.ref.length > 12
+          ? scanVersion.ref.slice(0, 7)
+          : scanVersion.ref
+        : `snapshot ${scanVersion.id.slice(0, 7)}`;
   return (
     <section data-testid="change-analysis-duplication" style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div style={header}>Duplication</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            {duplication.scanAgeMs == null
-              ? "no duplication scan yet"
-              : `last scan: ${formatAge(duplication.scanAgeMs)} ago`}
+            {!duplication.hasScan
+              ? `no scan at ${versionLabel} yet`
+              : duplication.scanAgeMs == null
+                ? "scan complete"
+                : `last scan: ${formatAge(duplication.scanAgeMs)} ago`}
           </span>
           <button
             type="button"
@@ -36,14 +51,23 @@ export function DuplicationCard({ duplication, scanVersion, onOpenFile }: Duplic
             disabled={duplication.scanning}
             style={smallButton}
           >
-            {duplication.scanning ? "Scanning…" : "Refresh"}
+            {duplication.scanning
+              ? "Scanning…"
+              : duplication.hasScan
+                ? "Re-scan"
+                : `Scan ${versionLabel}`}
           </button>
         </div>
       </div>
-      {dupes.length === 0 ? (
+      {!duplication.hasScan ? (
         <div style={muted}>
-          No duplicate-block findings touch the changed files. Run a fresh duplication scan if
-          results look stale.
+          No duplication scan has run against {versionLabel} for these files. Click
+          “Scan” above to run one now — duplicate-block findings only show when the
+          scan's tree version matches what you're analyzing.
+        </div>
+      ) : dupes.length === 0 ? (
+        <div style={muted}>
+          No duplicate-block findings touch the changed files in this scan.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
