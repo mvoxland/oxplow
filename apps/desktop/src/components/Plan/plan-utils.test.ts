@@ -111,7 +111,7 @@ test("buildBacklogGroups returns a single empty group for an empty backlog so se
   // + the To-Do "⋯ New task" menu must be visible even when the backlog is
   // empty so the user can seed the first task. That only happens if
   // buildBacklogGroups yields at least one group for WorkGroupList to render.
-  const state: BacklogState = { waiting: [], inProgress: [], done: [] } as any;
+  const state: BacklogState = { items: [], waiting: [], in_progress: [], done: [] };
   const groups = buildBacklogGroups(state);
   expect(groups).toHaveLength(1);
   expect(groups[0]?.items).toEqual([]);

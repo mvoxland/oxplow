@@ -16,9 +16,12 @@ const baseCtx = (overrides: Partial<AppBacklinkContext> = {}): AppBacklinkContex
 
 const mkCommit = (sha: string, subject: string) => ({
   sha,
-  parents: [],
-  commit: { author: { name: "x", email: "y@z", date: "" }, message: subject },
-  refs: [],
+  short_sha: sha.slice(0, 7),
+  author: "x",
+  email: "y@z",
+  timestamp_secs: 0,
+  subject,
+  parents: [] as string[],
 });
 
 describe("gitDashboardBacklinks", () => {
