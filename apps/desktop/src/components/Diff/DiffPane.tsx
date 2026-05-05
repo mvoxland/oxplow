@@ -1,11 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
-import { readFileAtRef, readWorkspaceFile, type Stream } from "../../api.js";
+import { readFile, type Stream } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
+import type { FileVersion } from "../../file-version.js";
 
 export interface DiffSpec {
   path: string;
-  leftRef: string;
-  rightKind: "working" | { ref: string };
+  /** Version to load on the LEFT side of the diff. Required — there
+   *  is no implicit "current working tree" default. */
+  leftVersion: FileVersion;
+  /** Version to load on the RIGHT side. */
+  rightVersion: FileVersion;
   baseLabel: string;
   /** When set, skip reading the left side and diff this literal text instead. */
   leftContent?: string;
@@ -81,24 +85,19 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
     (async () => {
       try {
         const leftPromise = spec.leftContent !== undefined
-          ? Promise.resolve({ content: spec.leftContent })
-          : readFileAtRef(stream.id, spec.leftRef, spec.path);
+          ? Promise.resolve(spec.leftContent as string | null)
+          : readFile(stream.id, spec.path, spec.leftVersion);
         const rightPromise = spec.rightContent !== undefined
-          ? Promise.resolve({ content: spec.rightContent })
-          : spec.rightKind === "working"
-            ? readWorkspaceFile(stream.id, spec.path).then(
-                (file) => ({ content: file.content as string | null }),
-                () => ({ content: null as string | null }),
-              )
-            : readFileAtRef(stream.id, spec.rightKind.ref, spec.path);
-        const [leftResult, rightResult] = await Promise.all([leftPromise, rightPromise]);
+          ? Promise.resolve(spec.rightContent as string | null)
+          : readFile(stream.id, spec.path, spec.rightVersion);
+        const [leftContent, rightContent] = await Promise.all([leftPromise, rightPromise]);
         if (cancelled) return;
         const monaco = monacoRef.current;
         const editor = editorRef.current;
         if (!monaco || !editor) return;
         const language = languageForPath(spec.path) ?? "plaintext";
-        const left = monaco.editor.createModel(leftResult.content ?? "", language);
-        const right = monaco.editor.createModel(rightResult.content ?? "", language);
+        const left = monaco.editor.createModel(leftContent ?? "", language);
+        const right = monaco.editor.createModel(rightContent ?? "", language);
         const previous = modelsRef.current;
         editor.setModel({ original: left, modified: right });
         modelsRef.current = { left, right };
@@ -124,7 +123,20 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
       }
     })();
     return () => { cancelled = true; };
-  }, [stream, editorReady, spec.path, spec.leftRef, typeof spec.rightKind === "string" ? "working" : spec.rightKind.ref, spec.leftContent, spec.rightContent, spec.revealLine]);
+  }, [
+    stream,
+    editorReady,
+    spec.path,
+    spec.leftVersion.kind,
+    spec.leftVersion.kind === "ref" ? spec.leftVersion.ref : null,
+    spec.leftVersion.kind === "snapshot" ? spec.leftVersion.id : null,
+    spec.rightVersion.kind,
+    spec.rightVersion.kind === "ref" ? spec.rightVersion.ref : null,
+    spec.rightVersion.kind === "snapshot" ? spec.rightVersion.id : null,
+    spec.leftContent,
+    spec.rightContent,
+    spec.revealLine,
+  ]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>

@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { refVersion } from "../../file-version.js";
 import {
   getCommitDetail,
   type CommitDetail,
@@ -153,8 +154,8 @@ export function CommitDetailBody({
                 const left = detail.parents[0] ?? "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
                 onOpenDiff({
                   path,
-                  leftRef: left,
-                  rightKind: { ref: detail.sha },
+                  leftVersion: refVersion(left),
+                  rightVersion: refVersion(detail.sha),
                   baseLabel: detail.parents[0] ? detail.parents[0].slice(0, 7) : "(root)",
                 });
               }}

@@ -1,6 +1,8 @@
+import type { FileVersion } from "../../file-version.js";
+
 export interface DiffRequest {
   path: string;
-  leftRef: string;
-  rightKind: "working" | { ref: string };
+  leftVersion: FileVersion;
+  rightVersion: FileVersion;
   baseLabel: string;
 }

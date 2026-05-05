@@ -1522,6 +1522,22 @@ export async function readWorkspaceFile(streamId: string, path: string): Promise
   return unwrap(await commands.readWorkspaceFile(streamId || null, path));
 }
 
+/**
+ * Versioned file read. Routes to the working tree, a git ref, or
+ * (eventually) a local-history snapshot based on `version`. The
+ * single-chokepoint replacement for the historical pair
+ * `readWorkspaceFile` + `readFileAtRef` — new code must use this so
+ * "what version are we reading?" is a typed answer at every call
+ * site. Returns `null` when the path doesn't exist at that version.
+ */
+export async function readFile(
+  streamId: string,
+  path: string,
+  version: import("./file-version.js").FileVersion,
+): Promise<string | null> {
+  return unwrap(await commands.readFile(streamId || null, path, version));
+}
+
 export async function getWorkspaceStatusSummary(
   streamId: string,
 ): Promise<WorkspaceStatusSummary> {

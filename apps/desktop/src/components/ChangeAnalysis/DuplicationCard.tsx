@@ -1,4 +1,5 @@
 import type { CodeQualityFindingRow } from "../../api-types.js";
+import { DISK, type FileVersion } from "../../file-version.js";
 import { duplicateBlockRef } from "../../tabs/pageRefs.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 
@@ -9,10 +10,14 @@ interface DuplicationCardProps {
     scanning: boolean;
     refresh(): Promise<void>;
   };
+  /** Tree version the scan ran against — gets stamped onto every
+   *  duplicate-block ref so the side-by-side page reads files at the
+   *  same version, never silently substituting the working tree. */
+  scanVersion: FileVersion;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
 }
 
-export function DuplicationCard({ duplication, onOpenFile }: DuplicationCardProps) {
+export function DuplicationCard({ duplication, scanVersion, onOpenFile }: DuplicationCardProps) {
   const dupes = duplication.findings.filter((f) => f.kind === "duplicate-block");
   return (
     <section data-testid="change-analysis-duplication" style={card}>
@@ -43,7 +48,12 @@ export function DuplicationCard({ duplication, onOpenFile }: DuplicationCardProp
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {dupes.slice(0, 25).map((f) => (
-            <DuplicateRow key={f.id} finding={f} onOpenFile={onOpenFile} />
+            <DuplicateRow
+              key={f.id}
+              finding={f}
+              scanVersion={scanVersion}
+              onOpenFile={onOpenFile}
+            />
           ))}
           {dupes.length > 25 ? (
             <div style={muted}>…and {dupes.length - 25} more</div>
@@ -56,10 +66,11 @@ export function DuplicationCard({ duplication, onOpenFile }: DuplicationCardProp
 
 interface DuplicateRowProps {
   finding: CodeQualityFindingRow;
+  scanVersion: FileVersion;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
 }
 
-function DuplicateRow({ finding, onOpenFile }: DuplicateRowProps) {
+function DuplicateRow({ finding, scanVersion, onOpenFile }: DuplicateRowProps) {
   const peerPath = (finding.extra?.peerPath as string | undefined) ?? null;
   const peerStart = (finding.extra?.peerStartLine as number | undefined) ?? null;
   const peerEnd = (finding.extra?.peerEndLine as number | undefined) ?? null;
@@ -69,11 +80,14 @@ function DuplicateRow({ finding, onOpenFile }: DuplicateRowProps) {
         leftPath: finding.path,
         leftStart: finding.startLine,
         leftEnd: finding.endLine,
+        leftVersion: scanVersion,
         rightPath: peerPath!,
         rightStart: peerStart!,
         rightEnd: peerEnd!,
+        rightVersion: scanVersion,
       })
     : null;
+  void DISK;
   const { handlers } = useRouteDispatch(
     ref ?? { id: "noop", kind: "file", payload: { path: finding.path } },
     { onNavigate: (r, opts) => onOpenFile((r.payload as { path: string }).path, opts) },

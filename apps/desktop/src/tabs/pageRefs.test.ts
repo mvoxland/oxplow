@@ -18,11 +18,11 @@ describe("pageRefs", () => {
     expect(agentRef().kind).toBe("agent");
   });
 
-  test("fileRef encodes the path", () => {
+  test("fileRef encodes the path with a default disk version", () => {
     expect(fileRef("src/a.ts")).toEqual({
       id: "file:src/a.ts",
       kind: "file",
-      payload: { path: "src/a.ts" },
+      payload: { path: "src/a.ts", version: { kind: "disk" } },
     });
   });
 
