@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  attachChurn,
   buildFilePivots,
   diffFunctions,
   fileExtension,
@@ -7,7 +8,10 @@ import {
   isTestPath,
   summarizeTests,
   topDirectory,
+  type FunctionChurnRow,
+  type FunctionsBuckets,
 } from "./analysisHelpers.js";
+import { fileInterestingness } from "./interestingness.js";
 import type { BranchChangeEntry } from "../../api-types.js";
 
 describe("isTestPath", () => {
@@ -158,5 +162,103 @@ describe("summarizeTests", () => {
   });
   test("ratio", () => {
     expect(summary.ratio).toBeCloseTo(1 / 3);
+  });
+});
+
+describe("attachChurn", () => {
+  test("decorates added + modifiedBody rows by qualified key", () => {
+    const buckets: FunctionsBuckets = {
+      added: [
+        { path: "a.ts", name: "newFn", containerPath: [], startLine: 10, paramCount: 0, complexity: 1, length: 5, visibility: "public" },
+      ],
+      modifiedBody: [
+        { path: "a.ts", name: "existing", containerPath: ["Foo"], startLine: 20, complexityDelta: 1, lengthDelta: 0, visibility: "public" },
+        { path: "b.ts", name: "untouched", containerPath: [], startLine: 1, complexityDelta: 0, lengthDelta: 0, visibility: "public" },
+      ],
+      modifiedSignature: [],
+      deleted: [],
+    };
+    const churn: FunctionChurnRow[] = [
+      { path: "a.ts", name: "newFn", containerPath: [], startLineHead: 10, addedLines: 5, deletedLines: 0, modifiedLines: 0 },
+      { path: "a.ts", name: "existing", containerPath: ["Foo"], startLineHead: 20, addedLines: 3, deletedLines: 2, modifiedLines: 2 },
+    ];
+    attachChurn(buckets, churn);
+    expect(buckets.added[0]!.churn).toEqual({
+      addedLines: 5,
+      deletedLines: 0,
+      modifiedLines: 0,
+      churnPercent: 5 / 10,
+    });
+    expect(buckets.modifiedBody[0]!.churn?.churnPercent).toBeCloseTo(5 / 10);
+    // No churn row for `untouched` → null decoration.
+    expect(buckets.modifiedBody[1]!.churn).toBeNull();
+  });
+});
+
+describe("fileInterestingness", () => {
+  const baseFile: BranchChangeEntry = {
+    path: "src/calm.ts",
+    status: "modified",
+    additions: 3,
+    deletions: 1,
+  };
+  const emptyBuckets = { added: [], deleted: [], modifiedSignature: [], modifiedBody: [] };
+
+  test("low score for routine diffs", () => {
+    const r = fileInterestingness({
+      file: baseFile,
+      bucketed: emptyBuckets,
+      hasMatchingTest: true,
+    });
+    expect(r.score).toBeLessThan(4);
+    expect(r.reasons).toEqual([]);
+  });
+
+  test("complexity spike pushes score up and adds a reason", () => {
+    const r = fileInterestingness({
+      file: { path: "src/x.ts", status: "modified", additions: 50, deletions: 30 },
+      bucketed: {
+        added: [],
+        deleted: [],
+        modifiedSignature: [],
+        modifiedBody: [
+          { path: "src/x.ts", name: "f", containerPath: [], startLine: 1, complexityDelta: 8, lengthDelta: 10, visibility: "public" },
+        ],
+      },
+      hasMatchingTest: true,
+    });
+    expect(r.score).toBeGreaterThan(20);
+    expect(r.reasons.some((s) => s.startsWith("complexity"))).toBe(true);
+  });
+
+  test("untested non-test files multiply by 1.5", () => {
+    const tested = fileInterestingness({
+      file: baseFile,
+      bucketed: emptyBuckets,
+      hasMatchingTest: true,
+    });
+    const untested = fileInterestingness({
+      file: baseFile,
+      bucketed: emptyBuckets,
+      hasMatchingTest: false,
+    });
+    expect(untested.score).toBeCloseTo(tested.score * 1.5);
+    expect(untested.reasons).toContain("no test in same dir");
+  });
+
+  test("long new function bumps score", () => {
+    const longFn = fileInterestingness({
+      file: { path: "src/x.ts", status: "modified", additions: 100, deletions: 0 },
+      bucketed: {
+        added: [
+          { path: "src/x.ts", name: "big", containerPath: [], startLine: 1, paramCount: 0, complexity: 5, length: 180, visibility: "public" },
+        ],
+        deleted: [],
+        modifiedSignature: [],
+        modifiedBody: [],
+      },
+      hasMatchingTest: true,
+    });
+    expect(longFn.reasons.some((s) => s.includes("180-line"))).toBe(true);
   });
 });

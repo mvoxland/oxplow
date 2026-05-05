@@ -27,11 +27,53 @@ export interface FilePivots {
   byStatus: Record<GitFileStatus, number>;
 }
 
+/** Per-function line churn (from the IPC), keyed by qualified key. */
+export interface FunctionChurnRow {
+  path: string;
+  name: string;
+  containerPath: string[];
+  startLineHead: number;
+  addedLines: number;
+  deletedLines: number;
+  modifiedLines: number;
+}
+
+/** Optional churn decoration on a bucket row. Absent when the file
+ *  was not modified-with-content (added/deleted/binary). */
+export interface ChurnDecoration {
+  addedLines: number;
+  deletedLines: number;
+  modifiedLines: number;
+  /** (added + deleted) / total diff churn — 0 if total is zero. */
+  churnPercent: number;
+}
+
 export interface FunctionsBuckets {
-  added: Array<{ path: string; name: string; containerPath: string[]; startLine: number; paramCount: number; complexity: number; visibility: FunctionVisibility }>;
+  added: Array<{
+    path: string;
+    name: string;
+    containerPath: string[];
+    startLine: number;
+    paramCount: number;
+    complexity: number;
+    /** Length in lines on the head side. Filled by `diffFunctions`
+     *  for added functions; used by interestingness scoring. */
+    length: number;
+    visibility: FunctionVisibility;
+    churn?: ChurnDecoration | null;
+  }>;
   deleted: Array<{ path: string; name: string; containerPath: string[]; startLine: number; visibility: FunctionVisibility }>;
   modifiedSignature: Array<{ path: string; name: string; containerPath: string[]; startLine: number; before: number; after: number; visibility: FunctionVisibility }>;
-  modifiedBody: Array<{ path: string; name: string; containerPath: string[]; startLine: number; complexityDelta: number; lengthDelta: number; visibility: FunctionVisibility }>;
+  modifiedBody: Array<{
+    path: string;
+    name: string;
+    containerPath: string[];
+    startLine: number;
+    complexityDelta: number;
+    lengthDelta: number;
+    visibility: FunctionVisibility;
+    churn?: ChurnDecoration | null;
+  }>;
 }
 
 const TEST_PATTERNS: RegExp[] = [
@@ -172,6 +214,7 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
           startLine: after.startLine,
           paramCount: after.paramCount,
           complexity: after.complexity,
+          length: after.length,
           visibility: after.visibility,
         });
         continue;
@@ -220,6 +263,50 @@ export function diffFunctions(index: SidedFunctionMap): FunctionsBuckets {
     (a, b) => Math.abs(b.complexityDelta) - Math.abs(a.complexityDelta),
   );
   return out;
+}
+
+/**
+ * Decorate `added` and `modifiedBody` rows with per-function churn.
+ * Lookup key is `path::container::name` (matching the IPC churn
+ * row's identity). Mutates the input buckets in place AND returns
+ * them so callers can chain.
+ */
+export function attachChurn(
+  buckets: FunctionsBuckets,
+  churnRows: FunctionChurnRow[],
+): FunctionsBuckets {
+  let totalChurn = 0;
+  for (const c of churnRows) {
+    totalChurn += c.addedLines + c.deletedLines;
+  }
+  const lookup = new Map<string, FunctionChurnRow>();
+  for (const c of churnRows) {
+    lookup.set(churnLookupKey(c.path, c.containerPath, c.name), c);
+  }
+  const decorate = (path: string, containerPath: string[], name: string): ChurnDecoration | null => {
+    const row = lookup.get(churnLookupKey(path, containerPath, name));
+    if (!row) return null;
+    const sum = row.addedLines + row.deletedLines;
+    return {
+      addedLines: row.addedLines,
+      deletedLines: row.deletedLines,
+      modifiedLines: row.modifiedLines,
+      churnPercent: totalChurn === 0 ? 0 : sum / totalChurn,
+    };
+  };
+  for (const row of buckets.added) {
+    row.churn = decorate(row.path, row.containerPath, row.name);
+  }
+  for (const row of buckets.modifiedBody) {
+    row.churn = decorate(row.path, row.containerPath, row.name);
+  }
+  return buckets;
+}
+
+function churnLookupKey(path: string, containerPath: string[], name: string): string {
+  return containerPath.length === 0
+    ? `${path}::${name}`
+    : `${path}::${containerPath.join("::")}::${name}`;
 }
 
 export interface TestSummary {

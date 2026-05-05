@@ -583,21 +583,15 @@ export type AnalyzeFileSpec = {
 	path: string,
 	base_content: string | null,
 	head_content: string | null,
-	/**
-	 *  Optional unified diff (`git diff base -- path`) for per-
-	 *  function churn attribution. When present, the result's
-	 *  `churn` array gets a row for this file with added /
-	 *  deleted / modified line counts attributed back to head-side
-	 *  functions. When absent, no churn entry is produced.
-	 */
-	unified_diff?: string | null,
 };
 
 export type AnalyzeFunctionsResult = {
 	sides: AnalyzedFileSide[],
 	/**
-	 *  One entry per `AnalyzeFileSpec` whose `unified_diff` was
-	 *  non-empty. Files without a diff supplied are omitted.
+	 *  One entry per file with both base + head content present —
+	 *  i.e. modified files. Added / deleted / unsupported / binary
+	 *  files are omitted (the file-level totals already cover those
+	 *  cases via `BranchChangeEntry.additions` / `deletions`).
 	 */
 	churn?: AnalyzedFileChurn[],
 };

@@ -329,13 +329,6 @@ pub struct AnalyzeFileSpec {
     pub path: String,
     pub base_content: Option<String>,
     pub head_content: Option<String>,
-    /// Optional unified diff (`git diff base -- path`) for per-
-    /// function churn attribution. When present, the result's
-    /// `churn` array gets a row for this file with added /
-    /// deleted / modified line counts attributed back to head-side
-    /// functions. When absent, no churn entry is produced.
-    #[serde(default)]
-    pub unified_diff: Option<String>,
 }
 
 /// Function metadata for one (path, side) pair.
@@ -388,8 +381,10 @@ pub struct AnalyzedFileChurn {
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzeFunctionsResult {
     pub sides: Vec<AnalyzedFileSide>,
-    /// One entry per `AnalyzeFileSpec` whose `unified_diff` was
-    /// non-empty. Files without a diff supplied are omitted.
+    /// One entry per file with both base + head content present —
+    /// i.e. modified files. Added / deleted / unsupported / binary
+    /// files are omitted (the file-level totals already cover those
+    /// cases via `BranchChangeEntry.additions` / `deletions`).
     #[serde(default)]
     pub churn: Vec<AnalyzedFileChurn>,
 }
@@ -446,28 +441,33 @@ fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
             });
         }
 
-        if let Some(diff) = spec.unified_diff.as_deref() {
-            if !diff.is_empty() {
-                let fc =
-                    crate::commands::churn::compute_file_churn(&spec.path, &base_metrics, &head_metrics, diff);
-                churn.push(AnalyzedFileChurn {
-                    path: fc.path,
-                    file_added: fc.file_added,
-                    file_deleted: fc.file_deleted,
-                    functions: fc
-                        .functions
-                        .into_iter()
-                        .map(|f| AnalyzedFunctionChurn {
-                            name: f.name,
-                            container_path: f.container_path,
-                            start_line_head: f.start_line_head,
-                            added_lines: f.added_lines,
-                            deleted_lines: f.deleted_lines,
-                            modified_lines: f.modified_lines,
-                        })
-                        .collect(),
-                });
-            }
+        if let (Some(base), Some(head)) =
+            (spec.base_content.as_deref(), spec.head_content.as_deref())
+        {
+            let fc = crate::commands::churn::compute_file_churn(
+                &spec.path,
+                &base_metrics,
+                &head_metrics,
+                base,
+                head,
+            );
+            churn.push(AnalyzedFileChurn {
+                path: fc.path,
+                file_added: fc.file_added,
+                file_deleted: fc.file_deleted,
+                functions: fc
+                    .functions
+                    .into_iter()
+                    .map(|f| AnalyzedFunctionChurn {
+                        name: f.name,
+                        container_path: f.container_path,
+                        start_line_head: f.start_line_head,
+                        added_lines: f.added_lines,
+                        deleted_lines: f.deleted_lines,
+                        modified_lines: f.modified_lines,
+                    })
+                    .collect(),
+            });
         }
     }
     sides.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.side.cmp(&b.side)));
@@ -509,7 +509,6 @@ mod tests {
             head_content: Some(
                 "fn a() { if true { 1; } }".into(),
             ),
-            unified_diff: None,
         }];
         let result = analyze_functions_at_refs(files).await.unwrap();
         assert_eq!(result.sides.len(), 2);
@@ -528,7 +527,6 @@ mod tests {
             path: "src/new.py".into(),
             base_content: None,
             head_content: Some("def f(x):\n    return x\n".into()),
-            unified_diff: None,
         }];
         let result = analyze_functions_at_refs(files).await.unwrap();
         assert_eq!(result.sides.len(), 1);
@@ -541,7 +539,6 @@ mod tests {
             path: "README.md".into(),
             base_content: Some("# old".into()),
             head_content: Some("# new".into()),
-            unified_diff: None,
         }];
         let result = analyze_functions_at_refs(files).await.unwrap();
         // We still emit empty sides so the caller can see "we looked".
