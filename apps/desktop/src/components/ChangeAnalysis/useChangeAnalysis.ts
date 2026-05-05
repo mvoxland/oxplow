@@ -17,6 +17,7 @@ import type {
 import { commands } from "../../tauri-bridge/index.js";
 import { DISK, refVersion, type FileVersion } from "../../file-version.js";
 import {
+  attachChurn,
   buildFilePivots,
   diffFunctions,
   fileExtension,
@@ -24,9 +25,14 @@ import {
   summarizeTests,
   topDirectory,
   type FilePivots,
+  type FunctionChurnRow,
   type FunctionsBuckets,
   type TestSummary,
 } from "./analysisHelpers.js";
+import {
+  fileInterestingness,
+  type InterestingnessResult,
+} from "./interestingness.js";
 import type { ChangeAnalysisScope } from "../../tabs/pageRefs.js";
 
 export interface UseChangeAnalysisInput {
@@ -89,6 +95,11 @@ export interface ChangeAnalysisState {
     hasScan: boolean;
   };
   tests: TestSummary;
+  /** Per-function churn rows (added/deleted/modified lines). One
+   *  row per function with non-zero churn. */
+  functionChurn: FunctionChurnRow[];
+  /** Per-file interestingness score (path → score + reasons). */
+  fileScores: Map<string, InterestingnessResult>;
   refresh: () => Promise<void>;
   /** The (base, head) refs used to compute this analysis. `headRef`
    *  is null in working-tree mode (caller should diff against the
@@ -155,6 +166,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   const { streamId, target, scope } = input;
   const [files, setFiles] = useState<BranchChangeEntry[]>(EMPTY_FILES);
   const [functions, setFunctions] = useState<FunctionsBuckets>(EMPTY_BUCKETS);
+  const [functionChurn, setFunctionChurn] = useState<FunctionChurnRow[]>([]);
   const [duplication, setDuplication] = useState<{
     findings: CodeQualityFindingRow[];
     scanAgeMs: number | null;
@@ -245,7 +257,21 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
               : "unknown" as const,
           })),
         }));
-        setFunctions(diffFunctions(indexSides(sides)));
+        const buckets = diffFunctions(indexSides(sides));
+        const churnRows: FunctionChurnRow[] = (result.churn ?? []).flatMap((file) =>
+          file.functions.map((fn) => ({
+            path: file.path,
+            name: fn.name,
+            containerPath: fn.container_path,
+            startLineHead: fn.start_line_head,
+            addedLines: fn.added_lines,
+            deletedLines: fn.deleted_lines,
+            modifiedLines: fn.modified_lines,
+          })),
+        );
+        attachChurn(buckets, churnRows);
+        setFunctions(buckets);
+        setFunctionChurn(churnRows);
       }
 
       // Duplication: look up the latest `done` scan for THIS exact
@@ -380,6 +406,67 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
 
   const pivots = useMemo(() => buildFilePivots(filteredFiles), [filteredFiles]);
   const tests = useMemo(() => summarizeTests(filteredFiles), [filteredFiles]);
+  const filteredChurn = useMemo<FunctionChurnRow[]>(
+    () => (scope ? functionChurn.filter((c) => filteredPathSet.has(c.path)) : functionChurn),
+    [functionChurn, filteredPathSet, scope],
+  );
+
+  // Per-file interestingness. Caller filters/scopes the input file
+  // list, so the score map is consistent with whatever the
+  // dashboard or drilldown will render. The "matching test" check
+  // uses ALL changed test files (unscoped) — a test file in a
+  // sibling directory still de-risks the file regardless of the
+  // current drilldown.
+  const fileScores = useMemo<Map<string, InterestingnessResult>>(() => {
+    const testedDirs = new Set<string>();
+    for (const f of files) {
+      if (
+        /\.test\.[a-zA-Z]+$/.test(f.path) ||
+        /\.spec\.[a-zA-Z]+$/.test(f.path) ||
+        /(^|\/)tests?\//.test(f.path) ||
+        /(^|\/)test_[^/]+\.(py|rs)$/.test(f.path) ||
+        /_test\.go$/.test(f.path)
+      ) {
+        testedDirs.add(topDirectory(f.path));
+      }
+    }
+    const result = new Map<string, InterestingnessResult>();
+    const fnsByPath = new Map<string, {
+      added: FunctionsBuckets["added"];
+      deleted: FunctionsBuckets["deleted"];
+      modifiedSignature: FunctionsBuckets["modifiedSignature"];
+      modifiedBody: FunctionsBuckets["modifiedBody"];
+    }>();
+    const ensure = (path: string) => {
+      let bucket = fnsByPath.get(path);
+      if (!bucket) {
+        bucket = { added: [], deleted: [], modifiedSignature: [], modifiedBody: [] };
+        fnsByPath.set(path, bucket);
+      }
+      return bucket;
+    };
+    for (const fn of functions.added) ensure(fn.path).added.push(fn);
+    for (const fn of functions.deleted) ensure(fn.path).deleted.push(fn);
+    for (const fn of functions.modifiedSignature) ensure(fn.path).modifiedSignature.push(fn);
+    for (const fn of functions.modifiedBody) ensure(fn.path).modifiedBody.push(fn);
+    for (const file of filteredFiles) {
+      const bucketed = fnsByPath.get(file.path) ?? {
+        added: [],
+        deleted: [],
+        modifiedSignature: [],
+        modifiedBody: [],
+      };
+      result.set(
+        file.path,
+        fileInterestingness({
+          file,
+          bucketed,
+          hasMatchingTest: testedDirs.has(topDirectory(file.path)),
+        }),
+      );
+    }
+    return result;
+  }, [filteredFiles, files, functions]);
 
   return {
     loading,
@@ -396,6 +483,8 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
       hasScan: duplication.hasScan,
     },
     tests,
+    functionChurn: filteredChurn,
+    fileScores,
     refresh,
     refs: resolvedRefs,
   };

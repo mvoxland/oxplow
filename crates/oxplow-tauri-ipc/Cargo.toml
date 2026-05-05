@@ -28,6 +28,8 @@ specta = { workspace = true }
 tempfile = { workspace = true }
 oxplow-code-metrics = { workspace = true }
 oxplow-tree-source = { workspace = true }
+# Line-diff for per-function churn attribution.
+similar = "2"
 
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }
