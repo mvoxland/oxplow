@@ -53,20 +53,33 @@ parameter / decision-point / container AST node names plus a grammar
 loader. Files in unsupported languages are silently skipped.
 
 **Duplicate blocks** (tool name `"duplication"`) — handled by
-`oxplow-code-dup`. Pipeline:
+`oxplow-code-dup`. **Function-anchored AST subtree-hash detector
+(Deckard-style).** Pipeline:
 
-1. Walk the tree-sitter AST of each file, emitting a normalized
-   token per leaf (identifiers / numeric literals / strings are
-   folded to placeholder kinds so renames and constant tweaks don't
-   suppress matches; comments are skipped).
-2. Compute rolling 64-bit hashes over k-grams of `K=20` tokens.
-3. Winnow with window `W=4` (Schleimer/Aiken 2003) — keep one
-   fingerprint per ~5 tokens.
-4. Build an inverted index of fingerprint → occurrences and extend
-   each multi-occurrence fingerprint forward into the longest
-   matching contiguous run.
-5. Emit one duplicate per pair where the line span is at least
-   `min_lines = 5`.
+1. Walk the tree-sitter AST of each file, find every function-like
+   node (per `Language::spec().function_kinds` — covers Rust
+   `function_item` / `closure_expression`, JS/TS function /
+   arrow-function / method, Python / Go / Java / C / C++
+   equivalents). **Code outside any function body is not in the
+   corpus.** This is deliberate — top-level `const` style objects,
+   `enum` declarations with thiserror derives, JSX expression trees,
+   schema literals, etc. share AST shape across unrelated files,
+   and were the dominant false-positive class of the prior detector.
+2. For each function node, hash the function body subtree AND every
+   sub-subtree large enough to seed a meaningful match. Hash =
+   64-bit fold of preorder-normalized kind sequence: identifiers,
+   numeric literals, and strings fold to placeholders (`ID`, `NUM`,
+   `STR`); imports / use / include / package declarations are
+   skipped whole-subtree; comments are skipped; cross-language
+   collisions are prevented by salting with `Language::tag()`.
+3. Group records by hash. For each (function-A, function-B) pair
+   that shares any matching subtree, emit ONE finding for the
+   largest matching subtree between them — so a whole-function
+   clone subsumes the inner-loop and inner-branch matches that
+   would otherwise pile up.
+4. Filter by `min_lines` (default 10) and `min_nodes` (default
+   30 AST nodes — small enough that a real extracted helper still
+   surfaces, large enough that 5-line idioms don't).
 
 Output is two `duplicate-block` findings per pair (one per side)
 with `extra.peerPath` / `extra.peerStartLine` / `extra.peerEndLine`

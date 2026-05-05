@@ -1,36 +1,52 @@
-//! Walk a tree-sitter syntax tree and emit a normalized token stream.
+//! Compute Deckard-style subtree hashes from a tree-sitter AST.
 //!
-//! Identifiers and literals are folded to placeholder kinds (`ID`,
-//! `NUM`, `STR`) so renames and constant tweaks don't break clone
-//! matches. Everything else uses the tree-sitter `node.kind()` string
-//! (which is `&'static str`) as the token kind. Comments are skipped.
+//! A subtree's hash is a fold over its preorder kind sequence with
+//! identifiers/literals normalized (so renames don't break the
+//! match) and import / use / include / package declarations skipped
+//! whole-subtree (so two files that share a few imports don't seed
+//! a fingerprint collision). The hash is salted by `Language::tag()`
+//! so cross-language structures cannot accidentally collide.
 //!
-//! Import / use / include / package declarations are also skipped
-//! whole-subtree: an `import` block is line noise that biases the
-//! fingerprint toward "two files share a few imports" matches. The
-//! skip list is keyed off [`Language`] so each grammar contributes
-//! exactly the node kinds it actually emits.
+//! The same walker is used by every caller. The unit of duplication
+//! detection is "the hash of a subtree" — not a sliding token
+//! window.
 
 use oxplow_code_metrics::Language;
 use tree_sitter::Node;
 
+/// Result of hashing one subtree.
 #[derive(Debug, Clone, Copy)]
-pub struct Token {
-    /// The normalized AST node kind. Borrows from tree-sitter's
-    /// static grammar tables — no allocation per leaf.
-    pub kind: &'static str,
+pub struct SubtreeHash {
+    /// 64-bit fold of the preorder normalized kind sequence.
+    pub hash: u64,
+    /// Number of AST nodes in the subtree (after skip-pruning, after
+    /// comment-pruning). Cheap proxy for "how interesting is this
+    /// subtree" — small subtrees are filtered before reporting.
+    pub node_count: u32,
     pub start_line: u32,
     pub end_line: u32,
 }
 
-pub fn tokenize_source(root: Node<'_>, lang: Language) -> Vec<Token> {
-    let mut out = Vec::new();
+/// Hash one subtree.
+pub fn hash_subtree(root: Node<'_>, lang: Language) -> SubtreeHash {
+    let mut acc: u64 = 0xcbf29ce484222325 ^ (lang.tag() as u64);
+    let mut count: u32 = 0;
     let mut cursor = root.walk();
-    walk(&mut cursor, lang, &mut out);
-    out
+    walk_hash(&mut cursor, lang, &mut acc, &mut count);
+    SubtreeHash {
+        hash: acc,
+        node_count: count,
+        start_line: root.start_position().row as u32 + 1,
+        end_line: root.end_position().row as u32 + 1,
+    }
 }
 
-fn walk(cursor: &mut tree_sitter::TreeCursor<'_>, lang: Language, out: &mut Vec<Token>) {
+fn walk_hash(
+    cursor: &mut tree_sitter::TreeCursor<'_>,
+    lang: Language,
+    acc: &mut u64,
+    count: &mut u32,
+) {
     let node = cursor.node();
     let kind = node.kind();
     if is_comment_kind(kind) {
@@ -39,47 +55,52 @@ fn walk(cursor: &mut tree_sitter::TreeCursor<'_>, lang: Language, out: &mut Vec<
     if is_skip_kind(lang, kind) {
         return;
     }
-    if node.child_count() == 0 {
-        out.push(Token {
-            kind: normalize_kind(kind),
-            start_line: node.start_position().row as u32 + 1,
-            end_line: node.end_position().row as u32 + 1,
-        });
-        return;
-    }
+    let normalized = normalize_kind(kind);
+    fold_str(acc, normalized);
+    *count += 1;
     if cursor.goto_first_child() {
         loop {
-            walk(cursor, lang, out);
+            walk_hash(cursor, lang, acc, count);
             if !cursor.goto_next_sibling() {
                 break;
             }
         }
         cursor.goto_parent();
     }
+    // Mark the closing of a subtree by folding a sentinel — without
+    // this, "if { x }" and "{ if x }" can hash the same.
+    fold_byte(acc, 0xFF);
 }
 
-/// Exact-match comment node kinds across our 9 grammars. Substring
-/// matching on "comment" was fragile (would catch any future node
-/// like `commenter`).
-fn is_comment_kind(kind: &str) -> bool {
+#[inline]
+fn fold_str(acc: &mut u64, s: &str) {
+    for &b in s.as_bytes() {
+        *acc ^= b as u64;
+        *acc = acc.wrapping_mul(0x00000100000001B3);
+    }
+    fold_byte(acc, 0xFE); // separator between sibling kind tokens
+}
+
+#[inline]
+fn fold_byte(acc: &mut u64, b: u8) {
+    *acc ^= b as u64;
+    *acc = acc.wrapping_mul(0x00000100000001B3);
+}
+
+/// Exact-match comment node kinds across our 9 grammars.
+pub fn is_comment_kind(kind: &str) -> bool {
     matches!(
         kind,
         "comment" | "line_comment" | "block_comment" | "doc_comment"
     )
 }
 
-/// Per-language list of node kinds whose entire subtree we skip
-/// during tokenization. The motivating case is import / use /
-/// include / package declarations: they're idiomatic line noise
-/// that drags the fingerprint toward "two files share a few of the
-/// same imports" false positives. Whatever lives inside an
-/// import declaration (paths, aliases, brace-lists) contributes
-/// nothing semantic to clone detection.
-///
-/// Adding a new language: list every top-level declaration node
-/// kind that wraps an import / package directive. The skip is
-/// whole-subtree so listing the outer wrapper is enough.
-fn is_skip_kind(lang: Language, kind: &str) -> bool {
+/// Per-language list of node kinds whose entire subtree we skip.
+/// Imports / use / include / package directives are noise: they
+/// share lots of structure across unrelated files. Skipping
+/// whole-subtree means whatever the grammar wraps inside (paths,
+/// aliases, brace-lists) contributes nothing to the hash.
+pub fn is_skip_kind(lang: Language, kind: &str) -> bool {
     match lang {
         Language::Rust => matches!(
             kind,
@@ -109,10 +130,10 @@ fn is_skip_kind(lang: Language, kind: &str) -> bool {
     }
 }
 
-/// Coarse token-kind buckets — enough to trip on renames + literal
-/// swaps but keep structural punctuation distinct. Uses an
-/// exact-match list per category instead of substring containment.
-fn normalize_kind(kind: &str) -> &'static str {
+/// Coarse token-kind buckets — fold identifiers and literals into
+/// generic placeholders so renames + literal swaps don't break
+/// matches, but keep structural punctuation distinct.
+pub fn normalize_kind(kind: &str) -> &'static str {
     if matches!(
         kind,
         "identifier"
@@ -155,14 +176,9 @@ fn normalize_kind(kind: &str) -> &'static str {
     ) {
         return "STR";
     }
-    // Promote the tree-sitter `&'static str` to our return slot. No
-    // allocation — `Node::kind()` is documented to return `'static`.
     static_str(kind)
 }
 
-/// Helper: tree-sitter's `Node::kind()` returns `&'static str`, but
-/// the borrow checker can't prove that through a function boundary.
-/// This intermediate lets us return `&'static` without unsafe.
 #[inline]
 fn static_str(s: &str) -> &'static str {
     // SAFETY: `Node::kind()` always returns a `&'static str` produced
