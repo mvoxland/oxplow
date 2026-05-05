@@ -2647,7 +2647,10 @@ export function App() {
               sha={sha}
               threadWork={selectedThreadWork}
               onOpenDiff={navOpenDiff}
+              onOpenAnalysisDiff={navOpenDiff}
+              onOpenAnalysisDiffInTab={navOpenDiff}
               onOpenPage={navOpen}
+              onOpenFile={navOpenFile}
             />
           ),
         });

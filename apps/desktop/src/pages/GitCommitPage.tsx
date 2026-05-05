@@ -3,12 +3,14 @@ import type { CommitDetail, Stream, ThreadWorkState } from "../api.js";
 import { getCommitDetail } from "../api.js";
 import { logUi } from "../logger.js";
 import type { DiffRequest } from "../components/Diff/diff-request.js";
+import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { CommitDetailBody, buildCommitSlideoverTitle } from "../components/History/CommitDetailSlideover.js";
 import { Page } from "../tabs/Page.js";
 import { useBacklinks } from "../tabs/useBacklinks.js";
-import { changeAnalysisRef, gitCommitRef } from "../tabs/pageRefs.js";
+import { gitCommitRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
 
 export interface GitCommitPageProps {
   stream: Stream | null;
@@ -17,14 +19,30 @@ export interface GitCommitPageProps {
   subject?: string;
   threadWork: ThreadWorkState | null;
   onOpenDiff?(request: DiffRequest): void;
-  onOpenPage(ref: TabRef): void;
+  /** DiffSpec-shaped opener for the embedded change-analysis panel
+   *  (separate from the DiffRequest-shaped opener used by
+   *  CommitDetailBody). */
+  onOpenAnalysisDiff?(spec: DiffSpec): void;
+  onOpenAnalysisDiffInTab?(spec: DiffSpec): void;
+  onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
+  onOpenFile?(path: string, opts?: { newTab?: boolean }): void;
 }
 
 /**
  * Single-commit page. Bookmark- and history-friendly equivalent of the
  * legacy `CommitDetailSlideover`. Routed via `gitCommitRef(sha)`.
  */
-export function GitCommitPage({ stream, sha, subject = "", threadWork, onOpenDiff, onOpenPage }: GitCommitPageProps) {
+export function GitCommitPage({
+  stream,
+  sha,
+  subject = "",
+  threadWork,
+  onOpenDiff,
+  onOpenAnalysisDiff,
+  onOpenAnalysisDiffInTab,
+  onOpenPage,
+  onOpenFile,
+}: GitCommitPageProps) {
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const backlinkEntries = useBacklinks(gitCommitRef(sha), stream, threadWork);
@@ -59,25 +77,6 @@ export function GitCommitPage({ stream, sha, subject = "", threadWork, onOpenDif
   return (
     <Page testId="page-git-commit" title={headerTitle} kind="commit" backlinks={backlinks}>
       <div style={{ padding: "12px 16px" }}>
-        {sha ? (
-          <div style={{ marginBottom: 8 }}>
-            <button
-              type="button"
-              data-testid="git-commit-analyze"
-              onClick={() => onOpenPage(changeAnalysisRef(sha))}
-              style={{
-                padding: 0,
-                background: "transparent",
-                border: "none",
-                color: "var(--text-link, #2563eb)",
-                fontSize: 12,
-                cursor: "pointer",
-              }}
-            >
-              Analyze Changes →
-            </button>
-          </div>
-        ) : null}
         {!sha ? (
           <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>No commit selected.</div>
         ) : loading && !detail ? (
@@ -87,6 +86,20 @@ export function GitCommitPage({ stream, sha, subject = "", threadWork, onOpenDif
         ) : (
           <CommitDetailBody detail={detail} onOpenDiff={onOpenDiff} />
         )}
+
+        {sha && stream && onOpenFile ? (
+          <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--border-subtle)" }}>
+            <ChangeAnalysisPanel
+              streamId={stream.id}
+              target={sha}
+              showHeader={false}
+              onOpenPage={onOpenPage}
+              onOpenFile={onOpenFile}
+              onOpenDiff={onOpenAnalysisDiff}
+              onOpenDiffInTab={onOpenAnalysisDiffInTab}
+            />
+          </div>
+        ) : null}
       </div>
     </Page>
   );
