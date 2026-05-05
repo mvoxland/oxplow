@@ -4,12 +4,8 @@ import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, uncommittedChangesRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
-import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
-import { FilesPivot } from "../components/ChangeAnalysis/FilesPivot.js";
 import { ChangeAnalysisHeader } from "../components/ChangeAnalysis/ChangeAnalysisHeader.js";
 import { ChangeAnalysisDrilldown } from "../components/ChangeAnalysis/ChangeAnalysisDrilldown.js";
-import { LookHereFirstCard } from "../components/ChangeAnalysis/LookHereFirstCard.js";
-import { FileChurnCard } from "../components/ChangeAnalysis/FileChurnCard.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
 export interface ChangeAnalysisPageProps {
@@ -77,7 +73,7 @@ export function ChangeAnalysisPage({ stream, target, scope, onOpenPage, onOpenFi
                 ? "Working tree is clean."
                 : "No file changes in this commit."}
           </div>
-        ) : scope ? (
+        ) : (
           <ChangeAnalysisDrilldown
             scope={scope}
             target={target}
@@ -86,23 +82,6 @@ export function ChangeAnalysisPage({ stream, target, scope, onOpenPage, onOpenFi
             onOpenDiff={onOpenDiff}
             onOpenDiffInTab={onOpenDiffInTab}
           />
-        ) : (
-          <>
-            <LookHereFirstCard
-              files={analysis.files}
-              fileScores={analysis.fileScores}
-              onOpenFile={onOpenFile}
-            />
-            <SummaryCard
-              fileCount={analysis.files.length}
-              additions={analysis.totals.additions}
-              deletions={analysis.totals.deletions}
-              byStatus={analysis.pivots.byStatus}
-              tests={analysis.tests}
-            />
-            <FileChurnCard files={analysis.files} onOpenFile={onOpenFile} />
-            <FilesPivot pivots={analysis.pivots} target={target} />
-          </>
         )}
       </div>
     </Page>

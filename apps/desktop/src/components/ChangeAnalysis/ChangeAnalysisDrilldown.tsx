@@ -13,6 +13,7 @@ import { FileChurnCard } from "./FileChurnCard.js";
 import { FunctionChurnCard } from "./FunctionChurnCard.js";
 import { ComplexitySpikesCard } from "./ComplexitySpikesCard.js";
 import { OtherSmellsCard } from "./OtherSmellsCard.js";
+import { FilesPivot } from "./FilesPivot.js";
 import { buildFilePivots, summarizeTests, type FunctionChurnRow, type FunctionsBuckets } from "./analysisHelpers.js";
 import type { GitFileStatus } from "../../api-types.js";
 import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
@@ -21,7 +22,9 @@ type ViewMode = "semantic" | "files";
 type StatusFilter = "all" | "added" | "modified" | "deleted";
 
 export interface ChangeAnalysisDrilldownProps {
-  scope: ChangeAnalysisScope;
+  /** Optional drilldown filter; when absent, every panel still
+   *  renders against the full file set. */
+  scope?: ChangeAnalysisScope;
   target: ChangeAnalysisTarget;
   analysis: ChangeAnalysisState;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
@@ -38,7 +41,7 @@ export function ChangeAnalysisDrilldown({
   onOpenDiffInTab,
 }: ChangeAnalysisDrilldownProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("semantic");
-  const initialStatus: StatusFilter = scope.kind === "status"
+  const initialStatus: StatusFilter = scope?.kind === "status"
     ? (scope.value === "added" || scope.value === "modified" || scope.value === "deleted"
       ? scope.value
       : "all")
@@ -151,6 +154,7 @@ export function ChangeAnalysisDrilldown({
         tests={testsAfterStatus}
       />
       <FileChurnCard files={filesAfterStatus} onOpenFile={onOpenFile} />
+      <FilesPivot pivots={pivotsAfterStatus} target={target} />
 
       <section style={card}>
         <div style={toolbarRow}>
@@ -202,21 +206,17 @@ export function ChangeAnalysisDrilldown({
         )}
       </section>
 
-      {viewMode === "semantic" ? (
-        <>
-          <FunctionChurnCard
-            churn={churnAfterStatus}
-            functions={functionsAfterStatus}
-            onOpenFile={onOpenFile}
-          />
-          <ComplexitySpikesCard functions={functionsAfterStatus} onOpenFile={onOpenFile} />
-          <OtherSmellsCard
-            functions={functionsAfterStatus}
-            tests={testsAfterStatus}
-            onOpenFile={onOpenFile}
-          />
-        </>
-      ) : null}
+      <FunctionChurnCard
+        churn={churnAfterStatus}
+        functions={functionsAfterStatus}
+        onOpenFile={onOpenFile}
+      />
+      <ComplexitySpikesCard functions={functionsAfterStatus} onOpenFile={onOpenFile} />
+      <OtherSmellsCard
+        functions={functionsAfterStatus}
+        tests={testsAfterStatus}
+        onOpenFile={onOpenFile}
+      />
       <DuplicationCard duplication={dupAfterStatus} scanVersion={scanVersion} onOpenFile={onOpenFile} />
       <TestsCard tests={testsAfterStatus} onOpenFile={onOpenFile} />
     </>
