@@ -11,7 +11,18 @@ export type CommandId =
   | "plan.newWorkItem"
   | "stream.new"
   | "thread.new"
-  | "files.commit";
+  | "files.commit"
+  // Native (responder-chain) items. Activations are dispatched by the
+  // OS, never by the renderer's `menu:command` listener — the ids
+  // exist only so the snapshot can carry them through to the Rust
+  // menu builder, which decodes the `native.<role>` prefix.
+  | "native.undo"
+  | "native.redo"
+  | "native.cut"
+  | "native.copy"
+  | "native.paste"
+  | "native.selectAll"
+  | "native.separator";
 
 export type MenuId = "file" | "edit" | "view" | "plan";
 export type MainViewId = "agent" | "editor";
@@ -78,6 +89,20 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       id: "edit",
       label: "Edit",
       items: [
+        // Native (responder-chain) Cut/Copy/Paste/SelectAll. Required on
+        // macOS so WKWebView delivers Cmd+V/Cmd+C/etc. to the focused
+        // webview — without these items in the app menu, the standard
+        // shortcuts are swallowed and JS keydown never sees them. The
+        // ids `native.<role>` are decoded by the Rust menu builder
+        // (see `crates/oxplow-tauri-ipc/src/commands/menu.rs`).
+        { id: "native.undo", label: "Undo", enabled: true },
+        { id: "native.redo", label: "Redo", enabled: true },
+        { id: "native.separator", label: "", enabled: true },
+        { id: "native.cut", label: "Cut", enabled: true },
+        { id: "native.copy", label: "Copy", enabled: true },
+        { id: "native.paste", label: "Paste", enabled: true },
+        { id: "native.selectAll", label: "Select All", enabled: true },
+        { id: "native.separator", label: "", enabled: true },
         { id: "edit.find", label: "Find", shortcut: "Ctrl/Cmd+F", enabled: state.hasSelectedFile },
       ],
     },
@@ -104,6 +129,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
 }
 
 export function buildMenuGroups(state: CommandState, handlers: CommandHandlers): MenuGroup[] {
+  const noop = () => {};
   const handlersById: Record<CommandId, () => void> = {
     "file.save": handlers.save,
     "file.quickOpen": handlers.quickOpen,
@@ -116,6 +142,14 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "history.open": handlers.openHistory,
     "snapshots.open": handlers.openSnapshots,
     "files.commit": handlers.commitFiles,
+    // Native items dispatch through the OS responder chain.
+    "native.undo": noop,
+    "native.redo": noop,
+    "native.cut": noop,
+    "native.copy": noop,
+    "native.paste": noop,
+    "native.selectAll": noop,
+    "native.separator": noop,
   };
   return buildMenuGroupSnapshots(state).map((group) => ({
     ...group,

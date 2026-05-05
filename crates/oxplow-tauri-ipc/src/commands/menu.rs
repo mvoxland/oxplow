@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Wry};
 
 use crate::error::IpcError;
@@ -58,6 +58,30 @@ fn build_menu(app: &AppHandle, groups: &[MenuGroupSnapshot]) -> tauri::Result<Me
     for group in groups {
         let mut submenu = SubmenuBuilder::new(app, &group.label);
         for item in &group.items {
+            // Items with id "native.<role>" map to the OS predefined
+            // menu items (Cut/Copy/Paste/SelectAll/Undo/Redo). These
+            // dispatch through the macOS responder chain so the
+            // standard keyboard shortcuts (Cmd+V, Cmd+C, …) reach
+            // the focused webview — without them, WKWebView swallows
+            // Cmd+V and JS keydown handlers never see it.
+            if let Some(role) = item.id.strip_prefix("native.") {
+                let predefined = match role {
+                    "undo" => PredefinedMenuItem::undo(app, Some(&item.label))?,
+                    "redo" => PredefinedMenuItem::redo(app, Some(&item.label))?,
+                    "cut" => PredefinedMenuItem::cut(app, Some(&item.label))?,
+                    "copy" => PredefinedMenuItem::copy(app, Some(&item.label))?,
+                    "paste" => PredefinedMenuItem::paste(app, Some(&item.label))?,
+                    "selectAll" => PredefinedMenuItem::select_all(app, Some(&item.label))?,
+                    "separator" => PredefinedMenuItem::separator(app)?,
+                    _ => {
+                        tracing::warn!(role, "unknown native menu role; skipping");
+                        continue;
+                    }
+                };
+                submenu = submenu.item(&predefined);
+                continue;
+            }
+
             let mut builder = MenuItemBuilder::with_id(item.id.clone(), &item.label)
                 .enabled(item.enabled);
             if let Some(shortcut) = item.shortcut.as_deref().filter(|s| !s.is_empty()) {

@@ -57,7 +57,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 `PageKind` (`tabState.ts`):
 
 ```
-"agent" | "file" | "diff" | "note" | "work-item" | "finding"
+"agent" | "file" | "diff" | "duplicate-block" | "note" | "work-item" | "finding"
 | "tasks" | "done-work" | "backlog" | "archived"
 | "wiki-index" | "files" | "code-quality"
 | "local-history" | "git-history" | "git-dashboard" | "git-commit"
@@ -79,6 +79,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | agent | `agent` | `agent` |
 | file | `file:<path>` | `file:crates/oxplow-app/src/lib.rs` |
 | diff | `diff:<path>\|<from>\|<to>\|<labelOverride>` | `diff:src/a.ts\|abc\|def\|` |
+| duplicate-block | `dup:<leftPath>:<lstart>-<lend>::<rightPath>:<rstart>-<rend>` | `dup:src/a.ts:10-40::src/b.ts:55-85` |
 | note | `note:<slug>` | `note:how-stop-hook-fires` |
 | work-item | `wi:<id>` | `wi:wi-142` |
 | finding | `finding:<id>` | `finding:f-7` |

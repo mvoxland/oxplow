@@ -1,0 +1,229 @@
+import React, { useEffect, useRef, useState } from "react";
+import { Page } from "../tabs/Page.js";
+import { usePageTitle } from "../tabs/PageNavigationContext.js";
+import { readWorkspaceFile, type Stream } from "../api.js";
+import { languageForPath } from "../editor-language.js";
+import type { DuplicateBlockPayload } from "../tabs/pageRefs.js";
+
+const HIGHLIGHT_STYLE_ID = "oxplow-duplicate-block-style";
+
+function ensureHighlightStyle(): void {
+  if (typeof document === "undefined") return;
+  if (document.getElementById(HIGHLIGHT_STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = HIGHLIGHT_STYLE_ID;
+  style.textContent = `
+.monaco-editor .oxplow-duplicate-block-line {
+  background: rgba(255, 200, 80, 0.18) !important;
+}
+.monaco-editor .oxplow-duplicate-block-margin {
+  background: rgba(255, 200, 80, 0.35) !important;
+}
+`;
+  document.head.appendChild(style);
+}
+
+export interface DuplicateBlockPageProps {
+  stream: Stream;
+  payload: DuplicateBlockPayload;
+  visible: boolean;
+  onJumpToSource(path: string): void;
+}
+
+/**
+ * Side-by-side viewer for a single duplicate-block finding. Renders
+ * two read-only Monaco editors stacked horizontally, each scrolled so
+ * its duplicated range starts at the top of the viewport — making the
+ * two ranges line up visually. The duplicated lines on each side are
+ * highlighted with a soft accent background.
+ *
+ * Not a Monaco diff editor: a real text-diff would re-align line-by-
+ * line on content, which is exactly what we don't want — duplication
+ * findings can come from completely different files where Monaco's
+ * diff would line up unrelated lines. We want literal range-aligned
+ * side-by-side.
+ */
+export function DuplicateBlockPage({ stream, payload, visible, onJumpToSource }: DuplicateBlockPageProps) {
+  const leftBase = payload.leftPath.split("/").pop() ?? payload.leftPath;
+  const rightBase = payload.rightPath.split("/").pop() ?? payload.rightPath;
+  usePageTitle(`${leftBase} ↔ ${rightBase} (duplicate)`);
+
+  void visible;
+
+  return (
+    <Page testId="page-duplicate-block" kind="duplicate-block">
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        <div
+          style={{
+            padding: "4px 10px",
+            borderBottom: "1px solid var(--border-subtle)",
+            color: "var(--text-muted)",
+            fontSize: 11,
+            display: "flex",
+            gap: 16,
+            alignItems: "center",
+          }}
+        >
+          <span>
+            Duplicated block:{" "}
+            <strong style={{ color: "var(--text-primary)" }}>
+              {payload.leftEnd - payload.leftStart + 1} lines
+            </strong>
+          </span>
+        </div>
+        <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+          <DuplicateSide
+            stream={stream}
+            path={payload.leftPath}
+            startLine={payload.leftStart}
+            endLine={payload.leftEnd}
+            onJumpToSource={onJumpToSource}
+          />
+          <div style={{ width: 1, background: "var(--border-subtle)" }} />
+          <DuplicateSide
+            stream={stream}
+            path={payload.rightPath}
+            startLine={payload.rightStart}
+            endLine={payload.rightEnd}
+            onJumpToSource={onJumpToSource}
+          />
+        </div>
+      </div>
+    </Page>
+  );
+}
+
+interface SideProps {
+  stream: Stream;
+  path: string;
+  startLine: number;
+  endLine: number;
+  onJumpToSource(path: string): void;
+}
+
+function DuplicateSide({ stream, path, startLine, endLine, onJumpToSource }: SideProps) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<any>(null);
+  const modelRef = useRef<any>(null);
+  const monacoRef = useRef<any>(null);
+  const [editorReady, setEditorReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    ensureHighlightStyle();
+    let cancelled = false;
+    (async () => {
+      const monaco = await import("monaco-editor");
+      if (cancelled || !hostRef.current) return;
+      monacoRef.current = monaco;
+      const editor = monaco.editor.create(hostRef.current, {
+        automaticLayout: true,
+        readOnly: true,
+        theme: "vs-dark",
+        minimap: { enabled: false },
+        renderLineHighlight: "none",
+        scrollBeyondLastLine: false,
+      });
+      editorRef.current = editor;
+      setEditorReady(true);
+    })();
+    return () => {
+      cancelled = true;
+      const editor = editorRef.current;
+      const model = modelRef.current;
+      editorRef.current = null;
+      modelRef.current = null;
+      editor?.setModel(null);
+      editor?.dispose();
+      model?.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!editorReady) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const file = await readWorkspaceFile(stream.id, path);
+        if (cancelled) return;
+        const monaco = monacoRef.current;
+        const editor = editorRef.current;
+        if (!monaco || !editor) return;
+        const language = languageForPath(path) ?? "plaintext";
+        const model = monaco.editor.createModel(file.content ?? "", language);
+        const previous = modelRef.current;
+        editor.setModel(model);
+        modelRef.current = model;
+        previous?.dispose();
+
+        const lineCount = model.getLineCount();
+        const safeStart = Math.max(1, Math.min(startLine, lineCount));
+        const safeEnd = Math.max(safeStart, Math.min(endLine, lineCount));
+        editor.deltaDecorations(
+          [],
+          [
+            {
+              range: new monaco.Range(safeStart, 1, safeEnd, model.getLineMaxColumn(safeEnd)),
+              options: {
+                isWholeLine: true,
+                className: "oxplow-duplicate-block-line",
+                marginClassName: "oxplow-duplicate-block-margin",
+              },
+            },
+          ],
+        );
+        // Reveal the start line near the top so both editors line up.
+        editor.revealLineNearTop(safeStart);
+        editor.setPosition({ lineNumber: safeStart, column: 1 });
+        setError(null);
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editorReady, stream.id, path, startLine, endLine]);
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+      <div
+        style={{
+          padding: "4px 10px",
+          borderBottom: "1px solid var(--border-subtle)",
+          fontSize: 11,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+        }}
+      >
+        <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--text-primary)" }}>
+          {path}
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>
+          :{startLine}-{endLine}
+        </span>
+        {error ? <span style={{ color: "#ff6b6b" }}>{error}</span> : null}
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={() => onJumpToSource(path)}
+          style={{
+            background: "var(--surface-card)",
+            color: "var(--text-primary)",
+            borderWidth: 1,
+            borderStyle: "solid",
+            borderColor: "var(--border-subtle)",
+            borderRadius: 3,
+            padding: "2px 8px",
+            fontSize: 11,
+            cursor: "pointer",
+          }}
+        >
+          Open file
+        </button>
+      </div>
+      <div ref={hostRef} style={{ flex: 1, minHeight: 0 }} />
+    </div>
+  );
+}

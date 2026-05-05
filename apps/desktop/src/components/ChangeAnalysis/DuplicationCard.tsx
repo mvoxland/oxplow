@@ -1,4 +1,6 @@
 import type { CodeQualityFindingRow } from "../../api-types.js";
+import { duplicateBlockRef } from "../../tabs/pageRefs.js";
+import { useRouteDispatch } from "../../tabs/RouteLink.js";
 
 interface DuplicationCardProps {
   duplication: {
@@ -40,48 +42,82 @@ export function DuplicationCard({ duplication, onOpenFile }: DuplicationCardProp
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {dupes.slice(0, 25).map((f) => {
-            const peerPath = (f.extra?.peerPath as string | undefined) ?? null;
-            const peerStart = (f.extra?.peerStartLine as number | undefined) ?? null;
-            const peerEnd = (f.extra?.peerEndLine as number | undefined) ?? null;
-            return (
-              <div
-                key={f.id}
-                data-testid="change-analysis-duplicate-row"
-                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}
-              >
-                <button
-                  type="button"
-                  onClick={(e) => onOpenFile(f.path, { newTab: e.metaKey || e.ctrlKey })}
-                  style={pathButton}
-                >
-                  {f.path}:{f.startLine}-{f.endLine}
-                </button>
-                <span style={{ color: "var(--text-muted)" }}>↔</span>
-                {peerPath ? (
-                  <button
-                    type="button"
-                    onClick={(e) => onOpenFile(peerPath, { newTab: e.metaKey || e.ctrlKey })}
-                    style={pathButton}
-                  >
-                    {peerPath}
-                    {peerStart != null && peerEnd != null ? `:${peerStart}-${peerEnd}` : ""}
-                  </button>
-                ) : (
-                  <span style={muted}>(unknown peer)</span>
-                )}
-                <span style={{ marginLeft: "auto", color: "var(--text-muted)" }}>
-                  {f.metricValue} lines
-                </span>
-              </div>
-            );
-          })}
+          {dupes.slice(0, 25).map((f) => (
+            <DuplicateRow key={f.id} finding={f} onOpenFile={onOpenFile} />
+          ))}
           {dupes.length > 25 ? (
             <div style={muted}>…and {dupes.length - 25} more</div>
           ) : null}
         </div>
       )}
     </section>
+  );
+}
+
+interface DuplicateRowProps {
+  finding: CodeQualityFindingRow;
+  onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+}
+
+function DuplicateRow({ finding, onOpenFile }: DuplicateRowProps) {
+  const peerPath = (finding.extra?.peerPath as string | undefined) ?? null;
+  const peerStart = (finding.extra?.peerStartLine as number | undefined) ?? null;
+  const peerEnd = (finding.extra?.peerEndLine as number | undefined) ?? null;
+  const hasPeer = peerPath != null && peerStart != null && peerEnd != null;
+  const ref = hasPeer
+    ? duplicateBlockRef({
+        leftPath: finding.path,
+        leftStart: finding.startLine,
+        leftEnd: finding.endLine,
+        rightPath: peerPath!,
+        rightStart: peerStart!,
+        rightEnd: peerEnd!,
+      })
+    : null;
+  const { handlers } = useRouteDispatch(
+    ref ?? { id: "noop", kind: "file", payload: { path: finding.path } },
+    { onNavigate: (r, opts) => onOpenFile((r.payload as { path: string }).path, opts) },
+  );
+  return (
+    <div
+      data-testid="change-analysis-duplicate-row"
+      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}
+    >
+      {hasPeer ? (
+        <button
+          type="button"
+          {...handlers}
+          style={pathButton}
+          title="Open side-by-side duplicate view"
+        >
+          {finding.path}:{finding.startLine}-{finding.endLine}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={(e) => onOpenFile(finding.path, { newTab: e.metaKey || e.ctrlKey })}
+          style={pathButton}
+        >
+          {finding.path}:{finding.startLine}-{finding.endLine}
+        </button>
+      )}
+      <span style={{ color: "var(--text-muted)" }}>↔</span>
+      {hasPeer ? (
+        <button
+          type="button"
+          {...handlers}
+          style={pathButton}
+          title="Open side-by-side duplicate view"
+        >
+          {peerPath}:{peerStart}-{peerEnd}
+        </button>
+      ) : (
+        <span style={muted}>(unknown peer)</span>
+      )}
+      <span style={{ marginLeft: "auto", color: "var(--text-muted)" }}>
+        {finding.metricValue} lines
+      </span>
+    </div>
   );
 }
 
