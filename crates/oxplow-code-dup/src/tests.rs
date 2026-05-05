@@ -218,3 +218,117 @@ fn skips_unsupported_languages() {
     );
     assert!(blocks.is_empty());
 }
+
+#[test]
+fn scoped_detects_clone_when_only_one_side_is_in_scope() {
+    // Simulates the change-analysis flow: `src/a.rs` is the changed
+    // file, `src/b.rs` is an unchanged peer. The scan must catch
+    // the duplication even though only `a.rs` is in scope.
+    let body = r#"
+fn helper(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 {
+            out.push(item * 2);
+        } else if item < 0 {
+            out.push(item * -1);
+        } else {
+            out.push(0);
+        }
+    }
+    out
+}
+"#;
+    let mut scope = BTreeSet::new();
+    scope.insert("src/a.rs".to_string());
+    let blocks = detect_duplicates_scoped(
+        vec![
+            ("src/a.rs".to_string(), body.to_string()),
+            ("src/b.rs".to_string(), body.to_string()),
+            ("src/c.rs".to_string(), body.to_string()),
+        ],
+        &scope,
+        DupOptions::default(),
+    );
+    assert!(!blocks.is_empty(), "expected at least one scoped match");
+    // Every reported block must touch a scope path.
+    for b in &blocks {
+        assert!(
+            b.a_path == "src/a.rs" || b.b_path == "src/a.rs",
+            "scope filter violated: {b:?}",
+        );
+        // Side A is the scope side per the runner's convention.
+        assert_eq!(b.a_path, "src/a.rs");
+        assert_ne!(b.a_path, b.b_path, "same-file pair leaked: {b:?}");
+    }
+}
+
+#[test]
+fn scoped_drops_pairs_where_neither_side_is_in_scope() {
+    let body = r#"
+fn helper(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 {
+            out.push(item * 2);
+        } else if item < 0 {
+            out.push(item * -1);
+        } else {
+            out.push(0);
+        }
+    }
+    out
+}
+"#;
+    let mut scope = BTreeSet::new();
+    scope.insert("src/changed.rs".to_string()); // not in corpus
+    let blocks = detect_duplicates_scoped(
+        vec![
+            ("src/a.rs".to_string(), body.to_string()),
+            ("src/b.rs".to_string(), body.to_string()),
+        ],
+        &scope,
+        DupOptions::default(),
+    );
+    assert!(
+        blocks.is_empty(),
+        "expected no findings when scope doesn't intersect corpus, got {blocks:?}"
+    );
+}
+
+#[test]
+fn scoped_drops_same_file_self_match() {
+    // A file containing two long, near-identical regions would
+    // otherwise surface as an in-file dup. Scoped semantics drop it.
+    let body_with_repeat = r#"
+fn case_a(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 { out.push(item * 2); }
+        else if item < 0 { out.push(item * -1); }
+        else { out.push(0); }
+    }
+    out
+}
+
+fn case_b(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 { out.push(item * 2); }
+        else if item < 0 { out.push(item * -1); }
+        else { out.push(0); }
+    }
+    out
+}
+"#;
+    let mut scope = BTreeSet::new();
+    scope.insert("src/single.rs".to_string());
+    let blocks = detect_duplicates_scoped(
+        vec![("src/single.rs".to_string(), body_with_repeat.to_string())],
+        &scope,
+        DupOptions::default(),
+    );
+    for b in &blocks {
+        assert_ne!(b.a_path, b.b_path, "same-file pair leaked: {b:?}");
+    }
+}

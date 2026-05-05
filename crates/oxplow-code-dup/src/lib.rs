@@ -30,7 +30,7 @@
 //! Code Quality panel readable; if you need full multi-way analysis
 //! the renderer would have to walk peer chains via `extra.peerPath`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use oxplow_code_metrics::{Language, language_for_path};
 use tree_sitter::Parser;
@@ -79,7 +79,16 @@ impl Default for DupOptions {
 /// fragmenting without exploding false positives.
 const MAX_SKIP: usize = 2;
 
-/// Scan a batch of (path, content) pairs for duplicate blocks.
+/// Scan a batch of (path, content) pairs for duplicate blocks. All
+/// pairwise matches across distinct positions are surfaced.
+///
+/// **Note**: same-path matches (a region of a file matching another
+/// region of the SAME file) are intentionally surfaced here — the
+/// raw detector treats two ranges in one file as a valid in-file
+/// clone. Callers that don't want that (the change-analysis flow,
+/// for instance) should use [`detect_duplicates_scoped`] which
+/// filters them out.
+///
 /// Files in unsupported languages are skipped silently.
 pub fn detect_duplicates<I, P, S>(files: I, opts: DupOptions) -> Vec<DuplicateBlock>
 where
@@ -111,6 +120,59 @@ where
         docs.push(Doc { path, tokens, fps });
     }
     detect_across_docs(&docs, opts)
+}
+
+/// Same as [`detect_duplicates`] but applies "scope" semantics:
+///
+/// - The whole corpus participates in fingerprint matching (so a
+///   changed file can clone-match an unchanged peer file).
+/// - A finding is reported only if **at least one** side's path is
+///   in `scope_paths`.
+/// - Same-path matches (file vs itself) are dropped — two ranges
+///   in one file that happen to fingerprint-match are almost always
+///   shifted-by-one artifacts of winnowing on long token streams,
+///   not real duplication worth surfacing.
+/// - When only one side is in scope it is rotated to the A side
+///   of the [`DuplicateBlock`] so the renderer's "side A is what
+///   you're analyzing, side B is the peer" convention holds.
+pub fn detect_duplicates_scoped<I, P, S>(
+    files: I,
+    scope_paths: &BTreeSet<String>,
+    opts: DupOptions,
+) -> Vec<DuplicateBlock>
+where
+    I: IntoIterator<Item = (P, S)>,
+    P: Into<String>,
+    S: AsRef<str>,
+{
+    let raw = detect_duplicates(files, opts);
+    let mut out = Vec::with_capacity(raw.len());
+    for block in raw {
+        if block.a_path == block.b_path {
+            continue;
+        }
+        let a_in = scope_paths.contains(&block.a_path);
+        let b_in = scope_paths.contains(&block.b_path);
+        if !a_in && !b_in {
+            continue;
+        }
+        if !a_in && b_in {
+            // Side B is the scope path; flip so side A is the
+            // analyzed file the panel row actually anchors on.
+            out.push(DuplicateBlock {
+                a_path: block.b_path,
+                a_start_line: block.b_start_line,
+                a_end_line: block.b_end_line,
+                b_path: block.a_path,
+                b_start_line: block.a_start_line,
+                b_end_line: block.a_end_line,
+                line_count: block.line_count,
+            });
+        } else {
+            out.push(block);
+        }
+    }
+    out
 }
 
 struct Doc {

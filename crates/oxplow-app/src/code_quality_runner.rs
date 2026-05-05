@@ -13,7 +13,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_code_dup::{detect_duplicates, DupOptions};
+use std::collections::BTreeSet;
+
+use oxplow_code_dup::{detect_duplicates, detect_duplicates_scoped, DupOptions};
 use oxplow_code_metrics::FunctionMetrics;
 use oxplow_tree_source::{
     collect_corpus, AllFiles, DiskTreeSource, FileFilter, TreeError, TreeSource,
@@ -191,10 +193,12 @@ pub async fn run_metrics_scan(
 ///
 /// `source` enumerates files and reads their content (Disk = working
 /// tree, GitRef = a commit's tree, …); `filter` decides which paths
-/// from the source make it into the corpus. The detector itself is
-/// unchanged — we just route content through the trait so the same
-/// scan logic works for working tree, a commit, and (eventually) a
-/// snapshot.
+/// from the source make it into the corpus. Every pair of corpus
+/// docs is matched, including same-file self-matches — this is the
+/// "scan everything" mode used by the standalone Code Quality panel.
+/// The change-analysis flow uses
+/// [`run_duplication_scan_scoped`] instead so unchanged peers
+/// participate as match targets without adding their own findings.
 ///
 /// The whole scan runs on `spawn_blocking` because tree-sitter and
 /// libgit2 are CPU/IO-bound; the trait objects are `Send + Sync` so
@@ -216,6 +220,51 @@ pub async fn run_duplication_scan_with(
             .filter(|(p, _)| oxplow_code_metrics::is_supported_path(Path::new(p)))
             .collect();
         let blocks = detect_duplicates(inputs, DupOptions::default());
+        Ok(blocks_to_findings(blocks))
+    });
+    match tokio::time::timeout(timeout, task).await {
+        Ok(Ok(inner)) => inner,
+        Ok(Err(join_err)) => Err(CodeQualityError::Task(format!("duplication task: {join_err}"))),
+        Err(_) => Err(CodeQualityError::Timeout(timeout)),
+    }
+}
+
+/// Scoped duplicate-block scan: corpus is the WHOLE tree (every
+/// supported file the source enumerates), but a finding only
+/// surfaces when at least one side's path is in `scope_filter`. The
+/// scope-side is rotated to side A so the renderer's
+/// "you're analyzing this file vs the peer over there" convention
+/// holds. Same-path matches (a region of a file matching another
+/// region of the SAME file) are dropped — those are almost always
+/// shifted-by-one winnowing artifacts on long token streams.
+///
+/// This is what the change-analysis page wants: when a user changes
+/// `foo.ts`, surface duplications between `foo.ts` and ANY existing
+/// file in the repo, not just other changed files. Without this
+/// mode the scan would miss copy-paste from an unchanged peer.
+pub async fn run_duplication_scan_scoped(
+    source: Arc<dyn TreeSource>,
+    scope_filter: Arc<dyn FileFilter>,
+    timeout: Option<std::time::Duration>,
+) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
+    let timeout = timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
+    let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
+        // The corpus deliberately uses AllFiles — the scope filter
+        // determines which findings we keep, NOT which files we
+        // walk. A copy-paste from an unchanged file only surfaces
+        // when that unchanged file is in the corpus.
+        let all = AllFiles;
+        let corpus = collect_corpus(source.as_ref(), &all)?;
+        let inputs: Vec<(String, String)> = corpus
+            .into_iter()
+            .filter(|(p, _)| oxplow_code_metrics::is_supported_path(Path::new(p)))
+            .collect();
+        let scope: BTreeSet<String> = inputs
+            .iter()
+            .map(|(p, _)| p.clone())
+            .filter(|p| scope_filter.keep(p))
+            .collect();
+        let blocks = detect_duplicates_scoped(inputs, &scope, DupOptions::default());
         Ok(blocks_to_findings(blocks))
     });
     match tokio::time::timeout(timeout, task).await {
@@ -487,6 +536,104 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
     /// disk versions to be unique. A scan against `HEAD` via
     /// `GitTreeSource` should still report the duplicates; a scan
     /// against `Disk` would not.
+    /// The scoped runner walks the whole tree but only surfaces
+    /// findings whose A side is in scope. Verifies the
+    /// change-analysis "compare changed files against everything"
+    /// semantic.
+    #[tokio::test]
+    async fn duplication_scan_scoped_finds_clones_in_unchanged_peers() {
+        use oxplow_tree_source::{DiskTreeSource, ExplicitPaths};
+        let dir = tempfile::tempdir().unwrap();
+        let body = r#"
+fn helper(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 {
+            out.push(item * 2);
+        } else if item < 0 {
+            out.push(item * -1);
+        } else {
+            out.push(0);
+        }
+    }
+    out
+}
+"#;
+        std::fs::write(dir.path().join("changed.rs"), body).unwrap();
+        std::fs::write(dir.path().join("untouched.rs"), body).unwrap();
+        let source: Arc<dyn TreeSource> =
+            Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
+        // Scope = only the changed file. The peer (untouched.rs) is
+        // NOT in scope but must still participate as a match
+        // target.
+        let scope: Arc<dyn FileFilter> =
+            Arc::new(ExplicitPaths::new(vec!["changed.rs".to_string()]));
+        let findings = run_duplication_scan_scoped(source, scope, None)
+            .await
+            .unwrap();
+        let dups: Vec<_> = findings
+            .iter()
+            .filter(|f| f.kind == "duplicate-block")
+            .collect();
+        assert!(
+            !dups.is_empty(),
+            "expected dup findings between changed and untouched, got {findings:?}",
+        );
+        // Every finding's anchor (path) is the scope file; the peer
+        // (extra.peerPath) is the unchanged file. The flat
+        // findings list emits one record per side, so the scope
+        // file shows up at least once.
+        assert!(
+            findings.iter().any(|f| f.path == "changed.rs"),
+            "expected changed.rs to anchor at least one finding"
+        );
+    }
+
+    /// Same-file pairs (file matched against itself, two regions
+    /// in one file) must be dropped by the scoped runner.
+    #[tokio::test]
+    async fn duplication_scan_scoped_drops_same_file_self_match() {
+        use oxplow_tree_source::{DiskTreeSource, ExplicitPaths};
+        let dir = tempfile::tempdir().unwrap();
+        let body_with_repeat = r#"
+fn case_a(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 { out.push(item * 2); }
+        else if item < 0 { out.push(item * -1); }
+        else { out.push(0); }
+    }
+    out
+}
+
+fn case_b(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 { out.push(item * 2); }
+        else if item < 0 { out.push(item * -1); }
+        else { out.push(0); }
+    }
+    out
+}
+"#;
+        std::fs::write(dir.path().join("only.rs"), body_with_repeat).unwrap();
+        let source: Arc<dyn TreeSource> =
+            Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
+        let scope: Arc<dyn FileFilter> =
+            Arc::new(ExplicitPaths::new(vec!["only.rs".to_string()]));
+        let findings = run_duplication_scan_scoped(source, scope, None)
+            .await
+            .unwrap();
+        // Even if the engine surfaces in-file matches, the scoped
+        // runner's same-path filter must drop them.
+        for f in &findings {
+            let raw = f.extra_json.as_deref().unwrap_or("{}");
+            let parsed: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let peer = parsed.get("peerPath").and_then(|v| v.as_str()).unwrap_or("");
+            assert_ne!(peer, f.path, "same-file pair leaked: {f:?}");
+        }
+    }
+
     #[tokio::test]
     async fn duplication_scan_reads_from_tree_source_not_disk() {
         use oxplow_tree_source::{AllFiles, GitTreeSource};
