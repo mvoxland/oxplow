@@ -36,14 +36,7 @@ export function DuplicationCard({ duplication, scanVersion, onOpenFile }: Duplic
     <section data-testid="change-analysis-duplication" style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div style={header}>Duplication</div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            {!duplication.hasScan
-              ? `no scan at ${versionLabel} yet`
-              : duplication.scanAgeMs == null
-                ? "scan complete"
-                : `last scan: ${formatAge(duplication.scanAgeMs)} ago`}
-          </span>
+        {!duplication.hasScan ? (
           <button
             type="button"
             data-testid="change-analysis-duplication-refresh"
@@ -51,13 +44,9 @@ export function DuplicationCard({ duplication, scanVersion, onOpenFile }: Duplic
             disabled={duplication.scanning}
             style={smallButton}
           >
-            {duplication.scanning
-              ? "Scanning…"
-              : duplication.hasScan
-                ? "Re-scan"
-                : `Scan ${versionLabel}`}
+            {duplication.scanning ? "Scanning…" : "Scan for duplicates"}
           </button>
-        </div>
+        ) : null}
       </div>
       {!duplication.hasScan ? (
         <div style={muted}>
@@ -157,17 +146,6 @@ function DuplicateRow({ finding, scanVersion, onOpenFile }: DuplicateRowProps) {
       </span>
     </div>
   );
-}
-
-function formatAge(ms: number): string {
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 48) return `${hr}h`;
-  const days = Math.floor(hr / 24);
-  return `${days}d`;
 }
 
 const card: React.CSSProperties = {
