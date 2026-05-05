@@ -217,6 +217,113 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 }
 
 #[test]
+fn imports_alone_dont_seed_false_positives() {
+    // Two unrelated Rust files that happen to share several `use`
+    // declarations must NOT be reported as duplicates. Pre-skip
+    // behavior: the use-line tokens dominate small files and would
+    // produce a fingerprint match.
+    let a = r#"
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+fn really_a_thing() -> i32 {
+    42
+}
+"#;
+    let b = r#"
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+fn completely_different_logic(name: &str) -> String {
+    format!("hi {}", name)
+}
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.rs".to_string(), a.to_string()),
+            ("src/b.rs".to_string(), b.to_string()),
+        ],
+        detect_opts(),
+    );
+    assert!(
+        blocks.is_empty(),
+        "shared imports must not seed a duplicate-block finding, got {blocks:?}"
+    );
+}
+
+#[test]
+fn ts_imports_are_skipped() {
+    let a = r#"
+import { foo, bar } from "./foo";
+import * as React from "react";
+import type { Baz } from "./baz";
+
+function unique_a() {
+    return 1;
+}
+"#;
+    let b = r#"
+import { foo, bar } from "./foo";
+import * as React from "react";
+import type { Baz } from "./baz";
+
+function unique_b(x: number) {
+    return x * 2;
+}
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.ts".to_string(), a.to_string()),
+            ("src/b.ts".to_string(), b.to_string()),
+        ],
+        detect_opts(),
+    );
+    assert!(
+        blocks.is_empty(),
+        "shared TS imports must not seed a finding, got {blocks:?}"
+    );
+}
+
+#[test]
+fn python_imports_are_skipped() {
+    let a = r#"
+import os
+import sys
+from collections import defaultdict, OrderedDict
+from typing import List, Dict
+
+def unique_a():
+    return 1
+"#;
+    let b = r#"
+import os
+import sys
+from collections import defaultdict, OrderedDict
+from typing import List, Dict
+
+def unique_b(x):
+    return x * 2
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.py".to_string(), a.to_string()),
+            ("src/b.py".to_string(), b.to_string()),
+        ],
+        detect_opts(),
+    );
+    assert!(
+        blocks.is_empty(),
+        "shared Python imports must not seed a finding, got {blocks:?}"
+    );
+}
+
+#[test]
 fn skips_unsupported_languages() {
     let blocks = detect_duplicates(
         vec![
