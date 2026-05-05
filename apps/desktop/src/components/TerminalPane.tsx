@@ -360,7 +360,7 @@ export function TerminalPane({
     let ro: ResizeObserver | null = null;
     const dataDisp = term.onData((data) => {
       if (sessionIdRef.current) {
-        void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input", bytes: btoa(data) }));
+        void desktopBridge().sendTerminalMessage(sessionIdRef.current, JSON.stringify({ type: "input", bytes: utf8ToBase64(data) }));
       }
     });
     const binaryDisp = term.onBinary((data) => {
@@ -594,6 +594,25 @@ function binaryToBase64(data: string) {
   let binary = "";
   for (let i = 0; i < data.length; i++) {
     binary += String.fromCharCode(data.charCodeAt(i) & 0xff);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Encode a JS string as UTF-8 bytes, then base64. `btoa()` directly
+ * rejects strings containing any character > U+00FF — pasting log
+ * output with smart quotes / em-dashes / emoji used to throw
+ * InvalidCharacterError and silently drop the paste. Going through
+ * TextEncoder gets us proper UTF-8 round-tripping for the PTY.
+ */
+function utf8ToBase64(data: string) {
+  const bytes = new TextEncoder().encode(data);
+  let binary = "";
+  // String.fromCharCode is fine for one byte at a time; chunked to
+  // avoid the apply-with-large-array argument-limit pitfall.
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
   }
   return btoa(binary);
 }
