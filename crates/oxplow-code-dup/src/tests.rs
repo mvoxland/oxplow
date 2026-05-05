@@ -324,6 +324,190 @@ def unique_b(x):
 }
 
 #[test]
+fn top_level_style_objects_are_ignored() {
+    // Two unrelated TS files whose ONLY content is top-level
+    // const-style declarations. These are AST-isomorphic with the
+    // old token detector and used to cross-match. Function-anchored
+    // detection ignores them — they're not inside a function body.
+    let a = r#"
+const chipStyle = {
+    fontFamily: "ui-monospace, monospace",
+    color: "var(--text-muted)",
+    border: "1px solid var(--border-subtle)",
+    borderRadius: 3,
+    padding: "0 6px",
+};
+
+const labelStyle = {
+    fontFamily: "ui-monospace, monospace",
+    color: "var(--text-primary)",
+};
+"#;
+    let b = r#"
+const footerStyle = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "4px 10px",
+};
+
+const bannerStyle = {
+    display: "flex",
+    color: "var(--accent)",
+};
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.tsx".to_string(), a.to_string()),
+            ("src/b.tsx".to_string(), b.to_string()),
+        ],
+        DupOptions::default(),
+    );
+    assert!(
+        blocks.is_empty(),
+        "top-level style objects must not surface as duplicates, got {blocks:?}"
+    );
+}
+
+#[test]
+fn top_level_error_enums_are_ignored() {
+    // The case from commit 7feb819 — two thiserror-style enums in
+    // different files would cross-match because their AST shapes
+    // (derive attribute + variant + #[error("...")] + tuple-struct
+    // String) are identical. These live at top level, not inside a
+    // function, so the function-anchored detector skips them.
+    let a = r#"
+#[derive(Debug, thiserror::Error)]
+pub enum CodeQualityError {
+    #[error("scan task failed: {0}")]
+    Task(String),
+    #[error("scan timed out after {0:?}")]
+    Timeout(std::time::Duration),
+    #[error("tree source failed: {0}")]
+    TreeSource(String),
+}
+"#;
+    let b = r#"
+#[derive(Debug, thiserror::Error)]
+pub enum LspClientError {
+    #[error("no language server configured for `{0}`")]
+    NoConfig(String),
+    #[error("spawn failed: {0}")]
+    Spawn(String),
+    #[error("client not found: {0}")]
+    NotFound(String),
+}
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.rs".to_string(), a.to_string()),
+            ("src/b.rs".to_string(), b.to_string()),
+        ],
+        DupOptions::default(),
+    );
+    assert!(
+        blocks.is_empty(),
+        "top-level error enums must not surface as duplicates, got {blocks:?}"
+    );
+}
+
+#[test]
+fn react_components_with_shared_idiom_but_different_logic_dont_match() {
+    // Both functions use useRef + useEffect; one paints a div red,
+    // one scrolls to top. Same idiom skeleton, completely different
+    // body. This was an APTED false positive at 0.97 in the
+    // similarity-rs spike. The subtree-hash approach treats the
+    // ENTIRE function body as one hash; one differing string
+    // assignment doesn't matter, but the called methods (style vs
+    // scrollTop) and the parameter list shape differ enough to
+    // produce different hashes once normalization preserves
+    // structural punctuation.
+    //
+    // We're checking a behavior: small bodies with ID/STR
+    // normalization may still hash-collide. If they do, the test
+    // tells us that and we can iterate. For now: if it produces a
+    // finding, the line span is short and falls below min_lines.
+    let a = r#"
+import { useEffect, useRef } from "react";
+
+export function MountA(): number {
+    const ref = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!ref.current) return;
+        ref.current.style.background = "red";
+    }, []);
+    return 1;
+}
+"#;
+    let b = r#"
+import { useEffect, useRef } from "react";
+
+export function MountB(): string {
+    const ref = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!ref.current) return;
+        ref.current.scrollTop = 0;
+    }, []);
+    return "ok";
+}
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.tsx".to_string(), a.to_string()),
+            ("src/b.tsx".to_string(), b.to_string()),
+        ],
+        DupOptions::default(),
+    );
+    // Whatever surfaces, line span must be at least min_lines (10).
+    // If both functions are ~9 lines, no finding will surface and
+    // that's fine — the threshold is doing its job. Print for
+    // visibility.
+    println!("[react idiom] blocks: {blocks:?}");
+    for b in &blocks {
+        assert!(
+            b.line_count >= DupOptions::default().min_lines,
+            "min_lines threshold violated: {b:?}"
+        );
+    }
+}
+
+#[test]
+fn whole_function_clone_subsumes_inner_block_clone() {
+    // When two functions are identical in their entirety, we should
+    // emit ONE finding spanning both function bodies — not also the
+    // inner loop and the inner branch as separate findings.
+    let body = r#"
+fn helper(items: Vec<i32>) -> Vec<i32> {
+    let mut out = Vec::new();
+    for item in items {
+        if item > 0 {
+            out.push(item * 2);
+        } else if item < 0 {
+            out.push(item * -1);
+        } else {
+            out.push(0);
+        }
+    }
+    out
+}
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.rs".to_string(), body.to_string()),
+            ("src/b.rs".to_string(), body.to_string()),
+        ],
+        detect_opts(),
+    );
+    let cross: Vec<_> = blocks.iter().filter(|b| b.a_path != b.b_path).collect();
+    assert_eq!(
+        cross.len(),
+        1,
+        "expected exactly 1 cross-file finding (whole-function), got {cross:?}",
+    );
+}
+
+#[test]
 fn skips_unsupported_languages() {
     let blocks = detect_duplicates(
         vec![

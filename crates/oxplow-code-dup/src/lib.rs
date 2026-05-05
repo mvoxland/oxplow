@@ -1,44 +1,46 @@
-//! Cross-file token-stream duplicate-block detector. The pipeline:
+//! Function-anchored AST subtree-hash duplicate detector
+//! (Deckard-style).
 //!
-//! 1. **Tokenize** each file by walking the tree-sitter AST and
-//!    emitting a normalized token per leaf node (identifiers, numeric
-//!    literals, and string literals are folded to placeholder kinds
-//!    so that renames and constant changes don't suppress matches).
-//! 2. **K-gram hash** over runs of `K` consecutive tokens. Each
-//!    file's hashes are salted by its language tag so token streams
-//!    from different grammars cannot collide.
-//! 3. **Winnow** with window `W` to keep one fingerprint per `W`
-//!    tokens — Schleimer/Aiken 2003.
-//! 4. **Inverted index** fingerprint → occurrences.
-//! 5. **Extend** each multi-occurrence fingerprint forward in the
-//!    fingerprint sequence, tolerating up to `MAX_SKIP` non-matching
-//!    fingerprints between matches (since winnowing samples
-//!    stochastically and two real clones can have slightly divergent
-//!    fingerprint subsets).
-//! 6. **Filter** runs whose line span is shorter than `min_lines`.
+//! # What it detects
 //!
-//! Tunables are exposed on `DupOptions` (K=20, W=4, min_lines=10 by
-//! default — small enough that a real extracted helper still surfaces,
-//! large enough that thiserror enum boilerplate / 5-line idioms don't).
+//! - **Whole-function clones**: two functions in different files whose
+//!   normalized AST hashes match.
+//! - **Within-function clones**: a sub-block of one function whose
+//!   normalized AST hash matches a sub-block of another function (or
+//!   another function entirely).
 //!
-//! # Multi-way clones
+//! # What it deliberately does NOT detect
 //!
-//! When fingerprint F appears in three or more files, only one
-//! pairing is reported per fingerprint position — once a (doc, fp)
-//! position is consumed by a match it's marked seen and won't seed
-//! another pair. So a 3-way clone (A↔B↔C) typically surfaces as a
-//! single (A, B) row in the panel, not three. This keeps the
-//! Code Quality panel readable; if you need full multi-way analysis
-//! the renderer would have to walk peer chains via `extra.peerPath`.
+//! - Duplicated code outside any function body — JSX/HTML markup,
+//!   top-level CSS-style object literals, `const` table declarations,
+//!   serde derive blocks. These are usually structural boilerplate
+//!   that share AST shape across unrelated files (e.g. two unrelated
+//!   `const styles = { ... }` blocks). Restricting the corpus to
+//!   function bodies eliminates this entire class of false positive
+//!   automatically.
+//!
+//! # Algorithm
+//!
+//! 1. Parse each file with tree-sitter.
+//! 2. For each file, find every function-like node (per
+//!    `Language::spec().function_kinds`).
+//! 3. For each function, compute Deckard-style hashes for the
+//!    function as a whole AND for every sub-subtree above
+//!    `min_nodes`/`min_lines`. See [`tokenize::hash_subtree`].
+//! 4. Group records by hash. Each group of >=2 records produces one
+//!    cross-pair finding per (a, b) pair of source functions, taking
+//!    the LARGEST matching subtree between that pair (so a whole-
+//!    function clone subsumes any internal sub-block matches).
+//! 5. Sort findings deterministically.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 use oxplow_code_metrics::{Language, language_for_path};
 use tree_sitter::Parser;
 
 mod tokenize;
 
-use tokenize::{tokenize_source, Token};
+use tokenize::hash_subtree;
 
 /// One duplicate pair the runner will emit as two findings (one per side).
 #[derive(Debug, Clone, PartialEq)]
@@ -55,40 +57,41 @@ pub struct DuplicateBlock {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DupOptions {
-    /// Tokens per k-gram. Smaller = catches shorter clones, more noise.
-    pub k: usize,
-    /// Winnowing window. Larger = fewer fingerprints, faster, less precise.
-    pub w: usize,
-    /// Minimum line span to report (filters out trivial echoes).
+    /// Minimum line span to report. Filters trivial single-block
+    /// echoes.
     pub min_lines: u32,
+    /// Minimum subtree node count to consider for matching. Subtrees
+    /// smaller than this never seed a finding — kills the "two
+    /// short methods that just call `self.x()`" class of match.
+    pub min_nodes: u32,
 }
 
 impl Default for DupOptions {
     fn default() -> Self {
         Self {
-            k: 20,
-            w: 4,
+            // Keep the production line floor we already settled on:
+            // small enough that a real extracted helper surfaces,
+            // large enough that 5-line idioms don't.
             min_lines: 10,
+            // 30 nodes ≈ a small but nontrivial block (a 5-7 line
+            // body with branching). Below this is mostly
+            // `return foo()` / property accesses / single
+            // expressions.
+            min_nodes: 30,
         }
     }
 }
 
-/// Maximum gap (in fingerprint indices) between matching fingerprints
-/// that we'll still consider part of the same run. Two real clones
-/// can have slightly divergent winnowing samples, especially at
-/// boundaries; tolerating one or two skips keeps short matches from
-/// fragmenting without exploding false positives.
-const MAX_SKIP: usize = 2;
-
-/// Scan a batch of (path, content) pairs for duplicate blocks. All
-/// pairwise matches across distinct positions are surfaced.
+/// Detect duplicate function bodies and duplicate sub-blocks
+/// within function bodies, across the given files.
 ///
-/// **Note**: same-path matches (a region of a file matching another
-/// region of the SAME file) are intentionally surfaced here — the
-/// raw detector treats two ranges in one file as a valid in-file
-/// clone. Callers that don't want that (the change-analysis flow,
-/// for instance) should use [`detect_duplicates_scoped`] which
-/// filters them out.
+/// The corpus is **function bodies only** — top-level declarations,
+/// const tables, JSX expression trees outside a function, etc. are
+/// ignored on purpose. See module docs.
+///
+/// Same-file matches are emitted (a function in F1 can clone a
+/// different function in F1). Callers that don't want self-matches
+/// should use [`detect_duplicates_scoped`].
 ///
 /// Files in unsupported languages are skipped silently.
 pub fn detect_duplicates<I, P, S>(files: I, opts: DupOptions) -> Vec<DuplicateBlock>
@@ -97,45 +100,41 @@ where
     P: Into<String>,
     S: AsRef<str>,
 {
-    let mut docs: Vec<Doc> = Vec::new();
+    let mut subtrees: Vec<SubtreeRef> = Vec::new();
     for (path, source) in files {
         let path = path.into();
         let Some(lang) = language_for_path(&path) else {
             continue;
         };
+        let source = source.as_ref();
         let mut parser = Parser::new();
         if parser.set_language(&lang.tree_sitter_language()).is_err() {
             continue;
         }
-        let Some(tree) = parser.parse(source.as_ref(), None) else {
+        let Some(tree) = parser.parse(source, None) else {
             continue;
         };
-        let tokens = tokenize_source(tree.root_node(), lang);
-        if tokens.len() < opts.k {
-            continue;
-        }
-        let fps = winnow(&tokens, lang, opts.k, opts.w);
-        if fps.is_empty() {
-            continue;
-        }
-        docs.push(Doc { path, tokens, fps });
+        collect_function_subtrees(
+            &path,
+            lang,
+            tree.root_node(),
+            opts,
+            &mut subtrees,
+        );
     }
-    detect_across_docs(&docs, opts)
+    pair_up(subtrees, opts)
 }
 
 /// Same as [`detect_duplicates`] but applies "scope" semantics:
 ///
-/// - The whole corpus participates in fingerprint matching (so a
-///   changed file can clone-match an unchanged peer file).
+/// - The whole corpus participates in matching (so a changed file
+///   can clone-match an unchanged peer file).
 /// - A finding is reported only if **at least one** side's path is
 ///   in `scope_paths`.
-/// - Same-path matches (file vs itself) are dropped — two ranges
-///   in one file that happen to fingerprint-match are almost always
-///   shifted-by-one artifacts of winnowing on long token streams,
-///   not real duplication worth surfacing.
+/// - Same-path matches (file vs itself) are dropped.
 /// - When only one side is in scope it is rotated to the A side
-///   of the [`DuplicateBlock`] so the renderer's "side A is what
-///   you're analyzing, side B is the peer" convention holds.
+///   so the renderer's "side A is what you're analyzing" convention
+///   holds.
 pub fn detect_duplicates_scoped<I, P, S>(
     files: I,
     scope_paths: &BTreeSet<String>,
@@ -158,8 +157,6 @@ where
             continue;
         }
         if !a_in && b_in {
-            // Side B is the scope path; flip so side A is the
-            // analyzed file the panel row actually anchors on.
             out.push(DuplicateBlock {
                 a_path: block.b_path,
                 a_start_line: block.b_start_line,
@@ -176,229 +173,213 @@ where
     out
 }
 
-struct Doc {
+/// One subtree extracted from the corpus that's eligible for
+/// matching. Each record carries enough context to emit a finding
+/// directly (path + line range) and to detect "this match is nested
+/// inside a larger one" via byte offsets within the parent function.
+#[derive(Debug, Clone)]
+struct SubtreeRef {
     path: String,
-    tokens: Vec<Token>,
-    fps: Vec<Fingerprint>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Fingerprint {
+    /// Byte range of the enclosing function body. Used to detect
+    /// whether two SubtreeRefs come from the same source function,
+    /// so we can collapse "whole function" + "loop inside that
+    /// function" matches into the single largest one per pair.
+    fn_byte_start: usize,
+    fn_byte_end: usize,
+    start_line: u32,
+    end_line: u32,
+    node_count: u32,
     hash: u64,
-    /// Index into `tokens` where this fingerprint's k-gram starts.
-    token_idx: usize,
 }
 
-/// Roll a 64-bit polynomial hash over tokens (salted by `language`),
-/// then winnow per Schleimer/Aiken to keep one fingerprint per
-/// minimum-of-window k-hash.
-fn winnow(tokens: &[Token], language: Language, k: usize, w: usize) -> Vec<Fingerprint> {
-    let n = tokens.len();
-    if n < k {
-        return Vec::new();
+/// Walk the AST top-down. Whenever we hit a function-like node,
+/// hash its body subtree AND every internal subtree large enough
+/// to match. Recurse into nested functions (closures inside
+/// methods, etc.) so they get their own records.
+fn collect_function_subtrees(
+    path: &str,
+    lang: Language,
+    root: tree_sitter::Node<'_>,
+    opts: DupOptions,
+    out: &mut Vec<SubtreeRef>,
+) {
+    let function_kinds = lang.spec().function_kinds;
+    walk_for_functions(path, lang, root, function_kinds, opts, out);
+}
+
+fn walk_for_functions(
+    path: &str,
+    lang: Language,
+    node: tree_sitter::Node<'_>,
+    function_kinds: &[&str],
+    opts: DupOptions,
+    out: &mut Vec<SubtreeRef>,
+) {
+    if function_kinds.contains(&node.kind()) {
+        record_function(path, lang, node, opts, out);
+        // Continue walking children — there may be nested functions
+        // (closures, inner functions). They'll get their own records.
     }
-    // Per-token hash: 64-bit FNV of the token kind, seeded by
-    // language tag so cross-language streams cannot collide.
-    let token_hashes: Vec<u64> = tokens
-        .iter()
-        .map(|t| fnv1a_seeded(language.tag(), t.kind.as_bytes()))
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            walk_for_functions(path, lang, cursor.node(), function_kinds, opts, out);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+}
+
+/// Hash this function's body and every internal subtree that's big
+/// enough to seed a meaningful match.
+fn record_function(
+    path: &str,
+    lang: Language,
+    fn_node: tree_sitter::Node<'_>,
+    opts: DupOptions,
+    out: &mut Vec<SubtreeRef>,
+) {
+    let fn_byte_start = fn_node.start_byte();
+    let fn_byte_end = fn_node.end_byte();
+    collect_subtrees_recursive(path, lang, fn_node, fn_byte_start, fn_byte_end, opts, out);
+}
+
+fn collect_subtrees_recursive(
+    path: &str,
+    lang: Language,
+    node: tree_sitter::Node<'_>,
+    fn_byte_start: usize,
+    fn_byte_end: usize,
+    opts: DupOptions,
+    out: &mut Vec<SubtreeRef>,
+) {
+    let h = hash_subtree(node, lang);
+    let line_span = h.end_line.saturating_sub(h.start_line) + 1;
+    if h.node_count >= opts.min_nodes && line_span >= opts.min_lines {
+        out.push(SubtreeRef {
+            path: path.to_string(),
+            fn_byte_start,
+            fn_byte_end,
+            start_line: h.start_line,
+            end_line: h.end_line,
+            node_count: h.node_count,
+            hash: h.hash,
+        });
+    }
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            let child = cursor.node();
+            if !tokenize::is_comment_kind(child.kind())
+                && !tokenize::is_skip_kind(lang, child.kind())
+            {
+                collect_subtrees_recursive(
+                    path,
+                    lang,
+                    child,
+                    fn_byte_start,
+                    fn_byte_end,
+                    opts,
+                    out,
+                );
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+}
+
+/// Group subtree records by hash; for each group with >=2 entries,
+/// emit the largest matching subtree per (function-A, function-B)
+/// pair. The "function" identity is the parent function's byte
+/// range within its file — so two subtrees in the SAME function are
+/// not a pair (we wouldn't surface "lines 10-15 ↔ lines 20-25 of
+/// the same function" as a duplicate; if those are actually
+/// duplicates inside one function, that's a refactor concern but
+/// not what the change-analysis flow surfaces).
+fn pair_up(subtrees: Vec<SubtreeRef>, _opts: DupOptions) -> Vec<DuplicateBlock> {
+    let mut by_hash: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (i, s) in subtrees.iter().enumerate() {
+        by_hash.entry(s.hash).or_default().push(i);
+    }
+    // Best (largest by node_count) match per ordered (a_fn, b_fn) pair.
+    type FnId<'a> = (&'a str, usize, usize); // (path, fn_byte_start, fn_byte_end)
+    let mut best: HashMap<(FnId, FnId), (u32, usize, usize)> = HashMap::new();
+    for idxs in by_hash.values() {
+        if idxs.len() < 2 {
+            continue;
+        }
+        for i in 0..idxs.len() {
+            for j in (i + 1)..idxs.len() {
+                let a = &subtrees[idxs[i]];
+                let b = &subtrees[idxs[j]];
+                // Same source function — not a cross-function clone.
+                if a.path == b.path
+                    && a.fn_byte_start == b.fn_byte_start
+                    && a.fn_byte_end == b.fn_byte_end
+                {
+                    continue;
+                }
+                let (lo, hi) = order(a, b, idxs[i], idxs[j]);
+                let key = (
+                    (lo.0.path.as_str(), lo.0.fn_byte_start, lo.0.fn_byte_end),
+                    (hi.0.path.as_str(), hi.0.fn_byte_start, hi.0.fn_byte_end),
+                );
+                let candidate_size = lo.0.node_count.min(hi.0.node_count);
+                let entry = best.entry(key).or_insert((0, lo.1, hi.1));
+                if candidate_size > entry.0 {
+                    *entry = (candidate_size, lo.1, hi.1);
+                }
+            }
+        }
+    }
+
+    let mut out: Vec<DuplicateBlock> = best
+        .into_values()
+        .map(|(_size, a_idx, b_idx)| {
+            let a = &subtrees[a_idx];
+            let b = &subtrees[b_idx];
+            let span_a = a.end_line.saturating_sub(a.start_line) + 1;
+            let span_b = b.end_line.saturating_sub(b.start_line) + 1;
+            DuplicateBlock {
+                a_path: a.path.clone(),
+                a_start_line: a.start_line,
+                a_end_line: a.end_line,
+                b_path: b.path.clone(),
+                b_start_line: b.start_line,
+                b_end_line: b.end_line,
+                line_count: span_a.max(span_b),
+            }
+        })
         .collect();
-
-    // K-gram hashes: rolling polynomial over token_hashes.
-    let base: u64 = 1099511628211;
-    let mut k_hashes: Vec<u64> = Vec::with_capacity(n - k + 1);
-    let mut acc: u64 = 0;
-    let mut base_pow: u64 = 1;
-    for i in 0..k {
-        acc = acc.wrapping_mul(base).wrapping_add(token_hashes[i]);
-        if i < k - 1 {
-            base_pow = base_pow.wrapping_mul(base);
-        }
-    }
-    k_hashes.push(acc);
-    for i in k..n {
-        let drop = token_hashes[i - k].wrapping_mul(base_pow);
-        acc = acc
-            .wrapping_sub(drop)
-            .wrapping_mul(base)
-            .wrapping_add(token_hashes[i]);
-        k_hashes.push(acc);
-    }
-
-    // Winnow: in each window of `w` k-hashes, pick the rightmost
-    // minimum (Schleimer/Aiken's tie-break preserves locality).
-    let mut prints = Vec::new();
-    let mut last_picked: Option<usize> = None;
-    if k_hashes.is_empty() {
-        return prints;
-    }
-    let last_window_start = k_hashes.len().saturating_sub(w);
-    for window_start in 0..=last_window_start {
-        let window_end = (window_start + w).min(k_hashes.len());
-        let mut min_idx = window_start;
-        for j in (window_start + 1)..window_end {
-            if k_hashes[j] <= k_hashes[min_idx] {
-                min_idx = j;
-            }
-        }
-        if last_picked != Some(min_idx) {
-            prints.push(Fingerprint {
-                hash: k_hashes[min_idx],
-                token_idx: min_idx,
-            });
-            last_picked = Some(min_idx);
-        }
-    }
-    prints
-}
-
-#[inline]
-fn fnv1a_seeded(seed: u8, bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325 ^ (seed as u64);
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x00000100000001B3);
-    }
-    h
-}
-
-fn detect_across_docs(docs: &[Doc], opts: DupOptions) -> Vec<DuplicateBlock> {
-    // Inverted index: fingerprint hash → Vec<(doc_idx, fp_idx)>.
-    let mut index: HashMap<u64, Vec<(usize, usize)>> = HashMap::new();
-    for (di, doc) in docs.iter().enumerate() {
-        for (fi, fp) in doc.fps.iter().enumerate() {
-            index.entry(fp.hash).or_default().push((di, fi));
-        }
-    }
-
-    let mut seen_starts: HashSet<(usize, usize)> = HashSet::new();
-    let mut blocks: Vec<DuplicateBlock> = Vec::new();
-    for (di_a, doc_a) in docs.iter().enumerate() {
-        for (fi_a, fp_a) in doc_a.fps.iter().enumerate() {
-            let occurrences = match index.get(&fp_a.hash) {
-                Some(v) => v,
-                None => continue,
-            };
-            if occurrences.len() < 2 {
-                continue;
-            }
-            for &(di_b, fi_b) in occurrences {
-                // Only consider each unordered pair once, and skip
-                // self-against-self at the same position.
-                if di_b < di_a || (di_b == di_a && fi_b <= fi_a) {
-                    continue;
-                }
-                if seen_starts.contains(&(di_b, fi_b)) {
-                    continue;
-                }
-                let doc_b = &docs[di_b];
-                let Some(run) = extend_run(doc_a, fi_a, doc_b, fi_b) else {
-                    continue;
-                };
-                let RunSpan {
-                    a_fp_end,
-                    b_fp_end,
-                    consumed_a,
-                    consumed_b,
-                } = run;
-                let a_tok_start = doc_a.fps[fi_a].token_idx;
-                let a_tok_end = doc_a.fps[a_fp_end].token_idx;
-                let b_tok_start = doc_b.fps[fi_b].token_idx;
-                let b_tok_end = doc_b.fps[b_fp_end].token_idx;
-                let a_end_line =
-                    doc_a.tokens[a_tok_end.min(doc_a.tokens.len() - 1)].end_line;
-                let b_end_line =
-                    doc_b.tokens[b_tok_end.min(doc_b.tokens.len() - 1)].end_line;
-                let a_start_line = doc_a.tokens[a_tok_start].start_line;
-                let b_start_line = doc_b.tokens[b_tok_start].start_line;
-                let span_a = a_end_line.saturating_sub(a_start_line) + 1;
-                let span_b = b_end_line.saturating_sub(b_start_line) + 1;
-                let line_count = span_a.max(span_b);
-                if line_count < opts.min_lines {
-                    continue;
-                }
-                blocks.push(DuplicateBlock {
-                    a_path: doc_a.path.clone(),
-                    a_start_line,
-                    a_end_line,
-                    b_path: doc_b.path.clone(),
-                    b_start_line,
-                    b_end_line,
-                    line_count,
-                });
-                for fp_idx in consumed_a {
-                    seen_starts.insert((di_a, fp_idx));
-                }
-                for fp_idx in consumed_b {
-                    seen_starts.insert((di_b, fp_idx));
-                }
-            }
-        }
-    }
-    blocks.sort_by(|x, y| {
+    out.sort_by(|x, y| {
         x.a_path
             .cmp(&y.a_path)
             .then_with(|| x.a_start_line.cmp(&y.a_start_line))
             .then_with(|| x.b_path.cmp(&y.b_path))
+            .then_with(|| x.b_start_line.cmp(&y.b_start_line))
     });
-    blocks
+    out
 }
 
-struct RunSpan {
-    /// Last matching fingerprint index in doc A.
-    a_fp_end: usize,
-    /// Last matching fingerprint index in doc B.
-    b_fp_end: usize,
-    /// Every fingerprint index in doc A consumed by this run.
-    consumed_a: Vec<usize>,
-    /// Every fingerprint index in doc B consumed by this run.
-    consumed_b: Vec<usize>,
-}
-
-/// Extend a (a, b) match through both fingerprint streams. Tolerates
-/// up to `MAX_SKIP` non-matching fingerprints on either side before
-/// giving up (winnowing can sample slightly different positions for
-/// the same underlying clone).
-fn extend_run(doc_a: &Doc, fi_a: usize, doc_b: &Doc, fi_b: usize) -> Option<RunSpan> {
-    let mut consumed_a = vec![fi_a];
-    let mut consumed_b = vec![fi_b];
-    let mut a = fi_a + 1;
-    let mut b = fi_b + 1;
-    loop {
-        // Look for the next matching pair within the skip window.
-        let mut matched = None;
-        'search: for da in 0..=MAX_SKIP {
-            for db in 0..=MAX_SKIP {
-                let na = a + da;
-                let nb = b + db;
-                if na >= doc_a.fps.len() || nb >= doc_b.fps.len() {
-                    continue;
-                }
-                if doc_a.fps[na].hash == doc_b.fps[nb].hash {
-                    matched = Some((na, nb));
-                    break 'search;
-                }
-            }
-        }
-        match matched {
-            Some((na, nb)) => {
-                consumed_a.push(na);
-                consumed_b.push(nb);
-                a = na + 1;
-                b = nb + 1;
-            }
-            None => break,
-        }
+/// Produce a stable ordering for a pair of records so we hash to
+/// one canonical (a, b) key regardless of which side we encountered
+/// first. Returns ((lo_record, lo_idx), (hi_record, hi_idx)).
+fn order<'a>(
+    a: &'a SubtreeRef,
+    b: &'a SubtreeRef,
+    a_idx: usize,
+    b_idx: usize,
+) -> ((&'a SubtreeRef, usize), (&'a SubtreeRef, usize)) {
+    let a_key = (&a.path, a.fn_byte_start, a.fn_byte_end);
+    let b_key = (&b.path, b.fn_byte_start, b.fn_byte_end);
+    if a_key <= b_key {
+        ((a, a_idx), (b, b_idx))
+    } else {
+        ((b, b_idx), (a, a_idx))
     }
-    if consumed_a.len() < 2 {
-        return None;
-    }
-    Some(RunSpan {
-        a_fp_end: *consumed_a.last().unwrap(),
-        b_fp_end: *consumed_b.last().unwrap(),
-        consumed_a,
-        consumed_b,
-    })
 }
 
 #[cfg(test)]
