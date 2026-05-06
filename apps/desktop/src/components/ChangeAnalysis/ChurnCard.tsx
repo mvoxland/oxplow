@@ -4,6 +4,7 @@ import type { FunctionChurnRow } from "./analysisHelpers.js";
 import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
 
 type View = "files" | "functions";
+type Sort = "total" | "added" | "deleted";
 
 interface ChurnCardProps {
   files: BranchChangeEntry[];
@@ -37,13 +38,22 @@ const MIN_FUNCTION_SHARE = 0.05;
  */
 export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) {
   const [view, setView] = useState<View>("files");
-  usePageSnapshot<{ churnView: View }>({
-    serialize: () => ({ churnView: view }),
+  const [sort, setSort] = useState<Sort>("total");
+  usePageSnapshot<{ churnView: View; churnSort: Sort }>({
+    serialize: () => ({ churnView: view, churnSort: sort }),
     restore: (snap) => {
       if (snap.churnView === "files" || snap.churnView === "functions") setView(snap.churnView);
+      if (snap.churnSort === "total" || snap.churnSort === "added" || snap.churnSort === "deleted") {
+        setSort(snap.churnSort);
+      }
     },
-    deps: [view],
+    deps: [view, sort],
   });
+  const compare = (a: UnifiedRow, b: UnifiedRow): number => {
+    if (sort === "added") return b.added - a.added;
+    if (sort === "deleted") return b.deleted - a.deleted;
+    return b.added + b.deleted - (a.added + a.deleted);
+  };
 
   const rows = useMemo<UnifiedRow[]>(() => {
     if (view === "files") {
@@ -66,7 +76,7 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
           };
         })
         .filter((r) => r.added + r.deleted > 0)
-        .sort((a, b) => b.added + b.deleted - (a.added + a.deleted))
+        .sort(compare)
         .slice(0, FILE_ROW_CAP);
     }
     // functions
@@ -89,9 +99,9 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
         };
       })
       .filter((r) => r.added + r.deleted >= MIN_FUNCTION_LINES || r.share >= MIN_FUNCTION_SHARE)
-      .sort((a, b) => b.share - a.share)
+      .sort(compare)
       .slice(0, FUNCTION_ROW_CAP);
-  }, [view, files, functionChurn]);
+  }, [view, files, functionChurn, sort]);
 
   if (rows.length === 0 && view === "files" && files.length === 0) return null;
 
@@ -99,21 +109,44 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
     <section data-testid="change-analysis-churn" style={card}>
       <div style={toolbarRow}>
         <div style={header}>Churn</div>
-        <div style={{ display: "flex", gap: 4 }}>
-          {([
-            ["files", "Files"],
-            ["functions", "Functions"],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              data-testid={`change-analysis-churn-view-${key}`}
-              onClick={() => setView(key)}
-              style={view === key ? activeTab : tab}
-            >
-              {label}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {([
+              ["files", "Files"],
+              ["functions", "Functions"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                data-testid={`change-analysis-churn-view-${key}`}
+                onClick={() => setView(key)}
+                style={view === key ? activeTab : tab}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div
+            style={{ display: "flex", gap: 4, alignItems: "center" }}
+            title="Sort the rows by total line churn, additions only, or deletions only. The % column always shows share of total churn."
+          >
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Sort:</span>
+            {([
+              ["total", "Total"],
+              ["added", "+ Added"],
+              ["deleted", "− Deleted"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                data-testid={`change-analysis-churn-sort-${key}`}
+                onClick={() => setSort(key)}
+                style={sort === key ? activeTab : tab}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       {rows.length === 0 ? (
