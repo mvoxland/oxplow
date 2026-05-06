@@ -128,49 +128,62 @@ export function gitDashboardRef(): TabRef {
   return { id: "git-dashboard", kind: "git-dashboard", payload: null };
 }
 
-/** Uncommitted Changes — stats + tree view of working-tree changes. */
-export function uncommittedChangesRef(): TabRef {
-  return { id: "uncommitted-changes", kind: "uncommitted-changes", payload: null };
-}
-
 /**
- * Change Analysis Dashboard — composite read-only view of a set of
- * changes. `target` is either the literal string "working" (uncommitted
- * working-tree state) or a commit SHA.
- */
-export type ChangeAnalysisTarget = "working" | string;
-
-/**
- * Drilldown scope for the focused Change Analysis page. The dashboard
- * uses no scope; clicking a row in any pivot routes to a page whose
- * ref carries one of these.
+ * Drilldown scope. `undefined` is "no scope" — show every changed
+ * file. The host pages (commit, uncommitted) own the scope on their
+ * own ref so a pivot click stays in-page rather than spawning a
+ * separate analysis tab.
  */
 export type ChangeAnalysisScope =
   | { kind: "ext"; value: string }
   | { kind: "dir"; value: string }
   | { kind: "status"; value: string };
 
+/** Kept as an alias for callers that still talk in terms of
+ *  `target` ("working" or a commit sha). New code should call the
+ *  host ref directly. */
+export type ChangeAnalysisTarget = "working" | string;
+
+/** Uncommitted Changes — stats + analysis panel for the working
+ *  tree. Optional drilldown scope (set when a pivot row is clicked
+ *  from inside the page) keeps the user on the same tab while
+ *  filtering. */
+export function uncommittedChangesRef(scope?: ChangeAnalysisScope): TabRef {
+  if (scope) {
+    return {
+      id: `uncommitted-changes:${scope.kind}:${scope.value}`,
+      kind: "uncommitted-changes",
+      payload: { scope },
+    };
+  }
+  return { id: "uncommitted-changes", kind: "uncommitted-changes", payload: null };
+}
+
+/**
+ * Convenience for "Change Analysis at <target>" call sites. Picks
+ * the right host ref by target: working-tree → uncommittedChangesRef,
+ * commit sha → gitCommitRef. The standalone "change-analysis" tab
+ * kind no longer exists — drilldowns stay on the host page with a
+ * scope set on its ref instead.
+ */
 export function changeAnalysisRef(
   target: ChangeAnalysisTarget,
   scope?: ChangeAnalysisScope,
 ): TabRef {
-  if (scope) {
-    return {
-      id: `change-analysis:${target}:${scope.kind}:${scope.value}`,
-      kind: "change-analysis",
-      payload: { target, scope },
-    };
-  }
-  return {
-    id: `change-analysis:${target}`,
-    kind: "change-analysis",
-    payload: { target },
-  };
+  return target === "working" ? uncommittedChangesRef(scope) : gitCommitRef(target, scope);
 }
 
-/** Single git commit page — bookmark-/history-friendly version of the
- *  commit slideover. Id format: `git-commit:<sha>`. */
-export function gitCommitRef(sha: string): TabRef {
+/** Single git commit page. Optional drilldown scope is folded into
+ *  the same ref so pivot clicks stay on the commit page rather than
+ *  navigating to a separate analysis tab. */
+export function gitCommitRef(sha: string, scope?: ChangeAnalysisScope): TabRef {
+  if (scope) {
+    return {
+      id: `git-commit:${sha}:${scope.kind}:${scope.value}`,
+      kind: "git-commit",
+      payload: { sha, scope },
+    };
+  }
   return { id: `git-commit:${sha}`, kind: "git-commit", payload: { sha } };
 }
 

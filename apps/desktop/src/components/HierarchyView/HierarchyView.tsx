@@ -3,6 +3,22 @@ import type { ReactNode } from "react";
 
 export type HierarchyStatus = "added" | "modified" | "deleted";
 
+/** Optional row-right metrics rendered as a stacked status bar
+ *  plus +/− line columns. When supplied, HierarchyView replaces
+ *  the status-badge cluster on that row with a colored bar; when
+ *  any row in the tree carries metrics the bar widths scale
+ *  against the largest visible row. */
+export interface HierarchyMetrics {
+  /** File / function counts per status. Drives the stacked bar
+   *  segments (green = added, yellow = modified, red = deleted). */
+  added: number;
+  modified: number;
+  deleted: number;
+  /** Line counts for the +/− columns. */
+  additions: number;
+  deletions: number;
+}
+
 export interface HierarchyNode {
   /** Stable id for keying + collapse-state lookups. Must be unique
    *  across the entire tree (callers usually prefix with the parent
@@ -31,6 +47,11 @@ export interface HierarchyNode {
   /** Optional override for the label color. Used by callers that
    *  want to color-code rows (e.g. by function visibility). */
   labelColor?: string;
+  /** Per-row tree-table metrics: status counts (drives stacked
+   *  bar) + line-level +/− totals. When a tree has any metrics-
+   *  bearing rows, every row reserves space for the bar so the
+   *  columns line up. */
+  metrics?: HierarchyMetrics;
   children: HierarchyNode[];
 }
 
@@ -82,6 +103,12 @@ export function HierarchyView({
 
   const allIds = useMemo(() => collectAllIds(filtered), [filtered]);
   const defaultCollapsed = useMemo(() => collectDefaultCollapsedIds(filtered), [filtered]);
+  // Largest row total in the tree. Bars get a fixed-width track on
+  // every row, but the colored fill inside the track scales to
+  // (row.total / barMax) so a row with fewer changes shows a
+  // shorter colored portion. Zero means no row carries metrics
+  // and the slot is hidden entirely.
+  const barMax = useMemo(() => collectBarMax(filtered), [filtered]);
 
   // Merge default + overrides into the effective collapsed set.
   const effectivelyCollapsed = useMemo(() => {
@@ -162,6 +189,7 @@ export function HierarchyView({
               depth={0}
               collapsed={effectivelyCollapsed}
               onToggle={toggle}
+              barMax={barMax}
             />
           ))}
         </div>
@@ -175,44 +203,50 @@ function Branch({
   depth,
   collapsed,
   onToggle,
+  barMax,
 }: {
   node: HierarchyNode;
   depth: number;
   collapsed: Set<string>;
   onToggle(id: string): void;
+  barMax: number;
 }) {
   const isLeaf = node.children.length === 0;
   const expanded = !collapsed.has(node.id);
+  const hasMetrics = barMax > 0;
   return (
     <>
-      <div data-testid={node.testId} style={branchRow(depth)}>
-        {isLeaf ? (
-          <span style={chevronSpacer} aria-hidden />
-        ) : (
-          <ChevronToggle expanded={expanded} onClick={() => onToggle(node.id)} />
-        )}
-        {node.icon ? <span style={iconWrapper}>{node.icon}</span> : null}
-        {node.statuses && node.statuses.size > 0 ? (
-          <StatusBadges statuses={node.statuses} />
-        ) : null}
-        {node.onDrill ? (
-          <button
-            type="button"
-            onClick={node.onDrill}
-            title={node.drillTitle}
-            style={node.labelColor ? { ...labelButton, color: node.labelColor } : labelButton}
-          >
-            {node.label}
-          </button>
-        ) : (
-          <span style={node.labelColor ? { ...labelText, color: node.labelColor } : labelText}>
-            {node.label}
-          </span>
-        )}
-        {node.detail ? <span style={detailText}>{node.detail}</span> : null}
-        {typeof node.count === "number" ? (
-          <span style={countText}>({node.count})</span>
-        ) : null}
+      <div data-testid={node.testId} style={rowOuter}>
+        {hasMetrics ? <MetricsLeftSlot metrics={node.metrics} barMax={barMax} /> : null}
+        <div style={contentArea(depth)}>
+          {isLeaf ? (
+            <span style={chevronSpacer} aria-hidden />
+          ) : (
+            <ChevronToggle expanded={expanded} onClick={() => onToggle(node.id)} />
+          )}
+          {node.icon ? <span style={iconWrapper}>{node.icon}</span> : null}
+          {!hasMetrics && node.statuses && node.statuses.size > 0 ? (
+            <StatusBadges statuses={node.statuses} />
+          ) : null}
+          {node.onDrill ? (
+            <button
+              type="button"
+              onClick={node.onDrill}
+              title={node.drillTitle}
+              style={node.labelColor ? { ...labelButton, color: node.labelColor } : labelButton}
+            >
+              {node.label}
+            </button>
+          ) : (
+            <span style={node.labelColor ? { ...labelText, color: node.labelColor } : labelText}>
+              {node.label}
+            </span>
+          )}
+          {node.detail ? <span style={detailText}>{node.detail}</span> : null}
+          {typeof node.count === "number" ? (
+            <span style={countText}>({node.count})</span>
+          ) : null}
+        </div>
       </div>
       {!isLeaf && expanded
         ? node.children.map((child) => (
@@ -222,10 +256,62 @@ function Branch({
               depth={depth + 1}
               collapsed={collapsed}
               onToggle={onToggle}
+              barMax={barMax}
             />
           ))
         : null}
     </>
+  );
+}
+
+function MetricsLeftSlot({
+  metrics,
+  barMax,
+}: {
+  metrics: HierarchyMetrics | undefined;
+  barMax: number;
+}) {
+  // Always reserve the same horizontal real-estate so rows without
+  // metrics line up cleanly with rows that have them.
+  if (!metrics) {
+    return (
+      <div style={metricsLeftWrap}>
+        <span style={addColStyle} />
+        <span style={delColStyle} />
+        <div style={barTrackStyle} />
+      </div>
+    );
+  }
+  const total = metrics.added + metrics.modified + metrics.deleted;
+  // Track width is fixed; the COLORED FILL inside the track is sized
+  // to (total / barMax) so a row with fewer changes shows a shorter
+  // colored portion. Status segments split the colored fill
+  // proportionally.
+  const totalPct = barMax === 0 ? 0 : (total / barMax) * 100;
+  const addPct = total === 0 ? 0 : (metrics.added / total) * 100;
+  const modPct = total === 0 ? 0 : (metrics.modified / total) * 100;
+  const delPct = total === 0 ? 0 : (metrics.deleted / total) * 100;
+  return (
+    <div style={metricsLeftWrap}>
+      <span style={addColStyle}>{metrics.additions > 0 ? `+${metrics.additions}` : ""}</span>
+      <span style={delColStyle}>{metrics.deletions > 0 ? `−${metrics.deletions}` : ""}</span>
+      <div
+        style={barTrackStyle}
+        title={`${metrics.added} added · ${metrics.modified} modified · ${metrics.deleted} deleted`}
+      >
+        <div style={{ display: "flex", height: "100%", width: `${totalPct}%` }}>
+          {metrics.added > 0 ? (
+            <span style={{ width: `${addPct}%`, background: "var(--text-success, #16a34a)" }} />
+          ) : null}
+          {metrics.modified > 0 ? (
+            <span style={{ width: `${modPct}%`, background: "var(--text-warning, #d97706)" }} />
+          ) : null}
+          {metrics.deleted > 0 ? (
+            <span style={{ width: `${delPct}%`, background: "var(--text-danger, #dc2626)" }} />
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -318,6 +404,21 @@ function filterTree(node: HierarchyNode, needle: string): HierarchyNode | null {
   return { ...node, children: matchedChildren };
 }
 
+function collectBarMax(nodes: HierarchyNode[]): number {
+  let max = 0;
+  const walk = (list: HierarchyNode[]) => {
+    for (const n of list) {
+      if (n.metrics) {
+        const total = n.metrics.added + n.metrics.modified + n.metrics.deleted;
+        if (total > max) max = total;
+      }
+      if (n.children.length > 0) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return max;
+}
+
 function collectAllIds(nodes: HierarchyNode[], out: string[] = []): string[] {
   for (const n of nodes) {
     if (n.children.length > 0) {
@@ -379,16 +480,29 @@ const emptyStyle: React.CSSProperties = {
   fontSize: 12,
   padding: 8,
 };
-const branchRow = (depth: number): React.CSSProperties => ({
+const rowOuter: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 4,
   fontSize: ROW_FONT_SIZE,
   lineHeight: 1.3,
   padding: "1px 0",
-  paddingLeft: depth * 12,
   userSelect: "none",
+  gap: 8,
+};
+const contentArea = (depth: number): React.CSSProperties => ({
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+  paddingLeft: depth * 12,
+  flex: 1,
+  minWidth: 0,
 });
+const metricsLeftWrap: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  flexShrink: 0,
+};
 const chevronSpacer: React.CSSProperties = {
   display: "inline-block",
   width: CHEVRON_GUTTER,
@@ -449,6 +563,30 @@ const countText: React.CSSProperties = {
 const badgeRow: React.CSSProperties = {
   display: "inline-flex",
   gap: 2,
+  flexShrink: 0,
+};
+const barTrackStyle: React.CSSProperties = {
+  width: 100,
+  height: 8,
+  background: "var(--surface-app)",
+  borderRadius: 4,
+  overflow: "hidden",
+  flexShrink: 0,
+};
+const addColStyle: React.CSSProperties = {
+  color: "var(--text-success, #16a34a)",
+  width: 44,
+  textAlign: "right",
+  fontSize: 11,
+  fontFamily: "ui-monospace, monospace",
+  flexShrink: 0,
+};
+const delColStyle: React.CSSProperties = {
+  color: "var(--text-danger, #dc2626)",
+  width: 44,
+  textAlign: "right",
+  fontSize: 11,
+  fontFamily: "ui-monospace, monospace",
   flexShrink: 0,
 };
 const badgeStyle = (cfg: { fg: string; bg: string }): React.CSSProperties => ({

@@ -1,15 +1,36 @@
 import type { GitFileStatus } from "../../api-types.js";
-import type { TestSummary } from "./analysisHelpers.js";
+import type {
+  TestFunctionCounts,
+  TestLineRatio,
+  TestSummary,
+} from "./analysisHelpers.js";
 
 interface SummaryCardProps {
   fileCount: number;
   additions: number;
   deletions: number;
   byStatus: Record<GitFileStatus, number>;
+  /** File-level test summary. Currently passed for the ratio's
+   *  fallback when no churn data is available; OtherSmellsCard
+   *  reads the file lists. */
   tests: TestSummary;
+  /** Per-status test FUNCTION counts. Drives the Tests line. */
+  testFunctions: TestFunctionCounts;
+  /** Lines-of-tests vs lines-of-production from per-function
+   *  churn. Drives the Test/code ratio. */
+  testLineRatio: TestLineRatio;
 }
 
-export function SummaryCard({ fileCount, additions, deletions, byStatus, tests }: SummaryCardProps) {
+export function SummaryCard({
+  fileCount,
+  additions,
+  deletions,
+  byStatus,
+  tests,
+  testFunctions,
+  testLineRatio,
+}: SummaryCardProps) {
+  void tests; // currently unused on this card; kept for callsite stability
   return (
     <section data-testid="change-analysis-summary" style={card}>
       <div style={header}>Summary</div>
@@ -22,9 +43,18 @@ export function SummaryCard({ fileCount, additions, deletions, byStatus, tests }
         <Stat label="D" value={byStatus.deleted} />
         <Stat label="R" value={byStatus.renamed} />
       </div>
-      <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
-        Tests: {tests.added.length} added, {tests.modified.length} modified, {tests.deleted.length}{" "}
-        deleted • Test/code ratio: {tests.ratio.toFixed(2)}
+      <div
+        style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}
+        title={`${testLineRatio.testLines} test lines / ${testLineRatio.productionLines} production lines (added + deleted, function-anchored)`}
+      >
+        Tests: {testFunctions.added} added, {testFunctions.modified} modified,{" "}
+        {testFunctions.deleted} deleted • Test/code ratio:{" "}
+        {testLineRatio.ratio.toFixed(2)}
+        {testLineRatio.productionLines > 0 || testLineRatio.testLines > 0 ? (
+          <span style={{ marginLeft: 6 }}>
+            ({testLineRatio.testLines} / {testLineRatio.productionLines} lines)
+          </span>
+        ) : null}
       </div>
     </section>
   );

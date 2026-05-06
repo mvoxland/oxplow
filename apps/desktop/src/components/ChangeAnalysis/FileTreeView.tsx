@@ -1,11 +1,20 @@
 import { useMemo } from "react";
 import type { BranchChangeEntry, GitFileStatus } from "../../api.js";
-import { HierarchyView, type HierarchyNode, type HierarchyStatus } from "../HierarchyView/HierarchyView.js";
+import {
+  HierarchyView,
+  type HierarchyMetrics,
+  type HierarchyNode,
+  type HierarchyStatus,
+} from "../HierarchyView/HierarchyView.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
-import { fileRef } from "../../tabs/pageRefs.js";
+import { changeAnalysisRef, fileRef, type ChangeAnalysisTarget } from "../../tabs/pageRefs.js";
 
 interface Props {
   files: BranchChangeEntry[];
+  /** Analysis target ("working" or commit sha) — needed so a
+   *  directory click can drill into the same host page scoped to
+   *  that directory. */
+  target: ChangeAnalysisTarget;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   /** When supplied, plain click opens the file's diff in the current
    *  tab (browser-tab semantic, back returns to this list).
@@ -19,7 +28,7 @@ interface Props {
  * so the toolbar (filter + Expand all / Collapse all), the chevron
  * toggle, and the status badges all match the Semantic view exactly.
  */
-export function ChangeAnalysisFileTree({ files, onOpenFile, onOpenFileDiff }: Props) {
+export function ChangeAnalysisFileTree({ files, target, onOpenFile, onOpenFileDiff }: Props) {
   const ctxNav = useOptionalPageNavigation();
   // Default click semantic: navigate **in-tab** to the file's diff
   // when an `onOpenFileDiff` is supplied; otherwise fall through to
@@ -37,7 +46,13 @@ export function ChangeAnalysisFileTree({ files, onOpenFile, onOpenFileDiff }: Pr
     if (ctxNav) ctxNav.navigate(fileRef(path), { newTab: false });
     else onOpenFile(path, { newTab: false });
   };
-  const tree = useMemo(() => buildTree(files, openFile), [files, openFile]);
+  // Directory drill: navigate to the host page scoped to that
+  // directory. In-tab by default; cmd/ctrl-click opens a new tab.
+  const openDir = (dirPath: string, opts: { newTab: boolean }) => {
+    const ref = changeAnalysisRef(target, { kind: "dir", value: dirPath });
+    if (ctxNav) ctxNav.navigate(ref, { newTab: opts.newTab });
+  };
+  const tree = useMemo(() => buildTree(files, openFile, openDir), [files, openFile, openDir]);
   const total = files.length;
   return (
     <HierarchyView
@@ -64,6 +79,7 @@ interface RawDirNode {
 function buildTree(
   files: BranchChangeEntry[],
   openFile: (path: string, opts: { newTab: boolean }) => void,
+  openDir: (path: string, opts: { newTab: boolean }) => void,
 ): HierarchyNode[] {
   const root: RawDirNode = { name: "", path: "", files: [], dirs: new Map() };
   for (const file of files) {
@@ -82,20 +98,21 @@ function buildTree(
     }
     cursor.files.push({ name: fileName, entry: file });
   }
-  return materialize(root, "", openFile);
+  return materialize(root, "", openFile, openDir);
 }
 
 function materialize(
   node: RawDirNode,
   idPrefix: string,
   openFile: (path: string, opts: { newTab: boolean }) => void,
+  openDir: (path: string, opts: { newTab: boolean }) => void,
 ): HierarchyNode[] {
   const out: HierarchyNode[] = [];
   // Directories first, alphabetical.
   const dirsSorted = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
   for (const d of dirsSorted) {
     const id = `${idPrefix}/dir:${d.path}`;
-    const children = materialize(d, id, openFile);
+    const children = materialize(d, id, openFile, openDir);
     const summary = summarize(d);
     out.push({
       id,
@@ -103,19 +120,29 @@ function materialize(
       icon: <FolderIcon />,
       statuses: summary.statuses,
       count: summary.count,
+      metrics: summary.metrics,
       children,
+      onDrill: (e) => openDir(d.path, { newTab: e.metaKey || e.ctrlKey }),
+      drillTitle: `Drill into ${d.path}/`,
     });
   }
   // Then files.
   const filesSorted = [...node.files].sort((a, b) => a.name.localeCompare(b.name));
   for (const f of filesSorted) {
     const id = `${idPrefix}/file:${f.entry.path}`;
+    const bucket = statusBucket(f.entry.status);
     out.push({
       id,
       label: f.name,
       icon: <FileIcon />,
       statuses: gitStatusToHierarchy(f.entry.status),
-      detail: formatAddDel(f.entry.additions ?? 0, f.entry.deletions ?? 0),
+      metrics: {
+        added: bucket === "added" ? 1 : 0,
+        modified: bucket === "modified" ? 1 : 0,
+        deleted: bucket === "deleted" ? 1 : 0,
+        additions: f.entry.additions ?? 0,
+        deletions: f.entry.deletions ?? 0,
+      },
       onDrill: (e) => {
         // Plain click → in-tab navigate (handled by openFile via the
         // PageNavigationContext chokepoint when present). Cmd/Ctrl-
@@ -129,25 +156,47 @@ function materialize(
   return out;
 }
 
+function statusBucket(status: GitFileStatus): "added" | "modified" | "deleted" {
+  if (status === "added" || status === "untracked") return "added";
+  if (status === "deleted") return "deleted";
+  return "modified";
+}
+
 interface DirSummary {
   count: number;
   statuses: Set<HierarchyStatus>;
+  metrics: HierarchyMetrics;
 }
 
 function summarize(node: RawDirNode): DirSummary {
   const statuses = new Set<HierarchyStatus>();
   let count = 0;
+  const metrics: HierarchyMetrics = {
+    added: 0,
+    modified: 0,
+    deleted: 0,
+    additions: 0,
+    deletions: 0,
+  };
   for (const file of node.files) {
     const fileStatuses = gitStatusToHierarchy(file.entry.status);
     for (const s of fileStatuses) statuses.add(s);
     count += 1;
+    metrics[statusBucket(file.entry.status)] += 1;
+    metrics.additions += file.entry.additions ?? 0;
+    metrics.deletions += file.entry.deletions ?? 0;
   }
   for (const child of node.dirs.values()) {
     const inner = summarize(child);
     for (const s of inner.statuses) statuses.add(s);
     count += inner.count;
+    metrics.added += inner.metrics.added;
+    metrics.modified += inner.metrics.modified;
+    metrics.deleted += inner.metrics.deleted;
+    metrics.additions += inner.metrics.additions;
+    metrics.deletions += inner.metrics.deletions;
   }
-  return { count, statuses };
+  return { count, statuses, metrics };
 }
 
 function gitStatusToHierarchy(status: GitFileStatus): Set<HierarchyStatus> {
@@ -155,11 +204,6 @@ function gitStatusToHierarchy(status: GitFileStatus): Set<HierarchyStatus> {
   if (status === "deleted") return new Set(["deleted"]);
   // modified, renamed → "modified"
   return new Set(["modified"]);
-}
-
-function formatAddDel(adds: number, dels: number): string {
-  if (adds === 0 && dels === 0) return "";
-  return `+${adds} −${dels}`;
 }
 
 function FolderIcon() {

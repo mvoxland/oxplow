@@ -100,7 +100,6 @@ import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
-import { ChangeAnalysisPage } from "./pages/ChangeAnalysisPage.js";
 import { AgentPage } from "./pages/AgentPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
@@ -2016,7 +2015,6 @@ export function App() {
       case "git-dashboard":
       case "git-commit":
       case "uncommitted-changes":
-      case "change-analysis":
       case "hook-events":
       case "files":
       case "wiki-index":
@@ -2601,32 +2599,17 @@ export function App() {
           ),
         });
       } else if (ref.kind === "uncommitted-changes") {
+        const payload = (ref.payload as {
+          scope?: { kind: "ext" | "dir" | "status"; value: string };
+        } | null) ?? null;
+        const scope = payload?.scope ?? undefined;
         tabs.push({
           id: ref.id,
-          label: "Uncommitted",
+          label: scope ? `Uncommitted — ${scope.value}` : "Uncommitted",
           closable: true,
           render: () => (
             <UncommittedChangesPage
               stream={stream}
-              onOpenPage={navOpen}
-              onOpenFile={navOpenFile}
-            />
-          ),
-        });
-      } else if (ref.kind === "change-analysis") {
-        const payload = (ref.payload as { target?: string; scope?: { kind: "ext" | "dir" | "status"; value: string } } | null) ?? null;
-        const target = payload?.target ?? "working";
-        const scope = payload?.scope ?? undefined;
-        const baseLabel = target === "working" ? "Analysis: Uncommitted" : `Analysis: ${target.slice(0, 7)}`;
-        const label = scope ? `${baseLabel} — ${scope.value}` : baseLabel;
-        tabs.push({
-          id: ref.id,
-          label,
-          closable: true,
-          render: () => (
-            <ChangeAnalysisPage
-              stream={stream}
-              target={target}
               scope={scope}
               onOpenPage={navOpen}
               onOpenFile={navOpenFile}
@@ -2636,19 +2619,25 @@ export function App() {
           ),
         });
       } else if (ref.kind === "git-commit") {
-        const sha = (ref.payload as { sha?: string } | null)?.sha ?? "";
+        const payload = (ref.payload as {
+          sha?: string;
+          scope?: { kind: "ext" | "dir" | "status"; value: string };
+        } | null) ?? null;
+        const sha = payload?.sha ?? "";
+        const scope = payload?.scope ?? undefined;
+        const shaLabel = sha ? sha.slice(0, 7) : "commit";
         tabs.push({
           id: ref.id,
-          label: sha ? `${sha.slice(0, 7)}` : "commit",
+          label: scope ? `${shaLabel} — ${scope.value}` : shaLabel,
           closable: true,
           render: () => (
             <GitCommitPage
               stream={stream}
               sha={sha}
+              scope={scope}
               threadWork={selectedThreadWork}
               onOpenDiff={navOpenDiff}
-              onOpenAnalysisDiff={navOpenDiff}
-              onOpenAnalysisDiffInTab={navOpenDiff}
+              onOpenDiffInTab={navOpenDiff}
               onOpenPage={navOpen}
               onOpenFile={navOpenFile}
             />
@@ -2869,7 +2858,6 @@ export function App() {
               onOpenFile={(p) => navOpenFile(p)}
               onShowInHistory={handleShowSnapshotInHistory}
               onOpenDiff={navOpenDiff}
-              onOpenCommitDiff={navOpenDiff}
             />
           ),
         });

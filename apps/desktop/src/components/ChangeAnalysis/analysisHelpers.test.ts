@@ -5,6 +5,7 @@ import {
   diffFunctions,
   fileExtension,
   indexSides,
+  isTestFunction,
   isTestPath,
   summarizeTests,
   topDirectory,
@@ -205,11 +206,7 @@ describe("fileInterestingness", () => {
   const emptyBuckets = { added: [], deleted: [], modifiedSignature: [], modifiedBody: [] };
 
   test("low score for routine diffs", () => {
-    const r = fileInterestingness({
-      file: baseFile,
-      bucketed: emptyBuckets,
-      hasMatchingTest: true,
-    });
+    const r = fileInterestingness({ file: baseFile, bucketed: emptyBuckets });
     expect(r.score).toBeLessThan(4);
     expect(r.reasons).toEqual([]);
   });
@@ -225,25 +222,9 @@ describe("fileInterestingness", () => {
           { path: "src/x.ts", name: "f", containerPath: [], startLine: 1, complexityDelta: 8, lengthDelta: 10, visibility: "public" },
         ],
       },
-      hasMatchingTest: true,
     });
-    expect(r.score).toBeGreaterThan(20);
+    expect(r.score).toBeGreaterThan(15);
     expect(r.reasons.some((s) => s.startsWith("complexity"))).toBe(true);
-  });
-
-  test("untested non-test files multiply by 1.5", () => {
-    const tested = fileInterestingness({
-      file: baseFile,
-      bucketed: emptyBuckets,
-      hasMatchingTest: true,
-    });
-    const untested = fileInterestingness({
-      file: baseFile,
-      bucketed: emptyBuckets,
-      hasMatchingTest: false,
-    });
-    expect(untested.score).toBeCloseTo(tested.score * 1.5);
-    expect(untested.reasons).toContain("no test in same dir");
   });
 
   test("long new function bumps score", () => {
@@ -257,8 +238,107 @@ describe("fileInterestingness", () => {
         modifiedSignature: [],
         modifiedBody: [],
       },
-      hasMatchingTest: true,
     });
     expect(longFn.reasons.some((s) => s.includes("180-line"))).toBe(true);
+  });
+});
+
+describe("isTestFunction", () => {
+  test("classifies any function in a test file as a test", () => {
+    expect(isTestFunction("apps/desktop/src/foo.test.ts", "anything")).toBe(true);
+    expect(isTestFunction("crates/foo/tests/bar.rs", "helper")).toBe(true);
+    expect(isTestFunction("internal/mod_test.go", "anything")).toBe(true);
+  });
+  test("classifies by Python / Rust test_* convention", () => {
+    expect(isTestFunction("crates/foo/src/lib.rs", "test_thing")).toBe(true);
+    expect(isTestFunction("scripts/x.py", "test_run")).toBe(true);
+  });
+  test("classifies by Go Test / Benchmark / Example prefix", () => {
+    expect(isTestFunction("internal/x.go", "TestSomething")).toBe(true);
+    expect(isTestFunction("internal/x.go", "BenchmarkParse")).toBe(true);
+    expect(isTestFunction("internal/x.go", "ExampleUsage")).toBe(true);
+  });
+  test("does not classify production code as tests", () => {
+    expect(isTestFunction("crates/foo/src/lib.rs", "process")).toBe(false);
+    expect(isTestFunction("apps/desktop/src/foo.ts", "Tester")).toBe(false); // 'Tester' alone shouldn't match Test[A-Z]
+    expect(isTestFunction("apps/desktop/src/foo.ts", "tested")).toBe(false);
+  });
+  test("classifies functions inside Rust mod tests / FooTests classes", () => {
+    // Rust idiom: #[cfg(test)] mod tests { #[test] fn parses() { ... } }
+    expect(isTestFunction("crates/foo/src/lib.rs", "parses_simple_hunk", ["tests"])).toBe(true);
+    // Java/JS class-style test container
+    expect(isTestFunction("src/Foo.java", "validates", ["FooTests"])).toBe(true);
+    expect(isTestFunction("src/Foo.java", "validates", ["FooTest"])).toBe(true);
+    // Production sibling stays production
+    expect(isTestFunction("crates/foo/src/lib.rs", "helper", ["impl_block"])).toBe(false);
+  });
+});
+
+import { summarizeTestFunctions } from "./analysisHelpers.js";
+
+describe("summarizeTestFunctions", () => {
+  test("counts added / deleted / modified test functions; ignores production fns", () => {
+    const buckets: FunctionsBuckets = {
+      added: [
+        { path: "lib.rs", name: "test_one", containerPath: ["tests"], startLine: 1, paramCount: 0, complexity: 1, length: 3, visibility: "public" },
+        { path: "lib.rs", name: "do_thing", containerPath: [], startLine: 1, paramCount: 0, complexity: 1, length: 3, visibility: "public" },
+      ],
+      deleted: [
+        { path: "x.go", name: "TestOld", containerPath: [], startLine: 1, visibility: "public" },
+      ],
+      modifiedSignature: [
+        { path: "lib.rs", name: "parses", containerPath: ["tests"], startLine: 5, before: 0, after: 1, visibility: "public" },
+      ],
+      modifiedBody: [
+        { path: "lib.rs", name: "parses", containerPath: ["tests"], startLine: 5, complexityDelta: 1, lengthDelta: 0, visibility: "public" },
+        { path: "lib.rs", name: "process", containerPath: [], startLine: 100, complexityDelta: 2, lengthDelta: 0, visibility: "public" },
+      ],
+    };
+    const counts = summarizeTestFunctions(buckets);
+    expect(counts.added).toBe(1); // test_one (do_thing is production)
+    expect(counts.deleted).toBe(1); // TestOld
+    expect(counts.modified).toBe(1); // parses appears in both sig+body but counted once
+  });
+
+  test("zero counts when no test functions changed", () => {
+    const buckets: FunctionsBuckets = {
+      added: [],
+      deleted: [],
+      modifiedSignature: [],
+      modifiedBody: [
+        { path: "lib.rs", name: "process", containerPath: [], startLine: 1, complexityDelta: 1, lengthDelta: 0, visibility: "public" },
+      ],
+    };
+    const counts = summarizeTestFunctions(buckets);
+    expect(counts).toEqual({ added: 0, modified: 0, deleted: 0 });
+  });
+});
+
+import { summarizeTestLineRatio } from "./analysisHelpers.js";
+
+describe("summarizeTestLineRatio", () => {
+  test("ratio = test churn / production churn (added + deleted)", () => {
+    const churn: FunctionChurnRow[] = [
+      // production
+      { path: "lib.rs", name: "process", containerPath: [], startLineHead: 1, addedLines: 10, deletedLines: 4, modifiedLines: 4 },
+      // test (Rust mod tests)
+      { path: "lib.rs", name: "parses", containerPath: ["tests"], startLineHead: 30, addedLines: 6, deletedLines: 2, modifiedLines: 2 },
+      // test (test_ prefix)
+      { path: "scripts/x.py", name: "test_run", containerPath: [], startLineHead: 1, addedLines: 1, deletedLines: 0, modifiedLines: 0 },
+    ];
+    const result = summarizeTestLineRatio(churn);
+    expect(result.testLines).toBe(9); // 6+2 + 1
+    expect(result.productionLines).toBe(14); // 10 + 4
+    expect(result.ratio).toBeCloseTo(9 / 14);
+  });
+
+  test("zero production lines yields ratio 0 (no div-by-zero)", () => {
+    const churn: FunctionChurnRow[] = [
+      { path: "lib.rs", name: "test_x", containerPath: [], startLineHead: 1, addedLines: 5, deletedLines: 0, modifiedLines: 0 },
+    ];
+    const result = summarizeTestLineRatio(churn);
+    expect(result.testLines).toBe(5);
+    expect(result.productionLines).toBe(0);
+    expect(result.ratio).toBe(0);
   });
 });

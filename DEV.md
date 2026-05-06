@@ -1,4 +1,4 @@
-# Developing Oxplow
+# Developing for Oxplow
 
 ## Prerequisites
 

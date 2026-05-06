@@ -7,14 +7,12 @@ import {
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { workItemRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, workItemRef } from "../tabs/pageRefs.js";
 import { ActivityTimeline, WorkItemDetail } from "../components/Plan/WorkItemDetail.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks } from "../tabs/useBacklinks.js";
 import { SnapshotDetailSlideover } from "../components/Snapshots/SnapshotDetailSlideover.js";
-import { CommitDetailSlideover } from "../components/History/CommitDetailSlideover.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import type { DiffRequest } from "../components/Diff/diff-request.js";
 
 export interface WorkItemPageProps {
   stream: Stream | null;
@@ -29,9 +27,6 @@ export interface WorkItemPageProps {
   /** Forwarded to the embedded SnapshotDetailSlideover so its file rows
    *  can ask the host to open a diff editor. */
   onOpenDiff?(spec: DiffSpec): void;
-  /** Forwarded to the embedded CommitDetailSlideover so its file rows
-   *  can route diffs into the host's diff editor. */
-  onOpenCommitDiff?(request: DiffRequest): void;
 }
 
 /**
@@ -54,7 +49,6 @@ export function WorkItemPage({
   onOpenFile,
   onShowInHistory,
   onOpenDiff,
-  onOpenCommitDiff,
 }: WorkItemPageProps) {
   const item = items.find((i) => i.id === itemId) ?? null;
   const backlinkEntries = useBacklinks(workItemRef(itemId), stream, threadWork);
@@ -67,11 +61,6 @@ export function WorkItemPage({
     source: string;
     workItemId: string | null;
   } | null>(null);
-  const [slideoverCommit, setSlideoverCommit] = useState<{
-    sha: string;
-    subject: string;
-  } | null>(null);
-
   // Synthesize snapshot backlinks from this item's efforts. Each completed
   // effort's `end_snapshot_id` becomes a clickable row that opens the
   // SnapshotDetailSlideover. Skipped when no end snapshot (effort still
@@ -103,10 +92,7 @@ export function WorkItemPage({
           source: payload.source ?? "",
           workItemId: payload.workItemId ?? null,
         })}
-        onOpenCommit={(payload) => setSlideoverCommit({
-          sha: payload.sha,
-          subject: payload.subject ?? "",
-        })}
+        onOpenCommit={(payload) => onOpenPage(gitCommitRef(payload.sha))}
       />
     ),
   };
@@ -140,27 +126,17 @@ export function WorkItemPage({
   };
 
   const slideover = (
-    <>
-      <SnapshotDetailSlideover
-        open={!!slideoverSnapshot}
-        onClose={() => setSlideoverSnapshot(null)}
-        stream={stream}
-        snapshotId={slideoverSnapshot?.snapshotId ?? null}
-        snapshotLabel={slideoverSnapshot?.label ?? null}
-        snapshotSource={slideoverSnapshot?.source ?? ""}
-        workItemId={slideoverSnapshot?.workItemId ?? null}
-        onOpenDiff={onOpenDiff}
-        onOpenWorkItem={(targetId) => onOpenPage(workItemRef(targetId))}
-      />
-      <CommitDetailSlideover
-        open={!!slideoverCommit}
-        onClose={() => setSlideoverCommit(null)}
-        stream={stream}
-        sha={slideoverCommit?.sha ?? null}
-        subject={slideoverCommit?.subject ?? ""}
-        onOpenDiff={onOpenCommitDiff}
-      />
-    </>
+    <SnapshotDetailSlideover
+      open={!!slideoverSnapshot}
+      onClose={() => setSlideoverSnapshot(null)}
+      stream={stream}
+      snapshotId={slideoverSnapshot?.snapshotId ?? null}
+      snapshotLabel={slideoverSnapshot?.label ?? null}
+      snapshotSource={slideoverSnapshot?.source ?? ""}
+      workItemId={slideoverSnapshot?.workItemId ?? null}
+      onOpenDiff={onOpenDiff}
+      onOpenWorkItem={(targetId) => onOpenPage(workItemRef(targetId))}
+    />
   );
 
   if (!item) {

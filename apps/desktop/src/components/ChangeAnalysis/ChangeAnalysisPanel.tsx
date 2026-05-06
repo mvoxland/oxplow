@@ -2,16 +2,19 @@ import { useMemo } from "react";
 import { gitCommitRef, uncommittedChangesRef, type ChangeAnalysisScope } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
-import { useChangeAnalysis } from "./useChangeAnalysis.js";
 import { ChangeAnalysisHeader } from "./ChangeAnalysisHeader.js";
 import { ChangeAnalysisDrilldown } from "./ChangeAnalysisDrilldown.js";
+import type { ChangeAnalysisState } from "./useChangeAnalysis.js";
 
 export interface ChangeAnalysisPanelProps {
-  /** Stream id; renders an empty placeholder if null. */
-  streamId: string | null;
-  /** "working" or a commit SHA. */
+  /** Result from `useChangeAnalysis`, supplied by the host so a
+   *  shared SummaryCard above the panel can read the same state
+   *  without double-fetching. */
+  analysis: ChangeAnalysisState;
+  /** "working" or a commit SHA. Used for empty-state copy and the
+   *  back-to-source link. */
   target: string;
-  /** Optional drilldown filter; data is filtered by scope but every
+  /** Optional drilldown filter. Data is filtered by scope but every
    *  panel still renders. */
   scope?: ChangeAnalysisScope;
   /** Whether to render the ChangeAnalysisHeader (back-to-source +
@@ -20,25 +23,20 @@ export interface ChangeAnalysisPanelProps {
   showHeader?: boolean;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
-  /** Open the diff for a path between the analysis's resolved base
-   *  and head refs. The panel builds the spec; the host wires it. */
   onOpenDiff?(spec: DiffSpec): void;
-  /** Replace the host tab with the diff in place — preferred. */
   onOpenDiffInTab?(spec: DiffSpec): void;
 }
 
 /**
  * Reusable Change Analysis content. Renders the optional header,
  * the error banner, an empty / loading placeholder, or the full
- * drilldown panel set. Stripped of any `Page` chrome so other
- * surfaces (the GitCommitPage in particular) can host it inline
- * below their own content.
- *
- * `ChangeAnalysisPage` is the thin wrapper that surrounds this
- * with a `Page` for the standalone "Analysis: <commit>" tab.
+ * drilldown panel set. Stripped of any `Page` chrome AND of the
+ * SummaryCard — hosts render the summary at their own top-of-page
+ * position so it sits above any host-specific content (e.g. the
+ * commit message form on the uncommitted page).
  */
 export function ChangeAnalysisPanel({
-  streamId,
+  analysis,
   target,
   scope,
   showHeader = true,
@@ -47,16 +45,10 @@ export function ChangeAnalysisPanel({
   onOpenDiff,
   onOpenDiffInTab,
 }: ChangeAnalysisPanelProps) {
-  const analysis = useChangeAnalysis({ streamId, target, scope });
-
   const sourceLink = useMemo<TabRef | null>(() => {
     if (target === "working") return uncommittedChangesRef();
     return gitCommitRef(target);
   }, [target]);
-
-  if (!streamId) {
-    return <div style={muted}>No stream selected.</div>;
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -94,10 +86,6 @@ export function ChangeAnalysisPanel({
       )}
     </div>
   );
-}
-
-export function formatChangeAnalysisScope(scope: ChangeAnalysisScope): string {
-  return formatScope(scope);
 }
 
 function formatScope(scope: ChangeAnalysisScope): string {
