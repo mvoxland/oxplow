@@ -157,7 +157,6 @@ export function ChangeAnalysisDrilldown({
       />
       <OtherSmellsCard
         functions={functionsAfterStatus}
-        tests={testsAfterStatus}
         onOpenFile={onOpenFile}
         onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
       />
