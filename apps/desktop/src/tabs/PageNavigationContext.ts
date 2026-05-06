@@ -69,6 +69,10 @@ export interface PageNavigation {
   goPrevSibling?(): void;
   /** Step to the next sibling (index + 1). No-op at the last entry. */
   goNextSibling?(): void;
+  /** Jump to an arbitrary sibling by 0-based index. Out-of-range or
+   *  same-as-current is a no-op. Used by the indicator dropdown so
+   *  the user can jump straight to a sibling without stepping. */
+  goSibling?(index: number): void;
   /** Bookmark binding for the page currently rendered in this tab. */
   bookmark?: BookmarkBinding;
   /**

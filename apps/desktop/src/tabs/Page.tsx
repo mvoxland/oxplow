@@ -16,6 +16,13 @@ export interface PageNavBarConfig {
     onNext?(): void;
     indicator?: string;
     indicatorTitle?: string;
+    /** Full sibling list — when present, the indicator becomes a
+     *  toggle that opens a dropdown of all entries. */
+    entries?: Array<{ label: string }>;
+    /** 0-based index of the active entry within `entries`. */
+    activeIndex?: number;
+    /** Jump to a specific sibling by index. */
+    onSelect?(index: number): void;
   };
   bookmark?: {
     scopes: BookmarkScope[];
@@ -122,6 +129,9 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           onNext: ctxNav.goNextSibling,
           indicator: `${ctxNav.siblings.index + 1} of ${ctxNav.siblings.entries.length}`,
           indicatorTitle: ctxNav.siblings.title,
+          entries: ctxNav.siblings.entries.map((e) => ({ label: e.label })),
+          activeIndex: ctxNav.siblings.index,
+          onSelect: ctxNav.goSibling,
         }
       : undefined,
     bookmark: ctxNav.bookmark

@@ -3036,6 +3036,9 @@ export function App() {
         goNextSibling: entry.siblings && entry.siblings.index < entry.siblings.entries.length - 1
           ? () => handleStepSibling(tabId, entry.siblings!.index + 1)
           : undefined,
+        goSibling: entry.siblings
+          ? (i: number) => handleStepSibling(tabId, i)
+          : undefined,
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
         pageKey: selectedThreadId ? `${selectedThreadId}::${tabId}` : undefined,

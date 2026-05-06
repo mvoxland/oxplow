@@ -321,6 +321,14 @@ Mechanics:
   (`prevLabel` / `nextLabel` from `entries[index ± 1]`, callbacks from
   `goPrevSibling` / `goNextSibling` which are only set when not at the
   edge). The `1 of N` indicator renders between the buttons.
+- The indicator is itself a toggle (`page-nav-sibling-indicator`) —
+  clicking it opens a popover (`page-nav-sibling-list`) listing every
+  sibling entry numbered 1..N with the active row highlighted, so the
+  user can jump straight to any sibling instead of stepping through
+  them. Mirrors the CenterTabs overflow ▾ dropdown pattern. Wired via
+  `goSibling(index)` on `PageNavigation`, which delegates to the same
+  `handleStepSibling` used by the up/down buttons. Escape and
+  outside-click close the popover.
 
 Adopted lists:
 
