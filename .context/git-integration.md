@@ -165,7 +165,10 @@ unseeded streams just take the live-query path until the seed lands.
 
 Cached today: `status_summary`, `statuses`, `branches_for`,
 `conflict_state`, `git_log` (top `RECENT_LOG_LIMIT` HEAD-only commits
-per stream — slices to serve smaller-limit reads), `ahead_behind`
+per stream — slices to serve smaller-limit reads; the cached
+`branchHeads` and `tags` overlay arrays travel with every slice so
+both `HistoryPanel` and the dashboard's `RecentCommitsCard` get the
+ref badges next to each row), `ahead_behind`
 (per-stream `(base, head) → AheadBehind` memo, cleared whenever refs
 or HEAD move), and `list_recent_remote_branches` (project-wide,
 `RECENT_REMOTE_BRANCHES_LIMIT` entries). All cached slices are warmed
