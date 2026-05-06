@@ -3,7 +3,7 @@ import type { BranchChangeEntry, Stream } from "../api.js";
 import { gitCommitAll } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { opErrorRef, uncommittedChangesRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
+import { indexRef, opErrorRef, uncommittedChangesRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
 import { ScopeFilterBanner } from "../components/ChangeAnalysis/ScopeFilterBanner.js";
@@ -160,16 +160,29 @@ export function UncommittedChangesPage({
           </section>
         ) : null}
 
-        <ChangeAnalysisPanel
-          analysis={analysis}
-          target="working"
-          scope={scope}
-          showHeader={false}
-          onOpenPage={onOpenPage}
-          onOpenFile={onOpenFile}
-          onOpenDiff={onOpenDiff}
-          onOpenDiffInTab={onOpenDiffInTab}
-        />
+        {fileCount === 0 && !analysis.loading ? (
+          <div data-testid="uncommitted-clean" style={cleanState}>
+            <span>Working tree is clean.</span>
+            <button
+              type="button"
+              onClick={(e) => onOpenPage(indexRef("git-history"), { newTab: e.metaKey || e.ctrlKey })}
+              style={historyLink}
+            >
+              View git history →
+            </button>
+          </div>
+        ) : (
+          <ChangeAnalysisPanel
+            analysis={analysis}
+            target="working"
+            scope={scope}
+            showHeader={false}
+            onOpenPage={onOpenPage}
+            onOpenFile={onOpenFile}
+            onOpenDiff={onOpenDiff}
+            onOpenDiffInTab={onOpenDiffInTab}
+          />
+        )}
       </div>
     </Page>
   );
@@ -224,6 +237,25 @@ const errorBanner: React.CSSProperties = {
   background: "var(--surface-warning, #fef3c7)",
   color: "var(--text-warning, #92400e)",
   borderRadius: 4,
+};
+const cleanState: React.CSSProperties = {
+  background: "var(--surface-card)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 6,
+  padding: 16,
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  fontSize: 13,
+  color: "var(--text-muted)",
+};
+const historyLink: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  padding: 0,
+  color: "var(--text-link, #2563eb)",
+  cursor: "pointer",
+  fontSize: 13,
 };
 const primaryButton: React.CSSProperties = {
   padding: "4px 10px",
