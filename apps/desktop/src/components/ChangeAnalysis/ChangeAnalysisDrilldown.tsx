@@ -142,17 +142,24 @@ export function ChangeAnalysisDrilldown({
         files={filesAfterStatus}
         fileScores={analysis.fileScores}
         onOpenFile={onOpenFile}
+        onOpenFileDiff={(path) => openDiffAt(path, 1)}
       />
       <ChurnCard
         files={filesAfterStatus}
         functionChurn={churnAfterStatus}
         onOpenFile={onOpenFile}
+        onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
       />
-      <ComplexitySpikesCard functions={functionsAfterStatus} onOpenFile={onOpenFile} />
+      <ComplexitySpikesCard
+        functions={functionsAfterStatus}
+        onOpenFile={onOpenFile}
+        onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
+      />
       <OtherSmellsCard
         functions={functionsAfterStatus}
         tests={testsAfterStatus}
         onOpenFile={onOpenFile}
+        onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
       />
       <DuplicationCard duplication={dupAfterStatus} scanVersion={scanVersion} onOpenFile={onOpenFile} />
       <TestsCard tests={testsAfterStatus} onOpenFile={onOpenFile} />

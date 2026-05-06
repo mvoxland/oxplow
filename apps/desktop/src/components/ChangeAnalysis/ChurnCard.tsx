@@ -10,6 +10,10 @@ interface ChurnCardProps {
   files: BranchChangeEntry[];
   functionChurn: FunctionChurnRow[];
   onOpenFile?: (path: string, opts?: { newTab?: boolean }) => void;
+  /** Open the file's diff in the current tab. When supplied, plain
+   *  clicks on a row's path button route here; cmd/ctrl-click
+   *  escapes to a new-tab file open via onOpenFile. */
+  onOpenFileDiff?: (path: string, line?: number) => void;
 }
 
 interface UnifiedRow {
@@ -17,6 +21,10 @@ interface UnifiedRow {
   path: string;
   /** Function qualified name when the row represents a function. */
   fnLabel: string | null;
+  /** Function start line (head side) when the row is a function;
+   *  used to reveal the right region in the diff. Null for file
+   *  rows — clicks open the diff at line 1. */
+  startLine: number | null;
   added: number;
   deleted: number;
   /** Share of the active view's total churn (0..1). */
@@ -36,7 +44,7 @@ const MIN_FUNCTION_SHARE = 0.05;
  * total churn), +/− line columns, share-of-churn percent, then
  * the filename + optional function name on the right.
  */
-export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) {
+export function ChurnCard({ files, functionChurn, onOpenFile, onOpenFileDiff }: ChurnCardProps) {
   const [view, setView] = useState<View>("files");
   const [sort, setSort] = useState<Sort>("total");
   usePageSnapshot<{ churnView: View; churnSort: Sort }>({
@@ -70,6 +78,7 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
             key: `file::${f.path}`,
             path: f.path,
             fnLabel: null,
+            startLine: null,
             added,
             deleted,
             share: totalChurn === 0 ? 0 : total / totalChurn,
@@ -93,6 +102,7 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
           fnLabel: c.containerPath.length > 0
             ? `${c.containerPath.join("::")}::${c.name}`
             : c.name,
+          startLine: c.startLineHead,
           added: c.addedLines,
           deleted: c.deletedLines,
           share: totalChurn === 0 ? 0 : total / totalChurn,
@@ -158,7 +168,12 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {rows.map((row) => (
-            <ChurnRow key={row.key} row={row} onOpenFile={onOpenFile} />
+            <ChurnRow
+              key={row.key}
+              row={row}
+              onOpenFile={onOpenFile}
+              onOpenFileDiff={onOpenFileDiff}
+            />
           ))}
         </div>
       )}
@@ -169,9 +184,11 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
 function ChurnRow({
   row,
   onOpenFile,
+  onOpenFileDiff,
 }: {
   row: UnifiedRow;
   onOpenFile?: (path: string, opts?: { newTab?: boolean }) => void;
+  onOpenFileDiff?: (path: string, line?: number) => void;
 }) {
   const total = row.added + row.deleted;
   // Bar fills its track proportional to the row's share of total
@@ -203,7 +220,19 @@ function ChurnRow({
       <span style={pctCol}>{(row.share * 100).toFixed(0)}%</span>
       <button
         type="button"
-        onClick={(e) => onOpenFile?.(row.path, { newTab: e.metaKey || e.ctrlKey })}
+        onClick={(e) => {
+          // Plain click → diff in current tab; cmd/ctrl-click →
+          // new-tab file open (escape hatch).
+          if (e.metaKey || e.ctrlKey) {
+            onOpenFile?.(row.path, { newTab: true });
+            return;
+          }
+          if (onOpenFileDiff) {
+            onOpenFileDiff(row.path, row.startLine ?? undefined);
+            return;
+          }
+          onOpenFile?.(row.path);
+        }}
         style={pathButton}
         title={row.path}
       >
@@ -212,6 +241,11 @@ function ChurnRow({
       {row.fnLabel ? (
         <span style={fnCol} title={row.fnLabel}>
           {row.fnLabel}
+          {/* Disambiguate multiple "(anonymous)" rows in the same
+              file by appending the head-side start line. */}
+          {row.fnLabel === "(anonymous)" && row.startLine != null
+            ? ` @ ${row.startLine}`
+            : ""}
         </span>
       ) : null}
     </div>

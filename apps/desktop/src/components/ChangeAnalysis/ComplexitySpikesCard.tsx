@@ -3,6 +3,9 @@ import type { FunctionsBuckets } from "./analysisHelpers.js";
 interface ComplexitySpikesCardProps {
   functions: FunctionsBuckets;
   onOpenFile?: (path: string, opts?: { newTab?: boolean }) => void;
+  /** Plain click on a row → diff in current tab at the function's
+   *  start line. Cmd/ctrl-click → new-tab file open. */
+  onOpenFileDiff?: (path: string, line?: number) => void;
 }
 
 const ROW_CAP = 12;
@@ -32,7 +35,7 @@ interface SpikeRow {
  *
  * Hides itself when neither category fires.
  */
-export function ComplexitySpikesCard({ functions, onOpenFile }: ComplexitySpikesCardProps) {
+export function ComplexitySpikesCard({ functions, onOpenFile, onOpenFileDiff }: ComplexitySpikesCardProps) {
   const deltaRows: SpikeRow[] = functions.modifiedBody
     .filter((fn) => fn.complexityDelta >= DELTA_THRESHOLD)
     .map((fn) => ({
@@ -87,7 +90,14 @@ export function ComplexitySpikesCard({ functions, onOpenFile }: ComplexitySpikes
             </span>
             <button
               type="button"
-              onClick={(e) => onOpenFile?.(row.path, { newTab: e.metaKey || e.ctrlKey })}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey) {
+                  onOpenFile?.(row.path, { newTab: true });
+                  return;
+                }
+                if (onOpenFileDiff) onOpenFileDiff(row.path, row.startLine);
+                else onOpenFile?.(row.path);
+              }}
               style={pathButton}
               title={row.path}
             >
