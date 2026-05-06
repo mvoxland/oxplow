@@ -6,8 +6,7 @@ import { DISK, refVersion, type FileVersion } from "../../file-version.js";
 import { DuplicationCard } from "./DuplicationCard.js";
 import { TestsCard } from "./TestsCard.js";
 import { LookHereFirstCard } from "./LookHereFirstCard.js";
-import { FileChurnCard } from "./FileChurnCard.js";
-import { FunctionChurnCard } from "./FunctionChurnCard.js";
+import { ChurnCard } from "./ChurnCard.js";
 import { ComplexitySpikesCard } from "./ComplexitySpikesCard.js";
 import { OtherSmellsCard } from "./OtherSmellsCard.js";
 import {
@@ -144,10 +143,9 @@ export function ChangeAnalysisDrilldown({
         fileScores={analysis.fileScores}
         onOpenFile={onOpenFile}
       />
-      <FileChurnCard files={filesAfterStatus} onOpenFile={onOpenFile} />
-      <FunctionChurnCard
-        churn={churnAfterStatus}
-        functions={functionsAfterStatus}
+      <ChurnCard
+        files={filesAfterStatus}
+        functionChurn={churnAfterStatus}
         onOpenFile={onOpenFile}
       />
       <ComplexitySpikesCard functions={functionsAfterStatus} onOpenFile={onOpenFile} />
