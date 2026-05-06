@@ -426,9 +426,20 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
     #[tokio::test]
     async fn metrics_scan_returns_timeout_error_when_budget_exceeded() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("a.rs"), "fn x() {}").unwrap();
-        // 1ns budget — the spawn_blocking task can't complete that fast,
-        // even with one trivial file.
+        // Populate enough files that the spawn_blocking metrics pass
+        // can't possibly complete before the timeout future polls. A
+        // single trivial file races on fast CI hardware (the blocking
+        // pool finishes before tokio::time::timeout observes its
+        // deadline).
+        let mut body = String::new();
+        for i in 0..200 {
+            body.push_str(&format!(
+                "fn f{i}(x: i32) -> i32 {{ if x > 0 {{ x * 2 }} else if x < 0 {{ -x }} else {{ 0 }} }}\n"
+            ));
+        }
+        for i in 0..50 {
+            std::fs::write(dir.path().join(format!("f{i}.rs")), &body).unwrap();
+        }
         let opts = RunOptions {
             files: Vec::new(),
             timeout: Some(std::time::Duration::from_nanos(1)),
