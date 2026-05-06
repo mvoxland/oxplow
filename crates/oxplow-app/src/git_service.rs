@@ -24,12 +24,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use oxplow_domain::stores::StreamStore;
-use oxplow_domain::StreamId;
+use oxplow_domain::{StreamId, Timestamp};
 use oxplow_git::{
-    AheadBehind, BlameLine, BranchChanges, BranchRef, ChangeScopes, CommitDetail, GitFileStatus,
-    GitLogCommit, GitLogOptions, GitLogResult, GitOpResult, GitWorktreeEntry, GroupedGitRefs,
-    LocalBlameEntry, RemoteBranchEntry, RepoConflictState, TextSearchHit, WorkspaceEntry,
-    WorkspaceFile, WorkspaceIndexedFile, WorkspaceStatusSummary,
+    detect_current_branch, AheadBehind, BlameLine, BranchChanges, BranchRef, ChangeScopes,
+    CommitDetail, GitFileStatus, GitLogCommit, GitLogOptions, GitLogResult, GitOpResult,
+    GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry, RepoConflictState,
+    TextSearchHit, WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile, WorkspaceStatusSummary,
 };
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{debug, warn};
@@ -175,13 +175,17 @@ impl GitService {
         // Bus listener — translates fs-watch + refs events into
         // refresh tasks.
         Self::spawn_bus_listener(svc.clone());
-        // Seed snapshots for existing streams in the background.
+        // Seed snapshots for existing streams in the background, and
+        // reconcile each stream's branch field against the live HEAD
+        // — covers the case where the user switched branches in the
+        // worktree while oxplow was not running.
         let seed_svc = svc.clone();
         tokio::spawn(async move {
             if let Ok(rows) = streams.list().await {
                 for s in rows {
                     let path = resolve_worktree(&seed_svc.project_dir, &s.worktree_path);
-                    seed_svc.register_internal(&s.id, path).await;
+                    seed_svc.register_internal(&s.id, path.clone()).await;
+                    seed_svc.reconcile_branch(&s.id, &path).await;
                 }
             }
         });
@@ -356,6 +360,38 @@ impl GitService {
         });
     }
 
+    /// Compare the worktree's live HEAD against the Stream record's
+    /// stored `branch` and persist the new value if they diverged.
+    ///
+    /// External `git checkout`s — run while oxplow is off, or run from
+    /// a terminal during a session — never touch the Stream record on
+    /// their own; without this step the bottom-bar branch chip and any
+    /// other consumer of `stream.branch` keep showing the branch the
+    /// stream was created on. We reconcile both at seed time (covers
+    /// the "switched while oxplow was off" case) and after every
+    /// branch-refresh task fires (covers the in-session case driven
+    /// by GitRefsChanged from the fs-watcher).
+    async fn reconcile_branch(&self, stream_id: &StreamId, worktree: &Path) {
+        let Some(detected) = detect_current_branch(worktree) else {
+            return;
+        };
+        let Ok(Some(mut stored)) = self.streams.get(stream_id).await else {
+            return;
+        };
+        if stored.branch == detected {
+            return;
+        }
+        stored.branch = detected.clone();
+        stored.branch_ref = format!("refs/heads/{detected}");
+        stored.updated_at = Timestamp::now();
+        if let Err(e) = self.streams.upsert(&stored).await {
+            warn!(stream_id = %stream_id, error = %e, "failed to persist reconciled branch");
+            return;
+        }
+        debug!(stream_id = %stream_id, branch = %detected, "reconciled stream branch from HEAD");
+        self.events.emit(OxplowEvent::StreamsChanged);
+    }
+
     /// Drop the cached status map / summary for `stream_id` so the next
     /// reader recomputes from disk. Called from the event-bus listener
     /// the moment a workspace or refs change is observed; the async
@@ -383,6 +419,7 @@ impl GitService {
             }
         };
         let worktree = snapshot.read().await.worktree.clone();
+        let worktree_for_blocking = worktree.clone();
         let project_dir = self.project_dir.clone();
         let RefreshKinds {
             statuses,
@@ -394,6 +431,7 @@ impl GitService {
 
         let (statuses_v, branches_v, conflict_v, log_v, remote_branches_v) =
             tokio::task::spawn_blocking(move || {
+                let worktree = worktree_for_blocking;
                 let s = if statuses {
                     let map = oxplow_git::list_git_statuses(&worktree);
                     let summary = oxplow_git::summarize_git_statuses(&map);
@@ -483,6 +521,14 @@ impl GitService {
             || changed.remote_branches
         {
             let _ = self.snapshot_tx.send(changed);
+        }
+
+        // Branch-list refresh implies HEAD may have moved. Reconcile
+        // the Stream record's stored branch field so consumers
+        // (status-bar chip, agent prompt, etc.) follow along when an
+        // external `git checkout` happens during a session.
+        if branches {
+            self.reconcile_branch(stream_id, &worktree).await;
         }
     }
 
