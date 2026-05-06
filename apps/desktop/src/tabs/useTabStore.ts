@@ -24,7 +24,7 @@ export function useThreadTabs(threadId: string | null): ThreadTabState {
     return store.subscribe(threadId, fn);
   };
   const getSnapshot = () =>
-    threadId ? store.getThreadState(threadId) : { tabs: [], activeId: null };
+    threadId ? store.getThreadState(threadId) : { tabs: [], activeId: null, lru: [] };
   // The default getServerSnapshot is fine for renderer-only use.
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

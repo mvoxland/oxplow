@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createSlot,
   createTabStore,
+  MAX_TABS,
   navigateInSlot,
   resetSlotCounter,
   slotGoBack,
@@ -231,5 +232,67 @@ describe("PageSlot navigation", () => {
     slot = slotGoBack(slot)!;
     slot = slotGoForward(slot)!;
     expect(slot.slotId).toBe("slot:fixed");
+  });
+});
+
+describe("tabStore LRU eviction", () => {
+  function fileRef(i: number): TabRef {
+    return { id: `file:src/${i}.ts`, kind: "file", payload: { path: `src/${i}.ts` } };
+  }
+
+  test("openTab tracks LRU with most-recent at the front", () => {
+    const store = createTabStore();
+    store.openTab("t-1", FILE_A);
+    store.openTab("t-1", FILE_B);
+    store.openTab("t-1", WORK_ITEM);
+    expect(store.getThreadState("t-1").lru).toEqual([WORK_ITEM.id, FILE_B.id, FILE_A.id]);
+  });
+
+  test("activate moves the tab to the front of LRU", () => {
+    const store = createTabStore();
+    store.openTab("t-1", FILE_A);
+    store.openTab("t-1", FILE_B);
+    store.openTab("t-1", WORK_ITEM);
+    store.activate("t-1", FILE_A.id);
+    expect(store.getThreadState("t-1").lru).toEqual([FILE_A.id, WORK_ITEM.id, FILE_B.id]);
+  });
+
+  test("opening over MAX_TABS evicts the LRU tail", () => {
+    const store = createTabStore();
+    for (let i = 0; i < MAX_TABS; i++) store.openTab("t-1", fileRef(i));
+    expect(store.getThreadState("t-1").tabs.length).toBe(MAX_TABS);
+    store.openTab("t-1", fileRef(MAX_TABS));
+    const state = store.getThreadState("t-1");
+    expect(state.tabs.length).toBe(MAX_TABS);
+    expect(state.tabs.find((t) => t.id === fileRef(0).id)).toBeUndefined();
+    expect(state.tabs.find((t) => t.id === fileRef(MAX_TABS).id)).toBeDefined();
+  });
+
+  test("eviction respects access order, not insertion order", () => {
+    const store = createTabStore();
+    for (let i = 0; i < MAX_TABS; i++) store.openTab("t-1", fileRef(i));
+    store.activate("t-1", fileRef(0).id);
+    store.openTab("t-1", fileRef(MAX_TABS));
+    const state = store.getThreadState("t-1");
+    expect(state.tabs.find((t) => t.id === fileRef(0).id)).toBeDefined();
+    expect(state.tabs.find((t) => t.id === fileRef(1).id)).toBeUndefined();
+  });
+
+  test("agent tab is never evicted even when oldest", () => {
+    const store = createTabStore();
+    store.openTab("t-1", AGENT);
+    for (let i = 0; i < MAX_TABS; i++) store.openTab("t-1", fileRef(i));
+    const state = store.getThreadState("t-1");
+    expect(state.tabs.find((t) => t.id === AGENT.id)).toBeDefined();
+    expect(state.tabs.length).toBe(MAX_TABS);
+    expect(state.tabs.find((t) => t.id === fileRef(0).id)).toBeUndefined();
+  });
+
+  test("closeTab drops the id from LRU", () => {
+    const store = createTabStore();
+    store.openTab("t-1", FILE_A);
+    store.openTab("t-1", FILE_B);
+    store.closeTab("t-1", FILE_A.id);
+    expect(store.getThreadState("t-1").lru).toEqual([FILE_B.id]);
   });
 });
