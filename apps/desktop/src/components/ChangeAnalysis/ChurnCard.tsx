@@ -108,24 +108,8 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
   return (
     <section data-testid="change-analysis-churn" style={card}>
       <div style={toolbarRow}>
-        <div style={header}>Churn</div>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", gap: 4 }}>
-            {([
-              ["files", "Files"],
-              ["functions", "Functions"],
-            ] as const).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                data-testid={`change-analysis-churn-view-${key}`}
-                onClick={() => setView(key)}
-                style={view === key ? activeTab : tab}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <div style={header}>Churn</div>
           <div
             style={{ display: "flex", gap: 4, alignItems: "center" }}
             title="Sort the rows by total line churn, additions only, or deletions only. The % column always shows share of total churn."
@@ -147,6 +131,22 @@ export function ChurnCard({ files, functionChurn, onOpenFile }: ChurnCardProps) 
               </button>
             ))}
           </div>
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {([
+            ["files", "Files"],
+            ["functions", "Functions"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              data-testid={`change-analysis-churn-view-${key}`}
+              onClick={() => setView(key)}
+              style={view === key ? activeTab : tab}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
       {rows.length === 0 ? (
