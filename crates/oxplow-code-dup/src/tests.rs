@@ -635,3 +635,72 @@ fn case_b(items: Vec<i32>) -> Vec<i32> {
         assert_ne!(b.a_path, b.b_path, "same-file pair leaked: {b:?}");
     }
 }
+
+#[test]
+fn nested_inline_functions_dont_re_stamp_subtrees_via_ancestors() {
+    // Two TS files where one of them contains nested inline arrow
+    // functions sharing a common subtree shape with helpers in the
+    // other file. Pre-fix, the inner subtree was stamped once per
+    // ancestor function, so pair_up emitted one DuplicateBlock per
+    // (outer_fn, inner_fn) ancestry combination — same line-range
+    // rows repeating dozens of times. With the nested-function gate
+    // each subtree is recorded under exactly one FnId and the
+    // duplicate count stays bounded.
+    let host = r#"
+function App() {
+    return [
+        () => {
+            const items = [1, 2, 3];
+            for (const item of items) {
+                if (item > 0) {
+                    console.log(item);
+                }
+            }
+        },
+        () => {
+            const items = [4, 5, 6];
+            for (const item of items) {
+                if (item > 0) {
+                    console.log(item);
+                }
+            }
+        },
+        () => {
+            const items = [7, 8, 9];
+            for (const item of items) {
+                if (item > 0) {
+                    console.log(item);
+                }
+            }
+        },
+    ];
+}
+"#;
+    let peer = r#"
+function elsewhere() {
+    const items = [1, 2, 3];
+    for (const item of items) {
+        if (item > 0) {
+            console.log(item);
+        }
+    }
+}
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/host.ts".to_string(), host.to_string()),
+            ("src/peer.ts".to_string(), peer.to_string()),
+        ],
+        detect_opts(),
+    );
+    // Three inner arrows × the peer function = 3 cross-file pairs at
+    // most (one DuplicateBlock per ordered fn pair). Pre-fix this
+    // emitted ~12 because each outer ancestor (App + each arrow's
+    // closure path through siblings) stamped the same subtree.
+    let cross: Vec<_> = blocks.iter().filter(|b| b.a_path != b.b_path).collect();
+    assert!(
+        cross.len() <= 3,
+        "expected at most 3 cross-file blocks (one per inner arrow ↔ peer fn pair), got {}: {cross:#?}",
+        cross.len(),
+    );
+}

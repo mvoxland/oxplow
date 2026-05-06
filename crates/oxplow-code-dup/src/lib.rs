@@ -245,7 +245,18 @@ fn record_function(
 ) {
     let fn_byte_start = fn_node.start_byte();
     let fn_byte_end = fn_node.end_byte();
-    collect_subtrees_recursive(path, lang, fn_node, fn_byte_start, fn_byte_end, opts, out);
+    let function_kinds = lang.spec().function_kinds;
+    collect_subtrees_recursive(
+        path,
+        lang,
+        fn_node,
+        fn_byte_start,
+        fn_byte_end,
+        function_kinds,
+        opts,
+        out,
+        /* is_root */ true,
+    );
 }
 
 fn collect_subtrees_recursive(
@@ -254,9 +265,22 @@ fn collect_subtrees_recursive(
     node: tree_sitter::Node<'_>,
     fn_byte_start: usize,
     fn_byte_end: usize,
+    function_kinds: &[&str],
     opts: DupOptions,
     out: &mut Vec<SubtreeRef>,
+    is_root: bool,
 ) {
+    // Don't re-stamp subtrees of nested functions onto the outer
+    // function's FnId — `walk_for_functions` will visit each
+    // nested function as its own root and produce its own
+    // SubtreeRefs. Without this gate the same physical subtree
+    // ends up in `subtrees` once per ancestor function, and
+    // pair_up emits a DuplicateBlock for every (outer_fn, inner_fn)
+    // ancestry combination — visible as identical line-range
+    // rows repeating in the duplication panel.
+    if !is_root && function_kinds.contains(&node.kind()) {
+        return;
+    }
     let h = hash_subtree(node, lang);
     let line_span = h.end_line.saturating_sub(h.start_line) + 1;
     if h.node_count >= opts.min_nodes && line_span >= opts.min_lines {
@@ -283,8 +307,10 @@ fn collect_subtrees_recursive(
                     child,
                     fn_byte_start,
                     fn_byte_end,
+                    function_kinds,
                     opts,
                     out,
+                    /* is_root */ false,
                 );
             }
             if !cursor.goto_next_sibling() {
