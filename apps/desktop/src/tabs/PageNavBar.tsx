@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BookmarkScope } from "./bookmarks.js";
 
 export interface PageNavBarProps {
@@ -21,6 +21,15 @@ export interface PageNavBarProps {
     /** Hover-tooltip on the indicator describing the originating
      *  list (e.g. "Recently modified", "Backlinks"). */
     indicatorTitle?: string;
+    /** Full sibling list — when present, the indicator becomes a
+     *  toggle that opens a dropdown listing every entry, mirroring
+     *  the CenterTabs overflow ▾ pattern so the user can jump to a
+     *  sibling instead of stepping through them. */
+    entries?: Array<{ label: string }>;
+    /** 0-based index of the active entry within `entries`. */
+    activeIndex?: number;
+    /** Jump to a sibling by index. */
+    onSelect?(index: number): void;
   };
   /** Page title rendered to the right of the back/forward arrows. */
   title?: ReactNode;
@@ -64,6 +73,28 @@ export function PageNavBar({
 }: PageNavBarProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
+  const [siblingListOpen, setSiblingListOpen] = useState(false);
+  const siblingPopoverRef = useRef<HTMLDivElement | null>(null);
+  const siblingToggleRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!siblingListOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (siblingPopoverRef.current?.contains(target)) return;
+      if (siblingToggleRef.current?.contains(target)) return;
+      setSiblingListOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSiblingListOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [siblingListOpen]);
 
   return (
     <div
@@ -128,19 +159,135 @@ export function PageNavBar({
             ↓
           </button>
           {siblings.indicator ? (
-            <span
-              data-testid="page-nav-sibling-indicator"
-              title={siblings.indicatorTitle}
-              style={{
-                fontSize: 11,
-                color: "var(--text-secondary)",
-                marginLeft: 2,
-                fontVariantNumeric: "tabular-nums",
-                cursor: siblings.indicatorTitle ? "help" : "default",
-              }}
-            >
-              {siblings.indicator}
-            </span>
+            siblings.entries && siblings.entries.length > 0 && siblings.onSelect ? (
+              <div style={{ position: "relative", display: "inline-flex" }}>
+                <button
+                  ref={siblingToggleRef}
+                  type="button"
+                  data-testid="page-nav-sibling-indicator"
+                  title={siblings.indicatorTitle ?? "Show all"}
+                  aria-expanded={siblingListOpen}
+                  aria-haspopup="listbox"
+                  onClick={() => setSiblingListOpen((v) => !v)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    padding: "2px 4px",
+                    marginLeft: 2,
+                    fontSize: 11,
+                    color: "var(--text-secondary)",
+                    fontVariantNumeric: "tabular-nums",
+                    cursor: "pointer",
+                    borderRadius: 3,
+                  }}
+                >
+                  {siblings.indicator} ▾
+                </button>
+                {siblingListOpen ? (
+                  <div
+                    ref={siblingPopoverRef}
+                    data-testid="page-nav-sibling-list"
+                    role="listbox"
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 4px)",
+                      left: 0,
+                      minWidth: 240,
+                      maxWidth: 480,
+                      maxHeight: 360,
+                      overflow: "auto",
+                      background: "var(--surface-card)",
+                      border: "1px solid var(--border-subtle)",
+                      borderRadius: 6,
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+                      padding: 4,
+                      zIndex: 10,
+                      fontSize: 12,
+                    }}
+                  >
+                    {siblings.indicatorTitle ? (
+                      <div
+                        style={{
+                          padding: "4px 8px 6px",
+                          fontSize: 10,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.4,
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        {siblings.indicatorTitle}
+                      </div>
+                    ) : null}
+                    {siblings.entries.map((entry, i) => {
+                      const active = i === siblings.activeIndex;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          data-testid={`page-nav-sibling-list-item-${i}`}
+                          role="option"
+                          aria-selected={active}
+                          onClick={() => {
+                            setSiblingListOpen(false);
+                            if (!active) siblings.onSelect?.(i);
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "4px 8px",
+                            background: active ? "var(--surface-tab-active, var(--surface-rail))" : "transparent",
+                            border: "none",
+                            color: "var(--text-primary)",
+                            cursor: "pointer",
+                            borderRadius: 4,
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          <span
+                            style={{
+                              flexShrink: 0,
+                              width: 28,
+                              color: "var(--text-secondary)",
+                              fontSize: 11,
+                              textAlign: "right",
+                            }}
+                          >
+                            {i + 1}
+                          </span>
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              fontWeight: active ? 600 : 400,
+                            }}
+                          >
+                            {entry.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <span
+                data-testid="page-nav-sibling-indicator"
+                title={siblings.indicatorTitle}
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  marginLeft: 2,
+                  fontVariantNumeric: "tabular-nums",
+                  cursor: siblings.indicatorTitle ? "help" : "default",
+                }}
+              >
+                {siblings.indicator}
+              </span>
+            )
           ) : null}
         </div>
       ) : null}
