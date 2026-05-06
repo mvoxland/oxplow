@@ -704,3 +704,77 @@ function elsewhere() {
         cross.len(),
     );
 }
+
+#[test]
+fn clojure_clone_across_two_files() {
+    let body = r#"
+(ns foo.a
+  (:require [clojure.string :as str]))
+
+(defn process [items]
+  (let [out (atom [])]
+    (doseq [item items]
+      (cond
+        (pos? item) (swap! out conj (* item 2))
+        (neg? item) (swap! out conj (* item -1))
+        :else (swap! out conj 0)))
+    @out))
+"#;
+    let other = r#"
+(ns foo.b
+  (:require [clojure.string :as str]))
+
+(defn process [items]
+  (let [out (atom [])]
+    (doseq [item items]
+      (cond
+        (pos? item) (swap! out conj (* item 2))
+        (neg? item) (swap! out conj (* item -1))
+        :else (swap! out conj 0)))
+    @out))
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.clj".to_string(), body.to_string()),
+            ("src/b.clj".to_string(), other.to_string()),
+        ],
+        detect_opts(),
+    );
+    assert!(
+        !blocks.is_empty(),
+        "expected Clojure defn clone to be detected"
+    );
+}
+
+#[test]
+fn clojure_ns_require_preamble_is_skipped() {
+    let a = r#"
+(ns foo.a
+  (:require [clojure.string :as str]
+            [clojure.set :as set])
+  (:import [java.util Date UUID]))
+
+(defn unique-a []
+  1)
+"#;
+    let b = r#"
+(ns foo.b
+  (:require [clojure.string :as str]
+            [clojure.set :as set])
+  (:import [java.util Date UUID]))
+
+(defn unique-b [x]
+  (* x 2))
+"#;
+    let blocks = detect_duplicates(
+        vec![
+            ("src/a.clj".to_string(), a.to_string()),
+            ("src/b.clj".to_string(), b.to_string()),
+        ],
+        detect_opts(),
+    );
+    assert!(
+        blocks.is_empty(),
+        "shared Clojure ns/require/import preamble must not seed a finding, got {blocks:?}"
+    );
+}

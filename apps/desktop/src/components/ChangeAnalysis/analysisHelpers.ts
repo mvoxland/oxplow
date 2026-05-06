@@ -86,6 +86,7 @@ const TEST_PATTERNS: RegExp[] = [
   /(^|\/)tests?\//,
   /(^|\/)test_[^/]+\.(py|rs)$/,
   /_test\.go$/,
+  /_test\.cljc?$/, // Clojure / cljc; .cljs not conventionally suffixed
 ];
 
 /** True if `path` looks like a test file by convention. */
@@ -119,6 +120,8 @@ function isTestContainer(name: string): boolean {
   if (name === "tests" || name === "test") return true;
   if (/Tests?$/.test(name)) return true;
   if (/^Test([A-Z_]|$)/.test(name)) return true;
+  // Clojure namespace convention: `foo.bar-test`
+  if (/-test$/.test(name)) return true;
   return false;
 }
 

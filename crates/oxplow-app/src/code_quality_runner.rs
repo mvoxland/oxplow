@@ -528,6 +528,75 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
     }
 
     #[tokio::test]
+    async fn end_to_end_fixture_includes_clojure_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.clj"),
+            r#"
+(ns foo.a
+  (:require [clojure.string :as str]))
+
+(defn process [items]
+  (let [out (atom [])]
+    (doseq [item items]
+      (cond
+        (pos? item) (swap! out conj (* item 2))
+        (neg? item) (swap! out conj (* item -1))
+        :else (swap! out conj 0)))
+    @out))
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.clj"),
+            r#"
+(ns foo.b
+  (:require [clojure.string :as str]))
+
+(defn handle [values]
+  (let [output (atom [])]
+    (doseq [v values]
+      (cond
+        (pos? v) (swap! output conj (* v 2))
+        (neg? v) (swap! output conj (* v -1))
+        :else (swap! output conj 0)))
+    @output))
+"#,
+        )
+        .unwrap();
+
+        let metrics = run_metrics_scan(dir.path(), RunOptions::default())
+            .await
+            .unwrap();
+        let clj_findings: Vec<_> = metrics
+            .iter()
+            .filter(|f| f.path == "a.clj" || f.path == "b.clj")
+            .collect();
+        assert!(
+            !clj_findings.is_empty(),
+            "expected Clojure metrics findings, got {metrics:?}"
+        );
+        let kinds: Vec<_> = clj_findings.iter().map(|f| f.kind.as_str()).collect();
+        assert!(kinds.iter().filter(|k| **k == "complexity").count() == 2);
+
+        let dup_opts = RunOptions {
+            dup_options: Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+            ..RunOptions::default()
+        };
+        let duplication = run_duplication_scan(dir.path(), dup_opts)
+            .await
+            .unwrap();
+        let clj_dups: Vec<_> = duplication
+            .iter()
+            .filter(|f| f.kind == "duplicate-block" && (f.path == "a.clj" || f.path == "b.clj"))
+            .collect();
+        assert!(
+            clj_dups.len() >= 2,
+            "expected paired Clojure duplicate, got {duplication:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn duplication_scan_emits_nothing_for_unique_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(

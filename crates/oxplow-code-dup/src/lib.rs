@@ -35,7 +35,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use oxplow_code_metrics::{Language, language_for_path};
+use oxplow_code_metrics::{is_function_node, language_for_path, Language};
 use tree_sitter::Parser;
 
 mod tokenize;
@@ -121,6 +121,7 @@ where
             &path,
             lang,
             tree.root_node(),
+            source.as_bytes(),
             opts,
             &mut subtrees,
         );
@@ -203,30 +204,31 @@ fn collect_function_subtrees(
     path: &str,
     lang: Language,
     root: tree_sitter::Node<'_>,
+    src: &[u8],
     opts: DupOptions,
     out: &mut Vec<SubtreeRef>,
 ) {
-    let function_kinds = lang.spec().function_kinds;
-    walk_for_functions(path, lang, root, function_kinds, opts, out);
+    walk_for_functions(path, lang, root, src, opts, out);
 }
 
 fn walk_for_functions(
     path: &str,
     lang: Language,
     node: tree_sitter::Node<'_>,
-    function_kinds: &[&str],
+    src: &[u8],
     opts: DupOptions,
     out: &mut Vec<SubtreeRef>,
 ) {
-    if function_kinds.contains(&node.kind()) {
-        record_function(path, lang, node, opts, out);
+    let spec = lang.spec();
+    if is_function_node(node, src, spec) {
+        record_function(path, lang, node, src, opts, out);
         // Continue walking children — there may be nested functions
         // (closures, inner functions). They'll get their own records.
     }
     let mut cursor = node.walk();
     if cursor.goto_first_child() {
         loop {
-            walk_for_functions(path, lang, cursor.node(), function_kinds, opts, out);
+            walk_for_functions(path, lang, cursor.node(), src, opts, out);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -240,19 +242,19 @@ fn record_function(
     path: &str,
     lang: Language,
     fn_node: tree_sitter::Node<'_>,
+    src: &[u8],
     opts: DupOptions,
     out: &mut Vec<SubtreeRef>,
 ) {
     let fn_byte_start = fn_node.start_byte();
     let fn_byte_end = fn_node.end_byte();
-    let function_kinds = lang.spec().function_kinds;
     collect_subtrees_recursive(
         path,
         lang,
         fn_node,
+        src,
         fn_byte_start,
         fn_byte_end,
-        function_kinds,
         opts,
         out,
         /* is_root */ true,
@@ -263,13 +265,14 @@ fn collect_subtrees_recursive(
     path: &str,
     lang: Language,
     node: tree_sitter::Node<'_>,
+    src: &[u8],
     fn_byte_start: usize,
     fn_byte_end: usize,
-    function_kinds: &[&str],
     opts: DupOptions,
     out: &mut Vec<SubtreeRef>,
     is_root: bool,
 ) {
+    let spec = lang.spec();
     // Don't re-stamp subtrees of nested functions onto the outer
     // function's FnId — `walk_for_functions` will visit each
     // nested function as its own root and produce its own
@@ -278,10 +281,10 @@ fn collect_subtrees_recursive(
     // pair_up emits a DuplicateBlock for every (outer_fn, inner_fn)
     // ancestry combination — visible as identical line-range
     // rows repeating in the duplication panel.
-    if !is_root && function_kinds.contains(&node.kind()) {
+    if !is_root && is_function_node(node, src, spec) {
         return;
     }
-    let h = hash_subtree(node, lang);
+    let h = hash_subtree(node, src, lang);
     let line_span = h.end_line.saturating_sub(h.start_line) + 1;
     if h.node_count >= opts.min_nodes && line_span >= opts.min_lines {
         out.push(SubtreeRef {
@@ -299,15 +302,15 @@ fn collect_subtrees_recursive(
         loop {
             let child = cursor.node();
             if !tokenize::is_comment_kind(child.kind())
-                && !tokenize::is_skip_kind(lang, child.kind())
+                && !tokenize::is_skip_node(lang, child, src)
             {
                 collect_subtrees_recursive(
                     path,
                     lang,
                     child,
+                    src,
                     fn_byte_start,
                     fn_byte_end,
-                    function_kinds,
                     opts,
                     out,
                     /* is_root */ false,
