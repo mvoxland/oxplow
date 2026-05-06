@@ -199,7 +199,12 @@ mod tests {
 
     fn init_repo() -> tempfile::TempDir {
         let dir = tempdir().unwrap();
-        let repo = git2::Repository::init(dir.path()).unwrap();
+        // Pin the initial branch to "main" via init options so the
+        // tests don't depend on the system-wide init.defaultBranch
+        // (CI runners often default to "master").
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.initial_head("main");
+        let repo = git2::Repository::init_opts(dir.path(), &opts).unwrap();
         let mut config = repo.config().unwrap();
         config.set_str("user.name", "test").unwrap();
         config.set_str("user.email", "t@example.com").unwrap();
