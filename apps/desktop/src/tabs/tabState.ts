@@ -131,6 +131,51 @@ export function slotGoForward(slot: PageSlot): PageSlot | null {
 export interface ThreadTabState {
   tabs: TabRef[];
   activeId: string | null;
+  /** Tab ids in most-recently-used order (front = most recent). Used to
+   *  pick eviction victims when the open count exceeds `MAX_TABS`. */
+  lru: string[];
+}
+
+/** Maximum number of tabs kept open per thread. When `openTab` would
+ *  push the count over this, the least-recently-used closable tab(s)
+ *  are auto-evicted. The `agent` tab (kind === "agent") is never
+ *  evicted — it's the always-pinned per-thread tab. */
+export const MAX_TABS = 20;
+
+function isEvictable(ref: TabRef): boolean {
+  return ref.kind !== "agent";
+}
+
+function bumpLru(lru: string[], id: string): string[] {
+  const next = lru.filter((x) => x !== id);
+  next.unshift(id);
+  return next;
+}
+
+function evictIfOverCap(tabs: TabRef[], lru: string[], activeId: string | null, protectedId?: string): { tabs: TabRef[]; lru: string[]; activeId: string | null } {
+  if (tabs.length <= MAX_TABS) return { tabs, lru, activeId };
+  let workingTabs = tabs;
+  let workingLru = lru;
+  let workingActive = activeId;
+  while (workingTabs.length > MAX_TABS) {
+    let victimId: string | null = null;
+    for (let i = workingLru.length - 1; i >= 0; i--) {
+      const candidate = workingLru[i]!;
+      if (candidate === protectedId) continue;
+      const ref = workingTabs.find((t) => t.id === candidate);
+      if (!ref) continue;
+      if (!isEvictable(ref)) continue;
+      victimId = candidate;
+      break;
+    }
+    if (!victimId) break;
+    workingTabs = workingTabs.filter((t) => t.id !== victimId);
+    workingLru = workingLru.filter((x) => x !== victimId);
+    if (workingActive === victimId) {
+      workingActive = workingTabs[workingTabs.length - 1]?.id ?? null;
+    }
+  }
+  return { tabs: workingTabs, lru: workingLru, activeId: workingActive };
 }
 
 export interface OpenTabOptions {
@@ -149,7 +194,7 @@ export interface TabStore {
   subscribe(threadId: string, fn: () => void): () => void;
 }
 
-const EMPTY: ThreadTabState = Object.freeze({ tabs: [], activeId: null }) as ThreadTabState;
+const EMPTY: ThreadTabState = Object.freeze({ tabs: [], activeId: null, lru: [] }) as ThreadTabState;
 
 export function createTabStore(): TabStore {
   const states = new Map<string, ThreadTabState>();
@@ -178,58 +223,68 @@ export function createTabStore(): TabStore {
       if (opts?.replace && state.activeId) {
         const activeIdx = state.tabs.findIndex((t) => t.id === state.activeId);
         if (activeIdx >= 0) {
-          // If the new ref already exists elsewhere, drop the old occurrence
-          // and keep order stable around the active slot.
           const tabs = state.tabs.slice();
+          const replacedId = tabs[activeIdx]!.id;
           tabs.splice(activeIdx, 1, ref);
           if (existingIdx >= 0 && existingIdx !== activeIdx) {
-            // Remove the old duplicate, accounting for index shifts.
-            const dupIdx = existingIdx > activeIdx ? existingIdx : existingIdx;
-            tabs.splice(dupIdx, 1);
+            tabs.splice(existingIdx, 1);
           }
-          writeState(threadId, { tabs, activeId: ref.id });
+          const lru = bumpLru(state.lru.filter((x) => x !== replacedId), ref.id);
+          const evicted = evictIfOverCap(tabs, lru, ref.id, ref.id);
+          writeState(threadId, { tabs: evicted.tabs, activeId: evicted.activeId, lru: evicted.lru });
           return;
         }
       }
 
       if (existingIdx >= 0) {
-        if (state.activeId === ref.id) return;
-        writeState(threadId, { tabs: state.tabs, activeId: ref.id });
+        const lru = bumpLru(state.lru, ref.id);
+        if (state.activeId === ref.id) {
+          writeState(threadId, { tabs: state.tabs, activeId: state.activeId, lru });
+          return;
+        }
+        writeState(threadId, { tabs: state.tabs, activeId: ref.id, lru });
         return;
       }
-      writeState(threadId, {
-        tabs: [...state.tabs, ref],
-        activeId: ref.id,
-      });
+      const tabs = [...state.tabs, ref];
+      const lru = bumpLru(state.lru, ref.id);
+      const evicted = evictIfOverCap(tabs, lru, ref.id, ref.id);
+      writeState(threadId, { tabs: evicted.tabs, activeId: evicted.activeId ?? ref.id, lru: evicted.lru });
     },
     ensureTab(threadId, ref) {
       const state = readState(threadId);
       if (state.tabs.some((t) => t.id === ref.id)) return;
-      writeState(threadId, {
-        tabs: [...state.tabs, ref],
-        activeId: state.activeId ?? ref.id,
-      });
+      const tabs = [...state.tabs, ref];
+      // ensureTab does not bump LRU — it's a passive add. The new tab
+      // still goes to LRU tail so it's the first eviction victim if
+      // we're already at cap.
+      const lru = state.lru.includes(ref.id) ? state.lru : [...state.lru, ref.id];
+      const activeId = state.activeId ?? ref.id;
+      const evicted = evictIfOverCap(tabs, lru, activeId, activeId === ref.id ? ref.id : activeId ?? undefined);
+      writeState(threadId, { tabs: evicted.tabs, activeId: evicted.activeId, lru: evicted.lru });
     },
     activate(threadId, tabId) {
       const state = readState(threadId);
       if (!state.tabs.some((t) => t.id === tabId)) return;
-      if (state.activeId === tabId) return;
-      writeState(threadId, { tabs: state.tabs, activeId: tabId });
+      const lru = bumpLru(state.lru, tabId);
+      if (state.activeId === tabId) {
+        writeState(threadId, { tabs: state.tabs, activeId: state.activeId, lru });
+        return;
+      }
+      writeState(threadId, { tabs: state.tabs, activeId: tabId, lru });
     },
     closeTab(threadId, tabId) {
       const state = readState(threadId);
       const idx = state.tabs.findIndex((t) => t.id === tabId);
       if (idx < 0) return;
       const tabs = [...state.tabs.slice(0, idx), ...state.tabs.slice(idx + 1)];
+      const lru = state.lru.filter((x) => x !== tabId);
       let activeId = state.activeId;
       if (activeId === tabId) {
-        // Focus the previous tab; if closing the first, focus the new first;
-        // if no tabs remain, null.
         if (tabs.length === 0) activeId = null;
         else if (idx === 0) activeId = tabs[0]?.id ?? null;
         else activeId = tabs[idx - 1]?.id ?? null;
       }
-      writeState(threadId, { tabs, activeId });
+      writeState(threadId, { tabs, activeId, lru });
     },
     subscribe(threadId, fn) {
       let set = subscribers.get(threadId);

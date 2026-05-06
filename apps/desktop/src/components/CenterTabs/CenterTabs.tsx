@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentStatus } from "../../api.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { Kebab } from "../Kebab.js";
@@ -47,9 +47,31 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const draggingTab = draggingId ? tabs.find((t) => t.id === draggingId) ?? null : null;
+  const stripScrollRef = useRef<HTMLDivElement>(null);
+  const overflowButtonRef = useRef<HTMLButtonElement>(null);
+  const [hasOverflow, setHasOverflow] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = stripScrollRef.current;
+    if (!el) return;
+    const measure = () => {
+      setHasOverflow(el.scrollWidth > el.clientWidth + 1);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    return () => ro.disconnect();
+  }, [stripTabs.length]);
+
+  useEffect(() => {
+    if (!hasOverflow && overflowOpen) setOverflowOpen(false);
+  }, [hasOverflow, overflowOpen]);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-tab-inactive)", minHeight: 36 }}>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-tab-inactive)", minHeight: 36, position: "relative" }}>
+        <div ref={stripScrollRef} style={{ display: "flex", flex: 1, minWidth: 0, overflow: "hidden" }}>
         {stripTabs.map((tab) => {
           const isActive = tab.id === active?.id;
           const isHover = !isActive && hoverId === tab.id;
@@ -175,6 +197,49 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
             </div>
           );
         })}
+        </div>
+        {hasOverflow ? (
+          <button
+            ref={overflowButtonRef}
+            type="button"
+            data-testid="center-tabs-overflow-button"
+            aria-label="Show all tabs"
+            title="Show all tabs"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOverflowOpen((v) => !v);
+            }}
+            style={{
+              flex: "0 0 auto",
+              alignSelf: "stretch",
+              padding: "0 10px",
+              border: "none",
+              borderLeft: "1px solid var(--border-strong)",
+              background: "var(--surface-tab-inactive)",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              fontSize: 18,
+              lineHeight: 1,
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            ▾
+          </button>
+        ) : null}
+        {overflowOpen ? (
+          <OverflowPanel
+            tabs={stripTabs}
+            activeId={active?.id ?? null}
+            anchorRef={overflowButtonRef}
+            onActivate={(id) => {
+              setOverflowOpen(false);
+              onActivate(id);
+            }}
+            onClose={onClose}
+            onDismiss={() => setOverflowOpen(false)}
+          />
+        ) : null}
       </div>
       {header}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column", position: "relative" }}>
@@ -205,6 +270,121 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
           );
         })}
       </div>
+    </div>
+  );
+}
+
+interface OverflowPanelProps {
+  tabs: CenterTab[];
+  activeId: string | null;
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  onActivate(id: string): void;
+  onClose?(id: string): void;
+  onDismiss(): void;
+}
+
+function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismiss }: OverflowPanelProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    setPos({ top: rect.bottom + 2, right: Math.max(8, window.innerWidth - rect.right) });
+  }, [anchorRef]);
+
+  useEffect(() => {
+    function onPointerDown(e: MouseEvent) {
+      if (rootRef.current?.contains(e.target as Node)) return;
+      if (anchorRef.current?.contains(e.target as Node)) return;
+      onDismiss();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onDismiss();
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [anchorRef, onDismiss]);
+
+  if (!pos) return null;
+  return (
+    <div
+      ref={rootRef}
+      data-testid="center-tabs-overflow-panel"
+      style={{
+        position: "fixed",
+        top: pos.top,
+        right: pos.right,
+        zIndex: 1000,
+        background: "var(--surface-card)",
+        border: "1px solid var(--border-strong)",
+        boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+        minWidth: 240,
+        maxWidth: 360,
+        maxHeight: "60vh",
+        overflowY: "auto",
+        padding: "4px 0",
+      }}
+    >
+      {tabs.map((tab) => {
+        const isActive = tab.id === activeId;
+        return (
+          <div
+            key={tab.id}
+            data-testid={`center-tabs-overflow-item-${tab.id}`}
+            onClick={() => onActivate(tab.id)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 10px",
+              cursor: "pointer",
+              background: isActive ? "var(--surface-tab-active)" : "transparent",
+              color: isActive ? "var(--accent)" : "var(--text-primary)",
+              fontWeight: isActive ? 600 : 400,
+              fontSize: 13,
+            }}
+            onMouseEnter={(e) => {
+              if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "var(--surface-hover)";
+            }}
+            onMouseLeave={(e) => {
+              if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "transparent";
+            }}
+          >
+            {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tab.label}>
+              {tab.label}
+            </span>
+            {tab.closable && onClose ? (
+              <button
+                type="button"
+                data-testid={`center-tabs-overflow-close-${tab.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose(tab.id);
+                }}
+                title={`Close ${tab.label}`}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--muted)",
+                  cursor: "pointer",
+                  padding: "0 2px",
+                  fontSize: 14,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
