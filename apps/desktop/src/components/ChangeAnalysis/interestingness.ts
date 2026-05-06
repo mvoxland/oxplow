@@ -12,6 +12,13 @@
  *
  * Tunables live in `INTERESTINGNESS_WEIGHTS` so we can retune in
  * one place after dogfooding.
+ *
+ * Test-presence used to be a multiplier here. It was removed once
+ * we realized the only honest signal we could derive from a diff
+ * (without per-file pair matching or coverage data) is global —
+ * "this diff touched some tests" — which doesn't differentiate
+ * one row from another. The score now reflects the change's
+ * structural shape and nothing else.
  */
 import type { BranchChangeEntry } from "../../api-types.js";
 import type { FunctionsBuckets } from "./analysisHelpers.js";
@@ -29,9 +36,6 @@ export const INTERESTINGNESS_WEIGHTS = {
    *  by `longNewFnDivisor` adds to the multiplier. */
   longNewFnThreshold: 60,
   longNewFnDivisor: 40,
-  /** Multiplier applied when no test file changed in the same
-   *  top-level dir as this file. */
-  untestedMultiplier: 1.5,
   /** Reason threshold — only factors that push the multiplier
    *  this high get an entry in `reasons`. */
   reasonThreshold: 1.2,
@@ -52,14 +56,12 @@ export interface FileInterestInputs {
     modifiedSignature: FunctionsBuckets["modifiedSignature"];
     modifiedBody: FunctionsBuckets["modifiedBody"];
   };
-  /** True iff a test file changed in the same top-level dir. */
-  hasMatchingTest: boolean;
 }
 
 export function fileInterestingness(
   input: FileInterestInputs,
 ): InterestingnessResult {
-  const { file, bucketed, hasMatchingTest } = input;
+  const { file, bucketed } = input;
   const W = INTERESTINGNESS_WEIGHTS;
   const adds = file.additions ?? 0;
   const dels = file.deletions ?? 0;
@@ -82,13 +84,11 @@ export function fileInterestingness(
     );
   const longNewFn = Math.max(0, longestNewFnExcess) / W.longNewFnDivisor;
 
-  const untestedMul = hasMatchingTest ? 1.0 : W.untestedMultiplier;
-
   const base = W.baseFloor + sizeFactor;
   const complexityFactor = 1 + W.complexityCoeff * complexitySpike;
   const paramFactor = 1 + W.paramCoeff * paramSpike;
   const longFactor = 1 + longNewFn;
-  const score = base * complexityFactor * paramFactor * longFactor * untestedMul;
+  const score = base * complexityFactor * paramFactor * longFactor;
 
   const reasons: string[] = [];
   if (complexityFactor >= W.reasonThreshold) {
@@ -102,9 +102,6 @@ export function fileInterestingness(
   if (longFactor >= W.reasonThreshold) {
     const longest = Math.round(W.longNewFnThreshold + longestNewFnExcess);
     reasons.push(`added ${longest}-line function`);
-  }
-  if (untestedMul >= W.reasonThreshold) {
-    reasons.push("no test in same dir");
   }
   if (sizeFactor >= 5) {
     reasons.push(`${adds + dels} lines touched`);
@@ -124,13 +121,12 @@ export interface FunctionInterestInputs {
   };
   /** Per-function churn row (added/deleted/modified) if available. */
   churn: { addedLines: number; deletedLines: number; modifiedLines: number } | null;
-  hasMatchingTest: boolean;
 }
 
 export function functionInterestingness(
   input: FunctionInterestInputs,
 ): InterestingnessResult {
-  const { fn, churn, hasMatchingTest } = input;
+  const { fn, churn } = input;
   const W = INTERESTINGNESS_WEIGHTS;
   const churnLines = (churn?.addedLines ?? 0) + (churn?.deletedLines ?? 0);
   const sizeFactor = Math.log2(1 + churnLines + Math.abs(fn.lengthDelta ?? 0));
@@ -139,17 +135,13 @@ export function functionInterestingness(
     fn.length != null && fn.length > W.longNewFnThreshold
       ? 1 + (fn.length - W.longNewFnThreshold) / W.longNewFnDivisor
       : 1;
-  const untestedMul = hasMatchingTest ? 1.0 : W.untestedMultiplier;
-  const score = (W.baseFloor + sizeFactor) * complexityFactor * longFactor * untestedMul;
+  const score = (W.baseFloor + sizeFactor) * complexityFactor * longFactor;
   const reasons: string[] = [];
   if (complexityFactor >= W.reasonThreshold) {
     reasons.push(`complexity +${fn.complexityDelta}`);
   }
   if (longFactor >= W.reasonThreshold) {
     reasons.push(`${fn.length} lines`);
-  }
-  if (untestedMul >= W.reasonThreshold) {
-    reasons.push("no test in same dir");
   }
   return { score, reasons };
 }

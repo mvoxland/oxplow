@@ -1,50 +1,94 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CommitDetail, Stream, ThreadWorkState } from "../api.js";
 import { getCommitDetail } from "../api.js";
 import { logUi } from "../logger.js";
-import type { DiffRequest } from "../components/Diff/diff-request.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import { CommitDetailBody, buildCommitSlideoverTitle } from "../components/History/CommitDetailSlideover.js";
 import { Page } from "../tabs/Page.js";
 import { useBacklinks } from "../tabs/useBacklinks.js";
-import { gitCommitRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
+import { ScopeFilterBanner } from "../components/ChangeAnalysis/ScopeFilterBanner.js";
+import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
+import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
+import {
+  summarizeTestFunctions,
+  summarizeTestLineRatio,
+} from "../components/ChangeAnalysis/analysisHelpers.js";
 
 export interface GitCommitPageProps {
   stream: Stream | null;
   sha: string;
   /** Subject the caller already knows (for instant header rendering). */
   subject?: string;
+  /** Optional drilldown scope. Pivot clicks from inside the embedded
+   *  analysis panel set this on the page's own ref so the user
+   *  stays on this commit while filtering by extension / directory
+   *  / status. */
+  scope?: ChangeAnalysisScope;
   threadWork: ThreadWorkState | null;
-  onOpenDiff?(request: DiffRequest): void;
-  /** DiffSpec-shaped opener for the embedded change-analysis panel
-   *  (separate from the DiffRequest-shaped opener used by
-   *  CommitDetailBody). */
-  onOpenAnalysisDiff?(spec: DiffSpec): void;
-  onOpenAnalysisDiffInTab?(spec: DiffSpec): void;
+  /** DiffSpec opener forwarded to the embedded change-analysis panel. */
+  onOpenDiff?(spec: DiffSpec): void;
+  onOpenDiffInTab?(spec: DiffSpec): void;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile?(path: string, opts?: { newTab?: boolean }): void;
 }
 
 /**
- * Single-commit page. Bookmark- and history-friendly equivalent of the
- * legacy `CommitDetailSlideover`. Routed via `gitCommitRef(sha)`.
+ * Build the page title from the small commit identifier the caller
+ * already has (sha + subject), so the header renders synchronously
+ * without waiting on `getCommitDetail`. Exported for tests.
+ */
+export function buildCommitTitle(input: { sha: string; subject: string }): string {
+  const shaPrefix = input.sha.slice(0, 7);
+  const trimmed = input.subject.trim();
+  const subject = trimmed.length > 0 ? trimmed : "(no message)";
+  return `${shaPrefix} · ${subject}`;
+}
+
+/**
+ * Single-commit page. Renders the standard `SummaryCard` at the top,
+ * the inline commit metadata (subject, message body, SHA, author,
+ * date, parents), then the embedded `ChangeAnalysisPanel` which
+ * owns all file viewing for this surface — the page no longer
+ * keeps a separate "files changed" tree.
+ *
+ * Linked from `gitCommitRef(sha)`. Backlink clicks anywhere in the
+ * app open this page rather than a slideover.
  */
 export function GitCommitPage({
   stream,
   sha,
   subject = "",
+  scope,
   threadWork,
   onOpenDiff,
-  onOpenAnalysisDiff,
-  onOpenAnalysisDiffInTab,
+  onOpenDiffInTab,
   onOpenPage,
   onOpenFile,
 }: GitCommitPageProps) {
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const analysis = useChangeAnalysis({ streamId: stream?.id ?? null, target: sha, scope });
+  // Measure the SummaryCard so the CommitMeta on its left collapses
+  // to the same height — the meta panel is content-driven and would
+  // otherwise either be much shorter (1-line message) or much taller
+  // (long body) than the summary it sits beside.
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const [summaryHeight, setSummaryHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = summaryRef.current;
+    if (!el) {
+      setSummaryHeight(null);
+      return;
+    }
+    const measure = () => setSummaryHeight(el.getBoundingClientRect().height);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [analysis.files.length, sha, stream?.id]);
   const backlinkEntries = useBacklinks(gitCommitRef(sha), stream, threadWork);
   const backlinks = {
     count: backlinkEntries.length,
@@ -72,35 +116,167 @@ export function GitCommitPage({
     return () => { cancelled = true; };
   }, [sha, stream?.id]);
 
-  const headerTitle = buildCommitSlideoverTitle({ sha, subject: detail?.subject ?? subject });
+  const headerTitle = buildCommitTitle({ sha, subject: detail?.subject ?? subject });
 
   return (
     <Page testId="page-git-commit" title={headerTitle} kind="commit" backlinks={backlinks}>
-      <div style={{ padding: "12px 16px" }}>
-        {!sha ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>No commit selected.</div>
-        ) : loading && !detail ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>Loading…</div>
-        ) : !detail ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>Commit not found.</div>
-        ) : (
-          <CommitDetailBody detail={detail} onOpenDiff={onOpenDiff} />
-        )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "12px 16px" }}>
+        {scope ? (
+          <ScopeFilterBanner
+            scope={scope}
+            onClear={() => onOpenPage(gitCommitRef(sha))}
+          />
+        ) : null}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            {!sha ? (
+              <div style={muted}>No commit selected.</div>
+            ) : loading && !detail ? (
+              <div style={muted}>Loading…</div>
+            ) : !detail ? (
+              <div style={muted}>Commit not found.</div>
+            ) : (
+              <CommitMeta detail={detail} collapsedMaxHeight={summaryHeight} />
+            )}
+          </div>
+          <div style={{ minWidth: 0 }} ref={summaryRef}>
+            {sha && stream && analysis.files.length > 0 ? (
+              <SummaryCard
+                fileCount={analysis.files.length}
+                additions={analysis.totals.additions}
+                deletions={analysis.totals.deletions}
+                byStatus={analysis.pivots.byStatus}
+                tests={analysis.tests}
+                testFunctions={summarizeTestFunctions(analysis.functions)}
+                testLineRatio={summarizeTestLineRatio(analysis.functionChurn)}
+              />
+            ) : null}
+          </div>
+        </div>
 
         {sha && stream && onOpenFile ? (
-          <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--border-subtle)" }}>
-            <ChangeAnalysisPanel
-              streamId={stream.id}
-              target={sha}
-              showHeader={false}
-              onOpenPage={onOpenPage}
-              onOpenFile={onOpenFile}
-              onOpenDiff={onOpenAnalysisDiff}
-              onOpenDiffInTab={onOpenAnalysisDiffInTab}
-            />
-          </div>
+          <ChangeAnalysisPanel
+            analysis={analysis}
+            target={sha}
+            scope={scope}
+            showHeader={false}
+            onOpenPage={onOpenPage}
+            onOpenFile={onOpenFile}
+            onOpenDiff={onOpenDiff}
+            onOpenDiffInTab={onOpenDiffInTab}
+          />
         ) : null}
       </div>
     </Page>
   );
 }
+
+interface CommitMetaProps {
+  detail: CommitDetail;
+  /** Pixel height the SummaryCard alongside this panel renders at —
+   *  the panel collapses to roughly that height, with a "Show more"
+   *  toggle when the message body would overflow. `null` means "let
+   *  it grow" (e.g. before the summary mounts). */
+  collapsedMaxHeight: number | null;
+}
+
+function CommitMeta({ detail, collapsedMaxHeight }: CommitMetaProps) {
+  const date = formatAbsolute(new Date(detail.timestamp_secs * 1000).toISOString());
+  const author = detail.email ? `${detail.author} <${detail.email}>` : detail.author;
+  const sectionRef = useRef<HTMLElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  useLayoutEffect(() => {
+    const el = sectionRef.current;
+    if (!el || collapsedMaxHeight == null) {
+      setOverflowing(false);
+      return;
+    }
+    // Compare the natural scrollHeight against the cap. A small
+    // tolerance avoids a false positive from sub-pixel rounding.
+    setOverflowing(el.scrollHeight > collapsedMaxHeight + 2);
+  }, [collapsedMaxHeight, detail.body, detail.subject, detail.sha]);
+
+  const collapsed = !expanded && overflowing && collapsedMaxHeight != null;
+  return (
+    <section
+      ref={sectionRef}
+      style={{
+        ...card,
+        position: "relative",
+        maxHeight: collapsed ? collapsedMaxHeight! : undefined,
+        overflow: collapsed ? "hidden" : undefined,
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
+        <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
+          {date} · {author}
+        </div>
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{detail.subject}</div>
+          {detail.body ? (
+            <div style={{ whiteSpace: "pre-wrap", color: "var(--text-secondary)", fontSize: 11 }}>
+              {detail.body}
+            </div>
+          ) : null}
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "auto 1fr",
+            gap: "2px 10px",
+            color: "var(--text-secondary)",
+            fontSize: 11,
+          }}
+        >
+          <span>Version</span>
+          <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--text-primary)" }}>
+            {detail.sha}
+          </span>
+        </div>
+      </div>
+      {overflowing ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            position: "absolute",
+            right: 8,
+            bottom: 6,
+            background: "var(--surface-card)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 3,
+            padding: "1px 6px",
+            color: "var(--text-link, #2563eb)",
+            cursor: "pointer",
+            fontSize: 11,
+          }}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function formatAbsolute(input: string): string {
+  if (!input) return "";
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return input;
+  return d.toLocaleString();
+}
+
+const muted: React.CSSProperties = { color: "var(--text-secondary)", fontSize: 12 };
+const card: React.CSSProperties = {
+  background: "var(--surface-card)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 6,
+  padding: 12,
+};

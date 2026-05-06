@@ -1,16 +1,26 @@
 import { useMemo, useState } from "react";
-import type { FunctionsBuckets, FunctionVisibility } from "./analysisHelpers.js";
+import {
+  isTestFunction,
+  type FunctionChurnRow,
+  type FunctionsBuckets,
+  type FunctionVisibility,
+} from "./analysisHelpers.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { changeAnalysisRef, fileRef, type ChangeAnalysisTarget } from "../../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import {
   HierarchyView,
+  type HierarchyMetrics,
   type HierarchyNode,
   type HierarchyStatus,
 } from "../HierarchyView/HierarchyView.js";
 
 interface FunctionsCardProps {
   functions: FunctionsBuckets;
+  /** Per-function churn rows. When supplied, the leaf rows carry
+   *  added/deleted line counts in the right-side +/− columns;
+   *  ancestor (file/dir) nodes aggregate those totals. */
+  churn?: FunctionChurnRow[];
   /** Click target for function leaf rows. Falls back to opening the
    *  file in the editor if the host doesn't supply
    *  `onOpenFunctionDiff`. */
@@ -35,20 +45,34 @@ interface RowEntry {
   visibility: FunctionVisibility;
 }
 
-export function FunctionsCard({ functions, onOpenFile, onOpenFunctionDiff, target }: FunctionsCardProps) {
+export function FunctionsCard({ functions, churn, onOpenFile, onOpenFunctionDiff, target }: FunctionsCardProps) {
   const ctxNav = useOptionalPageNavigation();
   const [showPrivate, setShowPrivate] = useState(true);
+  const [showTests, setShowTests] = useState(true);
   const allRows = useMemo(() => flattenRows(functions), [functions]);
-  const visibleRows = useMemo(
-    () => (showPrivate ? allRows : allRows.filter((r) => r.visibility !== "private")),
-    [allRows, showPrivate],
-  );
+  const visibleRows = useMemo(() => {
+    let rows = allRows;
+    if (!showPrivate) rows = rows.filter((r) => r.visibility !== "private");
+    if (!showTests) rows = rows.filter((r) => !isTestFunction(r.path, r.name, r.containerPath));
+    return rows;
+  }, [allRows, showPrivate, showTests]);
+  const churnByKey = useMemo(() => {
+    const m = new Map<string, FunctionChurnRow>();
+    for (const c of churn ?? []) {
+      m.set(`${c.path}::${c.containerPath.join("::")}::${c.name}`, c);
+    }
+    return m;
+  }, [churn]);
   const nodes = useMemo(
-    () => buildNodes(visibleRows, target, onOpenFile, onOpenFunctionDiff, ctxNav),
-    [visibleRows, target, onOpenFile, onOpenFunctionDiff, ctxNav],
+    () => buildNodes(visibleRows, churnByKey, target, onOpenFile, onOpenFunctionDiff, ctxNav),
+    [visibleRows, churnByKey, target, onOpenFile, onOpenFunctionDiff, ctxNav],
   );
   const privateCount = useMemo(
     () => allRows.filter((r) => r.visibility === "private").length,
+    [allRows],
+  );
+  const testCount = useMemo(
+    () => allRows.filter((r) => isTestFunction(r.path, r.name, r.containerPath)).length,
     [allRows],
   );
 
@@ -56,17 +80,32 @@ export function FunctionsCard({ functions, onOpenFile, onOpenFunctionDiff, targe
     <section data-testid="change-analysis-functions" style={card}>
       <div style={headerRow}>
         <span style={{ fontWeight: 600 }}>Functions</span>
-        {privateCount > 0 ? (
-          <label style={toggleLabel} title="Heuristic per language. See language-specific notes for what 'private' means.">
+        <div style={togglesGroup}>
+          <label
+            style={toggleLabel}
+            title="Heuristic per language. See language-specific notes for what 'private' means."
+          >
             <input
               type="checkbox"
               data-testid="change-analysis-show-private"
               checked={showPrivate}
               onChange={(e) => setShowPrivate(e.target.checked)}
             />
-            <span>Show private ({privateCount})</span>
+            <span>Show private{privateCount > 0 ? ` (${privateCount})` : ""}</span>
           </label>
-        ) : null}
+          <label
+            style={toggleLabel}
+            title="Heuristic: a function is a test if its file path looks like a test path or its name matches test_*, Test*, Benchmark*, Example*."
+          >
+            <input
+              type="checkbox"
+              data-testid="change-analysis-show-tests"
+              checked={showTests}
+              onChange={(e) => setShowTests(e.target.checked)}
+            />
+            <span>Show tests{testCount > 0 ? ` (${testCount})` : ""}</span>
+          </label>
+        </div>
       </div>
       {allRows.length === 0 ? (
         <div style={muted}>
@@ -74,7 +113,11 @@ export function FunctionsCard({ functions, onOpenFile, onOpenFunctionDiff, targe
         </div>
       ) : visibleRows.length === 0 ? (
         <div style={muted}>
-          All function changes are private. Toggle "Show private" to see them.
+          {!showPrivate && allRows.every((r) => r.visibility === "private")
+            ? `All function changes are private. Toggle "Show private" to see them.`
+            : !showTests && allRows.every((r) => isTestFunction(r.path, r.name, r.containerPath))
+              ? `All function changes are tests. Toggle "Include tests" to see them.`
+              : `No functions match the current filters.`}
         </div>
       ) : (
         <HierarchyView
@@ -437,24 +480,47 @@ function collapseSingleChildDirs(node: RawNode): void {
 interface RawSummary {
   count: number;
   statuses: Set<HierarchyStatus>;
+  metrics: HierarchyMetrics;
 }
-function summarize(node: RawNode): RawSummary {
+function summarize(
+  node: RawNode,
+  churnByKey: Map<string, FunctionChurnRow>,
+): RawSummary {
   const statuses = new Set<HierarchyStatus>();
   let count = 0;
+  const metrics: HierarchyMetrics = {
+    added: 0,
+    modified: 0,
+    deleted: 0,
+    additions: 0,
+    deletions: 0,
+  };
   for (const row of node.rows) {
     statuses.add(row.status);
     count += 1;
+    metrics[row.status] += 1;
+    const c = churnByKey.get(`${row.path}::${row.containerPath.join("::")}::${row.name}`);
+    if (c) {
+      metrics.additions += c.addedLines;
+      metrics.deletions += c.deletedLines;
+    }
   }
   for (const child of node.children.values()) {
-    const inner = summarize(child);
+    const inner = summarize(child, churnByKey);
     for (const s of inner.statuses) statuses.add(s);
     count += inner.count;
+    metrics.added += inner.metrics.added;
+    metrics.modified += inner.metrics.modified;
+    metrics.deleted += inner.metrics.deleted;
+    metrics.additions += inner.metrics.additions;
+    metrics.deletions += inner.metrics.deletions;
   }
-  return { count, statuses };
+  return { count, statuses, metrics };
 }
 
 function buildNodes(
   rows: RowEntry[],
+  churnByKey: Map<string, FunctionChurnRow>,
   target: ChangeAnalysisTarget | undefined,
   onOpenFile: (path: string, opts?: { newTab?: boolean }) => void,
   onOpenFunctionDiff: ((path: string, line: number) => void) | undefined,
@@ -462,12 +528,13 @@ function buildNodes(
 ): HierarchyNode[] {
   const tree = buildRawTree(rows);
   const top = [...tree.children.values()].sort((a, b) => a.label.localeCompare(b.label));
-  return top.map((c) => toHierarchyNode(c, "", target, onOpenFile, onOpenFunctionDiff, ctxNav));
+  return top.map((c) => toHierarchyNode(c, "", churnByKey, target, onOpenFile, onOpenFunctionDiff, ctxNav));
 }
 
 function toHierarchyNode(
   node: RawNode,
   idPrefix: string,
+  churnByKey: Map<string, FunctionChurnRow>,
   target: ChangeAnalysisTarget | undefined,
   onOpenFile: (path: string, opts?: { newTab?: boolean }) => void,
   onOpenFunctionDiff: ((path: string, line: number) => void) | undefined,
@@ -481,19 +548,29 @@ function toHierarchyNode(
     return a.label.localeCompare(b.label);
   });
   const childNodes: HierarchyNode[] = sortedChildren.map((c) =>
-    toHierarchyNode(c, id, target, onOpenFile, onOpenFunctionDiff, ctxNav),
+    toHierarchyNode(c, id, churnByKey, target, onOpenFile, onOpenFunctionDiff, ctxNav),
   );
   // Function leaves attached at this depth.
   const leafRows = node.rows
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map<HierarchyNode>((row, i) => ({
+    .map<HierarchyNode>((row, i) => {
+      const churnRow = churnByKey.get(`${row.path}::${row.containerPath.join("::")}::${row.name}`);
+      const leafMetrics: HierarchyMetrics = {
+        added: row.status === "added" ? 1 : 0,
+        modified: row.status === "modified" ? 1 : 0,
+        deleted: row.status === "deleted" ? 1 : 0,
+        additions: churnRow?.addedLines ?? 0,
+        deletions: churnRow?.deletedLines ?? 0,
+      };
+      return {
       id: `${id}/fn:${row.name}:${i}`,
       label: row.name,
       icon: <FnIcon visibility={row.visibility} />,
       labelColor: visibilityColor(row.visibility),
       statuses: new Set<HierarchyStatus>([row.status]),
       detail: row.detail,
+      metrics: leafMetrics,
       onDrill: (e) => {
         // Plain click → open the diff for this file at the function's
         // line, *in the current tab* (browser-tab semantic; back
@@ -515,8 +592,9 @@ function toHierarchyNode(
       drillTitle: row.startLine > 0 ? `Open diff at line ${row.startLine}` : `Open diff for ${row.path}`,
       testId: "change-analysis-fn-row",
       children: [],
-    }));
-  const summary = summarize(node);
+      };
+    });
+  const summary = summarize(node, churnByKey);
   const childrenAll = [...childNodes, ...leafRows];
   const label = node.kind === "dir" ? `${node.label}/` : node.label;
 
@@ -565,6 +643,7 @@ function toHierarchyNode(
     icon: iconFor(node.kind),
     statuses: summary.statuses,
     count: summary.count,
+    metrics: summary.metrics,
     onDrill,
     drillTitle,
     children: childrenAll,
@@ -656,6 +735,12 @@ const headerRow: React.CSSProperties = {
   gap: 12,
   marginBottom: 8,
 };
+const togglesGroup: React.CSSProperties = {
+  marginLeft: "auto",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 12,
+};
 const toggleLabel: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -663,6 +748,5 @@ const toggleLabel: React.CSSProperties = {
   fontSize: 11,
   color: "var(--text-muted)",
   cursor: "pointer",
-  marginLeft: "auto",
 };
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };

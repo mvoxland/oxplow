@@ -19,6 +19,10 @@ export interface FilePivotRow {
   files: number;
   additions: number;
   deletions: number;
+  /** File counts split by status bucket — drives the stacked bar
+   *  on the extension pivot. `added` includes untracked; `modified`
+   *  includes renamed; `deleted` is just deleted. */
+  byStatus: { added: number; modified: number; deleted: number };
 }
 
 export interface FilePivots {
@@ -89,6 +93,50 @@ export function isTestPath(path: string): boolean {
   return TEST_PATTERNS.some((re) => re.test(path));
 }
 
+/** Per-language function-name conventions for tests:
+ *   - Python / Rust: `test_*`
+ *   - Go: `Test*` / `Benchmark*` / `Example*` followed by an
+ *     uppercase letter or end-of-name.
+ *   - Java: `test*` (older convention; @Test annotations aren't
+ *     carried in our function metrics so we lean on the prefix).
+ *   - JS/TS: `it`, `test`, `describe` blocks live inside test
+ *     files, which `isTestPath` already covers.
+ */
+const TEST_NAME_PATTERNS: RegExp[] = [
+  /^test_/, // Python, Rust
+  /^test[A-Z_]/, // older Java / JS convention
+  /^Test([A-Z_]|$)/, // Go
+  /^Benchmark([A-Z_]|$)/,
+  /^Example([A-Z_]|$)/,
+];
+
+/** Treat any container named `tests`, `test`, `FooTest`,
+ *  `FooTests`, or `Test*` as a test container. The Rust idiom
+ *  `#[cfg(test)] mod tests { #[test] fn parses() { ... } }`
+ *  produces functions whose name doesn't match the prefix
+ *  conventions but whose containerPath includes "tests". */
+function isTestContainer(name: string): boolean {
+  if (name === "tests" || name === "test") return true;
+  if (/Tests?$/.test(name)) return true;
+  if (/^Test([A-Z_]|$)/.test(name)) return true;
+  return false;
+}
+
+/** True if a function should be classified as a test — either it
+ *  lives in a test file, its name matches a per-language test
+ *  convention, or any of its container ancestors is a test
+ *  module/class (Rust `mod tests`, Java `FooTest` class, etc.). */
+export function isTestFunction(
+  path: string,
+  name: string,
+  containerPath: readonly string[] = [],
+): boolean {
+  if (isTestPath(path)) return true;
+  if (TEST_NAME_PATTERNS.some((re) => re.test(name))) return true;
+  if (containerPath.some(isTestContainer)) return true;
+  return false;
+}
+
 /** Extract the file extension (no dot). Empty string if none. */
 export function fileExtension(path: string): string {
   const base = path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path;
@@ -118,8 +166,8 @@ export function buildFilePivots(files: BranchChangeEntry[]): FilePivots {
     byStatus[f.status] += 1;
     const ext = fileExtension(f.path) || "(none)";
     const dir = topDirectory(f.path);
-    incPivot(byExt, ext, f.additions ?? 0, f.deletions ?? 0);
-    incPivot(byDir, dir, f.additions ?? 0, f.deletions ?? 0);
+    incPivot(byExt, ext, f.additions ?? 0, f.deletions ?? 0, f.status);
+    incPivot(byDir, dir, f.additions ?? 0, f.deletions ?? 0, f.status);
   }
   const sortDesc = (a: FilePivotRow, b: FilePivotRow) =>
     b.files - a.files || b.additions + b.deletions - (a.additions + a.deletions);
@@ -130,15 +178,40 @@ export function buildFilePivots(files: BranchChangeEntry[]): FilePivots {
   };
 }
 
-function incPivot(map: Map<string, FilePivotRow>, key: string, add: number, del: number): void {
+function incPivot(
+  map: Map<string, FilePivotRow>,
+  key: string,
+  add: number,
+  del: number,
+  status: GitFileStatus,
+): void {
+  const bucket = statusBucket(status);
   const existing = map.get(key);
   if (existing) {
     existing.files += 1;
     existing.additions += add;
     existing.deletions += del;
+    existing.byStatus[bucket] += 1;
     return;
   }
-  map.set(key, { key, files: 1, additions: add, deletions: del });
+  map.set(key, {
+    key,
+    files: 1,
+    additions: add,
+    deletions: del,
+    byStatus: {
+      added: bucket === "added" ? 1 : 0,
+      modified: bucket === "modified" ? 1 : 0,
+      deleted: bucket === "deleted" ? 1 : 0,
+    },
+  });
+}
+
+function statusBucket(status: GitFileStatus): "added" | "modified" | "deleted" {
+  if (status === "added" || status === "untracked") return "added";
+  if (status === "deleted") return "deleted";
+  // modified, renamed
+  return "modified";
 }
 
 export interface SidedFunctionMap {
@@ -319,6 +392,69 @@ export interface TestSummary {
   ratio: number;
   /** Non-test files that gained ≥1 net line and have no matching test file change. */
   riskyUntested: Array<{ path: string; netLines: number }>;
+}
+
+/** Per-status counts of test FUNCTIONS in the diff. "modified" =
+ *  unique test functions that appear in either modifiedSignature or
+ *  modifiedBody (so a function changed both ways still counts once).
+ *  Drives SummaryCard's Tests line. */
+export interface TestFunctionCounts {
+  added: number;
+  modified: number;
+  deleted: number;
+}
+
+/** Lines-of-tests vs lines-of-production from per-function churn.
+ *  `ratio = testLines / productionLines`. Used by SummaryCard's
+ *  Test/code ratio line. Both numerator and denominator count
+ *  added + deleted lines (i.e. total churn) within their bucket. */
+export interface TestLineRatio {
+  testLines: number;
+  productionLines: number;
+  /** 0 when productionLines is 0 (avoids div-by-zero; also natural
+   *  reading: "no production code touched" rather than "infinity"). */
+  ratio: number;
+}
+
+export function summarizeTestLineRatio(churn: FunctionChurnRow[]): TestLineRatio {
+  let testLines = 0;
+  let productionLines = 0;
+  for (const c of churn) {
+    const lines = c.addedLines + c.deletedLines;
+    if (isTestFunction(c.path, c.name, c.containerPath)) {
+      testLines += lines;
+    } else {
+      productionLines += lines;
+    }
+  }
+  return {
+    testLines,
+    productionLines,
+    ratio: productionLines === 0 ? 0 : testLines / productionLines,
+  };
+}
+
+export function summarizeTestFunctions(functions: FunctionsBuckets): TestFunctionCounts {
+  const out: TestFunctionCounts = { added: 0, modified: 0, deleted: 0 };
+  for (const fn of functions.added) {
+    if (isTestFunction(fn.path, fn.name, fn.containerPath)) out.added += 1;
+  }
+  for (const fn of functions.deleted) {
+    if (isTestFunction(fn.path, fn.name, fn.containerPath)) out.deleted += 1;
+  }
+  // modifiedSignature + modifiedBody can both touch the same function.
+  // Track qualified keys to avoid double-counting.
+  const seen = new Set<string>();
+  const tally = (fn: { path: string; name: string; containerPath: string[] }) => {
+    if (!isTestFunction(fn.path, fn.name, fn.containerPath)) return;
+    const key = `${fn.path}::${fn.containerPath.join("::")}::${fn.name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.modified += 1;
+  };
+  for (const fn of functions.modifiedSignature) tally(fn);
+  for (const fn of functions.modifiedBody) tally(fn);
+  return out;
 }
 
 export function summarizeTests(files: BranchChangeEntry[]): TestSummary {

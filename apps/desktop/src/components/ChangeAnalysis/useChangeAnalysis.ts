@@ -418,18 +418,12 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   // sibling directory still de-risks the file regardless of the
   // current drilldown.
   const fileScores = useMemo<Map<string, InterestingnessResult>>(() => {
-    const testedDirs = new Set<string>();
-    for (const f of files) {
-      if (
-        /\.test\.[a-zA-Z]+$/.test(f.path) ||
-        /\.spec\.[a-zA-Z]+$/.test(f.path) ||
-        /(^|\/)tests?\//.test(f.path) ||
-        /(^|\/)test_[^/]+\.(py|rs)$/.test(f.path) ||
-        /_test\.go$/.test(f.path)
-      ) {
-        testedDirs.add(topDirectory(f.path));
-      }
-    }
+    // No test-presence factor. The only honest test signal we
+    // could derive at the file level (without per-file pair
+    // matching or coverage data) is global, which doesn't
+    // differentiate one file from another. The score now
+    // reflects size + complexity / param spikes + new-function
+    // length only.
     const result = new Map<string, InterestingnessResult>();
     const fnsByPath = new Map<string, {
       added: FunctionsBuckets["added"];
@@ -458,11 +452,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
       };
       result.set(
         file.path,
-        fileInterestingness({
-          file,
-          bucketed,
-          hasMatchingTest: testedDirs.has(topDirectory(file.path)),
-        }),
+        fileInterestingness({ file, bucketed }),
       );
     }
     return result;
