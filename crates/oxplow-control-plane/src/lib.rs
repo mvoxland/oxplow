@@ -43,9 +43,7 @@ use oxplow_app::{
 };
 use oxplow_domain::stores::{AgentTurnStore, StreamStore, ThreadStore, WorkItemStore};
 use oxplow_domain::{HookKind, StreamId, ThreadId, WorkItemStatus};
-use oxplow_runtime::filing::{
-    build_filing_enforcement_pre_tool_deny, FilingEnforcementContext,
-};
+use oxplow_runtime::filing::{build_filing_enforcement_pre_tool_deny, FilingEnforcementContext};
 use oxplow_runtime::stop_hook::{
     decide_stop_directive, DirectiveBuilders, StopHookSideEffect, ThreadSnapshot,
 };
@@ -289,13 +287,7 @@ async fn handle_hook(
     // PreToolUse — runs BEFORE ingest so denial returns immediately
     // and the persisted record reflects what actually happened.
     if kind == HookKind::PreToolUse {
-        if let Some(deny) = pre_tool_check(
-            &ctx,
-            thread_id.as_ref(),
-            body_value.as_ref(),
-        )
-        .await
-        {
+        if let Some(deny) = pre_tool_check(&ctx, thread_id.as_ref(), body_value.as_ref()).await {
             // Persist the event with a deny outcome so the hook log
             // shows what the runtime did.
             let envelope = HookEnvelope {
@@ -372,9 +364,12 @@ async fn handle_hook(
                 .map(|s| s == "ExitPlanMode")
                 .unwrap_or(false)
             {
-                if let Some(banner) =
-                    role_change_banner_for(&ctx, thread_id, envelope_for_resume.session_id.as_deref())
-                        .await
+                if let Some(banner) = role_change_banner_for(
+                    &ctx,
+                    thread_id,
+                    envelope_for_resume.session_id.as_deref(),
+                )
+                .await
                 {
                     return (
                         StatusCode::OK,
@@ -485,11 +480,7 @@ async fn pre_tool_check(
         .work_item_store
         .list_for_thread(thread_id)
         .await
-        .map(|items| {
-            items
-                .iter()
-                .any(|i| i.status == WorkItemStatus::InProgress)
-        })
+        .map(|items| items.iter().any(|i| i.status == WorkItemStatus::InProgress))
         .unwrap_or(false);
 
     let file_path = tool_input
@@ -520,16 +511,9 @@ async fn pre_tool_check(
 /// per-thread wiki-note attribution table. Mirrors how main attributes
 /// note touches via the runtime's PostToolUse handler. Tolerant of
 /// missing fields — attribution is best-effort.
-async fn attribute_wiki_page_edit(
-    ctx: &AppCtx,
-    thread_id: &ThreadId,
-    body: &serde_json::Value,
-) {
+async fn attribute_wiki_page_edit(ctx: &AppCtx, thread_id: &ThreadId, body: &serde_json::Value) {
     let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-    if !matches!(
-        tool_name,
-        "Edit" | "Write" | "MultiEdit" | "NotebookEdit"
-    ) {
+    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
         return;
     }
     let tool_input = match body.get("tool_input") {
@@ -567,7 +551,11 @@ fn wiki_page_slug_from_path(raw: &str, project_dir: &Path) -> Option<String> {
     };
     let notes_dir = project_dir.join(".oxplow").join("wiki");
     let rel = abs.strip_prefix(&notes_dir).ok()?;
-    if rel.parent().map(|p| !p.as_os_str().is_empty()).unwrap_or(false) {
+    if rel
+        .parent()
+        .map(|p| !p.as_os_str().is_empty())
+        .unwrap_or(false)
+    {
         return None; // refuses subdirectories
     }
     let stem = rel.file_stem()?.to_string_lossy().into_owned();
@@ -617,7 +605,12 @@ async fn update_resume_session_id(ctx: &AppCtx, env: &HookEnvelope) {
 /// filing rule. Mirrors `src/electron/filing-enforcement.ts`.
 fn git_operation_in_progress(project_dir: &Path) -> bool {
     let gitdir = project_dir.join(".git");
-    for marker in ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
+    for marker in [
+        "MERGE_HEAD",
+        "REBASE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+    ] {
         if gitdir.join(marker).exists() {
             return true;
         }
@@ -626,7 +619,12 @@ fn git_operation_in_progress(project_dir: &Path) -> bool {
     if let Ok(contents) = std::fs::read_to_string(&gitdir) {
         if let Some(real_dir) = contents.strip_prefix("gitdir: ") {
             let real = Path::new(real_dir.trim());
-            for marker in ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
+            for marker in [
+                "MERGE_HEAD",
+                "REBASE_HEAD",
+                "CHERRY_PICK_HEAD",
+                "REVERT_HEAD",
+            ] {
                 if real.join(marker).exists() {
                     return true;
                 }
@@ -673,10 +671,7 @@ async fn mine_turn_signals(ctx: &AppCtx, thread_id: &ThreadId) -> Option<TurnSig
         signals.had_activity = true;
         if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&evt.payload_json) {
             if let Some(tool_name) = payload.get("tool_name").and_then(|v| v.as_str()) {
-                if matches!(
-                    tool_name,
-                    "Edit" | "Write" | "MultiEdit" | "NotebookEdit"
-                ) {
+                if matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
                     signals.had_writes = true;
                 }
             }
@@ -823,7 +818,11 @@ async fn capture_or_get_initial_role(
         .flatten()?;
     let current = RoleMode::from_thread(&thread);
     let mut st = ctx.role_state.lock();
-    Some(*st.initial_role_by_session_id.entry(session_id).or_insert(current))
+    Some(
+        *st.initial_role_by_session_id
+            .entry(session_id)
+            .or_insert(current),
+    )
 }
 
 /// Build a fresh `<session-context>` block for the thread with the
@@ -946,7 +945,10 @@ mod tests {
 
     #[test]
     fn parse_hook_kind_known() {
-        assert!(matches!(parse_hook_kind("PreToolUse"), Some(HookKind::PreToolUse)));
+        assert!(matches!(
+            parse_hook_kind("PreToolUse"),
+            Some(HookKind::PreToolUse)
+        ));
         assert!(matches!(parse_hook_kind("Stop"), Some(HookKind::Stop)));
     }
 

@@ -31,8 +31,10 @@ pub async fn set_snapshot_retention_days(
     days: u32,
 ) -> Result<OxplowConfig, IpcError> {
     let project = state.layout.project_dir.clone();
-    mutate_config(&state.config, &project, |c| c.snapshot_retention_days = days)
-        .map_err(|e| IpcError::internal(e.to_string()))
+    mutate_config(&state.config, &project, |c| {
+        c.snapshot_retention_days = days
+    })
+    .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]
@@ -42,8 +44,10 @@ pub async fn set_snapshot_max_file_bytes(
     bytes: u64,
 ) -> Result<OxplowConfig, IpcError> {
     let project = state.layout.project_dir.clone();
-    mutate_config(&state.config, &project, |c| c.snapshot_max_file_bytes = bytes)
-        .map_err(|e| IpcError::internal(e.to_string()))
+    mutate_config(&state.config, &project, |c| {
+        c.snapshot_max_file_bytes = bytes
+    })
+    .map_err(|e| IpcError::internal(e.to_string()))
 }
 
 #[tauri::command]

@@ -36,16 +36,11 @@ pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
             GitFileStatus::Added
         } else if s.contains(git2::Status::WT_NEW) {
             GitFileStatus::Untracked
-        } else if s.contains(git2::Status::WT_DELETED)
-            || s.contains(git2::Status::INDEX_DELETED)
-        {
+        } else if s.contains(git2::Status::WT_DELETED) || s.contains(git2::Status::INDEX_DELETED) {
             GitFileStatus::Deleted
-        } else if s.contains(git2::Status::WT_RENAMED)
-            || s.contains(git2::Status::INDEX_RENAMED)
-        {
+        } else if s.contains(git2::Status::WT_RENAMED) || s.contains(git2::Status::INDEX_RENAMED) {
             GitFileStatus::Renamed
-        } else if s.contains(git2::Status::WT_MODIFIED)
-            || s.contains(git2::Status::INDEX_MODIFIED)
+        } else if s.contains(git2::Status::WT_MODIFIED) || s.contains(git2::Status::INDEX_MODIFIED)
         {
             GitFileStatus::Modified
         } else {
@@ -79,7 +74,8 @@ mod tests {
             idx.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
         dir
     }
 

@@ -60,11 +60,7 @@ pub fn list_existing_worktrees(repo_root: impl AsRef<Path>) -> Vec<GitWorktreeEn
         } else if let Some(rest) = line.strip_prefix("HEAD ") {
             entry.head_sha = Some(rest.to_string());
         } else if let Some(rest) = line.strip_prefix("branch ") {
-            entry.branch = Some(
-                rest.strip_prefix("refs/heads/")
-                    .unwrap_or(rest)
-                    .to_string(),
-            );
+            entry.branch = Some(rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string());
         } else if line == "detached" {
             entry.is_detached = true;
         } else if line == "locked" || line.starts_with("locked ") {
@@ -164,7 +160,10 @@ pub fn ensure_worktree(
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(repo_root).arg("worktree").arg("add");
     if !branch_exists {
-        cmd.arg("-b").arg(branch).arg(worktree_path).arg(branch_source);
+        cmd.arg("-b")
+            .arg(branch)
+            .arg(worktree_path)
+            .arg(branch_source);
     } else {
         cmd.arg(worktree_path).arg(branch);
     }
@@ -287,6 +286,8 @@ mod tests {
         assert!(adoptable.is_empty());
         let none_registered: Vec<String> = vec![];
         let adoptable = list_adoptable_worktrees(repo_dir.path(), &none_registered);
-        assert!(adoptable.iter().any(|e| e.branch.as_deref() == Some("feat")));
+        assert!(adoptable
+            .iter()
+            .any(|e| e.branch.as_deref() == Some("feat")));
     }
 }

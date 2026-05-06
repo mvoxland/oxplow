@@ -107,11 +107,7 @@ pub fn read_file_at_ref(repo_path: &Path, r#ref: &str, path: &str) -> Option<Str
 }
 
 /// List the most recent commits that touched `path`, up to `limit`.
-pub fn list_file_commits(
-    repo_path: &Path,
-    path: &str,
-    limit: usize,
-) -> Vec<GitLogCommit> {
+pub fn list_file_commits(repo_path: &Path, path: &str, limit: usize) -> Vec<GitLogCommit> {
     let repo = match git2::Repository::open(repo_path) {
         Ok(r) => r,
         Err(_) => return vec![],
@@ -123,9 +119,7 @@ pub fn list_file_commits(
     if walker.push_head().is_err() {
         return vec![];
     }
-    walker
-        .set_sorting(git2::Sort::TIME)
-        .ok();
+    walker.set_sorting(git2::Sort::TIME).ok();
 
     let target = Path::new(path);
     let mut out = Vec::new();
@@ -227,12 +221,32 @@ mod tests {
     use tempfile::tempdir;
 
     fn init_with_commit(dir: &Path, file: &str, content: &str) {
-        Command::new("git").args(["init", "-q", "--initial-branch=main"]).current_dir(dir).output().unwrap();
-        Command::new("git").args(["config", "user.email", "t@e.com"]).current_dir(dir).output().unwrap();
-        Command::new("git").args(["config", "user.name", "t"]).current_dir(dir).output().unwrap();
+        Command::new("git")
+            .args(["init", "-q", "--initial-branch=main"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "t@e.com"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "t"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
         std::fs::write(dir.join(file), content).unwrap();
-        Command::new("git").args(["add", "-A"]).current_dir(dir).output().unwrap();
-        Command::new("git").args(["commit", "-m", "msg"]).current_dir(dir).output().unwrap();
+        Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "msg"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
     }
 
     #[test]

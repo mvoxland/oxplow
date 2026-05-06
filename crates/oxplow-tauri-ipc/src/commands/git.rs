@@ -1,9 +1,9 @@
+use oxplow_domain::stores::StreamStore;
 use oxplow_git::{
     AheadBehind, BlameLine, BranchChanges, ChangeScopes, GitOpResult, GitOperationKind,
     GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry, RepoConflictState,
     TextSearchHit,
 };
-use oxplow_domain::stores::StreamStore;
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -25,7 +25,10 @@ pub async fn get_ahead_behind(
     base: String,
     head: String,
 ) -> Result<AheadBehind, IpcError> {
-    Ok(state.git.ahead_behind(stream_id.as_deref(), base, head).await)
+    Ok(state
+        .git
+        .ahead_behind(stream_id.as_deref(), base, head)
+        .await)
 }
 
 #[tauri::command]
@@ -189,9 +192,7 @@ pub async fn git_add_path(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_all_refs(
-    state: tauri::State<'_, AppState>,
-) -> Result<GroupedGitRefs, IpcError> {
+pub async fn list_all_refs(state: tauri::State<'_, AppState>) -> Result<GroupedGitRefs, IpcError> {
     Ok(state.git.list_all_refs().await)
 }
 
@@ -239,7 +240,10 @@ pub async fn local_blame(
     path: String,
     disk_text: String,
 ) -> Result<Vec<LocalBlameEntry>, IpcError> {
-    Ok(state.git.local_blame(stream_id.as_deref(), path, disk_text).await)
+    Ok(state
+        .git
+        .local_blame(stream_id.as_deref(), path, disk_text)
+        .await)
 }
 
 #[tauri::command]
@@ -258,7 +262,10 @@ pub async fn get_branch_changes(
     stream_id: Option<String>,
     base_ref: String,
 ) -> Result<BranchChanges, IpcError> {
-    Ok(state.git.branch_changes(stream_id.as_deref(), base_ref).await)
+    Ok(state
+        .git
+        .branch_changes(stream_id.as_deref(), base_ref)
+        .await)
 }
 
 #[tauri::command]

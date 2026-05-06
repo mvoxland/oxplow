@@ -120,7 +120,8 @@ impl HookIngestService {
                     };
                     self.turns.open(&turn).await?;
                 }
-                self.set_status(&thread, AgentStatusState::Running, None).await?;
+                self.set_status(&thread, AgentStatusState::Running, None)
+                    .await?;
             }
             HookKind::Stop => {
                 self.close_open_turns(&thread, None).await?;
@@ -143,7 +144,8 @@ impl HookIngestService {
                 // at the top of ingest; that's all we need here.
             }
             HookKind::Interrupt => {
-                self.close_open_turns(&thread, Some("interrupted".into())).await?;
+                self.close_open_turns(&thread, Some("interrupted".into()))
+                    .await?;
                 self.set_status(&thread, AgentStatusState::Stopped, Some("interrupt".into()))
                     .await?;
             }
@@ -425,5 +427,4 @@ mod tests {
         assert!(!payload_signals_await_user(r#"{}"#));
         assert!(!payload_signals_await_user(r#"{"await_user":false}"#));
     }
-
 }

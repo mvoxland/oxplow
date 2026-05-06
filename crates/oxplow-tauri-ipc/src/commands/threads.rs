@@ -34,9 +34,7 @@ pub async fn upsert_thread(
 ) -> Result<(), IpcError> {
     let stream_id = thread.stream_id.clone();
     state.thread_store.upsert(&thread).await?;
-    state
-        .events
-        .emit(OxplowEvent::ThreadsChanged { stream_id });
+    state.events.emit(OxplowEvent::ThreadsChanged { stream_id });
     Ok(())
 }
 
@@ -47,10 +45,16 @@ pub async fn delete_thread(
     thread_id: ThreadId,
 ) -> Result<(), IpcError> {
     // Capture stream_id before delete so the event can target it.
-    let stream_id = state.thread_store.get(&thread_id).await?.map(|t| t.stream_id);
+    let stream_id = state
+        .thread_store
+        .get(&thread_id)
+        .await?
+        .map(|t| t.stream_id);
     state.thread_store.delete(&thread_id).await?;
     if let Some(sid) = stream_id {
-        state.events.emit(OxplowEvent::ThreadsChanged { stream_id: sid });
+        state
+            .events
+            .emit(OxplowEvent::ThreadsChanged { stream_id: sid });
     }
     Ok(())
 }

@@ -6,7 +6,9 @@ use std::path::Path;
 /// matching `git rev-parse --show-toplevel`.
 pub fn is_git_repo(path: impl AsRef<Path>) -> bool {
     let path = path.as_ref();
-    let Ok(repo) = git2::Repository::open(path) else { return false };
+    let Ok(repo) = git2::Repository::open(path) else {
+        return false;
+    };
     // git2 considers a worktree to be a repo too; we want to be more
     // strict and only return true for the *toplevel* dir of a repo.
     if let Some(workdir) = repo.workdir() {
@@ -61,7 +63,8 @@ mod tests {
             idx.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
         dir
     }
 

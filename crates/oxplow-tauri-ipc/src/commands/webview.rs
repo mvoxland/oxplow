@@ -10,32 +10,24 @@ use crate::error::IpcError;
 /// grants zero oxplow commands and zero plugin permissions.
 #[tauri::command]
 #[specta::specta]
-pub async fn open_external_url(
-    app: tauri::AppHandle,
-    url: String,
-) -> Result<String, IpcError> {
+pub async fn open_external_url(app: tauri::AppHandle, url: String) -> Result<String, IpcError> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err(IpcError::invalid(format!(
             "external URL must be http or https: {url}"
         )));
     }
 
-    let parsed = tauri::Url::parse(&url)
-        .map_err(|e| IpcError::invalid(format!("bad URL: {e}")))?;
+    let parsed = tauri::Url::parse(&url).map_err(|e| IpcError::invalid(format!("bad URL: {e}")))?;
 
     // Label format must match the `ext-url-*` glob in
     // capabilities/external-url.json.
     let label = format!("ext-url-{}", uuid::Uuid::new_v4().simple());
 
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        &label,
-        tauri::WebviewUrl::External(parsed),
-    )
-    .title(format!("{} — Oxplow", url))
-    .inner_size(1100.0, 800.0)
-    .build()
-    .map_err(|e| IpcError::internal(format!("create webview window: {e}")))?;
+    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(parsed))
+        .title(format!("{} — Oxplow", url))
+        .inner_size(1100.0, 800.0)
+        .build()
+        .map_err(|e| IpcError::internal(format!("create webview window: {e}")))?;
 
     Ok(label)
 }

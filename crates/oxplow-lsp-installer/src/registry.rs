@@ -99,7 +99,9 @@ mod tests {
         let target_dir = tmp.path().join("rust-analyzer");
         tokio::fs::create_dir_all(&target_dir).await.unwrap();
         let yaml = "name: rust-analyzer\ndescription: x\nlanguages: [Rust]\nsource:\n  id: pkg:github/rust-lang/rust-analyzer@v1\n  asset: []\nbin: {}\n";
-        tokio::fs::write(target_dir.join("package.yaml"), yaml).await.unwrap();
+        tokio::fs::write(target_dir.join("package.yaml"), yaml)
+            .await
+            .unwrap();
         let pkg = reg.fetch_package("rust-analyzer").await.unwrap();
         assert_eq!(pkg.name, "rust-analyzer");
     }

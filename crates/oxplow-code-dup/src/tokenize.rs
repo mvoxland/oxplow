@@ -107,14 +107,10 @@ pub fn is_comment_kind(kind: &str) -> bool {
 pub fn is_skip_node(lang: Language, node: Node<'_>, src: &[u8]) -> bool {
     let kind = node.kind();
     match lang {
-        Language::Rust => matches!(
-            kind,
-            "use_declaration" | "extern_crate_declaration"
-        ),
-        Language::TypeScript | Language::Tsx | Language::JavaScript => matches!(
-            kind,
-            "import_statement" | "import_alias"
-        ),
+        Language::Rust => matches!(kind, "use_declaration" | "extern_crate_declaration"),
+        Language::TypeScript | Language::Tsx | Language::JavaScript => {
+            matches!(kind, "import_statement" | "import_alias")
+        }
         Language::Python => matches!(
             kind,
             "import_statement" | "import_from_statement" | "future_import_statement"
@@ -123,10 +119,7 @@ pub fn is_skip_node(lang: Language, node: Node<'_>, src: &[u8]) -> bool {
             kind,
             "import_declaration" | "import_spec" | "import_spec_list" | "package_clause"
         ),
-        Language::Java => matches!(
-            kind,
-            "import_declaration" | "package_declaration"
-        ),
+        Language::Java => matches!(kind, "import_declaration" | "package_declaration"),
         Language::C => matches!(kind, "preproc_include"),
         Language::Cpp => matches!(
             kind,

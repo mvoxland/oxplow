@@ -88,7 +88,9 @@ fn spawn_for_stream(
     match std::fs::read_dir(&worktree) {
         Ok(entries) => {
             for entry in entries.flatten() {
-                let Ok(file_type) = entry.file_type() else { continue };
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
                 if !file_type.is_dir() {
                     continue;
                 }
@@ -168,7 +170,10 @@ fn spawn_for_stream(
         });
     }
 
-    Some(StreamWatchers { _fs: fs, _refs: refs })
+    Some(StreamWatchers {
+        _fs: fs,
+        _refs: refs,
+    })
 }
 
 /// Watch the project root for `.git` appearing or disappearing and
@@ -196,13 +201,8 @@ fn spawn_project_context(project_dir: PathBuf, events: EventBus) -> Option<FsWat
             match rx.recv().await {
                 Ok(WatchEvent { path, .. }) => {
                     // Only react to events on `.git` itself.
-                    let touched_git = path
-                        .file_name()
-                        .map(|n| n == ".git")
-                        .unwrap_or(false)
-                        || path
-                            .components()
-                            .any(|c| c.as_os_str() == ".git");
+                    let touched_git = path.file_name().map(|n| n == ".git").unwrap_or(false)
+                        || path.components().any(|c| c.as_os_str() == ".git");
                     if !touched_git {
                         continue;
                     }

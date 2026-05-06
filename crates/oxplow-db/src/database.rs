@@ -66,7 +66,9 @@ impl Database {
     /// Borrow a connection from the pool. Most stores should call this
     /// inside a `spawn_blocking` so the synchronous rusqlite API doesn't
     /// stall the tokio runtime.
-    pub(crate) fn conn(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, r2d2::Error> {
+    pub(crate) fn conn(
+        &self,
+    ) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, r2d2::Error> {
         self.pool.get()
     }
 
@@ -230,7 +232,8 @@ mod tests {
             "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
              VALUES ('b-a', 's-1', 'a', 'active', ?1, ?1)",
             [now],
-        ).unwrap();
+        )
+        .unwrap();
         let result = conn.execute(
             "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
              VALUES ('b-b', 's-1', 'b', 'active', ?1, ?1)",
@@ -272,13 +275,17 @@ mod tests {
             "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
              VALUES ('b-1', 's-1', 't', 'active', ?1, ?1)",
             [now],
-        ).unwrap();
+        )
+        .unwrap();
         // Both null — must fail.
         let r = conn.execute(
             "INSERT INTO work_notes (id, body, author, created_at) VALUES ('n-bad', 'b', 'u', ?1)",
             [now],
         );
-        assert!(r.is_err(), "work_notes with neither parent should fail CHECK");
+        assert!(
+            r.is_err(),
+            "work_notes with neither parent should fail CHECK"
+        );
         // Both set — must fail.
         let r = conn.execute(
             "INSERT INTO work_items (id, kind, title, status, priority, created_by, created_at, updated_at)

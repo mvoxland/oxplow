@@ -7,8 +7,8 @@
 
 pub mod agent_panes;
 pub mod app;
-pub mod backlog;
 pub mod background;
+pub mod backlog;
 pub mod branch;
 pub mod churn;
 pub mod code_quality;

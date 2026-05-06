@@ -25,7 +25,7 @@ mod package;
 mod registry;
 mod target;
 
-pub use installer::{InstallError, Installer, Installed};
+pub use installer::{InstallError, Installed, Installer};
 pub use package::{Package, PackageError, SourceId};
 pub use registry::{Registry, RegistryError};
 pub use target::{current_target, Target};

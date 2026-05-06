@@ -59,11 +59,7 @@ pub fn push(repo: &Path) -> std::io::Result<GitOpResult> {
     run(&["push"], repo)
 }
 
-pub fn push_current_to(
-    repo: &Path,
-    remote: &str,
-    branch: &str,
-) -> std::io::Result<GitOpResult> {
+pub fn push_current_to(repo: &Path, remote: &str, branch: &str) -> std::io::Result<GitOpResult> {
     run(&["push", remote, &format!("HEAD:{branch}")], repo)
 }
 
@@ -104,7 +100,16 @@ pub fn search_workspace_text(repo: &Path, query: &str, limit: Option<usize>) -> 
     }
     let limit = limit.unwrap_or(200).clamp(1, 1000);
     let output = match Command::new("git")
-        .args(["grep", "--no-color", "-n", "-I", "-F", "--untracked", "--", trimmed])
+        .args([
+            "grep",
+            "--no-color",
+            "-n",
+            "-I",
+            "-F",
+            "--untracked",
+            "--",
+            trimmed,
+        ])
         .current_dir(repo)
         .output()
     {

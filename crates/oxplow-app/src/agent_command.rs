@@ -93,7 +93,8 @@ fn build_env_prefix(env: &[(String, String)]) -> String {
         .iter()
         .map(|(k, v)| {
             assert!(
-                k.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'),
+                k.bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'),
                 "invalid env var name: {k}"
             );
             format!("{k}={}", shell_escape(v))
@@ -146,7 +147,12 @@ mod tests {
     #[test]
     fn copilot_command_just_execs_copilot() {
         let s = stream();
-        let cmd = build_agent_command(AgentKind::Copilot, &s, PaneKind::Working, &Default::default());
+        let cmd = build_agent_command(
+            AgentKind::Copilot,
+            &s,
+            PaneKind::Working,
+            &Default::default(),
+        );
         assert!(cmd.starts_with("sh -lc "));
         assert!(cmd.contains("exec copilot"));
         assert!(cmd.contains("/repo"));
@@ -155,7 +161,12 @@ mod tests {
     #[test]
     fn claude_command_resumes_when_session_id_set() {
         let s = stream();
-        let cmd = build_agent_command(AgentKind::Claude, &s, PaneKind::Working, &Default::default());
+        let cmd = build_agent_command(
+            AgentKind::Claude,
+            &s,
+            PaneKind::Working,
+            &Default::default(),
+        );
         assert!(cmd.contains("--resume "));
         assert!(cmd.contains("sess-w"));
         // Falls back to a fresh session on stale id.
@@ -166,7 +177,12 @@ mod tests {
     #[test]
     fn claude_command_fresh_when_no_session() {
         let s = stream();
-        let cmd = build_agent_command(AgentKind::Claude, &s, PaneKind::Talking, &Default::default());
+        let cmd = build_agent_command(
+            AgentKind::Claude,
+            &s,
+            PaneKind::Talking,
+            &Default::default(),
+        );
         assert!(!cmd.contains("--resume"));
         assert!(cmd.contains("exec claude"));
     }

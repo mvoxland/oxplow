@@ -47,7 +47,10 @@ impl SqliteWikiPageStore {
 }
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(&ts)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -63,7 +66,9 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiPage> {
     let body_size_bytes: i64 = row.get("body_size_bytes")?;
     let file_refs_json: String = row.get("file_refs_json")?;
     let related_notes_json: String = row.get("related_notes_json")?;
-    let dir_refs_json: String = row.get("dir_refs_json").unwrap_or_else(|_| "[]".to_string());
+    let dir_refs_json: String = row
+        .get("dir_refs_json")
+        .unwrap_or_else(|_| "[]".to_string());
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
     let map_err = |e: DomainError| {
@@ -122,12 +127,12 @@ impl SqliteWikiPageStore {
         let note = note.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                let file_refs_json = serde_json::to_string(&note.file_refs)
-                    .unwrap_or_else(|_| "[]".to_string());
-                let related_notes_json = serde_json::to_string(&note.related_notes)
-                    .unwrap_or_else(|_| "[]".to_string());
-                let dir_refs_json = serde_json::to_string(&note.dir_refs)
-                    .unwrap_or_else(|_| "[]".to_string());
+                let file_refs_json =
+                    serde_json::to_string(&note.file_refs).unwrap_or_else(|_| "[]".to_string());
+                let related_notes_json =
+                    serde_json::to_string(&note.related_notes).unwrap_or_else(|_| "[]".to_string());
+                let dir_refs_json =
+                    serde_json::to_string(&note.dir_refs).unwrap_or_else(|_| "[]".to_string());
                 conn.execute(
                     "INSERT INTO wiki_page (
                         slug, title, body_path, body_excerpt, body_size_bytes,

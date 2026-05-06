@@ -236,15 +236,12 @@ impl GitService {
     async fn register_internal(&self, stream_id: &StreamId, worktree: PathBuf) {
         {
             let mut inner = self.inner.write().await;
-            inner
-                .snapshots
-                .entry(stream_id.clone())
-                .or_insert_with(|| {
-                    Arc::new(RwLock::new(StreamSnapshot {
-                        worktree: worktree.clone(),
-                        ..Default::default()
-                    }))
-                });
+            inner.snapshots.entry(stream_id.clone()).or_insert_with(|| {
+                Arc::new(RwLock::new(StreamSnapshot {
+                    worktree: worktree.clone(),
+                    ..Default::default()
+                }))
+            });
         }
         // Best-effort kick — failure means the worker shut down.
         let _ = self.refresh_tx.send(RefreshTask {
@@ -259,10 +256,7 @@ impl GitService {
         inner.snapshots.remove(stream_id);
     }
 
-    fn spawn_refresh_worker(
-        svc: Arc<Self>,
-        mut rx: mpsc::UnboundedReceiver<RefreshTask>,
-    ) {
+    fn spawn_refresh_worker(svc: Arc<Self>, mut rx: mpsc::UnboundedReceiver<RefreshTask>) {
         tokio::spawn(async move {
             // Coalesce within a small debounce window so a burst of
             // fs-watch hits doesn't translate into N separate git
@@ -573,10 +567,7 @@ impl GitService {
     // Cached reads
     // ---------------------------------------------------------------
 
-    pub async fn status_summary(
-        &self,
-        stream_id: Option<&str>,
-    ) -> WorkspaceStatusSummary {
+    pub async fn status_summary(&self, stream_id: Option<&str>) -> WorkspaceStatusSummary {
         if let Some(snap) = self.snapshot_for(stream_id).await {
             let guard = snap.read().await;
             if let Some(s) = guard.status_summary.as_ref() {
@@ -602,10 +593,7 @@ impl GitService {
         summary
     }
 
-    pub async fn statuses(
-        &self,
-        stream_id: Option<&str>,
-    ) -> HashMap<String, GitFileStatus> {
+    pub async fn statuses(&self, stream_id: Option<&str>) -> HashMap<String, GitFileStatus> {
         if let Some(snap) = self.snapshot_for(stream_id).await {
             let guard = snap.read().await;
             if let Some(s) = guard.statuses.as_ref() {
@@ -651,10 +639,7 @@ impl GitService {
             .unwrap_or_default()
     }
 
-    pub async fn conflict_state(
-        &self,
-        stream_id: Option<&str>,
-    ) -> RepoConflictState {
+    pub async fn conflict_state(&self, stream_id: Option<&str>) -> RepoConflictState {
         if let Some(snap) = self.snapshot_for(stream_id).await {
             let guard = snap.read().await;
             if let Some(c) = guard.conflict_state.as_ref() {
@@ -712,22 +697,14 @@ impl GitService {
             .expect("change_scopes join")
     }
 
-    pub async fn branch_changes(
-        &self,
-        stream_id: Option<&str>,
-        base_ref: String,
-    ) -> BranchChanges {
+    pub async fn branch_changes(&self, stream_id: Option<&str>, base_ref: String) -> BranchChanges {
         let path = self.resolve_repo_dir(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::list_branch_changes(&path, &base_ref))
             .await
             .expect("branch_changes join")
     }
 
-    pub async fn git_log(
-        &self,
-        stream_id: Option<&str>,
-        opts: GitLogOptions,
-    ) -> GitLogResult {
+    pub async fn git_log(&self, stream_id: Option<&str>, opts: GitLogOptions) -> GitLogResult {
         // Cache hit: HEAD-only query whose limit fits inside the
         // pre-fetched window. The dashboard asks for limit=5; the
         // GitHistory page's first paint asks for ~50.
@@ -777,11 +754,7 @@ impl GitService {
         .unwrap_or_default()
     }
 
-    pub async fn blame(
-        &self,
-        stream_id: Option<&str>,
-        path: String,
-    ) -> Vec<BlameLine> {
+    pub async fn blame(&self, stream_id: Option<&str>, path: String) -> Vec<BlameLine> {
         let dir = self.resolve_repo_dir(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::git_blame(&dir, &path))
             .await
@@ -812,11 +785,7 @@ impl GitService {
             .unwrap_or_default()
     }
 
-    pub async fn read_file_at_ref(
-        &self,
-        r#ref: String,
-        path: String,
-    ) -> Option<String> {
+    pub async fn read_file_at_ref(&self, r#ref: String, path: String) -> Option<String> {
         let project = self.project_dir.clone();
         tokio::task::spawn_blocking(move || oxplow_git::read_file_at_ref(&project, &r#ref, &path))
             .await
@@ -873,14 +842,13 @@ impl GitService {
             .unwrap_or_default()
     }
 
-    pub async fn list_adoptable_worktrees(
-        &self,
-        registered: Vec<String>,
-    ) -> Vec<GitWorktreeEntry> {
+    pub async fn list_adoptable_worktrees(&self, registered: Vec<String>) -> Vec<GitWorktreeEntry> {
         let path = self.project_dir.clone();
-        tokio::task::spawn_blocking(move || oxplow_git::list_adoptable_worktrees(&path, &registered))
-            .await
-            .unwrap_or_default()
+        tokio::task::spawn_blocking(move || {
+            oxplow_git::list_adoptable_worktrees(&path, &registered)
+        })
+        .await
+        .unwrap_or_default()
     }
 
     pub async fn detect_default_branch(&self) -> Option<String> {
@@ -951,8 +919,8 @@ impl GitService {
                     statuses: true,
                     branches: false,
                     conflict: false,
-                                ..Default::default()
-                            },
+                    ..Default::default()
+                },
             );
         }
         Ok(result)
@@ -977,8 +945,8 @@ impl GitService {
                     statuses: true,
                     branches: false,
                     conflict: false,
-                                ..Default::default()
-                            },
+                    ..Default::default()
+                },
             );
         }
         Ok(result)
@@ -1016,8 +984,8 @@ impl GitService {
                     statuses: true,
                     branches: false,
                     conflict: false,
-                                ..Default::default()
-                            },
+                    ..Default::default()
+                },
             );
         }
         Ok(result)
@@ -1041,8 +1009,8 @@ impl GitService {
                     statuses: true,
                     branches: false,
                     conflict: false,
-                                ..Default::default()
-                            },
+                    ..Default::default()
+                },
             );
         }
         Ok(result)
@@ -1065,8 +1033,8 @@ impl GitService {
                 statuses: true,
                 branches: true,
                 conflict: true,
-                                ..Default::default()
-                            },
+                ..Default::default()
+            },
         );
         Ok(result)
     }
@@ -1084,8 +1052,8 @@ impl GitService {
                 statuses: true,
                 branches: false,
                 conflict: false,
-                                ..Default::default()
-                            },
+                ..Default::default()
+            },
         );
         Ok(result)
     }
@@ -1103,8 +1071,8 @@ impl GitService {
                 statuses: true,
                 branches: false,
                 conflict: false,
-                                ..Default::default()
-                            },
+                ..Default::default()
+            },
         );
         Ok(())
     }
@@ -1120,10 +1088,7 @@ impl GitService {
         Ok(result)
     }
 
-    pub async fn pull(
-        &self,
-        stream_id: Option<&str>,
-    ) -> std::io::Result<GitOpResult> {
+    pub async fn pull(&self, stream_id: Option<&str>) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::pull(&path)).await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), RefreshKinds::all());
@@ -1137,18 +1102,14 @@ impl GitService {
         branch: String,
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
-        let result = run_blocking(move || {
-            oxplow_git::pull_remote_into_current(&path, &remote, &branch)
-        })
-        .await?;
+        let result =
+            run_blocking(move || oxplow_git::pull_remote_into_current(&path, &remote, &branch))
+                .await?;
         self.announce_write(stream_id_from(stream_id).as_ref(), RefreshKinds::all());
         Ok(result)
     }
 
-    pub async fn push(
-        &self,
-        stream_id: Option<&str>,
-    ) -> std::io::Result<GitOpResult> {
+    pub async fn push(&self, stream_id: Option<&str>) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::push(&path)).await?;
         // Push doesn't change local refs; just nudge the renderer in
@@ -1159,8 +1120,8 @@ impl GitService {
                 statuses: false,
                 branches: true,
                 conflict: false,
-                                ..Default::default()
-                            },
+                ..Default::default()
+            },
         );
         Ok(result)
     }
@@ -1180,8 +1141,8 @@ impl GitService {
                 statuses: false,
                 branches: true,
                 conflict: false,
-                                ..Default::default()
-                            },
+                ..Default::default()
+            },
         );
         Ok(result)
     }
@@ -1244,16 +1205,13 @@ impl GitService {
                 statuses: true,
                 branches: false,
                 conflict: false,
-                                ..Default::default()
-                            },
+                ..Default::default()
+            },
         );
         Ok(())
     }
 
-    async fn snapshot_for(
-        &self,
-        stream_id: Option<&str>,
-    ) -> Option<Arc<RwLock<StreamSnapshot>>> {
+    async fn snapshot_for(&self, stream_id: Option<&str>) -> Option<Arc<RwLock<StreamSnapshot>>> {
         let id = stream_id?;
         let inner = self.inner.read().await;
         inner.snapshots.get(&StreamId::from(id)).cloned()
@@ -1271,12 +1229,11 @@ impl GitService {
                     statuses: false,
                     branches: true,
                     conflict: true,
-                                ..Default::default()
-                            },
+                    ..Default::default()
+                },
             );
-            self.events.emit(OxplowEvent::GitRefsChanged {
-                stream_id: id,
-            });
+            self.events
+                .emit(OxplowEvent::GitRefsChanged { stream_id: id });
         }
     }
 }
@@ -1304,7 +1261,10 @@ where
         Ok(r) => r,
         Err(e) => {
             warn!(error = %e, "git op join failed");
-            Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
         }
     }
 }

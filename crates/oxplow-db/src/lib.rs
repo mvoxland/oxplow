@@ -6,8 +6,8 @@
 
 pub mod agent_stores;
 pub mod analytics_stores;
-pub mod effort_store;
 mod database;
+pub mod effort_store;
 mod stream_store;
 mod thread_store;
 pub mod wiki_page_store;
@@ -16,15 +16,15 @@ mod work_item_store;
 mod work_satellite;
 
 pub use agent_stores::SqliteAgentTurnStore;
-pub use effort_store::{
-    EffortFile, EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffort, WorkItemEffortStore,
-};
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
     PageVisitStore, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,
     SqliteUsageStore, UsageEvent, UsageRollup,
 };
 pub use database::{Database, DbInitError};
+pub use effort_store::{
+    EffortFile, EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffort, WorkItemEffortStore,
+};
 pub use stream_store::SqliteStreamStore;
 pub use thread_store::SqliteThreadStore;
 pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};

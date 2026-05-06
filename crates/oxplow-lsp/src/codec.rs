@@ -51,14 +51,10 @@ impl Decoder for LspCodec {
                 .split_once(':')
                 .ok_or_else(|| CodecError::BadHeader(line.to_string()))?;
             if name.eq_ignore_ascii_case("Content-Length") {
-                content_length = Some(
-                    value
-                        .trim()
-                        .parse()
-                        .map_err(|e: std::num::ParseIntError| {
-                            CodecError::BadHeader(e.to_string())
-                        })?,
-                );
+                content_length =
+                    Some(value.trim().parse().map_err(|e: std::num::ParseIntError| {
+                        CodecError::BadHeader(e.to_string())
+                    })?);
             }
         }
         let len = content_length.ok_or(CodecError::MissingLength)?;
@@ -91,10 +87,7 @@ fn find_double_crlf(buf: &[u8]) -> Option<usize> {
 
 /// Helper for tests that just want to write a framed JSON message
 /// onto an `AsyncWrite` without going through `Framed`.
-pub async fn write_framed<W: AsyncWriteExt + Unpin>(
-    writer: &mut W,
-    json: &str,
-) -> io::Result<()> {
+pub async fn write_framed<W: AsyncWriteExt + Unpin>(writer: &mut W, json: &str) -> io::Result<()> {
     let header = format!("Content-Length: {}\r\n\r\n", json.len());
     writer.write_all(header.as_bytes()).await?;
     writer.write_all(json.as_bytes()).await?;
@@ -116,9 +109,7 @@ mod tests {
 
     #[test]
     fn decode_returns_full_message() {
-        let mut buf = BytesMut::from(
-            "Content-Length: 7\r\n\r\n{\"a\":1}",
-        );
+        let mut buf = BytesMut::from("Content-Length: 7\r\n\r\n{\"a\":1}");
         let mut codec = LspCodec;
         let msg = codec.decode(&mut buf).unwrap();
         assert_eq!(msg.as_deref(), Some("{\"a\":1}"));
@@ -127,9 +118,8 @@ mod tests {
 
     #[test]
     fn decode_handles_back_to_back_messages() {
-        let mut buf = BytesMut::from(
-            "Content-Length: 3\r\n\r\n{}\nContent-Length: 7\r\n\r\n{\"b\":2}",
-        );
+        let mut buf =
+            BytesMut::from("Content-Length: 3\r\n\r\n{}\nContent-Length: 7\r\n\r\n{\"b\":2}");
         // First decode pulls "{}\n", second pulls "{\"b\":2}".
         let mut codec = LspCodec;
         let a = codec.decode(&mut buf).unwrap().unwrap();

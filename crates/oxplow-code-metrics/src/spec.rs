@@ -422,10 +422,7 @@ static C: LanguageSpec = LanguageSpec {
 // ---- C++ ----
 
 static CPP: LanguageSpec = LanguageSpec {
-    function_kinds: &[
-        "function_definition",
-        "lambda_expression",
-    ],
+    function_kinds: &["function_definition", "lambda_expression"],
     name_fields: &["declarator"],
     param_list_fields: &["parameters"],
     parameter_kinds: &["parameter_declaration", "optional_parameter_declaration"],

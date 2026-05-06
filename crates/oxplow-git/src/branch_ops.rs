@@ -70,10 +70,7 @@ pub fn detect_default_branch(repo_path: &Path) -> Option<String> {
         }
     }
     for candidate in &["main", "master"] {
-        if repo
-            .find_branch(candidate, git2::BranchType::Local)
-            .is_ok()
-        {
+        if repo.find_branch(candidate, git2::BranchType::Local).is_ok() {
             return Some((*candidate).to_string());
         }
     }
@@ -90,23 +87,34 @@ pub struct AheadBehind {
 /// branch names (short form). Returns `(0, 0)` on lookup failure.
 pub fn get_ahead_behind(repo_path: &Path, base: &str, head: &str) -> AheadBehind {
     let Ok(repo) = git2::Repository::open(repo_path) else {
-        return AheadBehind { ahead: 0, behind: 0 };
+        return AheadBehind {
+            ahead: 0,
+            behind: 0,
+        };
     };
-    let resolve = |name: &str| -> Option<git2::Oid> {
-        repo.revparse_single(name).ok().map(|obj| obj.id())
-    };
+    let resolve =
+        |name: &str| -> Option<git2::Oid> { repo.revparse_single(name).ok().map(|obj| obj.id()) };
     let Some(base_oid) = resolve(base) else {
-        return AheadBehind { ahead: 0, behind: 0 };
+        return AheadBehind {
+            ahead: 0,
+            behind: 0,
+        };
     };
     let Some(head_oid) = resolve(head) else {
-        return AheadBehind { ahead: 0, behind: 0 };
+        return AheadBehind {
+            ahead: 0,
+            behind: 0,
+        };
     };
     repo.graph_ahead_behind(head_oid, base_oid)
         .map(|(ahead, behind)| AheadBehind {
             ahead: ahead as u32,
             behind: behind as u32,
         })
-        .unwrap_or(AheadBehind { ahead: 0, behind: 0 })
+        .unwrap_or(AheadBehind {
+            ahead: 0,
+            behind: 0,
+        })
 }
 
 /// First N commits `head` has that aren't on `base`. Equivalent to
@@ -140,7 +148,9 @@ pub fn get_commits_ahead_of(
 
     let mut out = Vec::with_capacity(limit);
     for oid in walk.flatten().take(limit) {
-        let Ok(commit) = repo.find_commit(oid) else { continue };
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
         let author = commit.author();
         out.push(GitLogCommit {
             sha: oid.to_string(),
@@ -215,7 +225,8 @@ mod tests {
         idx.add_path(std::path::Path::new("a")).unwrap();
         let tree_id = idx.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
         dir
     }
 
@@ -235,7 +246,9 @@ mod tests {
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         repo.branch("feature", &head, false).unwrap();
         delete_branch(dir.path(), "feature", false).unwrap();
-        assert!(repo.find_branch("feature", git2::BranchType::Local).is_err());
+        assert!(repo
+            .find_branch("feature", git2::BranchType::Local)
+            .is_err());
     }
 
     #[test]
@@ -250,7 +263,13 @@ mod tests {
     fn ahead_behind_zero_for_same_branch() {
         let dir = init_repo();
         let ab = get_ahead_behind(dir.path(), "main", "main");
-        assert_eq!(ab, AheadBehind { ahead: 0, behind: 0 });
+        assert_eq!(
+            ab,
+            AheadBehind {
+                ahead: 0,
+                behind: 0
+            }
+        );
     }
 
     #[test]

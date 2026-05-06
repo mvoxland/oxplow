@@ -63,12 +63,9 @@ impl WikiPagesWatcher {
                         let Some(slug) = evt.path.file_stem().and_then(|s| s.to_str()) else {
                             continue;
                         };
-                        if let Err(err) = wiki_pages::sync_from_disk(
-                            &project_dir_for_loop,
-                            &store_for_loop,
-                            slug,
-                        )
-                        .await
+                        if let Err(err) =
+                            wiki_pages::sync_from_disk(&project_dir_for_loop, &store_for_loop, slug)
+                                .await
                         {
                             warn!(slug, ?err, "wiki page resync failed");
                             continue;

@@ -19,7 +19,7 @@ use tree_sitter::{Node, Parser};
 
 mod spec;
 
-pub use spec::{Language, LanguageSpec, VisibilityStrategy, language_for_path};
+pub use spec::{language_for_path, Language, LanguageSpec, VisibilityStrategy};
 
 /// Coarse public/private classification. Heuristic per language —
 /// see the comment on `LanguageSpec::visibility` for the strategy
@@ -71,11 +71,7 @@ pub fn analyze_file(path: &str, source: &str) -> Vec<FunctionMetrics> {
 /// Like `analyze_file` but with the language explicitly chosen
 /// (useful when the path doesn't reveal the language, e.g. content
 /// fetched from a git ref into a temp buffer).
-pub fn analyze_with_language(
-    path: &str,
-    source: &str,
-    language: Language,
-) -> Vec<FunctionMetrics> {
+pub fn analyze_with_language(path: &str, source: &str, language: Language) -> Vec<FunctionMetrics> {
     let spec = language.spec();
     let mut parser = Parser::new();
     if parser.set_language(&spec.tree_sitter_language()).is_err() {
@@ -291,11 +287,7 @@ fn ts_visibility(node: Node<'_>, src: &[u8]) -> Visibility {
     // If this method sits inside a class, default = public.
     if has_ancestor_kind(
         node,
-        &[
-            "class_declaration",
-            "abstract_class_declaration",
-            "class",
-        ],
+        &["class_declaration", "abstract_class_declaration", "class"],
     ) {
         return Visibility::Public;
     }
@@ -604,12 +596,7 @@ fn count_decision_points(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> u32
     count
 }
 
-fn count_decision_subtree(
-    node: Node<'_>,
-    src: &[u8],
-    spec: &LanguageSpec,
-    root_id: usize,
-) -> u32 {
+fn count_decision_subtree(node: Node<'_>, src: &[u8], spec: &LanguageSpec, root_id: usize) -> u32 {
     let mut count = 0u32;
     if node.id() != root_id && is_decision_node(node, src, spec) {
         count += 1;

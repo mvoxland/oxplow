@@ -153,7 +153,8 @@ impl AgentStatusStore for ThreadRuntimeRegistry {
         pane_target: &str,
     ) -> Result<Option<AgentStatus>, DomainError> {
         let m = self.inner.lock().expect("registry mutex");
-        Ok(m.get(thread).and_then(|r| r.statuses.get(pane_target).cloned()))
+        Ok(m.get(thread)
+            .and_then(|r| r.statuses.get(pane_target).cloned()))
     }
 
     async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError> {
@@ -184,7 +185,9 @@ mod tests {
     #[tokio::test]
     async fn append_then_list_recent_returns_newest_first_within_thread() {
         let r = ThreadRuntimeRegistry::with_default_capacity();
-        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1)).await.unwrap();
+        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1))
+            .await
+            .unwrap();
         r.append(&ev("b-1", HookKind::PreToolUse, 2)).await.unwrap();
         r.append(&ev("b-2", HookKind::Stop, 3)).await.unwrap();
         let recent = r
@@ -215,7 +218,9 @@ mod tests {
     #[tokio::test]
     async fn list_recent_with_no_thread_filter_merges_across_threads_desc() {
         let r = ThreadRuntimeRegistry::with_default_capacity();
-        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1)).await.unwrap();
+        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1))
+            .await
+            .unwrap();
         r.append(&ev("b-2", HookKind::Stop, 3)).await.unwrap();
         r.append(&ev("b-1", HookKind::PreToolUse, 2)).await.unwrap();
         let all = r.list_recent(None, 10).await.unwrap();
@@ -227,7 +232,9 @@ mod tests {
     #[tokio::test]
     async fn list_by_kind_filters() {
         let r = ThreadRuntimeRegistry::with_default_capacity();
-        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1)).await.unwrap();
+        r.append(&ev("b-1", HookKind::UserPromptSubmit, 1))
+            .await
+            .unwrap();
         r.append(&ev("b-1", HookKind::PreToolUse, 2)).await.unwrap();
         r.append(&ev("b-1", HookKind::Stop, 3)).await.unwrap();
         let stops = r.list_by_kind(HookKind::Stop, 10).await.unwrap();

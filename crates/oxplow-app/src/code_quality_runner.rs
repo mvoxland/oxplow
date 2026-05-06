@@ -229,7 +229,9 @@ pub async fn run_duplication_scan_with(
     });
     match tokio::time::timeout(timeout, task).await {
         Ok(Ok(inner)) => inner,
-        Ok(Err(join_err)) => Err(CodeQualityError::Task(format!("duplication task: {join_err}"))),
+        Ok(Err(join_err)) => Err(CodeQualityError::Task(format!(
+            "duplication task: {join_err}"
+        ))),
         Err(_) => Err(CodeQualityError::Timeout(timeout)),
     }
 }
@@ -276,7 +278,9 @@ pub async fn run_duplication_scan_scoped(
     });
     match tokio::time::timeout(timeout, task).await {
         Ok(Ok(inner)) => inner,
-        Ok(Err(join_err)) => Err(CodeQualityError::Task(format!("duplication task: {join_err}"))),
+        Ok(Err(join_err)) => Err(CodeQualityError::Task(format!(
+            "duplication task: {join_err}"
+        ))),
         Err(_) => Err(CodeQualityError::Timeout(timeout)),
     }
 }
@@ -293,7 +297,9 @@ pub async fn run_duplication_scan(
     let filter: Arc<dyn FileFilter> = if opts.files.is_empty() {
         Arc::new(AllFiles)
     } else {
-        Arc::new(oxplow_tree_source::ExplicitPaths::new(opts.files.iter().cloned()))
+        Arc::new(oxplow_tree_source::ExplicitPaths::new(
+            opts.files.iter().cloned(),
+        ))
     };
     run_duplication_scan_with(source, filter, opts.timeout, opts.dup_options).await
 }
@@ -385,12 +391,13 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         std::fs::write(dir.path().join("a.rs"), body).unwrap();
         std::fs::write(dir.path().join("b.rs"), body).unwrap();
         let opts = RunOptions {
-            dup_options: Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+            dup_options: Some(DupOptions {
+                min_lines: 5,
+                ..DupOptions::default()
+            }),
             ..RunOptions::default()
         };
-        let findings = run_duplication_scan(dir.path(), opts)
-            .await
-            .unwrap();
+        let findings = run_duplication_scan(dir.path(), opts).await.unwrap();
         let dups: Vec<_> = findings
             .iter()
             .filter(|f| f.kind == "duplicate-block")
@@ -406,14 +413,17 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         // a nested object.
         for f in &dups {
             let raw = f.extra_json.as_deref().expect("extra_json present");
-            let parsed: serde_json::Value = serde_json::from_str(raw)
-                .expect("extra_json parses as JSON");
+            let parsed: serde_json::Value =
+                serde_json::from_str(raw).expect("extra_json parses as JSON");
             assert!(
                 parsed.get("peerPath").and_then(|v| v.as_str()).is_some(),
                 "expected peerPath in extra_json, got {raw}"
             );
             assert!(
-                parsed.get("peerStartLine").and_then(|v| v.as_i64()).is_some(),
+                parsed
+                    .get("peerStartLine")
+                    .and_then(|v| v.as_i64())
+                    .is_some(),
                 "expected peerStartLine in extra_json, got {raw}"
             );
             assert!(
@@ -509,29 +519,55 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             .unwrap();
         // Two functions × three metric kinds = 6 findings.
         let function_kinds: Vec<_> = metrics.iter().map(|f| f.kind.as_str()).collect();
-        assert!(function_kinds.iter().filter(|k| **k == "complexity").count() == 2);
-        assert!(function_kinds.iter().filter(|k| **k == "function-length").count() == 2);
+        assert!(
+            function_kinds
+                .iter()
+                .filter(|k| **k == "complexity")
+                .count()
+                == 2
+        );
+        assert!(
+            function_kinds
+                .iter()
+                .filter(|k| **k == "function-length")
+                .count()
+                == 2
+        );
         // Both functions take one argument.
-        assert!(function_kinds.iter().filter(|k| **k == "parameter-count").count() == 2);
+        assert!(
+            function_kinds
+                .iter()
+                .filter(|k| **k == "parameter-count")
+                .count()
+                == 2
+        );
         // Paths are repo-relative (not absolute, not under target/).
         for f in &metrics {
             assert!(!f.path.starts_with('/'), "leaked absolute path: {}", f.path);
-            assert!(!f.path.contains("target/"), "scanned skipped dir: {}", f.path);
+            assert!(
+                !f.path.contains("target/"),
+                "scanned skipped dir: {}",
+                f.path
+            );
         }
         assert!(metrics.iter().all(|f| f.path == "a.rs" || f.path == "b.rs"));
 
         let dup_opts = RunOptions {
-            dup_options: Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+            dup_options: Some(DupOptions {
+                min_lines: 5,
+                ..DupOptions::default()
+            }),
             ..RunOptions::default()
         };
-        let duplication = run_duplication_scan(dir.path(), dup_opts)
-            .await
-            .unwrap();
+        let duplication = run_duplication_scan(dir.path(), dup_opts).await.unwrap();
         let dups: Vec<_> = duplication
             .iter()
             .filter(|f| f.kind == "duplicate-block")
             .collect();
-        assert!(dups.len() >= 2, "expected paired duplicate, got {duplication:?}");
+        assert!(
+            dups.len() >= 2,
+            "expected paired duplicate, got {duplication:?}"
+        );
         for f in &duplication {
             assert!(!f.path.starts_with('/'));
             assert!(!f.path.contains("target/"));
@@ -591,12 +627,13 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
         assert!(kinds.iter().filter(|k| **k == "complexity").count() == 2);
 
         let dup_opts = RunOptions {
-            dup_options: Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+            dup_options: Some(DupOptions {
+                min_lines: 5,
+                ..DupOptions::default()
+            }),
             ..RunOptions::default()
         };
-        let duplication = run_duplication_scan(dir.path(), dup_opts)
-            .await
-            .unwrap();
+        let duplication = run_duplication_scan(dir.path(), dup_opts).await.unwrap();
         let clj_dups: Vec<_> = duplication
             .iter()
             .filter(|f| f.kind == "duplicate-block" && (f.path == "a.clj" || f.path == "b.clj"))
@@ -657,8 +694,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 "#;
         std::fs::write(dir.path().join("changed.rs"), body).unwrap();
         std::fs::write(dir.path().join("untouched.rs"), body).unwrap();
-        let source: Arc<dyn TreeSource> =
-            Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
+        let source: Arc<dyn TreeSource> = Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
         // Scope = only the changed file. The peer (untouched.rs) is
         // NOT in scope but must still participate as a match
         // target.
@@ -668,7 +704,10 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             source,
             scope,
             None,
-            Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+            Some(DupOptions {
+                min_lines: 5,
+                ..DupOptions::default()
+            }),
         )
         .await
         .unwrap();
@@ -718,10 +757,8 @@ fn case_b(items: Vec<i32>) -> Vec<i32> {
 }
 "#;
         std::fs::write(dir.path().join("only.rs"), body_with_repeat).unwrap();
-        let source: Arc<dyn TreeSource> =
-            Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
-        let scope: Arc<dyn FileFilter> =
-            Arc::new(ExplicitPaths::new(vec!["only.rs".to_string()]));
+        let source: Arc<dyn TreeSource> = Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
+        let scope: Arc<dyn FileFilter> = Arc::new(ExplicitPaths::new(vec!["only.rs".to_string()]));
         let findings = run_duplication_scan_scoped(source, scope, None, None)
             .await
             .unwrap();
@@ -730,7 +767,10 @@ fn case_b(items: Vec<i32>) -> Vec<i32> {
         for f in &findings {
             let raw = f.extra_json.as_deref().unwrap_or("{}");
             let parsed: serde_json::Value = serde_json::from_str(raw).unwrap();
-            let peer = parsed.get("peerPath").and_then(|v| v.as_str()).unwrap_or("");
+            let peer = parsed
+                .get("peerPath")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             assert_ne!(peer, f.path, "same-file pair leaked: {f:?}");
         }
     }
@@ -785,7 +825,10 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             source,
             filter,
             None,
-            Some(DupOptions { min_lines: 5, ..DupOptions::default() }),
+            Some(DupOptions {
+                min_lines: 5,
+                ..DupOptions::default()
+            }),
         )
         .await
         .unwrap();

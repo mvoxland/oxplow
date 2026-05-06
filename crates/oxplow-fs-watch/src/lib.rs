@@ -55,10 +55,7 @@ pub struct FsWatcher {
 
 impl FsWatcher {
     /// Watch `path` recursively, debouncing events within `debounce_window`.
-    pub fn watch(
-        path: impl AsRef<Path>,
-        debounce_window: Duration,
-    ) -> Result<Self, FsWatchError> {
+    pub fn watch(path: impl AsRef<Path>, debounce_window: Duration) -> Result<Self, FsWatchError> {
         Self::watch_paths(
             vec![(path.as_ref().to_path_buf(), RecursiveMode::Recursive)],
             debounce_window,
@@ -76,10 +73,8 @@ impl FsWatcher {
         let (tx, _) = broadcast::channel(256);
         let tx_clone = tx.clone();
 
-        let mut debouncer = new_debouncer(
-            debounce_window,
-            None,
-            move |res: DebounceEventResult| {
+        let mut debouncer =
+            new_debouncer(debounce_window, None, move |res: DebounceEventResult| {
                 let Ok(events) = res else { return };
                 for evt in events {
                     let kind = classify(&evt.event);
@@ -90,8 +85,7 @@ impl FsWatcher {
                         });
                     }
                 }
-            },
-        )?;
+            })?;
 
         for (p, mode) in paths {
             debouncer.watch(&p, mode)?;
@@ -281,7 +275,10 @@ mod tests {
                 _ => break,
             }
         }
-        assert!(!nested_seen, "non-recursive watch should not surface nested writes");
+        assert!(
+            !nested_seen,
+            "non-recursive watch should not surface nested writes"
+        );
 
         // Top-level write should be reported.
         let top = dir.path().join("top.txt");
@@ -305,12 +302,24 @@ mod tests {
 
     #[test]
     fn should_ignore_filters_oxplow_git_and_build_dirs() {
-        assert!(should_ignore_workspace_watch_path(Path::new(".oxplow/blobs/aa/foo.tmp")));
-        assert!(should_ignore_workspace_watch_path(Path::new(".git/index.lock")));
-        assert!(should_ignore_workspace_watch_path(Path::new("target/debug/x.bin")));
-        assert!(should_ignore_workspace_watch_path(Path::new("node_modules/foo/index.js")));
-        assert!(!should_ignore_workspace_watch_path(Path::new("src/main.rs")));
-        assert!(!should_ignore_workspace_watch_path(Path::new("docs/README.md")));
+        assert!(should_ignore_workspace_watch_path(Path::new(
+            ".oxplow/blobs/aa/foo.tmp"
+        )));
+        assert!(should_ignore_workspace_watch_path(Path::new(
+            ".git/index.lock"
+        )));
+        assert!(should_ignore_workspace_watch_path(Path::new(
+            "target/debug/x.bin"
+        )));
+        assert!(should_ignore_workspace_watch_path(Path::new(
+            "node_modules/foo/index.js"
+        )));
+        assert!(!should_ignore_workspace_watch_path(Path::new(
+            "src/main.rs"
+        )));
+        assert!(!should_ignore_workspace_watch_path(Path::new(
+            "docs/README.md"
+        )));
     }
 
     #[tokio::test]
@@ -326,7 +335,7 @@ mod tests {
         let recv = timeout(Duration::from_millis(500), rx.recv()).await;
         // Either a timeout (the channel is silent) or a closed channel.
         match recv {
-            Err(_) => {} // timeout — fine
+            Err(_) => {}                                       // timeout — fine
             Ok(Err(broadcast::error::RecvError::Closed)) => {} // closed — fine
             other => panic!("expected closed/timeout, got {other:?}"),
         }

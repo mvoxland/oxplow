@@ -91,11 +91,7 @@ impl LspClientRegistry {
 
     /// Spawn a fresh language-server child. Each call yields a new
     /// `client_id`; closing one does not affect any other.
-    pub async fn open(
-        &self,
-        language: &str,
-        cwd: PathBuf,
-    ) -> Result<String, LspClientError> {
+    pub async fn open(&self, language: &str, cwd: PathBuf) -> Result<String, LspClientError> {
         let server = self
             .find_server_config(language)
             .ok_or_else(|| LspClientError::NoConfig(language.to_string()))?;
@@ -286,10 +282,7 @@ while True:
         use std::time::Duration;
         let reg = LspClientRegistry::new(echo_config());
         let mut events = reg.subscribe();
-        let id = reg
-            .open("echo", std::env::temp_dir())
-            .await
-            .expect("open");
+        let id = reg.open("echo", std::env::temp_dir()).await.expect("open");
         reg.send(&id, r#"{"hello":1}"#.to_string())
             .await
             .expect("send");

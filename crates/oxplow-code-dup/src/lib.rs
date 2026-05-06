@@ -301,8 +301,7 @@ fn collect_subtrees_recursive(
     if cursor.goto_first_child() {
         loop {
             let child = cursor.node();
-            if !tokenize::is_comment_kind(child.kind())
-                && !tokenize::is_skip_node(lang, child, src)
+            if !tokenize::is_comment_kind(child.kind()) && !tokenize::is_skip_node(lang, child, src)
             {
                 collect_subtrees_recursive(
                     path,

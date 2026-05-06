@@ -248,7 +248,10 @@ mod tests {
         let entry = &pre["hooks"][0];
         assert_eq!(entry["type"], "http");
         assert_eq!(entry["url"], "http://h/hook/PreToolUse");
-        assert_eq!(entry["headers"]["Authorization"], "Bearer $OXPLOW_HOOK_TOKEN");
+        assert_eq!(
+            entry["headers"]["Authorization"],
+            "Bearer $OXPLOW_HOOK_TOKEN"
+        );
     }
 
     #[test]

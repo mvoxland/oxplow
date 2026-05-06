@@ -46,11 +46,7 @@ impl SqliteWikiPageThreadUpdateStore {
                      VALUES (?1, ?2, ?3)
                      ON CONFLICT(thread_id, slug) DO UPDATE SET
                        last_seen_at = excluded.last_seen_at",
-                    params![
-                        thread.as_str(),
-                        slug,
-                        ts_to_string(at),
-                    ],
+                    params![thread.as_str(), slug, ts_to_string(at),],
                 )?;
                 Ok(())
             })
@@ -76,15 +72,12 @@ impl SqliteWikiPageThreadUpdateStore {
                      ORDER BY last_seen_at DESC
                      LIMIT ?2",
                 )?;
-                let rows = stmt.query_map(
-                    params![thread.as_str(), limit as i64],
-                    |row| {
-                        let tid: String = row.get("thread_id")?;
-                        let slug: String = row.get("slug")?;
-                        let ts: String = row.get("last_seen_at")?;
-                        Ok((tid, slug, ts))
-                    },
-                )?;
+                let rows = stmt.query_map(params![thread.as_str(), limit as i64], |row| {
+                    let tid: String = row.get("thread_id")?;
+                    let slug: String = row.get("slug")?;
+                    let ts: String = row.get("last_seen_at")?;
+                    Ok((tid, slug, ts))
+                })?;
                 let mut out = Vec::new();
                 for row in rows {
                     let (tid, slug, ts) = row?;

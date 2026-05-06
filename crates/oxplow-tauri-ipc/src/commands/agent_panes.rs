@@ -69,15 +69,15 @@ pub async fn ensure_agent_pane(
     };
 
     let config = state.config.read().expect("config rwlock").clone();
-    let prompt = assemble_system_prompt(
-        &state.layout.project_dir,
-        &config,
-        &stream,
-        thread.as_ref(),
-    );
+    let prompt =
+        assemble_system_prompt(&state.layout.project_dir, &config, &stream, thread.as_ref());
 
     let opts = AgentCommandOptions {
-        append_system_prompt: if prompt.is_empty() { None } else { Some(prompt) },
+        append_system_prompt: if prompt.is_empty() {
+            None
+        } else {
+            Some(prompt)
+        },
         ..Default::default()
     };
 

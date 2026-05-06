@@ -333,7 +333,7 @@ mod tests {
             }
         }
         let _ = store.list_running(); // triggers gc
-        // The running map dropped the task but the snapshot remains.
+                                      // The running map dropped the task but the snapshot remains.
         let snap = store.get(&task.id).unwrap();
         assert_eq!(snap.status, BackgroundTaskStatus::Done);
         assert_eq!(snap.result_json.as_deref(), Some("{\"ok\":true}"));

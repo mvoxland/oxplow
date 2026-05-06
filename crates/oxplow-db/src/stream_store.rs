@@ -28,16 +28,22 @@ fn str_to_kind(s: &str) -> Result<StreamKind, DomainError> {
     match s {
         "primary" => Ok(StreamKind::Primary),
         "worktree" => Ok(StreamKind::Worktree),
-        other => Err(DomainError::Invalid(format!("unknown stream kind: {other}"))),
+        other => Err(DomainError::Invalid(format!(
+            "unknown stream kind: {other}"
+        ))),
     }
 }
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(&ts)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s)).map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
+    serde_json::from_str(&format!("\"{}\"", s))
+        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
 }
 
 fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {

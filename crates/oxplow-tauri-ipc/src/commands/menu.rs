@@ -46,8 +46,8 @@ pub async fn set_native_menu(
     app: AppHandle,
     groups: Vec<MenuGroupSnapshot>,
 ) -> Result<(), IpcError> {
-    let menu = build_menu(&app, &groups)
-        .map_err(|e| IpcError::internal(format!("menu build: {e}")))?;
+    let menu =
+        build_menu(&app, &groups).map_err(|e| IpcError::internal(format!("menu build: {e}")))?;
     app.set_menu(menu)
         .map_err(|e| IpcError::internal(format!("set menu: {e}")))?;
     Ok(())
@@ -82,8 +82,8 @@ fn build_menu(app: &AppHandle, groups: &[MenuGroupSnapshot]) -> tauri::Result<Me
                 continue;
             }
 
-            let mut builder = MenuItemBuilder::with_id(item.id.clone(), &item.label)
-                .enabled(item.enabled);
+            let mut builder =
+                MenuItemBuilder::with_id(item.id.clone(), &item.label).enabled(item.enabled);
             if let Some(shortcut) = item.shortcut.as_deref().filter(|s| !s.is_empty()) {
                 let normalized = normalize_accelerator(shortcut);
                 builder = builder.accelerator(normalized);

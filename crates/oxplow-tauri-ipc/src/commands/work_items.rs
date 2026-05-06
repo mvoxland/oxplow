@@ -46,7 +46,11 @@ pub async fn delete_work_item(
     state: tauri::State<'_, AppState>,
     id: WorkItemId,
 ) -> Result<(), IpcError> {
-    let thread_id = state.work_item_store.get(&id).await?.and_then(|i| i.thread_id);
+    let thread_id = state
+        .work_item_store
+        .get(&id)
+        .await?
+        .and_then(|i| i.thread_id);
     state.work_item_store.soft_delete(&id).await?;
     state
         .events

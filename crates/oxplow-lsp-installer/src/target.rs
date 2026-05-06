@@ -50,6 +50,12 @@ mod tests {
     #[test]
     fn current_target_is_known_for_test_host() {
         let t = current_target();
-        assert_ne!(t.as_str(), "unknown", "test host {} {} unmapped", std::env::consts::OS, std::env::consts::ARCH);
+        assert_ne!(
+            t.as_str(),
+            "unknown",
+            "test host {} {} unmapped",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
     }
 }

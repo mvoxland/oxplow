@@ -5,9 +5,9 @@
 //! convention). Use `Timestamp` rather than reaching for `time::OffsetDateTime`
 //! directly so swapping representations later stays cheap.
 
+use ::time::OffsetDateTime;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use ::time::OffsetDateTime;
 
 /// Wall-clock UTC timestamp serialized as RFC 3339 strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]

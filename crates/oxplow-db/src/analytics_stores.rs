@@ -13,7 +13,10 @@ use oxplow_domain::{DomainError, StreamId, Timestamp};
 use crate::database::Database;
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(&ts)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -163,9 +166,8 @@ impl PageVisitStore for SqlitePageVisitStore {
                         .collect();
                     rows
                 } else {
-                    let rows: rusqlite::Result<Vec<_>> = stmt
-                        .query_map(params![limit as i64], map_row)?
-                        .collect();
+                    let rows: rusqlite::Result<Vec<_>> =
+                        stmt.query_map(params![limit as i64], map_row)?.collect();
                     rows
                 }
             })
@@ -211,9 +213,8 @@ impl PageVisitStore for SqlitePageVisitStore {
                          ORDER BY visits DESC
                          LIMIT ?1",
                     )?;
-                    let rows: rusqlite::Result<Vec<_>> = stmt
-                        .query_map(params![limit as i64], map_row)?
-                        .collect();
+                    let rows: rusqlite::Result<Vec<_>> =
+                        stmt.query_map(params![limit as i64], map_row)?.collect();
                     rows
                 }
             })
@@ -551,11 +552,7 @@ fn row_to_scan(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeQualityScan> {
         _ => CodeQualityScanStatus::Failed,
     };
     let map_err = |e: DomainError| {
-        rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            Box::new(e),
-        )
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
     Ok(CodeQualityScan {
         id,
@@ -563,7 +560,10 @@ fn row_to_scan(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeQualityScan> {
         scope,
         status,
         started_at: string_to_ts(&started_at).map_err(map_err)?,
-        ended_at: ended_at.map(|s| string_to_ts(&s)).transpose().map_err(map_err)?,
+        ended_at: ended_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(map_err)?,
         error,
         // Default backfill matches the V9 migration's UPDATE.
         tree_version_kind: tree_version_kind.unwrap_or_else(|| "disk".into()),
@@ -582,15 +582,12 @@ impl SqliteCodeQualityStore {
         Self { db }
     }
 
-    pub async fn create_scan(
-        &self,
-        tool: &str,
-        scope: &str,
-    ) -> Result<i64, DomainError> {
+    pub async fn create_scan(&self, tool: &str, scope: &str) -> Result<i64, DomainError> {
         // Legacy entry point: callers that haven't been ported to the
         // versioned API land here. Default to ("disk", null, "all"),
         // matching the implicit pre-V9 behavior.
-        self.create_scan_with(tool, scope, "disk", None, "all").await
+        self.create_scan_with(tool, scope, "disk", None, "all")
+            .await
     }
 
     /// Versioned create_scan. Tags the row with the tree version it
@@ -620,14 +617,7 @@ impl SqliteCodeQualityStore {
                        (tool, scope, status, started_at,
                         tree_version_kind, tree_version_value, file_filter)
                      VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6)",
-                    params![
-                        tool,
-                        scope,
-                        ts_to_string(now),
-                        kind,
-                        value,
-                        filter,
-                    ],
+                    params![tool, scope, ts_to_string(now), kind, value, filter,],
                 )?;
                 Ok(conn.last_insert_rowid())
             })
@@ -881,8 +871,7 @@ impl SqliteSnapshotStore {
                      FROM file_snapshot WHERE stream_id = ?1
                      ORDER BY captured_at DESC LIMIT ?2",
                 )?;
-                let rows =
-                    stmt.query_map(params![stream_id, limit as i64], row_to_snapshot)?;
+                let rows = stmt.query_map(params![stream_id, limit as i64], row_to_snapshot)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
