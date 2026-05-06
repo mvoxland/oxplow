@@ -2344,6 +2344,24 @@ export function App() {
             stream={stream}
             visible={effectiveCenterActive === "agent"}
             transportMode={agentTransportMode}
+            onOpenFile={(absPath, line, column) => {
+              if (!stream) return;
+              // The terminal link provider hands us absolute paths
+              // (resolved against stream.worktree_path). The rest of
+              // the app's open-file path takes a workspace-relative
+              // path, so trim the worktree prefix when present.
+              const wt = stream.worktree_path.endsWith("/")
+                ? stream.worktree_path.slice(0, -1)
+                : stream.worktree_path;
+              const rel = absPath.startsWith(wt + "/")
+                ? absPath.slice(wt.length + 1)
+                : absPath;
+              if (typeof line === "number" && line > 0) {
+                void handleNavigateToLocation({ path: rel, line, column: column ?? 1 });
+              } else {
+                void handleOpenFile(rel);
+              }
+            }}
           />
         ),
       },

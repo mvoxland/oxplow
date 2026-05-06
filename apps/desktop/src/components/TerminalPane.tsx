@@ -21,6 +21,7 @@ import {
 import { formatContextMention } from "../agent-context-ref.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
+import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 
 const XTERM_THEME = {
   background: "#1c1f24",
@@ -53,6 +54,24 @@ const XTERM_THEME = {
  * Cmd+V and returns empty for non-text-primary flavors set by other
  * apps. Falls back to navigator.clipboard if the IPC path isn't wired.
  */
+/**
+ * Resolve a path detected in terminal output against the active
+ * stream's worktree. Absolute paths are returned as-is; `~/...` is
+ * left unresolved (frontend doesn't know HOME) and dropped; relative
+ * paths join onto the worktree. Returns null when the path can't be
+ * resolved (no worktree + relative path).
+ */
+function resolveAgainstWorktree(path: string, worktree: string | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith("/")) return path;
+  if (path.startsWith("~/")) return null;
+  if (!worktree) return null;
+  const trimmed = worktree.endsWith("/") ? worktree.slice(0, -1) : worktree;
+  // Strip explicit ./ to keep the joined path tidy.
+  const rel = path.startsWith("./") ? path.slice(2) : path;
+  return `${trimmed}/${rel}`;
+}
+
 async function readClipboard(): Promise<string> {
   const api = desktopBridge() as { clipboardReadText?: () => Promise<string> };
   if (api?.clipboardReadText) {
@@ -74,6 +93,8 @@ export function TerminalPane({
   visible,
   transportMode,
   onUserInterrupt,
+  worktreePath,
+  onOpenFile,
 }: {
   paneTarget: string;
   visible: boolean;
@@ -83,6 +104,15 @@ export function TerminalPane({
   /// synthesize an Interrupt hook so the working-dot flips to idle
   /// even though Claude Code itself doesn't emit a Stop. */
   onUserInterrupt?(): void;
+  /// Stream's worktree absolute path. Relative paths detected in
+  /// terminal output resolve against this. Optional — when omitted,
+  /// only absolute paths produce links.
+  worktreePath?: string;
+  /// Fires when the user clicks a detected file-path link. The
+  /// callback receives an absolute path (resolved against
+  /// `worktreePath` when the source was relative) plus optional
+  /// line/column.
+  onOpenFile?(absPath: string, line?: number, column?: number): void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -90,6 +120,13 @@ export function TerminalPane({
   const [mode, setMode] = useState<"live" | "history">("live");
   const modeRef = useRef<"live" | "history">("live");
   const [dragHovering, setDragHovering] = useState(false);
+  // Live refs so the link-provider activate handler always sees the
+  // current worktree + callback even though the provider is
+  // registered once at terminal creation.
+  const worktreePathRef = useRef<string | undefined>(worktreePath);
+  const onOpenFileRef = useRef<typeof onOpenFile>(onOpenFile);
+  worktreePathRef.current = worktreePath;
+  onOpenFileRef.current = onOpenFile;
 
   function setInteractionMode(next: "live" | "history") {
     modeRef.current = next;
@@ -236,6 +273,21 @@ export function TerminalPane({
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
+
+    // File-path link provider — turns `path/to/file.ts:42` in terminal
+    // output into a clickable, underlined link that opens the file in
+    // a new editor tab via `onOpenFile`. Registered once per terminal;
+    // the activate handler reads from refs so callback / worktree
+    // updates are picked up live.
+    const linkProviderDisp = installFilePathLinkProvider(term, {
+      onActivate: (match: FilePathLinkActivation) => {
+        const open = onOpenFileRef.current;
+        if (!open) return;
+        const abs = resolveAgainstWorktree(match.text, worktreePathRef.current);
+        if (!abs) return;
+        open(abs, match.line, match.column);
+      },
+    });
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") {
         return true;
@@ -512,6 +564,7 @@ export function TerminalPane({
       ro?.disconnect();
       dataDisp.dispose();
       binaryDisp.dispose();
+      linkProviderDisp.dispose();
       const sessionId = sessionIdRef.current;
       sessionIdRef.current = null;
       termRef.current = null;
