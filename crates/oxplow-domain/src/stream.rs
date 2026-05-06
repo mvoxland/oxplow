@@ -77,7 +77,13 @@ mod tests {
 
     #[test]
     fn kind_uses_snake_case() {
-        assert_eq!(serde_json::to_string(&StreamKind::Primary).unwrap(), "\"primary\"");
-        assert_eq!(serde_json::to_string(&StreamKind::Worktree).unwrap(), "\"worktree\"");
+        assert_eq!(
+            serde_json::to_string(&StreamKind::Primary).unwrap(),
+            "\"primary\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StreamKind::Worktree).unwrap(),
+            "\"worktree\""
+        );
     }
 }

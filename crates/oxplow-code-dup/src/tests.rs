@@ -511,7 +511,10 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
 fn skips_unsupported_languages() {
     let blocks = detect_duplicates(
         vec![
-            ("README.md".to_string(), "# heading\nlots of text".to_string()),
+            (
+                "README.md".to_string(),
+                "# heading\nlots of text".to_string(),
+            ),
             (
                 "OTHER.md".to_string(),
                 "# heading\nlots of text".to_string(),

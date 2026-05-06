@@ -23,8 +23,7 @@ use oxplow_domain::stores::{
     WorkItemStore, WorkNoteStore,
 };
 use oxplow_domain::{
-    NoteId, ThreadId, WorkItem, WorkItemId, WorkItemKind, WorkItemLinkType,
-    WorkItemStatus,
+    NoteId, ThreadId, WorkItem, WorkItemId, WorkItemKind, WorkItemLinkType, WorkItemStatus,
 };
 
 #[derive(Clone)]
@@ -311,9 +310,9 @@ impl OxplowMcp {
 
     #[tool(description = "Get the running oxplow daemon version.")]
     async fn app_version(&self) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![Content::text(
-            env!("CARGO_PKG_VERSION"),
-        )]))
+        Ok(CallToolResult::success(vec![Content::text(env!(
+            "CARGO_PKG_VERSION"
+        ))]))
     }
 
     // ---------- streams ----------
@@ -478,7 +477,9 @@ impl OxplowMcp {
         json_result(&item)
     }
 
-    #[tool(description = "Persist (insert or update) a work item. `item_json` is the JSON-encoded WorkItem.")]
+    #[tool(
+        description = "Persist (insert or update) a work item. `item_json` is the JSON-encoded WorkItem."
+    )]
     async fn upsert_work_item(
         &self,
         params: Parameters<UpsertWorkItemParams>,
@@ -892,23 +893,14 @@ impl OxplowMcp {
         // the writes to this item.
         let touched = p.touched_files.unwrap_or_default();
         if !touched.is_empty()
-            && matches!(
-                item.status,
-                WorkItemStatus::Done | WorkItemStatus::Blocked
-            )
+            && matches!(item.status, WorkItemStatus::Done | WorkItemStatus::Blocked)
         {
             let thread_for_effort = thread.or_else(|| item.thread_id.clone());
             if let Some(tid) = thread_for_effort {
                 if let Err(err) = self
                     .services
                     .work_items
-                    .record_effort(
-                        &self.services.effort_store,
-                        &item.id,
-                        &tid,
-                        &touched,
-                        None,
-                    )
+                    .record_effort(&self.services.effort_store, &item.id, &tid, &touched, None)
                     .await
                 {
                     tracing::warn!(?err, "create_work_item: effort record failed");
@@ -959,13 +951,9 @@ impl OxplowMcp {
         // Acceptance-criteria + parent: `Option<Option<…>>` semantics
         // — outer Some means "the field was passed", inner None means
         // "clear it". Empty string = clear; non-empty = set.
-        let acceptance_criteria: Option<Option<String>> = p.acceptance_criteria.map(|s| {
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        });
+        let acceptance_criteria: Option<Option<String>> =
+            p.acceptance_criteria
+                .map(|s| if s.is_empty() { None } else { Some(s) });
         let parent_id: Option<Option<WorkItemId>> = p.parent_id.map(|s| {
             if s.is_empty() {
                 None
@@ -1163,7 +1151,9 @@ impl OxplowMcp {
         json_result(&updated)
     }
 
-    #[tool(description = "Signal that the agent is awaiting user input. Persists a hook event so Stop suppression kicks in.")]
+    #[tool(
+        description = "Signal that the agent is awaiting user input. Persists a hook event so Stop suppression kicks in."
+    )]
     async fn await_user(
         &self,
         params: Parameters<AwaitUserParams>,
@@ -1221,7 +1211,12 @@ impl OxplowMcp {
             oxplow_domain::IdKind::Thread,
         )?;
         let id = ThreadId::from(params.0.thread_id);
-        let thread = self.services.thread_store.get(&id).await.map_err(internal)?;
+        let thread = self
+            .services
+            .thread_store
+            .get(&id)
+            .await
+            .map_err(internal)?;
         let items = self
             .services
             .work_item_store
@@ -1341,10 +1336,12 @@ impl OxplowMcp {
                     .get(&id)
                     .await
                     .map_err(internal)?
-                    .ok_or_else(|| McpError::invalid_params(
-                        format!("dispatch_work_item: item not found: {}", id.0),
-                        None,
-                    ))?
+                    .ok_or_else(|| {
+                        McpError::invalid_params(
+                            format!("dispatch_work_item: item not found: {}", id.0),
+                            None,
+                        )
+                    })?
             }
             None => {
                 let items = self
@@ -1384,10 +1381,8 @@ impl OxplowMcp {
             .await
             .map_err(|e| internal(e.to_string()))?;
 
-        let prompt = compose_dispatch_brief(
-            &updated,
-            params.0.extra_context.as_deref().unwrap_or(""),
-        );
+        let prompt =
+            compose_dispatch_brief(&updated, params.0.extra_context.as_deref().unwrap_or(""));
         self.emit_work_items_changed(updated.thread_id.clone());
         json_result(&serde_json::json!({
             "ok": true,
@@ -1396,7 +1391,9 @@ impl OxplowMcp {
         }))
     }
 
-    #[tool(description = "Branch a new thread off an existing one (shared stream, fresh thread row).")]
+    #[tool(
+        description = "Branch a new thread off an existing one (shared stream, fresh thread row)."
+    )]
     async fn fork_thread(
         &self,
         params: Parameters<ForkThreadParams>,
@@ -1434,12 +1431,10 @@ impl OxplowMcp {
         params: Parameters<FindNotesForFileParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let mut hits = oxplow_app::wiki_pages::backlinks_for_file(
-            &self.services.wiki_page_store,
-            &p.path,
-        )
-        .await
-        .map_err(internal)?;
+        let mut hits =
+            oxplow_app::wiki_pages::backlinks_for_file(&self.services.wiki_page_store, &p.path)
+                .await
+                .map_err(internal)?;
         if (p.limit as usize) > 0 && hits.len() > p.limit as usize {
             hits.truncate(p.limit as usize);
         }
@@ -1474,7 +1469,8 @@ impl OxplowMcp {
         params: Parameters<LspPositionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> = resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
+            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
         let resp = proxy
             .request(
                 "textDocument/definition",
@@ -1496,7 +1492,8 @@ impl OxplowMcp {
         params: Parameters<LspPositionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> = resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
+            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
         let resp = proxy
             .request(
                 "textDocument/hover",
@@ -1518,7 +1515,8 @@ impl OxplowMcp {
         params: Parameters<LspPositionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> = resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
+            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
         let resp = proxy
             .request(
                 "textDocument/references",
@@ -1541,7 +1539,8 @@ impl OxplowMcp {
         params: Parameters<LspDiagnosticsParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let proxy: std::sync::Arc<oxplow_app::LspProxy> = resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
+            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
         let resp = proxy
             .request(
                 "textDocument/diagnostic",
@@ -1655,9 +1654,7 @@ async fn resolve_lsp_proxy(
         .map_err(|e| internal(e.to_string()))?
         .into_iter()
         .find(|s| s.id.as_str() == stream_id)
-        .ok_or_else(|| {
-            McpError::invalid_params(format!("stream not found: {stream_id}"), None)
-        })?;
+        .ok_or_else(|| McpError::invalid_params(format!("stream not found: {stream_id}"), None))?;
     let cwd = std::path::PathBuf::from(&stream.worktree_path);
     services
         .lsp_sessions
@@ -1774,10 +1771,7 @@ fn compose_delegate_query_prompt(
 /// Per-item notes used to render here too but were retired —
 /// work_item_effort.summary already records what shipped on prior
 /// attempts; reviewers see it from the work-item activity timeline.
-fn compose_dispatch_brief(
-    item: &oxplow_domain::WorkItem,
-    extra_context: &str,
-) -> String {
+fn compose_dispatch_brief(item: &oxplow_domain::WorkItem, extra_context: &str) -> String {
     let mut out: Vec<String> = vec![
         format!("Work item: {}", item.title),
         format!("itemId: {}", item.id.0),
@@ -1801,9 +1795,7 @@ fn compose_dispatch_brief(
         out.push(extra_context.to_string());
         out.push(String::new());
     }
-    out.push(
-        "## Protocol".into(),
-    );
+    out.push("## Protocol".into());
     out.push(
         "Follow the `oxplow-subagent-work-protocol` skill: mark in_progress on entry; \
          done on exit. Return ONE line: `oxplow-result: {\"ok\":true,\"itemId\":\"<id>\",…}`. \
@@ -1832,11 +1824,10 @@ pub async fn serve_stdio(services: Arc<Services>) -> Result<(), Box<dyn std::err
 mod tests {
     use super::*;
     use oxplow_domain::stores::WorkItemStore;
-    use oxplow_domain::work_item::{
-        WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemKind, WorkItemPriority,
-        WorkItemStatus,
-    };
     use oxplow_domain::time::Timestamp;
+    use oxplow_domain::work_item::{
+        WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemKind, WorkItemPriority, WorkItemStatus,
+    };
     use rmcp::handler::server::wrapper::Parameters;
 
     fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
@@ -2036,9 +2027,7 @@ mod tests {
         let json = serde_json::to_string(&item).unwrap();
 
         let r = server
-            .upsert_work_item(Parameters(UpsertWorkItemParams {
-                item_json: json,
-            }))
+            .upsert_work_item(Parameters(UpsertWorkItemParams { item_json: json }))
             .await
             .unwrap();
         let body = text_payload(r);

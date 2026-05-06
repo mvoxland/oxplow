@@ -170,12 +170,32 @@ mod tests {
     #[test]
     fn git_blame_against_real_repo() {
         let dir = tempdir().unwrap();
-        Cmd::new("git").args(["init", "-q", "--initial-branch=main"]).current_dir(dir.path()).output().unwrap();
-        Cmd::new("git").args(["config", "user.email", "t@e.com"]).current_dir(dir.path()).output().unwrap();
-        Cmd::new("git").args(["config", "user.name", "Tester"]).current_dir(dir.path()).output().unwrap();
+        Cmd::new("git")
+            .args(["init", "-q", "--initial-branch=main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Cmd::new("git")
+            .args(["config", "user.email", "t@e.com"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Cmd::new("git")
+            .args(["config", "user.name", "Tester"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
         std::fs::write(dir.path().join("a.txt"), "alpha\nbeta\n").unwrap();
-        Cmd::new("git").args(["add", "-A"]).current_dir(dir.path()).output().unwrap();
-        Cmd::new("git").args(["commit", "-m", "init"]).current_dir(dir.path()).output().unwrap();
+        Cmd::new("git")
+            .args(["add", "-A"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Cmd::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
         let lines = git_blame(dir.path(), "a.txt");
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].author, "Tester");

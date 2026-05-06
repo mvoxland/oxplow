@@ -169,16 +169,19 @@ impl TreeSource for DiskTreeSource {
         let skip = self.skip.clone();
         let project = self.project_dir.clone();
         let mut out = Vec::new();
-        for entry in walkdir::WalkDir::new(&project).into_iter().filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            if e.depth() == 0 {
-                return true;
-            }
-            if name.starts_with('.') && e.file_type().is_dir() {
-                return false;
-            }
-            !(e.file_type().is_dir() && skip.contains(&name.as_ref()))
-        }) {
+        for entry in walkdir::WalkDir::new(&project)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                if e.depth() == 0 {
+                    return true;
+                }
+                if name.starts_with('.') && e.file_type().is_dir() {
+                    return false;
+                }
+                !(e.file_type().is_dir() && skip.contains(&name.as_ref()))
+            })
+        {
             let entry = match entry {
                 Ok(e) => e,
                 Err(_) => continue,
@@ -381,7 +384,10 @@ mod tests {
         let source = DiskTreeSource::new(dir.path());
         let filter = ExplicitPaths::new(["a.rs"]);
         let corpus = collect_corpus(&source, &filter).unwrap();
-        assert_eq!(corpus, vec![("a.rs".to_string(), "fn a() {}\n".to_string())]);
+        assert_eq!(
+            corpus,
+            vec![("a.rs".to_string(), "fn a() {}\n".to_string())]
+        );
     }
 
     #[test]
@@ -390,7 +396,11 @@ mod tests {
         let path = dir.path();
         // git init + commit
         let run = |args: &[&str]| {
-            let out = Command::new("git").args(args).current_dir(path).output().unwrap();
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .output()
+                .unwrap();
             assert!(out.status.success(), "git {args:?} failed: {:?}", out);
         };
         run(&["init", "-q", "-b", "main"]);
@@ -410,7 +420,9 @@ mod tests {
         assert!(source.read("missing.rs").unwrap().is_none());
         assert_eq!(
             source.version(),
-            TreeVersion::Ref { r#ref: "HEAD".into() }
+            TreeVersion::Ref {
+                r#ref: "HEAD".into()
+            }
         );
     }
 
@@ -427,7 +439,9 @@ mod tests {
         ));
         assert_eq!(
             source.version(),
-            TreeVersion::Snapshot { id: "snap-1".into() }
+            TreeVersion::Snapshot {
+                id: "snap-1".into()
+            }
         );
     }
 
@@ -435,7 +449,9 @@ mod tests {
     fn tree_version_kind_tag_and_value() {
         assert_eq!(TreeVersion::Disk.kind_tag(), "disk");
         assert_eq!(TreeVersion::Disk.value(), None);
-        let r = TreeVersion::Ref { r#ref: "abc".into() };
+        let r = TreeVersion::Ref {
+            r#ref: "abc".into(),
+        };
         assert_eq!(r.kind_tag(), "ref");
         assert_eq!(r.value(), Some("abc"));
         let s = TreeVersion::Snapshot { id: "x".into() };

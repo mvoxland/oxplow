@@ -44,8 +44,7 @@ pub async fn complete_background_task(
     id: String,
     result_json: Option<String>,
 ) -> Result<(), IpcError> {
-    let result = result_json
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    let result = result_json.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
     state.background_tasks.complete(&id, result);
     Ok(())
 }

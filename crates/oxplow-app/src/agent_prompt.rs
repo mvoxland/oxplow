@@ -252,11 +252,8 @@ mod tests {
         // Thread is currently read-only; was launched as writer.
         let mut t = thread();
         t.status = ThreadStatus::Queued;
-        let block = build_session_context_block_with_role(
-            &stream(),
-            Some(&t),
-            Some(RoleMode::Writer),
-        );
+        let block =
+            build_session_context_block_with_role(&stream(), Some(&t), Some(RoleMode::Writer));
         assert!(block.contains("role=read-only"));
         assert!(block.contains("ROLE CHANGE"));
         assert!(block.contains("demoted to read-only"));

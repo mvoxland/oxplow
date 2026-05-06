@@ -123,7 +123,10 @@ impl ThreadService {
         }
         // Demote whoever is currently active on this stream.
         let siblings = self.threads.list_for_stream(&t.stream_id).await?;
-        for mut s in siblings.into_iter().filter(|s| s.status == ThreadStatus::Active && s.id != t.id) {
+        for mut s in siblings
+            .into_iter()
+            .filter(|s| s.status == ThreadStatus::Active && s.id != t.id)
+        {
             s.status = ThreadStatus::Queued;
             s.updated_at = Timestamp::now();
             self.threads.upsert(&s).await?;
@@ -186,10 +189,7 @@ impl ThreadService {
         Ok(())
     }
 
-    pub async fn list_for_stream(
-        &self,
-        stream: &StreamId,
-    ) -> Result<Vec<Thread>, ThreadError> {
+    pub async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<Thread>, ThreadError> {
         Ok(self.threads.list_for_stream(stream).await?)
     }
 
@@ -355,7 +355,10 @@ mod tests {
     async fn set_prompt_round_trips_and_clears_on_empty() {
         let (svc, sid) = fixture().await;
         let t = svc.create(&sid, "x", "working").await.unwrap();
-        let with = svc.set_prompt(&t.id, Some("Be terse".into())).await.unwrap();
+        let with = svc
+            .set_prompt(&t.id, Some("Be terse".into()))
+            .await
+            .unwrap();
         assert_eq!(with.custom_prompt.as_deref(), Some("Be terse"));
         let cleared = svc.set_prompt(&t.id, Some(String::new())).await.unwrap();
         assert_eq!(cleared.custom_prompt, None);

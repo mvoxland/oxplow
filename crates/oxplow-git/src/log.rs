@@ -48,7 +48,9 @@ pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
 
     let mut commits = Vec::with_capacity(limit);
     for oid in walk.flatten().take(limit) {
-        let Ok(commit) = repo.find_commit(oid) else { continue };
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
         let author = commit.author();
         commits.push(GitLogCommit {
             sha: oid.to_string(),
@@ -95,10 +97,7 @@ pub fn get_commit_detail(repo_path: &Path, sha: &str) -> Option<CommitDetail> {
     let parents: Vec<String> = commit.parent_ids().map(|p| p.to_string()).collect();
 
     // Diff against the first parent (or empty tree if root).
-    let parent_tree = commit
-        .parent(0)
-        .ok()
-        .and_then(|p| p.tree().ok());
+    let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
     let commit_tree = commit.tree().ok()?;
     let diff = repo
         .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), None)
@@ -142,7 +141,8 @@ pub fn get_commit_detail(repo_path: &Path, sha: &str) -> Option<CommitDetail> {
         // we use the line callback.
         let _ = stats;
     }
-    diff.print(git2::DiffFormat::NameStatus, |_d, _h, _l| true).ok();
+    diff.print(git2::DiffFormat::NameStatus, |_d, _h, _l| true)
+        .ok();
     diff.foreach(
         &mut |_d, _| true,
         None,

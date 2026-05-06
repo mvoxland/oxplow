@@ -16,7 +16,10 @@ use oxplow_domain::{
 use crate::database::Database;
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(&ts)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {

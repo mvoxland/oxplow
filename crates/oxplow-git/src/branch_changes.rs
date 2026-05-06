@@ -33,7 +33,9 @@ pub fn get_change_scopes(repo: &Path) -> ChangeScopes {
     let current_branch = crate::repo::detect_current_branch(repo);
     let branch_base = detect_base_branch(repo);
     let upstream = detect_upstream_ref(repo);
-    let base_name = branch_base.as_deref().and_then(|b| b.strip_prefix("origin/").or(Some(b)));
+    let base_name = branch_base
+        .as_deref()
+        .and_then(|b| b.strip_prefix("origin/").or(Some(b)));
     let on_default_branch = match (&current_branch, base_name) {
         (Some(cur), Some(base)) => cur == base,
         _ => false,
@@ -52,16 +54,11 @@ pub fn get_change_scopes(repo: &Path) -> ChangeScopes {
 /// Parse `git status --porcelain=v1 --untracked-files=all` into two
 /// lists. The first column is index status, the second is worktree
 /// status; either non-space puts the file in the matching bucket.
-fn collect_working_tree_changes(
-    repo: &Path,
-) -> (Vec<BranchChangeEntry>, Vec<BranchChangeEntry>) {
+fn collect_working_tree_changes(repo: &Path) -> (Vec<BranchChangeEntry>, Vec<BranchChangeEntry>) {
     if !crate::repo::is_git_repo(repo) {
         return (Vec::new(), Vec::new());
     }
-    let raw = match run_capturing(
-        &["status", "--porcelain=v1", "--untracked-files=all"],
-        repo,
-    ) {
+    let raw = match run_capturing(&["status", "--porcelain=v1", "--untracked-files=all"], repo) {
         Some(s) => s,
         None => return (Vec::new(), Vec::new()),
     };
@@ -198,7 +195,11 @@ pub struct BranchChanges {
 }
 
 fn run_capturing(args: &[&str], cwd: &Path) -> Option<String> {
-    let out = Command::new("git").args(args).current_dir(cwd).output().ok()?;
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
     if !out.status.success() && out.stdout.is_empty() {
         return None;
     }
@@ -227,12 +228,10 @@ pub fn list_branch_changes(repo: &Path, base_ref: &str) -> BranchChanges {
         }
     };
 
-    let name_status = run_capturing(
-        &["diff", "--name-status", "-z", &merge_base_str],
-        repo,
-    )
-    .unwrap_or_default();
-    let numstat = run_capturing(&["diff", "--numstat", "-z", &merge_base_str], repo).unwrap_or_default();
+    let name_status =
+        run_capturing(&["diff", "--name-status", "-z", &merge_base_str], repo).unwrap_or_default();
+    let numstat =
+        run_capturing(&["diff", "--numstat", "-z", &merge_base_str], repo).unwrap_or_default();
 
     let mut entries = parse_name_status_z(&name_status);
     let counts = parse_numstat_z(&numstat);
@@ -251,9 +250,7 @@ pub fn list_branch_changes(repo: &Path, base_ref: &str) -> BranchChanges {
     }
 
     // Untracked files via status --porcelain
-    if let Some(status) =
-        run_capturing(&["status", "--porcelain", "--untracked-files=all"], repo)
-    {
+    if let Some(status) = run_capturing(&["status", "--porcelain", "--untracked-files=all"], repo) {
         for line in status.lines() {
             if let Some(rest) = line.strip_prefix("?? ") {
                 if !entries.iter().any(|e| e.path == rest) {
@@ -359,14 +356,34 @@ mod tests {
     use tempfile::tempdir;
 
     fn init_repo(dir: &Path) {
-        Cmd::new("git").args(["init", "-q", "--initial-branch=main"]).current_dir(dir).output().unwrap();
-        Cmd::new("git").args(["config", "user.email", "t@e.com"]).current_dir(dir).output().unwrap();
-        Cmd::new("git").args(["config", "user.name", "t"]).current_dir(dir).output().unwrap();
+        Cmd::new("git")
+            .args(["init", "-q", "--initial-branch=main"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Cmd::new("git")
+            .args(["config", "user.email", "t@e.com"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Cmd::new("git")
+            .args(["config", "user.name", "t"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
     }
 
     fn commit(dir: &Path, msg: &str) {
-        Cmd::new("git").args(["add", "-A"]).current_dir(dir).output().unwrap();
-        Cmd::new("git").args(["commit", "-m", msg]).current_dir(dir).output().unwrap();
+        Cmd::new("git")
+            .args(["add", "-A"])
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        Cmd::new("git")
+            .args(["commit", "-m", msg])
+            .current_dir(dir)
+            .output()
+            .unwrap();
     }
 
     #[test]
@@ -376,11 +393,18 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), "a").unwrap();
         commit(dir.path(), "init");
         // Create a feature branch and add a file.
-        Cmd::new("git").args(["checkout", "-b", "feat"]).current_dir(dir.path()).output().unwrap();
+        Cmd::new("git")
+            .args(["checkout", "-b", "feat"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
         std::fs::write(dir.path().join("b.txt"), "b").unwrap();
         commit(dir.path(), "add b");
         let changes = list_branch_changes(dir.path(), "main");
-        assert!(changes.files.iter().any(|f| f.path == "b.txt" && f.change == ChangeKind::Added));
+        assert!(changes
+            .files
+            .iter()
+            .any(|f| f.path == "b.txt" && f.change == ChangeKind::Added));
     }
 
     #[test]

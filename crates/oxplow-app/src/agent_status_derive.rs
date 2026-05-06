@@ -203,7 +203,10 @@ mod tests {
             ev(HookKind::UserPromptSubmit, 1, "{}"),
             ev(HookKind::PreToolUse, 2, r#"{"tool_name":"ExitPlanMode"}"#),
         ];
-        assert_eq!(derive_thread_status(&events), AgentStatusState::AwaitingUser);
+        assert_eq!(
+            derive_thread_status(&events),
+            AgentStatusState::AwaitingUser
+        );
     }
 
     #[test]

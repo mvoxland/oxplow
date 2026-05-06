@@ -30,12 +30,17 @@ fn str_to_status(s: &str) -> Result<ThreadStatus, DomainError> {
         "active" => Ok(ThreadStatus::Active),
         "queued" => Ok(ThreadStatus::Queued),
         "closed" => Ok(ThreadStatus::Closed),
-        other => Err(DomainError::Invalid(format!("unknown thread status: {other}"))),
+        other => Err(DomainError::Invalid(format!(
+            "unknown thread status: {other}"
+        ))),
     }
 }
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(&ts)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -213,8 +218,8 @@ impl ThreadStore for SqliteThreadStore {
                 let mut stmt = conn.prepare(
                     "SELECT selected_thread_id FROM thread_selection WHERE stream_id = ?1",
                 )?;
-                let mut rows = stmt
-                    .query_map(params![stream.as_str()], |r| r.get::<_, Option<String>>(0))?;
+                let mut rows =
+                    stmt.query_map(params![stream.as_str()], |r| r.get::<_, Option<String>>(0))?;
                 match rows.next() {
                     Some(Ok(Some(s))) => Ok(Some(ThreadId::from(s))),
                     Some(Ok(None)) => Ok(None),

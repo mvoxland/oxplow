@@ -13,7 +13,10 @@ use oxplow_domain::{AgentTurn, AgentTurnId, DomainError, ThreadId, Timestamp, Wo
 use crate::database::Database;
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(&ts)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -44,7 +47,10 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
         answer,
         session_id,
         started_at: string_to_ts(&started_at).map_err(map_err_text)?,
-        ended_at: ended_at.map(|s| string_to_ts(&s)).transpose().map_err(map_err_text)?,
+        ended_at: ended_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(map_err_text)?,
     })
 }
 
@@ -91,11 +97,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         .unwrap()
     }
 
-    async fn close(
-        &self,
-        id: &AgentTurnId,
-        answer: Option<String>,
-    ) -> Result<(), DomainError> {
+    async fn close(&self, id: &AgentTurnId, answer: Option<String>) -> Result<(), DomainError> {
         let db = self.db.clone();
         let id = id.clone();
         let now = ts_to_string(Timestamp::now());
@@ -173,8 +175,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                     "SELECT * FROM agent_turn WHERE thread_id = ?1
                      ORDER BY started_at DESC LIMIT ?2",
                 )?;
-                let rows =
-                    stmt.query_map(params![thread.as_str(), limit as i64], row_to_turn)?;
+                let rows = stmt.query_map(params![thread.as_str(), limit as i64], row_to_turn)?;
                 rows.collect()
             })
         })

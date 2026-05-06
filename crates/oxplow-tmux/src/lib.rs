@@ -168,14 +168,8 @@ impl TmuxRunner for SystemTmux {
 
     async fn has_window(&self, target: &WindowTarget) -> bool {
         let (session, window) = target.split();
-        let Ok(out) = Self::run(&[
-            "list-windows",
-            "-t",
-            session,
-            "-F",
-            "#{window_name}",
-        ])
-        .await else {
+        let Ok(out) = Self::run(&["list-windows", "-t", session, "-F", "#{window_name}"]).await
+        else {
             return false;
         };
         out.lines().any(|line| line == window)
@@ -269,10 +263,14 @@ impl TmuxRunner for SystemTmux {
             "-F",
             "#{window_name}",
         ])
-        .await else {
+        .await
+        else {
             return Vec::new();
         };
-        out.lines().filter(|s| !s.is_empty()).map(String::from).collect()
+        out.lines()
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect()
     }
 
     async fn capture_pane_history(&self, target: &WindowTarget, line_count: u32) -> String {
@@ -329,14 +327,7 @@ impl TmuxRunner for SystemTmux {
     }
 
     async fn exit_copy_mode(&self, target: &WindowTarget) {
-        let _ = Self::run_quiet(&[
-            "send-keys",
-            "-t",
-            target.as_str(),
-            "-X",
-            "cancel",
-        ])
-        .await;
+        let _ = Self::run_quiet(&["send-keys", "-t", target.as_str(), "-X", "cancel"]).await;
     }
 }
 

@@ -106,7 +106,10 @@ pub async fn list_currently_open_usage(
     state: tauri::State<'_, AppState>,
     limit: u32,
 ) -> Result<Vec<PageVisit>, IpcError> {
-    let recent = state.page_visit_store.list_recent(limit as usize * 4, None).await?;
+    let recent = state
+        .page_visit_store
+        .list_recent(limit as usize * 4, None)
+        .await?;
     Ok(recent
         .into_iter()
         .filter(|v| v.duration_ms.is_none())

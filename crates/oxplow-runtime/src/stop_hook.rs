@@ -17,9 +17,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{
-    Thread, ThreadStatus, WorkItem, WorkItemKind, WorkItemStatus,
-};
+use oxplow_domain::{Thread, ThreadStatus, WorkItem, WorkItemKind, WorkItemStatus};
 
 #[derive(Debug, Clone, Default)]
 pub struct ThreadSnapshot<'a> {
@@ -152,7 +150,8 @@ pub fn decide_stop_directive(
     // 6. In-progress audit branch.
     if !in_progress.is_empty() {
         if let Some(build) = builders.build_in_progress_audit_reason {
-            let in_progress_owned: Vec<WorkItem> = in_progress.iter().map(|i| (*i).clone()).collect();
+            let in_progress_owned: Vec<WorkItem> =
+                in_progress.iter().map(|i| (*i).clone()).collect();
             let signature = compute_audit_signature(&in_progress_owned);
             if snapshot.last_in_progress_audit_signature == Some(signature.as_str()) {
                 // Nothing changed; suppress.
@@ -443,7 +442,12 @@ mod tests {
         let t = active_thread();
         let items = vec![
             item("e-1", WorkItemKind::Epic, WorkItemStatus::Done, None),
-            item("c-1", WorkItemKind::Task, WorkItemStatus::Ready, Some("e-1")),
+            item(
+                "c-1",
+                WorkItemKind::Task,
+                WorkItemStatus::Ready,
+                Some("e-1"),
+            ),
         ];
         let snap = ThreadSnapshot {
             thread: Some(&t),

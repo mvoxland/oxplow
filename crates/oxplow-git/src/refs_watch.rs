@@ -95,6 +95,8 @@ mod tests {
             .await
             .expect("event arrives")
             .expect("recv ok");
-        assert!(evt.repo_path.contains(dir.path().to_string_lossy().as_ref()));
+        assert!(evt
+            .repo_path
+            .contains(dir.path().to_string_lossy().as_ref()));
     }
 }

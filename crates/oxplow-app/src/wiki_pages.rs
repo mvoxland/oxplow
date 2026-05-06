@@ -97,13 +97,14 @@ pub fn parse_wiki_file_ref(interior: &str) -> Option<WikiFileRef> {
                 None => (version_part, None),
             };
             let v = v.trim();
-            let parsed_version = if v.eq_ignore_ascii_case("disk") || v.eq_ignore_ascii_case("local") {
-                WikiVersion::Disk
-            } else if !v.is_empty() {
-                WikiVersion::Ref(v.to_string())
-            } else {
-                WikiVersion::Disk
-            };
+            let parsed_version =
+                if v.eq_ignore_ascii_case("disk") || v.eq_ignore_ascii_case("local") {
+                    WikiVersion::Disk
+                } else if !v.is_empty() {
+                    WikiVersion::Ref(v.to_string())
+                } else {
+                    WikiVersion::Disk
+                };
             // Reattach the line anchor (if any) to the path so the
             // existing line-stripping path below still applies.
             let pl = match line_part {
@@ -125,7 +126,11 @@ pub fn parse_wiki_file_ref(interior: &str) -> Option<WikiFileRef> {
     if bare.is_empty() || !looks_like_file(&bare) {
         return None;
     }
-    Some(WikiFileRef { path: bare, version, line })
+    Some(WikiFileRef {
+        path: bare,
+        version,
+        line,
+    })
 }
 
 /// Parse `[[…]]` wikilinks + inline file paths out of `body`.
@@ -225,7 +230,10 @@ pub async fn sync_from_disk(
     let body_excerpt = body.chars().take(280).collect::<String>();
     let now = Timestamp::now();
     let existing = store.get(slug).await?;
-    let created_at = existing.as_ref().map(|n| n.created_at.clone()).unwrap_or(now.clone());
+    let created_at = existing
+        .as_ref()
+        .map(|n| n.created_at.clone())
+        .unwrap_or(now.clone());
     let note = WikiPage {
         slug: slug.to_string(),
         title,
@@ -472,7 +480,9 @@ fn find_inline_paths(body: &str) -> Vec<String> {
     let mut out = BTreeSet::new();
     // Tokenize on whitespace + a few punctuation chars; check each
     // token for "looks like path/to/file.ext".
-    let separators: &[char] = &[' ', '\t', '\n', '\r', ',', ';', '(', ')', '[', ']', '"', '\''];
+    let separators: &[char] = &[
+        ' ', '\t', '\n', '\r', ',', ';', '(', ')', '[', ']', '"', '\'',
+    ];
     for token in body.split(|c: char| separators.contains(&c)) {
         let trimmed = token.trim_matches(|c: char| matches!(c, '.' | ',' | ';' | ':'));
         if trimmed.is_empty() || trimmed.starts_with('/') {
@@ -599,13 +609,19 @@ mod tests {
     #[test]
     fn parse_wikilink_with_head_version() {
         let refs = parse_refs("[[src/foo.ts@HEAD]]");
-        assert_eq!(refs.file_refs_detail[0].version, WikiVersion::Ref("HEAD".into()));
+        assert_eq!(
+            refs.file_refs_detail[0].version,
+            WikiVersion::Ref("HEAD".into())
+        );
     }
 
     #[test]
     fn parse_wikilink_with_branch_version() {
         let refs = parse_refs("[[src/foo.ts@main]]");
-        assert_eq!(refs.file_refs_detail[0].version, WikiVersion::Ref("main".into()));
+        assert_eq!(
+            refs.file_refs_detail[0].version,
+            WikiVersion::Ref("main".into())
+        );
     }
 
     #[test]

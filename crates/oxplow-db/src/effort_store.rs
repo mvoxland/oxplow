@@ -47,7 +47,10 @@ pub struct EffortFile {
 }
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(&ts)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -117,10 +120,7 @@ pub trait WorkItemEffortStore: Send + Sync {
         end_snapshot_id: Option<i64>,
         summary: Option<String>,
     ) -> Result<(), DomainError>;
-    async fn list_for_item(
-        &self,
-        item: &WorkItemId,
-    ) -> Result<Vec<WorkItemEffort>, DomainError>;
+    async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkItemEffort>, DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
     async fn record_file(
         &self,
@@ -219,10 +219,7 @@ impl WorkItemEffortStore for SqliteWorkItemEffortStore {
         .unwrap()
     }
 
-    async fn list_for_item(
-        &self,
-        item: &WorkItemId,
-    ) -> Result<Vec<WorkItemEffort>, DomainError> {
+    async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkItemEffort>, DomainError> {
         let db = self.db.clone();
         let item = item.clone();
         tokio::task::spawn_blocking(move || {

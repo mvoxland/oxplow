@@ -55,7 +55,11 @@ pub enum CodeQualityScanPhase {
 /// refetches the affected bucket on receipt rather than trying to
 /// reconcile diffs from the payload.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum OxplowEvent {
     /// Any stream row changed (created, renamed, deleted, panes
     /// updated). Renderer refetches `list_streams`.

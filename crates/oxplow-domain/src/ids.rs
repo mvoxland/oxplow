@@ -9,9 +9,7 @@ use std::fmt;
 
 macro_rules! id_type {
     ($name:ident, $prefix:literal) => {
-        #[derive(
-            Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type,
-        )]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
         #[serde(transparent)]
         pub struct $name(pub String);
 

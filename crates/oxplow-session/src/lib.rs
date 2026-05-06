@@ -102,7 +102,11 @@ impl StreamService {
         streams: Arc<dyn StreamStore>,
         threads: Arc<dyn oxplow_domain::stores::ThreadStore>,
     ) -> Self {
-        Self { layout, streams, threads }
+        Self {
+            layout,
+            streams,
+            threads,
+        }
     }
 
     /// Insert the auto-created `"Thread"` row that every fresh stream
@@ -163,8 +167,8 @@ impl StreamService {
         if let Some(existing) = self.streams.primary().await? {
             return Ok(existing);
         }
-        let branch = detect_current_branch(&self.layout.project_dir)
-            .unwrap_or_else(|| "HEAD".to_string());
+        let branch =
+            detect_current_branch(&self.layout.project_dir).unwrap_or_else(|| "HEAD".to_string());
         let now = Timestamp::now();
         let title = self
             .layout
@@ -302,8 +306,7 @@ impl StreamService {
         // Read the branch from the worktree's HEAD. If the worktree
         // is detached we still record it so the user can fix that on
         // their own (the rest of oxplow tolerates a missing branch).
-        let branch =
-            detect_current_branch(&worktree_path).unwrap_or_else(|| "HEAD".to_string());
+        let branch = detect_current_branch(&worktree_path).unwrap_or_else(|| "HEAD".to_string());
 
         let title = title.into();
         let now = Timestamp::now();
@@ -660,7 +663,12 @@ mod tests {
         assert!(path.exists());
         svc.delete_stream(&stream.id).await.unwrap();
         // git worktree remove deletes the dir; the row is gone.
-        assert!(svc.list_streams().await.unwrap().iter().all(|s| s.id != stream.id));
+        assert!(svc
+            .list_streams()
+            .await
+            .unwrap()
+            .iter()
+            .all(|s| s.id != stream.id));
         // best-effort dir removal — verify
         assert!(!path.exists(), "worktree dir should be removed");
     }
@@ -688,8 +696,16 @@ mod tests {
         assert!(path.exists());
         // delete_worktree=false: row is archived, dir remains on disk.
         svc.archive_stream(&stream.id, false).await.unwrap();
-        assert!(svc.list_streams().await.unwrap().iter().all(|s| s.id != stream.id));
-        assert!(path.exists(), "worktree dir should remain when delete_worktree=false");
+        assert!(svc
+            .list_streams()
+            .await
+            .unwrap()
+            .iter()
+            .all(|s| s.id != stream.id));
+        assert!(
+            path.exists(),
+            "worktree dir should remain when delete_worktree=false"
+        );
     }
 
     #[tokio::test]
@@ -703,7 +719,10 @@ mod tests {
         let path = dir.worktree_path("feat-arch-del");
         assert!(path.exists());
         svc.archive_stream(&stream.id, true).await.unwrap();
-        assert!(!path.exists(), "worktree dir should be pruned when delete_worktree=true");
+        assert!(
+            !path.exists(),
+            "worktree dir should be pruned when delete_worktree=true"
+        );
     }
 
     #[tokio::test]

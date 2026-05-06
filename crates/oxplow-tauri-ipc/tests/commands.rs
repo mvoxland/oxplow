@@ -74,10 +74,9 @@ async fn list_threads_empty_for_unknown_stream() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_closed_threads_empty_for_unknown_stream() {
     let app = TestApp::build();
-    let threads =
-        commands::threads::list_closed_threads(app.state(), StreamId::from("no-such"))
-            .await
-            .unwrap();
+    let threads = commands::threads::list_closed_threads(app.state(), StreamId::from("no-such"))
+        .await
+        .unwrap();
     assert!(threads.is_empty());
 }
 
@@ -93,12 +92,10 @@ async fn get_work_item_missing_returns_none() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_work_items_for_thread_empty() {
     let app = TestApp::build();
-    let items = commands::work_items::list_work_items_for_thread(
-        app.state(),
-        ThreadId::from("no-such"),
-    )
-    .await
-    .unwrap();
+    let items =
+        commands::work_items::list_work_items_for_thread(app.state(), ThreadId::from("no-such"))
+            .await
+            .unwrap();
     assert!(items.is_empty());
 }
 
@@ -139,7 +136,9 @@ async fn top_visited_pages_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recent_usage_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::usage::list_recent_usage(app.state(), 10).await.unwrap();
+    let v = commands::usage::list_recent_usage(app.state(), 10)
+        .await
+        .unwrap();
     assert!(v.is_empty());
 }
 
@@ -173,7 +172,9 @@ async fn list_snapshots_empty_for_unknown_path() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_snapshot_missing_returns_none() {
     let app = TestApp::build();
-    let v = commands::snapshot::get_snapshot(app.state(), 99999).await.unwrap();
+    let v = commands::snapshot::get_snapshot(app.state(), 99999)
+        .await
+        .unwrap();
     assert!(v.is_none());
 }
 
@@ -231,10 +232,9 @@ async fn get_config_returns_default_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_workspace_entries_returns_root_listing() {
     let app = TestApp::build();
-    let _entries =
-        commands::workspace::list_workspace_entries(app.state(), None, "".into())
-            .await
-            .unwrap();
+    let _entries = commands::workspace::list_workspace_entries(app.state(), None, "".into())
+        .await
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

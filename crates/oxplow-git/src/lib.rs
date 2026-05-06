@@ -19,7 +19,9 @@ pub mod sync;
 pub mod workspace;
 mod worktree;
 
-pub use blame::{git_blame, local_blame, parse_porcelain, BlameLine, LocalBlameEntry, BLAME_ZERO_SHA};
+pub use blame::{
+    git_blame, local_blame, parse_porcelain, BlameLine, LocalBlameEntry, BLAME_ZERO_SHA,
+};
 pub use branch::{list_branches, BranchRef, BranchRefKind};
 pub use branch_changes::{
     get_change_scopes, list_branch_changes, BranchChangeEntry, BranchChanges, ChangeKind,
@@ -53,6 +55,6 @@ pub use workspace::{
     WorkspaceStatusSummary,
 };
 pub use worktree::{
-    ensure_worktree, list_adoptable_worktrees, list_existing_worktrees,
-    EnsureWorktreeError, GitWorktreeEntry,
+    ensure_worktree, list_adoptable_worktrees, list_existing_worktrees, EnsureWorktreeError,
+    GitWorktreeEntry,
 };

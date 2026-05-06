@@ -233,8 +233,7 @@ mod tests {
             .parent()
             .and_then(|p| p.parent())
             .expect("workspace root");
-        let target = workspace_root
-            .join("apps/desktop/src/tauri-bridge/generated/bindings.ts");
+        let target = workspace_root.join("apps/desktop/src/tauri-bridge/generated/bindings.ts");
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).expect("create bridge dir");
         }

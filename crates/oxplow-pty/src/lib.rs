@@ -218,7 +218,12 @@ async fn owner_loop(mut cmd_rx: mpsc::Receiver<Cmd>) {
                 };
                 let _ = reply.send(result);
             }
-            Cmd::Resize { id, cols, rows, reply } => {
+            Cmd::Resize {
+                id,
+                cols,
+                rows,
+                reply,
+            } => {
                 let result = match panes.get(&id) {
                     Some(entry) => entry
                         .master
@@ -251,11 +256,7 @@ async fn owner_loop(mut cmd_rx: mpsc::Receiver<Cmd>) {
                         //    the PID so wait() returns. This covers
                         //    processes that ignore SIGHUP from a
                         //    closed PTY (e.g. `sleep`).
-                        let child_taken = entry
-                            .child
-                            .lock()
-                            .ok()
-                            .and_then(|mut g| g.take());
+                        let child_taken = entry.child.lock().ok().and_then(|mut g| g.take());
                         if let Some(mut child) = child_taken {
                             let _ = child.kill();
                             let _ = child.wait();
@@ -291,7 +292,9 @@ fn kill_pid(pid: u32) {
     #[cfg(windows)]
     unsafe {
         use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+        };
         let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
         if !handle.is_null() {
             TerminateProcess(handle, 1);
@@ -458,7 +461,9 @@ mod tests {
         // then look for our own bytes coming back.
         let _ = timeout(Duration::from_millis(100), handle.events.recv()).await;
 
-        mgr.write(&handle.id, Bytes::from_static(b"hello\n")).await.unwrap();
+        mgr.write(&handle.id, Bytes::from_static(b"hello\n"))
+            .await
+            .unwrap();
 
         // Read until we see "hello" in the stream (cat's PTY echo
         // turns each input byte into output).

@@ -187,10 +187,7 @@ pub async fn set_stream_prompt(
 ) -> Result<Stream, IpcError> {
     use oxplow_domain::stores::StreamStore;
     let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
-    let mut s = store
-        .get(&req.id)
-        .await?
-        .ok_or_else(IpcError::not_found)?;
+    let mut s = store.get(&req.id).await?.ok_or_else(IpcError::not_found)?;
     s.custom_prompt = req.prompt.filter(|p| !p.is_empty());
     s.updated_at = oxplow_domain::Timestamp::now();
     store.upsert(&s).await?;
@@ -216,9 +213,7 @@ pub async fn reorder_streams(
         if let Some(mut s) = store.get(id).await? {
             // Preserve primary ordering: only worktrees get re-shuffled.
             if s.kind != oxplow_domain::StreamKind::Primary {
-                s.created_at = oxplow_domain::Timestamp::from_unix_ms(
-                    now.unix_ms() + idx as i64,
-                );
+                s.created_at = oxplow_domain::Timestamp::from_unix_ms(now.unix_ms() + idx as i64);
                 s.updated_at = now;
                 store.upsert(&s).await?;
             }
@@ -237,10 +232,7 @@ pub async fn checkout_stream_branch(
 ) -> Result<Stream, IpcError> {
     use oxplow_domain::stores::StreamStore;
     let store = oxplow_db::SqliteStreamStore::new(state.db.clone());
-    let stream = store
-        .get(&id)
-        .await?
-        .ok_or_else(IpcError::not_found)?;
+    let stream = store.get(&id).await?.ok_or_else(IpcError::not_found)?;
     let path = std::path::PathBuf::from(&stream.worktree_path);
     let branch_for_blocking = branch.clone();
     let result = tokio::task::spawn_blocking(move || {

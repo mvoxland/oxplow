@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
-use oxplow_db::{EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffortStore};
 use oxplow_db::SqliteWorkItemStore;
+use oxplow_db::{EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffortStore};
 use oxplow_domain::stores::{WorkItemLinkStore, WorkItemStore};
 use oxplow_domain::{
     DomainError, ThreadId, Timestamp, WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemId,
@@ -559,15 +559,33 @@ mod tests {
     async fn reorder_rewrites_indices() {
         let (svc, tid) = fixture().await;
         let a = svc
-            .create(Some(tid.clone()), CreateWorkItemInput { title: "a".into(), ..Default::default() })
+            .create(
+                Some(tid.clone()),
+                CreateWorkItemInput {
+                    title: "a".into(),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         let b = svc
-            .create(Some(tid.clone()), CreateWorkItemInput { title: "b".into(), ..Default::default() })
+            .create(
+                Some(tid.clone()),
+                CreateWorkItemInput {
+                    title: "b".into(),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         let c = svc
-            .create(Some(tid.clone()), CreateWorkItemInput { title: "c".into(), ..Default::default() })
+            .create(
+                Some(tid.clone()),
+                CreateWorkItemInput {
+                    title: "c".into(),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         // c, a, b

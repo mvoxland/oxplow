@@ -1,10 +1,8 @@
-use oxplow_app::agent_command::{
-    build_agent_command_for_session, AgentCommandOptions, PaneKind,
-};
+use oxplow_app::agent_command::{build_agent_command_for_session, AgentCommandOptions, PaneKind};
 use oxplow_app::agent_prompt::assemble_system_prompt;
+use oxplow_app::terminal_sessions::SpawnRequest;
 use oxplow_app::terminal_sessions::{AttachResult, TerminalSessionError};
 use oxplow_domain::stores::ThreadStore;
-use oxplow_app::terminal_sessions::SpawnRequest;
 
 use crate::error::IpcError;
 use crate::state::{AppState, PluginRuntimeState};
@@ -44,11 +42,7 @@ pub async fn open_terminal_session(
     let pane_kind = match pane_target.as_str() {
         "working" => PaneKind::Working,
         "talking" => PaneKind::Talking,
-        other => {
-            return Err(IpcError::invalid(format!(
-                "unknown pane target: {other}"
-            )))
-        }
+        other => return Err(IpcError::invalid(format!("unknown pane target: {other}"))),
     };
 
     // Resolve the stream the user is currently driving. Falls back to
@@ -106,10 +100,7 @@ pub async fn open_terminal_session(
         ("OXPLOW_STREAM_ID".to_string(), stream.id.0.clone()),
         (
             "OXPLOW_THREAD_ID".to_string(),
-            thread_id
-                .as_ref()
-                .map(|t| t.0.clone())
-                .unwrap_or_default(),
+            thread_id.as_ref().map(|t| t.0.clone()).unwrap_or_default(),
         ),
         ("OXPLOW_PANE".to_string(), pane_target.clone()),
     ];
@@ -145,7 +136,8 @@ pub async fn open_terminal_session(
                     SpawnRequest {
                         command: "tmux".into(),
                         args: vec!["attach-session".into(), "-t".into(), target_label.clone()],
-                        cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                        cwd: std::env::current_dir()
+                            .unwrap_or_else(|_| std::path::PathBuf::from(".")),
                         env: vec![
                             ("TERM".into(), "xterm-256color".into()),
                             ("COLORTERM".into(), "truecolor".into()),

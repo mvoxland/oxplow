@@ -52,10 +52,7 @@ pub async fn run_code_quality_scan(
         timeout: None,
         dup_options: None,
     };
-    let scan_id = state
-        .code_quality_store
-        .create_scan(&tool, &scope)
-        .await?;
+    let scan_id = state.code_quality_store.create_scan(&tool, &scope).await?;
     state.events.emit(OxplowEvent::CodeQualityScanned {
         stream_id: None,
         scan_id,
@@ -82,7 +79,9 @@ pub async fn run_code_quality_scan(
                 scope: scope.clone(),
                 phase: CodeQualityScanPhase::Failed,
             });
-            return Err(IpcError::invalid(format!("unknown code quality tool: {other}")));
+            return Err(IpcError::invalid(format!(
+                "unknown code quality tool: {other}"
+            )));
         }
     };
     match findings_result {
@@ -120,11 +119,7 @@ pub async fn run_code_quality_scan(
         Err(e) => {
             state
                 .code_quality_store
-                .finish_scan(
-                    scan_id,
-                    CodeQualityScanStatus::Failed,
-                    Some(e.to_string()),
-                )
+                .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.to_string()))
                 .await?;
             state.events.emit(OxplowEvent::CodeQualityScanned {
                 stream_id: None,
@@ -236,7 +231,11 @@ pub async fn run_duplication_scan_at(
     let bg_label = match &tree_version {
         TreeVersion::Disk => "Scanning duplicates (working tree)".to_string(),
         TreeVersion::Ref { r#ref } => {
-            let short = if r#ref.len() > 12 { &r#ref[..7] } else { r#ref.as_str() };
+            let short = if r#ref.len() > 12 {
+                &r#ref[..7]
+            } else {
+                r#ref.as_str()
+            };
             format!("Scanning duplicates @{short}")
         }
         TreeVersion::Snapshot { id } => format!("Scanning duplicates @snapshot {id}"),
@@ -492,7 +491,8 @@ fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
                 Visibility::Public => "public",
                 Visibility::Private => "private",
                 Visibility::Unknown => "unknown",
-            }.to_string(),
+            }
+            .to_string(),
         })
         .collect()
 }
@@ -506,17 +506,11 @@ mod tests {
         let files = vec![AnalyzeFileSpec {
             path: "src/foo.rs".into(),
             base_content: Some("fn a() {}".into()),
-            head_content: Some(
-                "fn a() { if true { 1; } }".into(),
-            ),
+            head_content: Some("fn a() { if true { 1; } }".into()),
         }];
         let result = analyze_functions_at_refs(files).await.unwrap();
         assert_eq!(result.sides.len(), 2);
-        let head = result
-            .sides
-            .iter()
-            .find(|s| s.side == "head")
-            .unwrap();
+        let head = result.sides.iter().find(|s| s.side == "head").unwrap();
         assert_eq!(head.functions.len(), 1);
         assert!(head.functions[0].complexity >= 2.0);
     }

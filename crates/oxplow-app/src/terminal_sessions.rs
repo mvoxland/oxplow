@@ -24,8 +24,8 @@ use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use bytes::Bytes;
-use oxplow_pty::{PaneEvent, PaneId, PtyManager};
 pub use oxplow_pty::SpawnRequest;
+use oxplow_pty::{PaneEvent, PaneId, PtyManager};
 use oxplow_tmux::{ScrollDirection, TmuxRunner, WindowTarget};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -90,7 +90,10 @@ struct RingBuffer {
 
 impl RingBuffer {
     fn new() -> Self {
-        Self { chunks: VecDeque::new(), bytes: 0 }
+        Self {
+            chunks: VecDeque::new(),
+            bytes: 0,
+        }
     }
 
     fn push(&mut self, chunk: Bytes) {
@@ -249,7 +252,6 @@ impl TerminalSessionRegistry {
         req: SpawnRequest,
         key: SessionKey,
     ) -> Result<String, TerminalSessionError> {
-
         let mut handle = self.pty.spawn_pane(req).await?;
         let pane_id = handle.id.clone();
         let session_id = format!("term-{}", uuid::Uuid::new_v4().simple());
@@ -319,11 +321,7 @@ impl TerminalSessionRegistry {
     }
 
     /// Dispatch one renderer-issued JSON message.
-    pub async fn send(
-        &self,
-        session_id: &str,
-        message: &str,
-    ) -> Result<(), TerminalSessionError> {
+    pub async fn send(&self, session_id: &str, message: &str) -> Result<(), TerminalSessionError> {
         let parsed: serde_json::Value = serde_json::from_str(message)
             .map_err(|e| TerminalSessionError::InvalidMessage(e.to_string()))?;
         let kind = parsed
@@ -345,9 +343,7 @@ impl TerminalSessionRegistry {
                 let b64 = parsed
                     .get("bytes")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        TerminalSessionError::InvalidMessage("missing bytes".into())
-                    })?;
+                    .ok_or_else(|| TerminalSessionError::InvalidMessage("missing bytes".into()))?;
                 let raw = B64
                     .decode(b64)
                     .map_err(|e| TerminalSessionError::Base64(e.to_string()))?;

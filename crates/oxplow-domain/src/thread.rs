@@ -88,9 +88,18 @@ mod tests {
 
     #[test]
     fn status_uses_snake_case() {
-        assert_eq!(serde_json::to_string(&ThreadStatus::Active).unwrap(), "\"active\"");
-        assert_eq!(serde_json::to_string(&ThreadStatus::Queued).unwrap(), "\"queued\"");
-        assert_eq!(serde_json::to_string(&ThreadStatus::Closed).unwrap(), "\"closed\"");
+        assert_eq!(
+            serde_json::to_string(&ThreadStatus::Active).unwrap(),
+            "\"active\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ThreadStatus::Queued).unwrap(),
+            "\"queued\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ThreadStatus::Closed).unwrap(),
+            "\"closed\""
+        );
     }
 
     #[test]

@@ -45,10 +45,8 @@ pub trait ThreadStore: Send + Sync {
     /// `list_for_stream` after this fires.
     async fn archive(&self, id: &ThreadId) -> Result<(), DomainError>;
     /// Per-stream selected-thread pointer. None means nothing selected.
-    async fn selected_for_stream(
-        &self,
-        stream: &StreamId,
-    ) -> Result<Option<ThreadId>, DomainError>;
+    async fn selected_for_stream(&self, stream: &StreamId)
+        -> Result<Option<ThreadId>, DomainError>;
     async fn set_selected_for_stream(
         &self,
         stream: &StreamId,
@@ -145,11 +143,7 @@ pub trait AgentStatusStore: Send + Sync {
 #[async_trait]
 pub trait AgentTurnStore: Send + Sync {
     async fn open(&self, turn: &AgentTurn) -> Result<(), DomainError>;
-    async fn close(
-        &self,
-        id: &AgentTurnId,
-        answer: Option<String>,
-    ) -> Result<(), DomainError>;
+    async fn close(&self, id: &AgentTurnId, answer: Option<String>) -> Result<(), DomainError>;
     async fn get(&self, id: &AgentTurnId) -> Result<Option<AgentTurn>, DomainError>;
     async fn list_open(&self, thread: &ThreadId) -> Result<Vec<AgentTurn>, DomainError>;
     /// Every open agent_turn across every thread. Used by daemon

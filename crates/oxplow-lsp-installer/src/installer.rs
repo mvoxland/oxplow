@@ -27,7 +27,9 @@ pub enum InstallError {
     Zip(#[from] zip::result::ZipError),
     #[error("source scheme `{0}` not implemented (only pkg:github/... is supported)")]
     UnsupportedSource(String),
-    #[error("asset `{0}` has no extractor implemented (try .gz, .tar.gz, .zip, or a plain binary name)")]
+    #[error(
+        "asset `{0}` has no extractor implemented (try .gz, .tar.gz, .zip, or a plain binary name)"
+    )]
     UnsupportedAsset(String),
     #[error("package `{name}` declares no `bin` entry — nothing to install")]
     NoBin { name: String },
@@ -71,15 +73,36 @@ impl Installer {
     }
 
     /// Download + extract `package` for the given host target.
-    pub async fn install(&self, package: &Package, target: &Target) -> Result<Installed, InstallError> {
-        let SourceId::Github { owner, repo, version } = package.source_id()? else {
-            let SourceId::Other { scheme, .. } = package.source_id()? else { unreachable!() };
+    pub async fn install(
+        &self,
+        package: &Package,
+        target: &Target,
+    ) -> Result<Installed, InstallError> {
+        let SourceId::Github {
+            owner,
+            repo,
+            version,
+        } = package.source_id()?
+        else {
+            let SourceId::Other { scheme, .. } = package.source_id()? else {
+                unreachable!()
+            };
             return Err(InstallError::UnsupportedSource(scheme));
         };
         let asset = package.asset_for_target(target)?;
-        let url = format!("https://github.com/{owner}/{repo}/releases/download/{version}/{file}", file = asset.file);
+        let url = format!(
+            "https://github.com/{owner}/{repo}/releases/download/{version}/{file}",
+            file = asset.file
+        );
         info!(package = %package.name, %url, "downloading mason asset");
-        let bytes = self.http.get(&url).send().await?.error_for_status()?.bytes().await?;
+        let bytes = self
+            .http
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await?;
         let dest = self.install_dir_for(&package.name);
         if dest.exists() {
             tokio::fs::remove_dir_all(&dest).await?;
@@ -89,9 +112,16 @@ impl Installer {
         let asset_clone = asset.clone();
         let dest_clone = dest.clone();
         let pkg_name = package.name.clone();
-        tokio::task::spawn_blocking(move || extract_asset(&bytes_vec, &asset_clone, &dest_clone, &pkg_name))
-            .await
-            .map_err(|e| InstallError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))??;
+        tokio::task::spawn_blocking(move || {
+            extract_asset(&bytes_vec, &asset_clone, &dest_clone, &pkg_name)
+        })
+        .await
+        .map_err(|e| {
+            InstallError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
+        })??;
 
         // Resolve which file inside `dest` is the binary.
         let bin_path = resolve_bin_path(package, &asset, &dest)?;
@@ -114,7 +144,12 @@ impl Installer {
     }
 }
 
-fn extract_asset(bytes: &[u8], asset: &ResolvedAsset, dest: &Path, pkg_name: &str) -> Result<(), InstallError> {
+fn extract_asset(
+    bytes: &[u8],
+    asset: &ResolvedAsset,
+    dest: &Path,
+    pkg_name: &str,
+) -> Result<(), InstallError> {
     let file = &asset.file;
     if file.ends_with(".tar.gz") || file.ends_with(".tgz") {
         debug!(file, "extracting tar.gz");
@@ -132,10 +167,7 @@ fn extract_asset(bytes: &[u8], asset: &ResolvedAsset, dest: &Path, pkg_name: &st
     if file.ends_with(".gz") {
         // Plain gzip-of-binary. Mason's `bin` field tells us the output
         // name (without .gz). Decompress directly to that path.
-        let bin_name = asset
-            .bin
-            .clone()
-            .unwrap_or_else(|| pkg_name.to_string());
+        let bin_name = asset.bin.clone().unwrap_or_else(|| pkg_name.to_string());
         let out_path = dest.join(bin_name);
         let mut gz = flate2::read::GzDecoder::new(Cursor::new(bytes));
         let mut buf = Vec::new();
@@ -145,9 +177,7 @@ fn extract_asset(bytes: &[u8], asset: &ResolvedAsset, dest: &Path, pkg_name: &st
         return Ok(());
     }
     // Plain binary with no recognized extension — treat as raw.
-    if !file.contains('.')
-        || file.ends_with(".exe")
-    {
+    if !file.contains('.') || file.ends_with(".exe") {
         let out_path = dest.join(file);
         let mut f = std::fs::File::create(&out_path)?;
         f.write_all(bytes)?;
@@ -156,19 +186,23 @@ fn extract_asset(bytes: &[u8], asset: &ResolvedAsset, dest: &Path, pkg_name: &st
     Err(InstallError::UnsupportedAsset(file.clone()))
 }
 
-fn resolve_bin_path(package: &Package, asset: &ResolvedAsset, dest: &Path) -> Result<PathBuf, InstallError> {
+fn resolve_bin_path(
+    package: &Package,
+    asset: &ResolvedAsset,
+    dest: &Path,
+) -> Result<PathBuf, InstallError> {
     // Pick the first bin entry. Most LSP packages declare exactly one.
-    let (_server_name, template) = package
-        .bin
-        .iter()
-        .next()
-        .ok_or_else(|| InstallError::NoBin { name: package.name.clone() })?;
+    let (_server_name, template) =
+        package
+            .bin
+            .iter()
+            .next()
+            .ok_or_else(|| InstallError::NoBin {
+                name: package.name.clone(),
+            })?;
     // Resolve `{{source.asset.bin}}` to the asset's `bin` field.
     let resolved = if template.contains("{{source.asset.bin}}") {
-        let bin = asset
-            .bin
-            .clone()
-            .unwrap_or_else(|| package.name.clone());
+        let bin = asset.bin.clone().unwrap_or_else(|| package.name.clone());
         template.replace("{{source.asset.bin}}", &bin)
     } else {
         template.clone()
@@ -268,6 +302,9 @@ bin:
             .asset_for_target(&Target("darwin_arm64".into()))
             .unwrap();
         let path = resolve_bin_path(&pkg, &asset, Path::new("/tmp/rust-analyzer")).unwrap();
-        assert_eq!(path, PathBuf::from("/tmp/rust-analyzer/rust-analyzer-aarch64-apple-darwin"));
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/rust-analyzer/rust-analyzer-aarch64-apple-darwin")
+        );
     }
 }

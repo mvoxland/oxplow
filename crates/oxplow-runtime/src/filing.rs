@@ -43,7 +43,9 @@ pub struct FilingEnforcementContext<'a> {
 /// mode's plan file isn't blocked by filing enforcement.
 pub fn is_plan_mode_plan_file(file_path: Option<&str>) -> bool {
     let Some(path) = file_path else { return false };
-    let Some(home) = std::env::var_os("HOME") else { return false };
+    let Some(home) = std::env::var_os("HOME") else {
+        return false;
+    };
     let prefix = std::path::Path::new(&home).join(".claude").join("plans");
     let prefix_str = prefix.to_string_lossy().into_owned() + "/";
     path.starts_with(prefix_str.as_str()) && path.ends_with(".md")

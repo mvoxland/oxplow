@@ -37,7 +37,9 @@ fn str_to_kind(s: &str) -> Result<WorkItemKind, DomainError> {
         "subtask" => Ok(WorkItemKind::Subtask),
         "bug" => Ok(WorkItemKind::Bug),
         "note" => Ok(WorkItemKind::Note),
-        other => Err(DomainError::Invalid(format!("unknown work item kind: {other}"))),
+        other => Err(DomainError::Invalid(format!(
+            "unknown work item kind: {other}"
+        ))),
     }
 }
 
@@ -124,7 +126,10 @@ fn str_to_author(s: &str) -> Result<WorkItemAuthor, DomainError> {
 }
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts).unwrap().trim_matches('"').to_string()
+    serde_json::to_string(&ts)
+        .unwrap()
+        .trim_matches('"')
+        .to_string()
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -159,8 +164,9 @@ fn row_to_work_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkItem> {
         .flatten()
         .unwrap_or(0);
 
-    let map_err =
-        |e: DomainError| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e));
+    let map_err = |e: DomainError| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    };
 
     Ok(WorkItem {
         id: WorkItemId::from(id),
@@ -176,8 +182,14 @@ fn row_to_work_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkItem> {
         created_by: str_to_actor(&created_by).map_err(map_err)?,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
         updated_at: string_to_ts(&updated_at).map_err(map_err)?,
-        completed_at: completed_at.map(|s| string_to_ts(&s)).transpose().map_err(map_err)?,
-        deleted_at: deleted_at.map(|s| string_to_ts(&s)).transpose().map_err(map_err)?,
+        completed_at: completed_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(map_err)?,
+        deleted_at: deleted_at
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(map_err)?,
         note_count,
         author: author.and_then(|a| str_to_author(&a).ok()),
         category,

@@ -73,8 +73,15 @@ pub struct RawAsset {
 /// error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceId {
-    Github { owner: String, repo: String, version: String },
-    Other { scheme: String, raw: String },
+    Github {
+        owner: String,
+        repo: String,
+        version: String,
+    },
+    Other {
+        scheme: String,
+        raw: String,
+    },
 }
 
 impl Package {
@@ -96,7 +103,10 @@ impl Package {
             return Err(PackageError::UnsupportedScheme(self.source.id.clone()));
         };
         for asset in &self.source.asset {
-            if asset_targets(&asset.target).iter().any(|t| t == target.as_str()) {
+            if asset_targets(&asset.target)
+                .iter()
+                .any(|t| t == target.as_str())
+            {
                 let file = scalar_string(&asset.file)
                     .ok_or_else(|| PackageError::MalformedSourceId(self.source.id.clone()))?;
                 let resolved_file = file.replace("{{version}}", &version);
@@ -132,14 +142,18 @@ fn asset_targets(v: &serde_yaml::Value) -> Vec<String> {
 fn scalar_string(v: &serde_yaml::Value) -> Option<String> {
     match v {
         serde_yaml::Value::String(s) => Some(s.clone()),
-        serde_yaml::Value::Sequence(seq) => seq.iter().find_map(|x| x.as_str().map(|s| s.to_string())),
+        serde_yaml::Value::Sequence(seq) => {
+            seq.iter().find_map(|x| x.as_str().map(|s| s.to_string()))
+        }
         _ => None,
     }
 }
 
 fn parse_purl(s: &str) -> Result<SourceId, PackageError> {
     // Format: pkg:<scheme>/<...>@<version>
-    let rest = s.strip_prefix("pkg:").ok_or_else(|| PackageError::MalformedSourceId(s.to_string()))?;
+    let rest = s
+        .strip_prefix("pkg:")
+        .ok_or_else(|| PackageError::MalformedSourceId(s.to_string()))?;
     let (scheme, body) = rest
         .split_once('/')
         .ok_or_else(|| PackageError::MalformedSourceId(s.to_string()))?;
@@ -218,7 +232,10 @@ bin:
             .asset_for_target(&Target("darwin_arm64".into()))
             .expect("asset for darwin_arm64");
         assert_eq!(asset.file, "rust-analyzer-aarch64-apple-darwin.gz");
-        assert_eq!(asset.bin.as_deref(), Some("rust-analyzer-aarch64-apple-darwin"));
+        assert_eq!(
+            asset.bin.as_deref(),
+            Some("rust-analyzer-aarch64-apple-darwin")
+        );
     }
 
     #[test]

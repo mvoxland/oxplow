@@ -27,8 +27,8 @@ use tracing::{info, warn};
 
 use oxplow_config::LspServerConfig;
 use oxplow_lsp_installer::{
-    current_target, InstallError, Installed, Installer as MasonInstaller, Registry,
-    RegistryError, Target,
+    current_target, InstallError, Installed, Installer as MasonInstaller, Registry, RegistryError,
+    Target,
 };
 
 use crate::lsp_sessions::LspSessionManager;
@@ -106,14 +106,20 @@ impl LspInstallerService {
                 });
             }
         }
-        info!(count = manifest.entries.len(), "lsp installer manifest replayed");
+        info!(
+            count = manifest.entries.len(),
+            "lsp installer manifest replayed"
+        );
         Ok(())
     }
 
     /// Install (or reinstall) a Mason package by name. Downloads from
     /// the registry, extracts under `.oxplow/lsp/<name>/`, registers
     /// with the session manager, and persists the manifest.
-    pub async fn install(&self, package_name: &str) -> Result<InstalledManifestEntry, LspInstallerError> {
+    pub async fn install(
+        &self,
+        package_name: &str,
+    ) -> Result<InstalledManifestEntry, LspInstallerError> {
         let _guard = self.inner.lock().await;
         let registry = Registry::new(self.cache_root.clone());
         let installer = MasonInstaller::new(self.install_root.clone());
@@ -140,7 +146,11 @@ impl LspInstallerService {
         Ok(out)
     }
 
-    async fn persist(&self, installed: Installed, _target: &Target) -> Result<InstalledManifestEntry, LspInstallerError> {
+    async fn persist(
+        &self,
+        installed: Installed,
+        _target: &Target,
+    ) -> Result<InstalledManifestEntry, LspInstallerError> {
         if installed.languages.is_empty() {
             return Err(LspInstallerError::NoLanguages(installed.name.clone()));
         }

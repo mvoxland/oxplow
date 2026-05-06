@@ -11,24 +11,24 @@ pub mod agent_command;
 pub mod agent_pane;
 pub mod agent_prompt;
 pub mod agent_status_derive;
+pub mod background_task;
 pub mod blob_store;
 pub mod code_quality_runner;
-pub mod background_task;
 pub mod config_service;
 pub mod diagnostics;
 pub mod events;
 pub mod followup;
 pub mod git_service;
 pub mod hook_ingest;
-pub mod wiki_pages;
-pub mod wiki_pages_watch;
 pub mod lsp_clients;
 pub mod lsp_installer;
 pub mod lsp_sessions;
-pub mod terminal_sessions;
 pub mod recovery;
 pub mod snapshot_capture;
+pub mod terminal_sessions;
 pub mod thread_runtime;
+pub mod wiki_pages;
+pub mod wiki_pages_watch;
 pub mod work_item_service;
 pub mod workspace_watch;
 
@@ -39,11 +39,10 @@ pub use agent_prompt::{
 pub use events::{
     CodeQualityScanPhase, EventBus, OxplowEvent, SnapshotSourceKind, WorkspaceChangeKind,
 };
-pub use oxplow_lsp::{LspError, LspProxy};
 pub use hook_ingest::{HookEnvelope, HookIngestError, HookIngestService};
+pub use oxplow_lsp::{LspError, LspProxy};
 pub use work_item_service::{
-    BacklogState, CreateWorkItemInput, UpdateWorkItemChanges, WorkItemService,
-    WorkItemServiceError,
+    BacklogState, CreateWorkItemInput, UpdateWorkItemChanges, WorkItemService, WorkItemServiceError,
 };
 
 use std::path::PathBuf;
@@ -194,11 +193,11 @@ impl Services {
         let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
-        let wiki_page_thread_updates =
-            Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
+        let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
-        let streams = StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
+        let streams =
+            StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
         let threads = ThreadService::new(thread_store.clone());
         let work_items = WorkItemService::new(work_item_store.clone());
         let event_bus = EventBus::new();
@@ -309,10 +308,10 @@ impl Services {
         let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteWorkItemEffortStore::new(db.clone()));
-        let wiki_page_thread_updates =
-            Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
+        let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
-        let streams = StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
+        let streams =
+            StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
         let threads = ThreadService::new(thread_store.clone());
         let work_items = WorkItemService::new(work_item_store.clone());
         let event_bus = EventBus::new();
@@ -397,10 +396,7 @@ impl Services {
 /// the row and decides terminal vs non-terminal from `status`) is
 /// sufficient. Without this bridge the bottom-bar indicator stays
 /// silent and `awaitBackgroundTask` never resolves.
-fn bridge_background_task_events(
-    store: &BackgroundTaskStore,
-    bus: &EventBus,
-) {
+fn bridge_background_task_events(store: &BackgroundTaskStore, bus: &EventBus) {
     let mut rx = store.subscribe();
     let bus = bus.clone();
     tokio::spawn(async move {
@@ -440,7 +436,8 @@ mod tests {
             idx.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
 
         let layout = AppLayout::for_project(project.path());
         let services = Services::boot(layout).unwrap();

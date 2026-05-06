@@ -71,8 +71,7 @@ impl SnapshotCaptureService {
     }
 
     async fn run(self) {
-        let watcher = match FsWatcher::watch(self.project_dir.clone(), Duration::from_millis(250))
-        {
+        let watcher = match FsWatcher::watch(self.project_dir.clone(), Duration::from_millis(250)) {
             Ok(w) => w,
             Err(e) => {
                 warn!(error = %e, "snapshot capture: failed to start fs-watch");
@@ -105,7 +104,10 @@ impl SnapshotCaptureService {
         }
     }
 
-    async fn capture_path(&self, path: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn capture_path(
+        &self,
+        path: &Path,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let metadata = std::fs::metadata(path)?;
         if !metadata.is_file() {
             return Ok(());

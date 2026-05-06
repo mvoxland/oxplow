@@ -154,7 +154,10 @@ int classify(int x) {
 "#;
     let m = analyze_file("src/x.c", src);
     let f = m.iter().find(|f| f.name == "classify").unwrap_or_else(|| {
-        panic!("expected name 'classify', got {:?}", m.iter().map(|f| &f.name).collect::<Vec<_>>())
+        panic!(
+            "expected name 'classify', got {:?}",
+            m.iter().map(|f| &f.name).collect::<Vec<_>>()
+        )
     });
     assert_eq!(f.parameter_count, 1);
     assert!(f.complexity >= 3);
@@ -178,7 +181,11 @@ int Foo::bar(int x, int y) {
         "got {:?}",
         names
     );
-    assert!(!names.iter().any(|n| n.contains('(')), "name leaked declarator parens: {:?}", names);
+    assert!(
+        !names.iter().any(|n| n.contains('(')),
+        "name leaked declarator parens: {:?}",
+        names
+    );
 }
 
 #[test]
@@ -402,7 +409,12 @@ fn outer() {
 }
 "#;
     let m = analyze_file("src/x.rs", src);
-    assert_eq!(m.len(), 2, "got {:?}", m.iter().map(|f| &f.name).collect::<Vec<_>>());
+    assert_eq!(
+        m.len(),
+        2,
+        "got {:?}",
+        m.iter().map(|f| &f.name).collect::<Vec<_>>()
+    );
     let inner = m.iter().find(|f| f.name == "inner").unwrap();
     let outer = m.iter().find(|f| f.name == "outer").unwrap();
     // Inner function's `if` should count toward inner, not outer.
