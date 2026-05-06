@@ -28,6 +28,12 @@ pub struct FollowupStore {
     events: broadcast::Sender<ThreadId>,
 }
 
+impl Default for FollowupStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FollowupStore {
     pub fn new() -> Self {
         let (events, _) = broadcast::channel(64);

@@ -134,7 +134,7 @@ pub fn assemble_system_prompt(
     }
     if !config.agent_prompt_append.is_empty() {
         out.push_str(&config.agent_prompt_append);
-        out.push_str("\n");
+        out.push('\n');
     }
     out.trim_end().to_string()
 }

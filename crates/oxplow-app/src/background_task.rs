@@ -21,7 +21,9 @@ const SNAPSHOT_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum BackgroundTaskKind {
+    #[default]
     Git,
     CodeQuality,
     Lsp,
@@ -76,12 +78,6 @@ pub struct StartInput {
     pub progress: Option<f64>,
 }
 
-impl Default for BackgroundTaskKind {
-    fn default() -> Self {
-        BackgroundTaskKind::Git
-    }
-}
-
 #[derive(Default, Clone)]
 pub struct UpdateInput {
     pub label: Option<String>,
@@ -98,6 +94,12 @@ struct State {
 pub struct BackgroundTaskStore {
     state: Arc<Mutex<State>>,
     events: broadcast::Sender<BackgroundTaskChange>,
+}
+
+impl Default for BackgroundTaskStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BackgroundTaskStore {

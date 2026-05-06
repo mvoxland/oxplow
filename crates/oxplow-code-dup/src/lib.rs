@@ -261,6 +261,7 @@ fn record_function(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_subtrees_recursive(
     path: &str,
     lang: Language,

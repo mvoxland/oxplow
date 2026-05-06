@@ -11,6 +11,7 @@
 //! 1. **`[[wikilinks]]`** — preferred form. The interior matches:
 //!    - `path/with/slash.ext[:line]` → file ref
 //!    - `bare-slug` (kebab-case, no slash, no extension) → related-note ref
+//!
 //!    Custom display text after `|` is stripped (`[[a/b.ts|label]]`).
 //! 2. **Inline file paths** — fallback for legacy notes that didn't
 //!    use the `[[…]]` syntax. At least one slash + a 1-6 char extension,
@@ -226,14 +227,11 @@ pub async fn sync_from_disk(
         .map_err(|e| DomainError::Invalid(format!("read note {slug}: {e}")))?;
     let title = extract_title(&body, slug);
     let refs = parse_refs(&body);
-    let body_size_bytes = body.as_bytes().len() as i64;
+    let body_size_bytes = body.len() as i64;
     let body_excerpt = body.chars().take(280).collect::<String>();
     let now = Timestamp::now();
     let existing = store.get(slug).await?;
-    let created_at = existing
-        .as_ref()
-        .map(|n| n.created_at.clone())
-        .unwrap_or(now.clone());
+    let created_at = existing.as_ref().map(|n| n.created_at).unwrap_or(now);
     let note = WikiPage {
         slug: slug.to_string(),
         title,

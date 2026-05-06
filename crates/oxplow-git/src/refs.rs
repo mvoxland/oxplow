@@ -201,7 +201,7 @@ pub fn list_recent_remote_branches(repo_path: &Path, limit: usize) -> Vec<Remote
             });
         }
     }
-    entries.sort_by(|a, b| b.last_commit_at.cmp(&a.last_commit_at));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.last_commit_at));
     entries.truncate(limit);
     entries
 }

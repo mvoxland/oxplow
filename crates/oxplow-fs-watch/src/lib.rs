@@ -144,7 +144,7 @@ pub fn should_ignore_workspace_watch_path(path: &Path) -> bool {
     path.components().any(|c| match c {
         Component::Normal(seg) => seg
             .to_str()
-            .map(|s| IGNORED_WORKSPACE_SEGMENTS.iter().any(|ig| *ig == s))
+            .map(|s| IGNORED_WORKSPACE_SEGMENTS.contains(&s))
             .unwrap_or(false),
         _ => false,
     })
@@ -192,11 +192,8 @@ mod tests {
         // Collect everything that lands within 1s. The debouncer
         // should coalesce 20 writes into a small number of events.
         let mut count = 0;
-        loop {
-            match timeout(Duration::from_millis(800), rx.recv()).await {
-                Ok(Ok(_)) => count += 1,
-                _ => break,
-            }
+        while let Ok(Ok(_)) = timeout(Duration::from_millis(800), rx.recv()).await {
+            count += 1;
         }
 
         assert!(count > 0, "expected at least one event");
@@ -226,17 +223,14 @@ mod tests {
         let mut saw_b = false;
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while std::time::Instant::now() < deadline && !(saw_a && saw_b) {
-            match timeout(Duration::from_millis(500), rx.recv()).await {
-                Ok(Ok(evt)) => {
-                    let p = evt.path.canonicalize().unwrap_or(evt.path.clone());
-                    if p == ta.canonicalize().unwrap() {
-                        saw_a = true;
-                    }
-                    if p == tb.canonicalize().unwrap() {
-                        saw_b = true;
-                    }
+            if let Ok(Ok(evt)) = timeout(Duration::from_millis(500), rx.recv()).await {
+                let p = evt.path.canonicalize().unwrap_or(evt.path.clone());
+                if p == ta.canonicalize().unwrap() {
+                    saw_a = true;
                 }
-                _ => {}
+                if p == tb.canonicalize().unwrap() {
+                    saw_b = true;
+                }
             }
         }
         assert!(saw_a, "expected event for {ta:?}");

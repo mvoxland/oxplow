@@ -41,6 +41,12 @@ pub enum PtyError {
 #[serde(transparent)]
 pub struct PaneId(pub String);
 
+impl Default for PaneId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PaneId {
     pub fn new() -> Self {
         Self(format!("pane-{}", uuid::Uuid::new_v4().simple()))

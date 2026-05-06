@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn with_cause_attaches_string() {
-        let inner = std::io::Error::new(std::io::ErrorKind::Other, "io fault");
+        let inner = std::io::Error::other("io fault");
         let e = IpcError::internal("wrapped").with_cause(inner);
         assert_eq!(e.cause.as_deref(), Some("io fault"));
     }

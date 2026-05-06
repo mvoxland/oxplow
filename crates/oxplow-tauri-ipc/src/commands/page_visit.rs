@@ -225,7 +225,7 @@ pub async fn list_recently_finished(
         Some(cursor) => e.timestamp() > cursor,
         None => true,
     });
-    entries.sort_by(|a, b| b.timestamp().cmp(&a.timestamp()));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp()));
     entries.truncate(cap);
     Ok(entries)
 }

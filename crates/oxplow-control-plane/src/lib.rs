@@ -189,7 +189,7 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
 
 fn generate_token() -> String {
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
@@ -653,7 +653,7 @@ async fn mine_turn_signals(ctx: &AppCtx, thread_id: &ThreadId) -> Option<TurnSig
         .list_open(thread_id)
         .await
         .ok()?;
-    let started_at = open.first()?.started_at.clone();
+    let started_at = open.first()?.started_at;
     let events = ctx
         .services
         .hook_event_store

@@ -199,7 +199,7 @@ fn locate_interval(intervals: &[(u32, u32, usize)], line: u32) -> Option<usize> 
     None
 }
 
-fn locate_qkey<'a>(intervals: &'a [(u32, u32, String)], line: u32) -> Option<&'a str> {
+fn locate_qkey(intervals: &[(u32, u32, String)], line: u32) -> Option<&str> {
     for (start, end, key) in intervals {
         if *start <= line && line <= *end {
             return Some(key.as_str());

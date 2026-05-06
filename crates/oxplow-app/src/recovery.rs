@@ -65,7 +65,7 @@ pub struct RecoveryReport {
 mod tests {
     use super::*;
     use oxplow_db::{Database, SqliteAgentTurnStore, SqliteStreamStore, SqliteThreadStore};
-    use oxplow_domain::stores::{AgentTurnStore as _, StreamStore, ThreadStore};
+    use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{
         AgentTurn, AgentTurnId, Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus,
         Timestamp,

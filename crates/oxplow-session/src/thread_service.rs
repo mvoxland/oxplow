@@ -197,7 +197,7 @@ impl ThreadService {
         let mut all = self.threads.list_for_stream(stream).await?;
         all.retain(|t| t.status == ThreadStatus::Closed);
         // Closed threads sorted most-recently-closed first.
-        all.sort_by(|a, b| b.closed_at.cmp(&a.closed_at));
+        all.sort_by_key(|t| std::cmp::Reverse(t.closed_at));
         Ok(all)
     }
 
