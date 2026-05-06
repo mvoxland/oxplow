@@ -90,9 +90,10 @@ pub fn analyze_with_language(
 }
 
 /// Recursive function-finder. When we hit a node whose kind matches
-/// one of `spec.function_kinds`, compute its metrics and DO NOT
-/// recurse further — nested functions are reported as their own
-/// records by the second pass below.
+/// one of `spec.function_kinds` (or, for grammars with form-head
+/// matchers, a `list_lit` whose head sym is in
+/// `spec.function_form_heads`), compute its metrics. We always
+/// descend so nested closures / methods get their own records.
 fn walk_functions(
     node: Node<'_>,
     src: &[u8],
@@ -100,8 +101,7 @@ fn walk_functions(
     path: &str,
     out: &mut Vec<FunctionMetrics>,
 ) {
-    let kind = node.kind();
-    if spec.function_kinds.contains(&kind) {
+    if is_function_node(node, src, spec) {
         if let Some(rec) = function_metrics(node, src, spec, path) {
             out.push(rec);
         }
@@ -111,6 +111,69 @@ fn walk_functions(
     for child in node.children(&mut cursor) {
         walk_functions(child, src, spec, path, out);
     }
+}
+
+/// Whether `node` should be treated as a function root. Either
+/// `node.kind()` is in `spec.function_kinds`, or — for grammars
+/// with a generic list node like Clojure's `list_lit` — the head
+/// symbol's text is in `spec.function_form_heads`.
+pub fn is_function_node(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
+    if spec.function_kinds.contains(&node.kind()) {
+        return true;
+    }
+    if !spec.function_form_heads.is_empty() && node.kind() == "list_lit" {
+        if let Some(head) = head_symbol_text(node, src) {
+            return spec.function_form_heads.contains(&head);
+        }
+    }
+    false
+}
+
+/// Same shape as `is_function_node` but for decision points.
+fn is_decision_node(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
+    if spec.decision_kinds.contains(&node.kind()) {
+        return true;
+    }
+    if !spec.decision_form_heads.is_empty() && node.kind() == "list_lit" {
+        if let Some(head) = head_symbol_text(node, src) {
+            return spec.decision_form_heads.contains(&head);
+        }
+    }
+    false
+}
+
+/// Read the text of the first significant symbol child of a
+/// `list_lit` node. Skips comments. Returns `None` if the first
+/// significant child isn't a `sym_lit`. tree-sitter-clojure
+/// represents the actual symbol identifier as a `sym_name` child
+/// of `sym_lit` (with any leading `^…` metadata as a sibling
+/// `meta_lit` child of the same sym_lit), so we read sym_name's
+/// text rather than sym_lit's full text.
+pub fn head_symbol_text<'a>(node: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "comment" => continue,
+            "sym_lit" => {
+                return sym_lit_name(child, src);
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Extract the symbol name from a `sym_lit` by reading its
+/// `sym_name` child. Falls back to the sym_lit's own text when
+/// the grammar shape differs.
+fn sym_lit_name<'a>(sym_lit: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
+    let mut cursor = sym_lit.walk();
+    for child in sym_lit.named_children(&mut cursor) {
+        if child.kind() == "sym_name" {
+            return child.utf8_text(src).ok();
+        }
+    }
+    sym_lit.utf8_text(src).ok()
 }
 
 fn function_metrics(
@@ -124,8 +187,8 @@ fn function_metrics(
     let length = end_line.saturating_sub(start_line) + 1;
 
     let name = function_name(node, src, spec).unwrap_or_else(|| "(anonymous)".into());
-    let parameter_count = count_parameters(node, spec);
-    let complexity = count_decision_points(node, spec) + 1;
+    let parameter_count = count_parameters(node, src, spec);
+    let complexity = count_decision_points(node, src, spec) + 1;
     let container_path = container_path(node, src, spec);
     let visibility = visibility_for(node, src, spec, &name);
 
@@ -152,7 +215,40 @@ fn visibility_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec, name: &str) -
         VisibilityStrategy::GoCapitalization => go_visibility(name),
         VisibilityStrategy::PythonUnderscore => python_visibility(name),
         VisibilityStrategy::CStatic => c_visibility(node, src),
+        VisibilityStrategy::ClojureForm => clojure_visibility(node, src),
     }
+}
+
+fn clojure_visibility(node: Node<'_>, src: &[u8]) -> Visibility {
+    // `defn-` is the explicit private form.
+    if let Some(head) = head_symbol_text(node, src) {
+        if head == "defn-" {
+            return Visibility::Private;
+        }
+    }
+    // `^:private` metadata: tree-sitter-clojure attaches metadata
+    // as a child of the SYM_LIT it annotates, not as a sibling on
+    // the list_lit. So `(defn ^:private foo …)` puts the meta_lit
+    // inside `foo`'s sym_lit. Walk every sym_lit child of the
+    // list_lit and check for a meta_lit/old_meta_lit child whose
+    // text mentions `:private`.
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() != "sym_lit" {
+            continue;
+        }
+        let mut inner = child.walk();
+        for meta in child.named_children(&mut inner) {
+            if matches!(meta.kind(), "meta_lit" | "old_meta_lit") {
+                if let Ok(text) = meta.utf8_text(src) {
+                    if text.contains(":private") {
+                        return Visibility::Private;
+                    }
+                }
+            }
+        }
+    }
+    Visibility::Public
 }
 
 fn rust_visibility(node: Node<'_>) -> Visibility {
@@ -366,6 +462,12 @@ fn container_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<Str
 }
 
 fn function_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<String> {
+    // Clojure: list_lit shaped as (defn name [args] …). Head sym
+    // is the form (`defn`/`defmacro`/etc.); name is the next
+    // sym_lit child (skipping comments + metadata).
+    if !spec.function_form_heads.is_empty() && node.kind() == "list_lit" {
+        return clojure_function_name(node, src);
+    }
     for field in spec.name_fields {
         if let Some(name_node) = node.child_by_field_name(field) {
             // C/C++ functions store the name inside a nested
@@ -377,6 +479,30 @@ fn function_name(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> Option<Stri
             if let Ok(text) = leaf.utf8_text(src) {
                 return Some(text.to_string());
             }
+        }
+    }
+    None
+}
+
+/// Extract the function name from a Clojure `list_lit`. Skips the
+/// head form symbol and any leading comments. The actual
+/// identifier text is the `sym_name` child of the second sym_lit
+/// (the first sym_lit is the form head like `defn`). Anonymous
+/// `(fn …)` returns None — caller falls back to "(anonymous)".
+fn clojure_function_name(node: Node<'_>, src: &[u8]) -> Option<String> {
+    let mut cursor = node.walk();
+    let mut saw_head = false;
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "comment" => continue,
+            "sym_lit" => {
+                if !saw_head {
+                    saw_head = true;
+                    continue;
+                }
+                return sym_lit_name(child, src).map(|s| s.to_string());
+            }
+            _ => return None,
         }
     }
     None
@@ -400,7 +526,12 @@ fn innermost_identifier<'a>(node: Node<'a>) -> Option<Node<'a>> {
     None
 }
 
-fn count_parameters(node: Node<'_>, spec: &LanguageSpec) -> u32 {
+fn count_parameters(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> u32 {
+    // Clojure: param vector is the first vec_lit child after the
+    // head + name (or just after the head for `(fn [x] …)`).
+    if !spec.function_form_heads.is_empty() && node.kind() == "list_lit" {
+        return clojure_count_parameters(node, src);
+    }
     // First try a direct field lookup; falls through to a recursive
     // descendant search for grammars (C/C++) where the parameter list
     // is nested inside a `function_declarator` rather than reachable
@@ -423,6 +554,28 @@ fn count_parameters(node: Node<'_>, spec: &LanguageSpec) -> u32 {
     count
 }
 
+fn clojure_count_parameters(node: Node<'_>, _src: &[u8]) -> u32 {
+    // Walk the list_lit looking for the first vec_lit. Count its
+    // direct named children minus metadata. This is approximate —
+    // destructuring like `[{:keys [a b]} c]` counts the map as 1
+    // and `c` as 1, which matches what most tooling does.
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "vec_lit" {
+            let mut inner = child.walk();
+            let mut count = 0u32;
+            for p in child.named_children(&mut inner) {
+                if matches!(p.kind(), "comment" | "meta_lit" | "old_meta_lit") {
+                    continue;
+                }
+                count += 1;
+            }
+            return count;
+        }
+    }
+    0
+}
+
 /// Recursively look for a `parameter_list` node in a function's
 /// declarator subtree. Used for C/C++ where the structure is
 /// `function_definition > declarator(function_declarator) > parameters(parameter_list)`.
@@ -439,31 +592,38 @@ fn find_parameter_list<'a>(node: Node<'a>) -> Option<Node<'a>> {
     None
 }
 
-fn count_decision_points(node: Node<'_>, spec: &LanguageSpec) -> u32 {
+fn count_decision_points(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> u32 {
     // We never want to count the function node itself (function kinds
     // never appear in `decision_kinds` anyway), so just descend into
     // children and tally there.
     let mut count = 0u32;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        count += count_decision_subtree(child, spec, node.id());
+        count += count_decision_subtree(child, src, spec, node.id());
     }
     count
 }
 
-fn count_decision_subtree(node: Node<'_>, spec: &LanguageSpec, root_id: usize) -> u32 {
+fn count_decision_subtree(
+    node: Node<'_>,
+    src: &[u8],
+    spec: &LanguageSpec,
+    root_id: usize,
+) -> u32 {
     let mut count = 0u32;
-    if node.id() != root_id && spec.decision_kinds.contains(&node.kind()) {
+    if node.id() != root_id && is_decision_node(node, src, spec) {
         count += 1;
     }
     // Stop descending into nested function bodies — their decisions
-    // belong to that function's own metrics record.
-    if spec.function_kinds.contains(&node.kind()) {
+    // belong to that function's own metrics record. (Don't stop at
+    // the root function itself, which is the same node id we
+    // started from.)
+    if node.id() != root_id && is_function_node(node, src, spec) {
         return count;
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        count += count_decision_subtree(child, spec, root_id);
+        count += count_decision_subtree(child, src, spec, root_id);
     }
     count
 }

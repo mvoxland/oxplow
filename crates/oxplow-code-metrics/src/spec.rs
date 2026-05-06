@@ -26,6 +26,14 @@ pub enum Language {
     Java,
     C,
     Cpp,
+    /// Clojure / ClojureScript / cljc — share the same grammar and
+    /// idioms. tree-sitter-clojure represents every parenthesized
+    /// form as a generic `list_lit`, so function and
+    /// decision-point detection use the head-symbol-text matchers
+    /// (`function_form_heads`, `decision_form_heads`) on
+    /// `LanguageSpec` rather than the static-`node.kind()` arrays
+    /// that suffice for the other nine languages.
+    Clojure,
 }
 
 pub struct LanguageSpec {
@@ -55,6 +63,16 @@ pub struct LanguageSpec {
     /// capitalization), or scope-based (C `static`, TS top-level
     /// `export`).
     pub visibility: VisibilityStrategy,
+    /// Form-head matchers for grammars whose AST collapses every
+    /// parenthesized form to a single generic node kind (Clojure's
+    /// `list_lit`). When non-empty, a node whose kind is `list_lit`
+    /// AND whose first symbol child's text is in this list is
+    /// treated as a function in addition to anything in
+    /// `function_kinds`. Most languages leave this empty.
+    pub function_form_heads: &'static [&'static str],
+    /// Same shape as `function_form_heads` but for decision points
+    /// (cyclomatic complexity counter).
+    pub decision_form_heads: &'static [&'static str],
     /// Loader for the bundled tree-sitter grammar.
     grammar: fn() -> TsLanguage,
 }
@@ -89,6 +107,10 @@ pub enum VisibilityStrategy {
     /// All functions reported as Unknown — used for languages where
     /// no clean signal exists.
     Unknown,
+    /// Clojure: head sym `defn-` ⇒ Private. A `meta_lit` /
+    /// `old_meta_lit` child whose text contains `:private` ⇒
+    /// Private. Otherwise Public.
+    ClojureForm,
 }
 
 impl LanguageSpec {
@@ -109,6 +131,7 @@ impl Language {
             Language::Java => &JAVA,
             Language::C => &C,
             Language::Cpp => &CPP,
+            Language::Clojure => &CLOJURE,
         }
     }
 
@@ -131,6 +154,7 @@ impl Language {
             Language::Java => 7,
             Language::C => 8,
             Language::Cpp => 9,
+            Language::Clojure => 10,
         }
     }
 }
@@ -150,6 +174,7 @@ pub fn language_for_path(path: &str) -> Option<Language> {
         "java" => Language::Java,
         "c" | "h" => Language::C,
         "cc" | "cxx" | "cpp" | "hpp" | "hxx" => Language::Cpp,
+        "clj" | "cljs" | "cljc" => Language::Clojure,
         _ => return None,
     })
 }
@@ -177,6 +202,8 @@ static RUST: LanguageSpec = LanguageSpec {
     container_kinds: &["impl_item", "trait_item", "mod_item"],
     container_name_fields: &["name", "type"],
     visibility: VisibilityStrategy::RustModifier,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_rust::LANGUAGE.into(),
 };
 
@@ -191,6 +218,8 @@ static TYPESCRIPT: LanguageSpec = LanguageSpec {
     container_kinds: TS_CONTAINER_KINDS,
     container_name_fields: JS_NAME_FIELDS,
     visibility: VisibilityStrategy::TsClassModifier,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
 };
 
@@ -203,6 +232,8 @@ static TSX: LanguageSpec = LanguageSpec {
     container_kinds: TS_CONTAINER_KINDS,
     container_name_fields: JS_NAME_FIELDS,
     visibility: VisibilityStrategy::TsClassModifier,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_typescript::LANGUAGE_TSX.into(),
 };
 
@@ -215,6 +246,8 @@ static JAVASCRIPT: LanguageSpec = LanguageSpec {
     container_kinds: JS_CONTAINER_KINDS,
     container_name_fields: JS_NAME_FIELDS,
     visibility: VisibilityStrategy::TsClassModifier,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_javascript::LANGUAGE.into(),
 };
 
@@ -294,6 +327,8 @@ static PYTHON: LanguageSpec = LanguageSpec {
     container_kinds: &["class_definition"],
     container_name_fields: &["name"],
     visibility: VisibilityStrategy::PythonUnderscore,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_python::LANGUAGE.into(),
 };
 
@@ -319,6 +354,8 @@ static GO: LanguageSpec = LanguageSpec {
     container_kinds: &[],
     container_name_fields: &["name"],
     visibility: VisibilityStrategy::GoCapitalization,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_go::LANGUAGE.into(),
 };
 
@@ -353,6 +390,8 @@ static JAVA: LanguageSpec = LanguageSpec {
     ],
     container_name_fields: &["name"],
     visibility: VisibilityStrategy::JavaModifier,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_java::LANGUAGE.into(),
 };
 
@@ -375,6 +414,8 @@ static C: LanguageSpec = LanguageSpec {
     container_kinds: &[],
     container_name_fields: &["name"],
     visibility: VisibilityStrategy::CStatic,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_c::LANGUAGE.into(),
 };
 
@@ -405,5 +446,52 @@ static CPP: LanguageSpec = LanguageSpec {
     ],
     container_name_fields: &["name"],
     visibility: VisibilityStrategy::CppAccessSpecifier,
+    function_form_heads: &[],
+    decision_form_heads: &[],
     grammar: || tree_sitter_cpp::LANGUAGE.into(),
+};
+
+// ---- Clojure / ClojureScript / cljc ----
+//
+// tree-sitter-clojure flattens every parenthesized form to a
+// generic `list_lit`, so `function_kinds` / `decision_kinds` are
+// empty — detection runs through `function_form_heads` /
+// `decision_form_heads` on the head symbol's text instead.
+
+static CLOJURE: LanguageSpec = LanguageSpec {
+    function_kinds: &[],
+    name_fields: &[],
+    param_list_fields: &[],
+    parameter_kinds: &[],
+    decision_kinds: &[],
+    container_kinds: &[],
+    container_name_fields: &[],
+    visibility: VisibilityStrategy::ClojureForm,
+    function_form_heads: &[
+        "defn",
+        "defn-",
+        "defmacro",
+        "defmethod",
+        "definline",
+        "fn",
+        "fn*",
+        "defprotocol",
+    ],
+    decision_form_heads: &[
+        "if",
+        "if-not",
+        "if-let",
+        "if-some",
+        "when",
+        "when-not",
+        "when-let",
+        "when-some",
+        "cond",
+        "condp",
+        "case",
+        "and",
+        "or",
+        "try",
+    ],
+    grammar: || tree_sitter_clojure_orchard::LANGUAGE.into(),
 };

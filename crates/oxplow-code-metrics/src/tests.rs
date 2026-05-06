@@ -409,3 +409,80 @@ fn outer() {
     assert!(inner.complexity >= 2);
     assert_eq!(outer.complexity, 1);
 }
+
+#[test]
+fn clojure_defn_simple() {
+    let src = r#"
+(ns demo.core)
+
+(defn add [a b]
+  (+ a b))
+"#;
+    let m = analyze_file("src/demo/core.clj", src);
+    assert_eq!(m.len(), 1, "expected one function, got {m:#?}");
+    let f = &m[0];
+    assert_eq!(f.name, "add");
+    assert_eq!(f.parameter_count, 2);
+    assert_eq!(f.complexity, 1);
+    assert_eq!(f.visibility, Visibility::Public);
+}
+
+#[test]
+fn clojure_defn_minus_is_private() {
+    let src = r#"
+(defn- helper [x] x)
+"#;
+    let m = analyze_file("src/demo.clj", src);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].name, "helper");
+    assert_eq!(m[0].visibility, Visibility::Private);
+}
+
+#[test]
+fn clojure_metadata_private_marker_is_private() {
+    let src = r#"
+(defn ^:private secret [x] x)
+"#;
+    let m = analyze_file("src/demo.clj", src);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].name, "secret");
+    assert_eq!(m[0].visibility, Visibility::Private);
+}
+
+#[test]
+fn clojure_branching_increments_complexity() {
+    let src = r#"
+(defn classify [x]
+  (cond
+    (pos? x) :pos
+    (neg? x) :neg
+    :else :zero))
+"#;
+    let m = analyze_file("src/demo.clj", src);
+    assert_eq!(m.len(), 1);
+    assert!(m[0].complexity >= 2, "got {}", m[0].complexity);
+}
+
+#[test]
+fn clojure_nested_fn_inside_defn_recorded_separately() {
+    let src = r#"
+(defn outer [xs]
+  (map (fn [x] (* x 2)) xs))
+"#;
+    let m = analyze_file("src/demo.clj", src);
+    assert_eq!(m.len(), 2, "got {m:#?}");
+    let outer = m.iter().find(|f| f.name == "outer").unwrap();
+    let inner = m.iter().find(|f| f.name != "outer").unwrap();
+    assert_eq!(inner.name, "(anonymous)");
+    assert_eq!(outer.parameter_count, 1);
+}
+
+#[test]
+fn clojure_ignores_non_function_top_level_lists() {
+    let src = r#"
+(def some-data 42)
+(when true (println "side effect"))
+"#;
+    let m = analyze_file("src/demo.clj", src);
+    assert!(m.is_empty(), "expected no functions, got {m:#?}");
+}

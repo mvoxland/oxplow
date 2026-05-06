@@ -15,3 +15,4 @@ tree-sitter-go = { workspace = true }
 tree-sitter-java = { workspace = true }
 tree-sitter-c = { workspace = true }
 tree-sitter-cpp = { workspace = true }
+tree-sitter-clojure-orchard = { workspace = true }

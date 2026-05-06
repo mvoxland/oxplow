@@ -22,6 +22,8 @@ describe("isTestPath", () => {
     expect(isTestPath("packages/x/tests/helper.ts")).toBe(true);
     expect(isTestPath("crates/foo/src/test_inner.rs")).toBe(true);
     expect(isTestPath("internal/stuff/widget_test.go")).toBe(true);
+    expect(isTestPath("src/foo/bar_test.clj")).toBe(true);
+    expect(isTestPath("src/foo/bar_test.cljc")).toBe(true);
   });
   test("ignores production files", () => {
     expect(isTestPath("src/foo.ts")).toBe(false);
@@ -269,6 +271,8 @@ describe("isTestFunction", () => {
     // Java/JS class-style test container
     expect(isTestFunction("src/Foo.java", "validates", ["FooTests"])).toBe(true);
     expect(isTestFunction("src/Foo.java", "validates", ["FooTest"])).toBe(true);
+    // Clojure ns convention: foo.bar-test
+    expect(isTestFunction("src/foo/bar_test.clj", "round-trip", ["foo.bar-test"])).toBe(true);
     // Production sibling stays production
     expect(isTestFunction("crates/foo/src/lib.rs", "helper", ["impl_block"])).toBe(false);
   });

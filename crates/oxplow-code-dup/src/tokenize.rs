@@ -11,7 +11,7 @@
 //! detection is "the hash of a subtree" — not a sliding token
 //! window.
 
-use oxplow_code_metrics::Language;
+use oxplow_code_metrics::{head_symbol_text, Language};
 use tree_sitter::Node;
 
 /// Result of hashing one subtree.
@@ -28,11 +28,11 @@ pub struct SubtreeHash {
 }
 
 /// Hash one subtree.
-pub fn hash_subtree(root: Node<'_>, lang: Language) -> SubtreeHash {
+pub fn hash_subtree(root: Node<'_>, src: &[u8], lang: Language) -> SubtreeHash {
     let mut acc: u64 = 0xcbf29ce484222325 ^ (lang.tag() as u64);
     let mut count: u32 = 0;
     let mut cursor = root.walk();
-    walk_hash(&mut cursor, lang, &mut acc, &mut count);
+    walk_hash(&mut cursor, src, lang, &mut acc, &mut count);
     SubtreeHash {
         hash: acc,
         node_count: count,
@@ -43,6 +43,7 @@ pub fn hash_subtree(root: Node<'_>, lang: Language) -> SubtreeHash {
 
 fn walk_hash(
     cursor: &mut tree_sitter::TreeCursor<'_>,
+    src: &[u8],
     lang: Language,
     acc: &mut u64,
     count: &mut u32,
@@ -52,7 +53,7 @@ fn walk_hash(
     if is_comment_kind(kind) {
         return;
     }
-    if is_skip_kind(lang, kind) {
+    if is_skip_node(lang, node, src) {
         return;
     }
     let normalized = normalize_kind(kind);
@@ -60,7 +61,7 @@ fn walk_hash(
     *count += 1;
     if cursor.goto_first_child() {
         loop {
-            walk_hash(cursor, lang, acc, count);
+            walk_hash(cursor, src, lang, acc, count);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -95,12 +96,16 @@ pub fn is_comment_kind(kind: &str) -> bool {
     )
 }
 
-/// Per-language list of node kinds whose entire subtree we skip.
+/// Per-language predicate for nodes whose entire subtree we skip.
 /// Imports / use / include / package directives are noise: they
 /// share lots of structure across unrelated files. Skipping
 /// whole-subtree means whatever the grammar wraps inside (paths,
-/// aliases, brace-lists) contributes nothing to the hash.
-pub fn is_skip_kind(lang: Language, kind: &str) -> bool {
+/// aliases, brace-lists) contributes nothing to the hash. For
+/// most languages this is a static `node.kind()` check; Clojure
+/// inspects the head symbol of a `list_lit` because every form
+/// shares one node kind.
+pub fn is_skip_node(lang: Language, node: Node<'_>, src: &[u8]) -> bool {
+    let kind = node.kind();
     match lang {
         Language::Rust => matches!(
             kind,
@@ -127,6 +132,15 @@ pub fn is_skip_kind(lang: Language, kind: &str) -> bool {
             kind,
             "preproc_include" | "using_declaration" | "using_directive"
         ),
+        Language::Clojure => {
+            if kind != "list_lit" {
+                return false;
+            }
+            match head_symbol_text(node, src) {
+                Some(head) => matches!(head, "ns" | "require" | "import" | "use"),
+                None => false,
+            }
+        }
     }
 }
 
