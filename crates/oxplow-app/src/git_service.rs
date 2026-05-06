@@ -715,6 +715,8 @@ impl GitService {
                         let take = want.min(cached.commits.len());
                         return GitLogResult {
                             commits: cached.commits[..take].to_vec(),
+                            branch_heads: cached.branch_heads.clone(),
+                            tags: cached.tags.clone(),
                         };
                     }
                 }

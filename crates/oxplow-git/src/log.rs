@@ -18,9 +18,31 @@ pub struct GitLogCommit {
     pub parents: Vec<String>,
 }
 
+/// Minimal commit pointer carried by ref overlays. The renderer only
+/// reads `.sha` to bucket refs into the per-row badge map, so the
+/// extra fields on `GitLogCommit` would be dead weight.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct GitLogRefCommit {
+    pub sha: String,
+}
+
+/// One branch head or tag tied to a commit. Surfaced on `GitLogResult`
+/// so `CommitGraphTable` (and its dashboard re-use in the
+/// recent-commits card) can render branch/tag badges next to each row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct GitLogRef {
+    pub name: String,
+    pub commit: GitLogRefCommit,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct GitLogResult {
     pub commits: Vec<GitLogCommit>,
+    /// Local branch heads keyed by the commit they point at.
+    #[serde(rename = "branchHeads")]
+    pub branch_heads: Vec<GitLogRef>,
+    /// Tags (lightweight + annotated, dereferenced to their commit).
+    pub tags: Vec<GitLogRef>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -31,17 +53,22 @@ pub struct GitLogOptions {
 }
 
 pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
+    let empty = || GitLogResult {
+        commits: vec![],
+        branch_heads: vec![],
+        tags: vec![],
+    };
     let Ok(repo) = git2::Repository::open(repo_path) else {
-        return GitLogResult { commits: vec![] };
+        return empty();
     };
     let mut walk = match repo.revwalk() {
         Ok(w) => w,
-        Err(_) => return GitLogResult { commits: vec![] },
+        Err(_) => return empty(),
     };
     if options.all {
         let _ = walk.push_glob("refs/*");
     } else if walk.push_head().is_err() {
-        return GitLogResult { commits: vec![] };
+        return empty();
     }
     let _ = walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL);
     let limit = options.limit.unwrap_or(200);
@@ -62,7 +89,65 @@ pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
             parents: commit.parent_ids().map(|p| p.to_string()).collect(),
         });
     }
-    GitLogResult { commits }
+    let (branch_heads, tags) = collect_log_refs(&repo);
+    GitLogResult {
+        commits,
+        branch_heads,
+        tags,
+    }
+}
+
+/// Walk every local branch + tag and emit `GitLogRef` entries pointing
+/// at the commit each ref resolves to. The renderer indexes these by
+/// sha so refs whose target sha isn't in `commits[]` simply don't
+/// render — no need to filter here.
+fn collect_log_refs(repo: &git2::Repository) -> (Vec<GitLogRef>, Vec<GitLogRef>) {
+    let mut branch_heads = Vec::new();
+    let mut tags = Vec::new();
+    if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) {
+        for entry in branches.flatten() {
+            let (branch, _) = entry;
+            let Ok(Some(name)) = branch.name() else {
+                continue;
+            };
+            let Ok(reference) = branch.get().resolve() else {
+                continue;
+            };
+            let Some(oid) = reference.target() else {
+                continue;
+            };
+            branch_heads.push(GitLogRef {
+                name: name.to_string(),
+                commit: GitLogRefCommit {
+                    sha: oid.to_string(),
+                },
+            });
+        }
+    }
+    if let Ok(tag_names) = repo.tag_names(None) {
+        for name in tag_names.iter().flatten() {
+            let full = format!("refs/tags/{name}");
+            let Ok(reference) = repo.find_reference(&full) else {
+                continue;
+            };
+            // Annotated tags are tag objects — peel to the commit they
+            // point at; lightweight tags resolve directly.
+            let target_oid = match reference.peel_to_commit() {
+                Ok(commit) => commit.id(),
+                Err(_) => match reference.target() {
+                    Some(oid) => oid,
+                    None => continue,
+                },
+            };
+            tags.push(GitLogRef {
+                name: name.to_string(),
+                commit: GitLogRefCommit {
+                    sha: target_oid.to_string(),
+                },
+            });
+        }
+    }
+    (branch_heads, tags)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -253,5 +338,40 @@ mod tests {
     fn commit_detail_unknown_sha_returns_none() {
         let dir = make_repo_with_commits(1);
         assert!(get_commit_detail(dir.path(), "deadbeef").is_none());
+    }
+
+    #[test]
+    fn log_carries_branch_heads_and_tags() {
+        let dir = make_repo_with_commits(2);
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        // Add a second branch pointing at the older commit and a
+        // lightweight tag at HEAD so we have one of each to assert on.
+        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        let older_oid = head_commit.parent(0).unwrap().id();
+        let older_commit = repo.find_commit(older_oid).unwrap();
+        repo.branch("feature", &older_commit, false).unwrap();
+        repo.tag_lightweight("v0.1", head_commit.as_object(), false)
+            .unwrap();
+
+        let result = get_git_log(dir.path(), GitLogOptions::default());
+        let head_sha = head_commit.id().to_string();
+        let older_sha = older_oid.to_string();
+
+        assert!(
+            result
+                .branch_heads
+                .iter()
+                .any(|b| b.name == "feature" && b.commit.sha == older_sha),
+            "expected `feature` branch head at older commit, got {:?}",
+            result.branch_heads,
+        );
+        assert!(
+            result
+                .tags
+                .iter()
+                .any(|t| t.name == "v0.1" && t.commit.sha == head_sha),
+            "expected `v0.1` tag at HEAD, got {:?}",
+            result.tags,
+        );
     }
 }

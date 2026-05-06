@@ -906,8 +906,31 @@ export type GitLogCommit = {
 	parents: string[],
 };
 
+/**
+ *  One branch head or tag tied to a commit. Surfaced on `GitLogResult`
+ *  so `CommitGraphTable` (and its dashboard re-use in the
+ *  recent-commits card) can render branch/tag badges next to each row.
+ */
+export type GitLogRef = {
+	name: string,
+	commit: GitLogRefCommit,
+};
+
+/**
+ *  Minimal commit pointer carried by ref overlays. The renderer only
+ *  reads `.sha` to bucket refs into the per-row badge map, so the
+ *  extra fields on `GitLogCommit` would be dead weight.
+ */
+export type GitLogRefCommit = {
+	sha: string,
+};
+
 export type GitLogResult = {
 	commits: GitLogCommit[],
+	// Local branch heads keyed by the commit they point at.
+	branchHeads: GitLogRef[],
+	// Tags (lightweight + annotated, dereferenced to their commit).
+	tags: GitLogRef[],
 };
 
 /**
