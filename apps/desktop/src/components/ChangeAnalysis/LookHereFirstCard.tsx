@@ -7,6 +7,9 @@ interface LookHereFirstCardProps {
   /** path -> { score, reasons } */
   fileScores: Map<string, InterestingnessResult>;
   onOpenFile?: (path: string, opts?: { newTab?: boolean }) => void;
+  /** Plain click target: open the file's diff in-tab. Cmd/ctrl-
+   *  click escapes to a new-tab file open via onOpenFile. */
+  onOpenFileDiff?: (path: string, line?: number) => void;
 }
 
 const COLLAPSED_CAP = 8;
@@ -32,7 +35,7 @@ interface Row {
  * state — no point cluttering the dashboard with low-signal
  * panels.
  */
-export function LookHereFirstCard({ files, fileScores, onOpenFile }: LookHereFirstCardProps) {
+export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDiff }: LookHereFirstCardProps) {
   const [expanded, setExpanded] = useState(false);
   const ranked: Row[] = files
     .map((f) => {
@@ -79,7 +82,14 @@ export function LookHereFirstCard({ files, fileScores, onOpenFile }: LookHereFir
             <span style={badgeStyle(row.score)}>▲ {row.score.toFixed(1)}</span>
             <button
               type="button"
-              onClick={(e) => onOpenFile?.(row.path, { newTab: e.metaKey || e.ctrlKey })}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey) {
+                  onOpenFile?.(row.path, { newTab: true });
+                  return;
+                }
+                if (onOpenFileDiff) onOpenFileDiff(row.path);
+                else onOpenFile?.(row.path);
+              }}
               style={pathButton}
               title={row.path}
             >

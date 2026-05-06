@@ -4,6 +4,9 @@ interface OtherSmellsCardProps {
   functions: FunctionsBuckets;
   tests: TestSummary;
   onOpenFile?: (path: string, opts?: { newTab?: boolean }) => void;
+  /** Plain click on a row → diff at the function's start line.
+   *  Cmd/ctrl-click → new-tab file open. */
+  onOpenFileDiff?: (path: string, line?: number) => void;
 }
 
 const SECTION_CAP = 5;
@@ -23,7 +26,7 @@ const PARAM_SPIKE = 2;
  * Each section caps at 5; the whole card hides when every section
  * is empty.
  */
-export function OtherSmellsCard({ functions, tests, onOpenFile }: OtherSmellsCardProps) {
+export function OtherSmellsCard({ functions, tests, onOpenFile, onOpenFileDiff }: OtherSmellsCardProps) {
   const riskyFiles = new Set(tests.riskyUntested.map((r) => r.path));
 
   const paramSpikes = functions.modifiedSignature
@@ -69,7 +72,7 @@ export function OtherSmellsCard({ functions, tests, onOpenFile }: OtherSmellsCar
               label={`${fn.containerPath.length > 0 ? `${fn.containerPath.join("::")}::` : ""}${fn.name}`}
               badge={`+${fn.after - fn.before} params (now ${fn.after})`}
               badgeColor="var(--text-danger, #dc2626)"
-              onOpen={onOpenFile}
+              onOpen={onOpenFile} onOpenDiff={onOpenFileDiff}
             />
           ))}
         </Section>
@@ -85,7 +88,7 @@ export function OtherSmellsCard({ functions, tests, onOpenFile }: OtherSmellsCar
               label={`${fn.containerPath.length > 0 ? `${fn.containerPath.join("::")}::` : ""}${fn.name}`}
               badge={`${fn.length} lines`}
               badgeColor="var(--text-danger, #dc2626)"
-              onOpen={onOpenFile}
+              onOpen={onOpenFile} onOpenDiff={onOpenFileDiff}
             />
           ))}
         </Section>
@@ -101,7 +104,7 @@ export function OtherSmellsCard({ functions, tests, onOpenFile }: OtherSmellsCar
               label={`${fn.containerPath.length > 0 ? `${fn.containerPath.join("::")}::` : ""}${fn.name}`}
               badge={`+${fn.complexityDelta} cc`}
               badgeColor="var(--text-danger, #dc2626)"
-              onOpen={onOpenFile}
+              onOpen={onOpenFile} onOpenDiff={onOpenFileDiff}
             />
           ))}
         </Section>
@@ -117,7 +120,7 @@ export function OtherSmellsCard({ functions, tests, onOpenFile }: OtherSmellsCar
               label={`${fn.containerPath.length > 0 ? `${fn.containerPath.join("::")}::` : ""}${fn.name}`}
               badge={fn.complexity >= 5 ? `cc ${fn.complexity}` : "new"}
               badgeColor="var(--text-muted)"
-              onOpen={onOpenFile}
+              onOpen={onOpenFile} onOpenDiff={onOpenFileDiff}
             />
           ))}
         </Section>
@@ -152,6 +155,7 @@ function Row({
   badge,
   badgeColor,
   onOpen,
+  onOpenDiff,
 }: {
   path: string;
   startLine: number;
@@ -159,6 +163,7 @@ function Row({
   badge: string;
   badgeColor: string;
   onOpen?: (path: string, opts?: { newTab?: boolean }) => void;
+  onOpenDiff?: (path: string, line?: number) => void;
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
@@ -168,7 +173,14 @@ function Row({
       <span style={{ color: "var(--text-primary)", fontWeight: 600 }}>{label}</span>
       <button
         type="button"
-        onClick={(e) => onOpen?.(path, { newTab: e.metaKey || e.ctrlKey })}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey) {
+            onOpen?.(path, { newTab: true });
+            return;
+          }
+          if (onOpenDiff) onOpenDiff(path, startLine);
+          else onOpen?.(path);
+        }}
         style={pathButton}
         title={path}
       >
