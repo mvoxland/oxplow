@@ -4,7 +4,6 @@ import type { ChangeAnalysisState } from "./useChangeAnalysis.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, refVersion, type FileVersion } from "../../file-version.js";
 import { DuplicationCard } from "./DuplicationCard.js";
-import { TestsCard } from "./TestsCard.js";
 import { LookHereFirstCard } from "./LookHereFirstCard.js";
 import { ChurnCard } from "./ChurnCard.js";
 import { CodeSmellsCard } from "./CodeSmellsCard.js";
@@ -16,7 +15,6 @@ import {
 } from "./FilesPanel.js";
 import {
   buildFilePivots,
-  summarizeTests,
   type FunctionChurnRow,
   type FunctionsBuckets,
 } from "./analysisHelpers.js";
@@ -70,7 +68,6 @@ export function ChangeAnalysisDrilldown({
   );
 
   const pivotsAfterStatus = useMemo(() => buildFilePivots(filesAfterStatus), [filesAfterStatus]);
-  const testsAfterStatus = useMemo(() => summarizeTests(filesAfterStatus), [filesAfterStatus]);
 
   const filteredPathSet = useMemo(
     () => new Set(filesAfterStatus.map((f) => f.path)),
@@ -155,7 +152,6 @@ export function ChangeAnalysisDrilldown({
         onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
       />
       <DuplicationCard duplication={dupAfterStatus} scanVersion={scanVersion} onOpenFile={onOpenFile} />
-      <TestsCard tests={testsAfterStatus} onOpenFile={onOpenFile} />
     </>
   );
 }
