@@ -298,7 +298,9 @@ const pathButton: React.CSSProperties = {
   fontSize: 12,
   textAlign: "left",
   flexShrink: 0,
-  maxWidth: 320,
+  // Fixed-width column so the next column (function name) starts
+  // at the same X on every row regardless of path length.
+  width: 360,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
