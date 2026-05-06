@@ -112,6 +112,18 @@ test) or a tempfile-backed DB.
 Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun run test` invokes both Rust and TS suites.
 
+## Rust formatting
+
+CI runs `cargo fmt --all -- --check`. Whenever you edit a `.rs` file,
+run `cargo fmt --all` before ending the turn — drift accumulates
+silently and a fmt-only commit is wasted churn. (The fmt step has no
+test signal; it's purely formatting.)
+
+The durable fix is a PostToolUse hook on `Edit`/`Write` that pipes the
+edited `.rs` file through `rustfmt` — once installed it makes drift
+structurally impossible. A rust LSP with format-on-save covers
+human-driven edits the same way; agent edits go through the hook.
+
 ## Work items are observational
 
 Oxplow passively tracks active agent turns: each open `agent_turn` row
