@@ -3,6 +3,8 @@ import type { ChangeAnalysisScope, ChangeAnalysisTarget } from "../../tabs/pageR
 import type { ChangeAnalysisState } from "./useChangeAnalysis.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, refVersion, type FileVersion } from "../../file-version.js";
+import { diffRef } from "../../diff-id.js";
+import type { NavSiblingEntry, NavSiblings } from "../../tabs/PageNavigationContext.js";
 import { DuplicationCard } from "./DuplicationCard.js";
 import { LookHereFirstCard } from "./LookHereFirstCard.js";
 import { ChurnCard } from "./ChurnCard.js";
@@ -28,7 +30,7 @@ export interface ChangeAnalysisDrilldownProps {
   analysis: ChangeAnalysisState;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
-  onOpenDiffInTab?(spec: DiffSpec): void;
+  onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../../tabs/PageNavigationContext.js").NavSiblings): void;
 }
 
 export function ChangeAnalysisDrilldown({
@@ -91,9 +93,41 @@ export function ChangeAnalysisDrilldown({
   );
 
   /**
+   * Per-status-filter sibling list. Each entry is the diff-tab the
+   * Files panel would open when its row is clicked. Pre-computing
+   * the full list here means the destination diff page can render
+   * up/down arrows that step through every visible file without the
+   * Files panel having to plumb sibling indices itself.
+   */
+  const fileDiffSiblings = useMemo<NavSiblingEntry[] | null>(() => {
+    if (!analysis.refs) return null;
+    const { baseRef, headRef } = analysis.refs;
+    const rightVersion: FileVersion = headRef ? refVersion(headRef) : DISK;
+    const baseLabel =
+      target === "working" ? "working tree" : `parent of ${target.toString().slice(0, 7)}`;
+    const ordered = [...filesAfterStatus].sort((a, b) => compareTreePathOrder(a.path, b.path));
+    return ordered.map((f) => {
+      const spec: DiffSpec = {
+        path: f.path,
+        leftVersion: refVersion(baseRef),
+        rightVersion,
+        baseLabel,
+        revealLine: 1,
+      };
+      return {
+        ref: diffRef(spec),
+        label: f.path,
+        diffSpec: spec,
+      };
+    });
+  }, [analysis.refs, filesAfterStatus, target]);
+
+  /**
    * Open the diff for `path` at `line` *in the current tab*. Falls
    * through to plain file-open if no diff handler is wired or refs
-   * haven't resolved yet.
+   * haven't resolved yet. When the path is in `fileDiffSiblings`,
+   * threads the sibling list so the destination page can render
+   * prev/next arrows that step through the rest of the visible files.
    */
   const openDiffAt = (path: string, line: number) => {
     if (!analysis.refs) {
@@ -102,14 +136,30 @@ export function ChangeAnalysisDrilldown({
     }
     const { baseRef, headRef } = analysis.refs;
     const rightVersion: FileVersion = headRef ? refVersion(headRef) : DISK;
+    const baseLabel =
+      target === "working" ? "working tree" : `parent of ${target.toString().slice(0, 7)}`;
     const spec: DiffSpec = {
       path,
       leftVersion: refVersion(baseRef),
       rightVersion,
-      baseLabel: target === "working" ? "working tree" : `parent of ${target.toString().slice(0, 7)}`,
+      baseLabel,
       revealLine: line,
     };
-    if (onOpenDiffInTab) onOpenDiffInTab(spec);
+    let siblings: NavSiblings | undefined;
+    if (fileDiffSiblings) {
+      const idx = fileDiffSiblings.findIndex((e) => e.diffSpec?.path === path);
+      if (idx >= 0) {
+        siblings = {
+          entries: fileDiffSiblings,
+          index: idx,
+          title:
+            target === "working"
+              ? "Uncommitted file changes"
+              : `Files in ${target.toString().slice(0, 7)}`,
+        };
+      }
+    }
+    if (onOpenDiffInTab) onOpenDiffInTab(spec, siblings);
     else if (onOpenDiff) onOpenDiff(spec);
     else onOpenFile(path);
   };
@@ -154,4 +204,26 @@ export function ChangeAnalysisDrilldown({
       <DuplicationCard duplication={dupAfterStatus} scanVersion={scanVersion} onOpenFile={onOpenFile} />
     </>
   );
+}
+
+/** Order two paths the way FileTreeView renders them: at every shared
+ *  directory level, subdirectories (and their entire subtree) come
+ *  before files at that level; siblings sort alphabetically. */
+function compareTreePathOrder(a: string, b: string): number {
+  const sa = a.split("/");
+  const sb = b.split("/");
+  let i = 0;
+  while (i < sa.length && i < sb.length && sa[i] === sb[i]) i++;
+  if (i === sa.length && i === sb.length) return 0;
+  // One path is a strict prefix of the other — shouldn't happen for a
+  // flat list of file paths, but order parent-first to be deterministic.
+  if (i === sa.length) return -1;
+  if (i === sb.length) return 1;
+  // Diverging segment: a directory entry (path has more segments after
+  // this one) outranks a file entry at the same level.
+  const aIsDir = sa.length > i + 1;
+  const bIsDir = sb.length > i + 1;
+  if (aIsDir && !bIsDir) return -1;
+  if (!aIsDir && bIsDir) return 1;
+  return sa[i]!.localeCompare(sb[i]!);
 }

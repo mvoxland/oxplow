@@ -49,6 +49,14 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
   const monacoRef = useRef<any>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set of modified-side line numbers that begin a diff change. Combined
+  // with the modified editor's cursor line below, these drive the
+  // enabled/disabled state of the Prev/Next change buttons. We keep just
+  // the start lines (sorted ascending) — Monaco's `goToDiff` lands the
+  // cursor on a change start, so checking "is there a change strictly
+  // before/after the cursor line" is sufficient.
+  const [changeStarts, setChangeStarts] = useState<number[]>([]);
+  const [cursorLine, setCursorLine] = useState<number>(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +146,57 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
     spec.revealLine,
   ]);
 
+  // Refresh the change list whenever Monaco recomputes the diff, and
+  // track the modified editor's cursor line so Prev/Next can be
+  // disabled when there's no change before/after the cursor.
+  useEffect(() => {
+    if (!editorReady) return;
+    const editor = editorRef.current as
+      | {
+          onDidUpdateDiff?: (cb: () => void) => { dispose(): void };
+          getLineChanges?: () => Array<{ modifiedStartLineNumber: number }> | null;
+          getDiffComputationResult?: () => {
+            changes: Array<{ modified: { startLineNumber: number } }>;
+          } | null;
+          getModifiedEditor?: () => {
+            getPosition?: () => { lineNumber: number } | null;
+            onDidChangeCursorPosition?: (cb: (e: { position: { lineNumber: number } }) => void) => {
+              dispose(): void;
+            };
+          };
+        }
+      | null;
+    if (!editor) return;
+    const refreshChanges = () => {
+      const legacy = editor.getLineChanges?.();
+      if (legacy) {
+        setChangeStarts(legacy.map((c) => c.modifiedStartLineNumber).sort((a, b) => a - b));
+        return;
+      }
+      const computed = editor.getDiffComputationResult?.();
+      if (computed) {
+        setChangeStarts(
+          computed.changes.map((c) => c.modified.startLineNumber).sort((a, b) => a - b),
+        );
+      }
+    };
+    refreshChanges();
+    const diffSub = editor.onDidUpdateDiff?.(refreshChanges);
+    const modified = editor.getModifiedEditor?.();
+    const initialPos = modified?.getPosition?.();
+    if (initialPos) setCursorLine(initialPos.lineNumber);
+    const cursorSub = modified?.onDidChangeCursorPosition?.((e) => {
+      setCursorLine(e.position.lineNumber);
+    });
+    return () => {
+      diffSub?.dispose();
+      cursorSub?.dispose();
+    };
+  }, [editorReady]);
+
+  const hasPrevChange = changeStarts.some((line) => line < cursorLine);
+  const hasNextChange = changeStarts.some((line) => line > cursorLine);
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <div style={{ padding: "4px 10px", borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: 11, display: "flex", gap: 8, alignItems: "center" }}>
@@ -148,7 +207,7 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
         <button
           type="button"
           onClick={() => editorRef.current?.goToDiff("previous")}
-          disabled={!editorReady}
+          disabled={!editorReady || !hasPrevChange}
           title="Previous change"
           data-testid="diff-prev-change"
           style={toolbarButtonStyle}
@@ -158,7 +217,7 @@ export function DiffPane({ stream, spec, visible, onJumpToSource }: Props) {
         <button
           type="button"
           onClick={() => editorRef.current?.goToDiff("next")}
-          disabled={!editorReady}
+          disabled={!editorReady || !hasNextChange}
           title="Next change"
           data-testid="diff-next-change"
           style={toolbarButtonStyle}

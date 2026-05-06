@@ -20,6 +20,12 @@ export interface NavSiblingEntry {
   ref: TabRef;
   /** Human-readable label for hover-tooltips (file path, work-item title, …). */
   label: string;
+  /** When the entry's `ref.kind === "diff"`, the full DiffSpec is
+   *  carried alongside so the navigation host can pre-register every
+   *  sibling's spec in `diffTabs`. Without this, stepping arrows
+   *  would land on a diff TabRef whose spec the renderer can't find,
+   *  and the tab silently disappears. */
+  diffSpec?: import("../components/Diff/DiffPane.js").DiffSpec;
 }
 
 export interface NavSiblings {

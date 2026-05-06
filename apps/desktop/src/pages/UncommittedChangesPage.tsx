@@ -24,7 +24,7 @@ export interface UncommittedChangesPageProps {
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
-  onOpenDiffInTab?(spec: DiffSpec): void;
+  onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
 }
 
 /**

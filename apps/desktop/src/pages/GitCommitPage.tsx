@@ -30,7 +30,7 @@ export interface GitCommitPageProps {
   threadWork: ThreadWorkState | null;
   /** DiffSpec opener forwarded to the embedded change-analysis panel. */
   onOpenDiff?(spec: DiffSpec): void;
-  onOpenDiffInTab?(spec: DiffSpec): void;
+  onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile?(path: string, opts?: { newTab?: boolean }): void;
 }

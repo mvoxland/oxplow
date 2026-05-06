@@ -85,6 +85,7 @@ import { subscribeUiError } from "./ui-error.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
+import { computeDiffId } from "./diff-id.js";
 import { DiffPage } from "./pages/DiffPage.js";
 import { DuplicateBlockPage } from "./pages/DuplicateBlockPage.js";
 import { FileViewerPage } from "./pages/FileViewerPage.js";
@@ -1704,23 +1705,6 @@ export function App() {
   }, [currentSession.openOrder, diffTabs, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
-  const computeDiffId = (request: DiffSpec): string => {
-    const left =
-      request.leftVersion.kind === "disk"
-        ? "disk"
-        : request.leftVersion.kind === "ref"
-          ? `ref:${request.leftVersion.ref}`
-          : `snap:${request.leftVersion.id}`;
-    const right =
-      request.rightVersion.kind === "disk"
-        ? "disk"
-        : request.rightVersion.kind === "ref"
-          ? `ref:${request.rightVersion.ref}`
-          : `snap:${request.rightVersion.id}`;
-    const labelKey = request.labelOverride ? `:${request.labelOverride}` : "";
-    return `diff:${left}:${right}:${request.path}${labelKey}`;
-  };
-
   const handleOpenDiff = (request: DiffSpec) => {
     const id = computeDiffId(request);
     // Always (re)write the spec so per-click metadata that doesn't
@@ -2142,11 +2126,20 @@ export function App() {
     // Always rewrite the spec so per-click metadata that doesn't
     // affect the id (e.g. revealLine pointing at a function's start
     // line) is honored on subsequent clicks of the same diff.
+    //
+    // When siblings carry diffSpecs, pre-register every sibling's
+    // spec too — otherwise stepping the prev/next arrow lands on a
+    // diff TabRef whose spec the renderer can't find and the tab
+    // silently disappears.
     setDiffTabs((prev) => {
-      if (prev.some((tab) => tab.id === id)) {
-        return prev.map((tab) => (tab.id === id ? { id, spec } : tab));
+      const byId = new Map(prev.map((t) => [t.id, t.spec]));
+      byId.set(id, spec);
+      if (siblings) {
+        for (const e of siblings.entries) {
+          if (e.diffSpec) byId.set(computeDiffId(e.diffSpec), e.diffSpec);
+        }
       }
-      return [...prev, { id, spec }];
+      return [...byId.entries()].map(([tid, tspec]) => ({ id: tid, spec: tspec }));
     });
     const ref: TabRef = {
       id,
@@ -2204,7 +2197,7 @@ export function App() {
             // Preserve back/forward — sibling navigation is orthogonal.
             back: old.back,
             forward: old.forward,
-            siblings: old.siblings ? { entries: old.siblings.entries, index: targetIdx } : null,
+            siblings: old.siblings ? { entries: old.siblings.entries, index: targetIdx, title: old.siblings.title } : null,
           },
         },
       };
@@ -2422,8 +2415,11 @@ export function App() {
       // Open a diff *in this slot* — slot navigates to the diff,
       // back returns to the originating page. Used by pages that
       // surface a diff (work items, wiki, local history, etc.).
-      const navOpenDiff = (spec: DiffSpec) => {
-        handleOpenDiffInTab(slotRef.id, spec);
+      const navOpenDiff = (
+        spec: DiffSpec,
+        siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
+      ) => {
+        handleOpenDiffInTab(slotRef.id, spec, siblings);
       };
       const navRevealCommit = (sha: string) => {
         navOpen(gitCommitRef(sha));

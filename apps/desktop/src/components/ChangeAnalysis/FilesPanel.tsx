@@ -69,7 +69,7 @@ export function FilesPanel({
   onOpenFunctionDiff,
   onOpenFileDiff,
 }: FilesPanelProps) {
-  const [view, setView] = useState<FilesPanelView>("files");
+  const [view, setView] = useState<FilesPanelView>("extension");
   // Persist the view selection across reloads.
   usePageSnapshot<{ filesView: FilesPanelView }>({
     serialize: () => ({ filesView: view }),
