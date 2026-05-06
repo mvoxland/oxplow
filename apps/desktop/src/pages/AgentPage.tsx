@@ -8,6 +8,8 @@ interface AgentPageProps {
   stream: Stream | null;
   visible: boolean;
   transportMode: "direct" | "tmux";
+  /** Click-through handler for file paths detected in terminal output. */
+  onOpenFile?(absPath: string, line?: number, column?: number): void;
 }
 
 /**
@@ -22,7 +24,7 @@ interface AgentPageProps {
  * other tab: a tab is a slot that holds a Page; the Page configures
  * what chrome it wants.
  */
-export function AgentPage({ thread, stream, visible, transportMode }: AgentPageProps) {
+export function AgentPage({ thread, stream, visible, transportMode, onOpenFile }: AgentPageProps) {
   if (!thread) {
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
@@ -46,6 +48,8 @@ export function AgentPage({ thread, stream, visible, transportMode }: AgentPageP
             paneTarget={thread.pane_target}
             visible={visible}
             transportMode={transportMode}
+            worktreePath={stream?.worktree_path}
+            onOpenFile={onOpenFile}
             onUserInterrupt={() => {
               void recordUserInterrupt(thread.id, stream?.id ?? null);
             }}
