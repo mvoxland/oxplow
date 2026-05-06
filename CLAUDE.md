@@ -112,17 +112,24 @@ test) or a tempfile-backed DB.
 Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun run test` invokes both Rust and TS suites.
 
-## Rust formatting
+## Rust formatting & lints
 
-CI runs `cargo fmt --all -- --check`. Whenever you edit a `.rs` file,
-run `cargo fmt --all` before ending the turn — drift accumulates
-silently and a fmt-only commit is wasted churn. (The fmt step has no
-test signal; it's purely formatting.)
+CI runs `cargo fmt --all -- --check` AND `cargo clippy --workspace
+--all-targets -- -D warnings`. Whenever you edit a `.rs` file, before
+ending the turn:
 
-The durable fix is a PostToolUse hook on `Edit`/`Write` that pipes the
-edited `.rs` file through `rustfmt` — once installed it makes drift
-structurally impossible. A rust LSP with format-on-save covers
-human-driven edits the same way; agent edits go through the hook.
+1. `cargo fmt --all`
+2. `cargo clippy --workspace --all-targets -- -D warnings` and fix
+   anything it surfaces. Treat warnings as errors here — that's how
+   CI runs. Don't sprinkle `#[allow(...)]` to silence a real lint;
+   only use it when the lint genuinely doesn't apply (e.g. a public
+   API that intentionally has many args).
+
+Both checks have no functional test signal — they're purely
+formatting/lint hygiene, and drift accumulates silently between
+commits. The durable fix is a PostToolUse hook on `Edit`/`Write` that
+runs `rustfmt` + `cargo clippy --fix` against the touched crate.
+Until that's installed, run both manually each turn.
 
 ## Work items are observational
 

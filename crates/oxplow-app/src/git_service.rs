@@ -324,7 +324,6 @@ impl GitService {
                                 conflict: true,
                                 log: false,
                                 remote_branches: false,
-                                ..Default::default()
                             },
                         });
                     }
@@ -342,7 +341,6 @@ impl GitService {
                                 conflict: true,
                                 log: true,
                                 remote_branches: true,
-                                ..Default::default()
                             },
                         });
                     }
@@ -1261,10 +1259,7 @@ where
         Ok(r) => r,
         Err(e) => {
             warn!(error = %e, "git op join failed");
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
+            Err(std::io::Error::other(e.to_string()))
         }
     }
 }

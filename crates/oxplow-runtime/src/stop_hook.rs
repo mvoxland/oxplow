@@ -66,20 +66,12 @@ pub struct StopHookOutcome {
 /// Optional builders that turn a list of items into the human-readable
 /// reason text. Each is `Option` so callers can opt out of a branch
 /// (the older runtime tests used this for selective coverage).
+#[derive(Default)]
+#[allow(clippy::type_complexity)]
 pub struct DirectiveBuilders<'a> {
     pub build_in_progress_audit_reason: Option<&'a dyn Fn(&[WorkItem]) -> String>,
     pub build_filed_but_didnt_ship_reason: Option<&'a dyn Fn() -> String>,
     pub build_stale_epic_children_reason: Option<&'a dyn Fn(&[StaleEpicPair]) -> String>,
-}
-
-impl<'a> Default for DirectiveBuilders<'a> {
-    fn default() -> Self {
-        Self {
-            build_in_progress_audit_reason: None,
-            build_filed_but_didnt_ship_reason: None,
-            build_stale_epic_children_reason: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

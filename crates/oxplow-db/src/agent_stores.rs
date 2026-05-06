@@ -122,7 +122,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare("SELECT * FROM agent_turn WHERE id = ?1")?;
                 let mut rows = stmt.query_map(params![id.as_str()], row_to_turn)?;
-                Ok(rows.next().transpose()?)
+                rows.next().transpose()
             })
         })
         .await

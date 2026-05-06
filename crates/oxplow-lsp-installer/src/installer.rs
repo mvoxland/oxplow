@@ -116,12 +116,7 @@ impl Installer {
             extract_asset(&bytes_vec, &asset_clone, &dest_clone, &pkg_name)
         })
         .await
-        .map_err(|e| {
-            InstallError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })??;
+        .map_err(|e| InstallError::Io(std::io::Error::other(e.to_string())))??;
 
         // Resolve which file inside `dest` is the binary.
         let bin_path = resolve_bin_path(package, &asset, &dest)?;

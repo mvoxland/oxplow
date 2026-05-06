@@ -40,7 +40,7 @@ pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
     };
     if options.all {
         let _ = walk.push_glob("refs/*");
-    } else if let Err(_) = walk.push_head() {
+    } else if walk.push_head().is_err() {
         return GitLogResult { commits: vec![] };
     }
     let _ = walk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL);

@@ -19,8 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use oxplow_app::{CreateWorkItemInput, OxplowEvent, Services, UpdateWorkItemChanges};
 use oxplow_domain::stores::{
-    AgentStatusStore, HookEventStore, ThreadStore, WorkItemEventStore, WorkItemLinkStore,
-    WorkItemStore, WorkNoteStore,
+    ThreadStore, WorkItemEventStore, WorkItemLinkStore, WorkItemStore, WorkNoteStore,
 };
 use oxplow_domain::{
     NoteId, ThreadId, WorkItem, WorkItemId, WorkItemKind, WorkItemLinkType, WorkItemStatus,
@@ -1357,7 +1356,7 @@ impl OxplowMcp {
                             && i.kind != oxplow_domain::WorkItemKind::Epic
                     })
                     .collect();
-                ready_first.sort_by_key(|i| (i.sort_index, i.created_at.clone()));
+                ready_first.sort_by_key(|i| (i.sort_index, i.created_at));
                 let Some(it) = ready_first.into_iter().next() else {
                     return json_result(&serde_json::json!({
                         "ok": false,

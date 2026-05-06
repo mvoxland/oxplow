@@ -194,8 +194,7 @@ pub fn restore_path(repo_path: &Path, path: &str) -> std::io::Result<()> {
         .arg(path)
         .output()?;
     if !out.status.success() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(std::io::Error::other(
             String::from_utf8_lossy(&out.stderr).into_owned(),
         ));
     }

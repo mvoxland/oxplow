@@ -61,6 +61,7 @@ async fn item_is_blocked(
 /// without a translation layer.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "mode", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ReadWorkOptionsResult {
     Empty,
     Epic {
@@ -292,7 +293,7 @@ impl WorkItemService {
             .filter(|i| i.status == WorkItemStatus::Ready)
             .cloned()
             .collect();
-        ready.sort_by_key(|i| (i.sort_index, i.created_at.clone()));
+        ready.sort_by_key(|i| (i.sort_index, i.created_at));
 
         let mut unblocked_ready: Vec<WorkItem> = Vec::new();
         for item in &ready {
@@ -320,7 +321,7 @@ impl WorkItemService {
                     }
                 }
             }
-            children.sort_by_key(|i| (i.sort_index, i.created_at.clone()));
+            children.sort_by_key(|i| (i.sort_index, i.created_at));
             return Ok(ReadWorkOptionsResult::Epic {
                 epic: head,
                 children,

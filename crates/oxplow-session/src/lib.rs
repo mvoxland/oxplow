@@ -552,6 +552,7 @@ mod tests {
     }
 
     impl TestEnv {
+        #[allow(dead_code)]
         fn project_path(&self) -> &Path {
             &self.project
         }

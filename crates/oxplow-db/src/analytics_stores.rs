@@ -850,7 +850,7 @@ impl SqliteSnapshotStore {
                      FROM file_snapshot WHERE id = ?1",
                 )?;
                 let mut rows = stmt.query_map(params![id], row_to_snapshot)?;
-                Ok(rows.next().transpose()?)
+                rows.next().transpose()
             })
         })
         .await

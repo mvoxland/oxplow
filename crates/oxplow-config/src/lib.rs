@@ -19,15 +19,11 @@ const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum AgentKind {
+    #[default]
     Claude,
     Copilot,
-}
-
-impl Default for AgentKind {
-    fn default() -> Self {
-        AgentKind::Claude
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
