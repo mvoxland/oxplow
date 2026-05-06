@@ -7,8 +7,7 @@ import { DuplicationCard } from "./DuplicationCard.js";
 import { TestsCard } from "./TestsCard.js";
 import { LookHereFirstCard } from "./LookHereFirstCard.js";
 import { ChurnCard } from "./ChurnCard.js";
-import { ComplexitySpikesCard } from "./ComplexitySpikesCard.js";
-import { OtherSmellsCard } from "./OtherSmellsCard.js";
+import { CodeSmellsCard } from "./CodeSmellsCard.js";
 import {
   ALL_STATUSES,
   FilesPanel,
@@ -150,12 +149,7 @@ export function ChangeAnalysisDrilldown({
         onOpenFile={onOpenFile}
         onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
       />
-      <ComplexitySpikesCard
-        functions={functionsAfterStatus}
-        onOpenFile={onOpenFile}
-        onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
-      />
-      <OtherSmellsCard
+      <CodeSmellsCard
         functions={functionsAfterStatus}
         onOpenFile={onOpenFile}
         onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
