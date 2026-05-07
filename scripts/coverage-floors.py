@@ -30,6 +30,9 @@ FLOORS = {
     "oxplow-fs-watch": 60.0,
     "oxplow-git": 80.0,
     "oxplow-lsp": 75.0,
+    # oxplow-lsp-installer: pure-helper test batch lifted this from 66
+    # → 80%. Pinned at 75 (5pt cushion) to lock the gain.
+    "oxplow-lsp-installer": 75.0,
     "oxplow-runtime": 90.0,
     "oxplow-session": 70.0,
     # Subprocess-heavy crates exercised through oxplow-app integration:
@@ -37,9 +40,19 @@ FLOORS = {
     "oxplow-tmux": 70.0,
     # Adapter crates currently with light coverage. Floors are set at
     # the current baseline and should be raised as integration tests
-    # land. See task #78 for the harness that will move these up.
-    "oxplow-mcp": 22.0,
-    "oxplow-tauri-ipc": 12.0,
+    # land. The MCP + IPC adapters are mostly thin handlers that need a
+    # fuller mock-runtime harness (Tauri State + MCP transport) to
+    # exercise; the helpers and error mapping inside them are now
+    # tested directly.
+    # oxplow-mcp: pure-helper batch (parse_kind/status/priority/
+    # link_type, expect_id_kind, compose_*_brief) lifted this from
+    # 25% → 40%. 35 leaves cushion for the next batch.
+    "oxplow-mcp": 35.0,
+    # oxplow-tauri-ipc: full-conversion error tests + a few new
+    # command integration tests (page_visit, wiki, work_items, effort)
+    # moved this from 22% → 27%. 22 keeps the prior floor while the
+    # next batch lands.
+    "oxplow-tauri-ipc": 22.0,
 }
 
 CRATE_RE = re.compile(r"/crates/([^/]+)/")

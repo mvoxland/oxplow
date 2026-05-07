@@ -248,3 +248,95 @@ async fn read_workspace_file_missing_path_errors() {
     .await;
     assert!(result.is_err());
 }
+
+// ---- Page-visit commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn list_currently_open_usage_empty_for_fresh_project() {
+    let app = TestApp::build();
+    let v = commands::page_visit::list_currently_open_usage(app.state(), 10)
+        .await
+        .unwrap();
+    assert!(v.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn list_recently_finished_empty_for_fresh_project() {
+    let app = TestApp::build();
+    let v = commands::page_visit::list_recently_finished(app.state(), None, 10)
+        .await
+        .unwrap();
+    assert!(v.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn clear_recently_finished_no_throw_on_empty() {
+    let app = TestApp::build();
+    commands::page_visit::clear_recently_finished(app.state(), None)
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn count_page_visits_by_day_empty_for_fresh_project() {
+    let app = TestApp::build();
+    let days = commands::page_visit::count_page_visits_by_day(app.state(), 7)
+        .await
+        .unwrap();
+    assert!(days.is_empty());
+}
+
+// ---- Wiki commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn get_wiki_page_missing_returns_none() {
+    let app = TestApp::build();
+    let v = commands::wiki::get_wiki_page(app.state(), "no-such-slug".into())
+        .await
+        .unwrap();
+    assert!(v.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn search_wiki_bodies_empty_for_fresh_project() {
+    let app = TestApp::build();
+    let v = commands::wiki::search_wiki_bodies(app.state(), "any".into(), 20)
+        .await
+        .unwrap();
+    assert!(v.is_empty());
+}
+
+// ---- Work item commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn list_work_items_for_thread_returns_empty_again() {
+    // Slightly different from the existing list_work_items_for_thread_empty
+    // helper — exercises the same surface with an explicit ThreadId conversion.
+    let app = TestApp::build();
+    let v =
+        commands::work_items::list_work_items_for_thread(app.state(), ThreadId::from("b-empty"))
+            .await
+            .unwrap();
+    assert!(v.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn get_work_item_summaries_for_empty_thread() {
+    let app = TestApp::build();
+    let v =
+        commands::work_items::get_work_item_summaries(app.state(), Some(ThreadId::from("b-empty")))
+            .await
+            .unwrap();
+    assert!(v.is_empty());
+}
+
+// ---- Effort commands ----
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn list_work_item_efforts_empty_for_unknown_item() {
+    let app = TestApp::build();
+    let v = commands::effort::list_work_item_efforts(app.state(), WorkItemId::from("wi-none"))
+        .await
+        .unwrap();
+    assert!(v.is_empty());
+}

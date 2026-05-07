@@ -302,4 +302,146 @@ bin:
             PathBuf::from("/tmp/rust-analyzer/rust-analyzer-aarch64-apple-darwin")
         );
     }
+
+    #[test]
+    fn resolve_bin_path_passes_through_literal_template() {
+        // Templates without `{{source.asset.bin}}` should be used
+        // verbatim (joined onto dest). Useful for packages that ship
+        // a fixed binary name independent of the per-target asset.
+        let pkg = make_package(
+            r#"
+name: gopls
+languages: [Go]
+source:
+  id: pkg:github/golang/tools@v0.21.1
+  asset:
+    - target: darwin_arm64
+      file: gopls.tar.gz
+bin:
+  gopls: gopls
+"#,
+        );
+        let asset = pkg
+            .asset_for_target(&Target("darwin_arm64".into()))
+            .unwrap();
+        let path = resolve_bin_path(&pkg, &asset, Path::new("/tmp/gopls")).unwrap();
+        assert_eq!(path, PathBuf::from("/tmp/gopls/gopls"));
+    }
+
+    #[test]
+    fn resolve_bin_path_no_bin_entry_errors() {
+        let pkg = make_package(
+            r#"
+name: nobin
+languages: [Foo]
+source:
+  id: pkg:github/example/nobin@v1.0
+  asset:
+    - target: darwin_arm64
+      file: nobin.tar.gz
+bin: {}
+"#,
+        );
+        let asset = pkg
+            .asset_for_target(&Target("darwin_arm64".into()))
+            .unwrap();
+        let err = resolve_bin_path(&pkg, &asset, Path::new("/tmp")).unwrap_err();
+        match err {
+            InstallError::NoBin { name } => assert_eq!(name, "nobin"),
+            other => panic!("expected NoBin, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_tar_gz_unpacks_archive_to_dest() {
+        let tmp = tempdir().unwrap();
+        // Build a tarball in-memory containing one file.
+        let mut tar_buf: Vec<u8> = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_buf);
+            let mut header = tar::Header::new_gnu();
+            let payload = b"binary-bytes";
+            header.set_path("gopls").unwrap();
+            header.set_size(payload.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder.append(&header, &payload[..]).unwrap();
+            builder.into_inner().unwrap();
+        }
+        // Gzip the tarball.
+        let mut gz_buf = Vec::new();
+        {
+            let mut enc =
+                flate2::write::GzEncoder::new(&mut gz_buf, flate2::Compression::default());
+            enc.write_all(&tar_buf).unwrap();
+            enc.finish().unwrap();
+        }
+        let asset = ResolvedAsset {
+            file: "gopls.tar.gz".into(),
+            bin: None,
+        };
+        extract_asset(&gz_buf, &asset, tmp.path(), "gopls").unwrap();
+        let extracted = tmp.path().join("gopls");
+        assert!(extracted.exists());
+        assert_eq!(std::fs::read(extracted).unwrap(), b"binary-bytes");
+    }
+
+    #[test]
+    fn extract_plain_binary_no_extension_writes_file_named_for_asset() {
+        // Some Mason entries point at a raw uncompressed binary with
+        // no extension. The fallback branch should drop the bytes
+        // straight into dest under the asset's `file` name.
+        let tmp = tempdir().unwrap();
+        let asset = ResolvedAsset {
+            file: "lua-language-server".into(),
+            bin: None,
+        };
+        extract_asset(b"raw-bytes", &asset, tmp.path(), "lua-language-server").unwrap();
+        let out = tmp.path().join("lua-language-server");
+        assert!(out.exists());
+        assert_eq!(std::fs::read(out).unwrap(), b"raw-bytes");
+    }
+
+    #[test]
+    fn extract_exe_writes_file_directly() {
+        // Bare `.exe` (no zip wrapper) should land verbatim.
+        let tmp = tempdir().unwrap();
+        let asset = ResolvedAsset {
+            file: "tool.exe".into(),
+            bin: None,
+        };
+        extract_asset(b"win-bytes", &asset, tmp.path(), "tool").unwrap();
+        let out = tmp.path().join("tool.exe");
+        assert!(out.exists());
+        assert_eq!(std::fs::read(out).unwrap(), b"win-bytes");
+    }
+
+    #[test]
+    fn extract_unsupported_extension_errors() {
+        let tmp = tempdir().unwrap();
+        let asset = ResolvedAsset {
+            file: "weird.xz".into(),
+            bin: None,
+        };
+        let err = extract_asset(b"x", &asset, tmp.path(), "weird").unwrap_err();
+        match err {
+            InstallError::UnsupportedAsset(name) => assert_eq!(name, "weird.xz"),
+            other => panic!("expected UnsupportedAsset, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_gz_falls_back_to_pkg_name_when_bin_missing() {
+        // When the asset has no `bin` field, the .gz branch uses the
+        // package name as the output file name. Covers the
+        // `unwrap_or_else(|| pkg_name.to_string())` branch.
+        let tmp = tempdir().unwrap();
+        let asset = ResolvedAsset {
+            file: "rust-analyzer.gz".into(),
+            bin: None,
+        };
+        extract_asset(&gzip(b"bytes"), &asset, tmp.path(), "rust-analyzer").unwrap();
+        let out = tmp.path().join("rust-analyzer");
+        assert!(out.exists());
+    }
 }

@@ -58,4 +58,18 @@ mod tests {
             std::env::consts::ARCH
         );
     }
+
+    #[test]
+    fn target_round_trips_through_as_str() {
+        let t = Target("linux_x64_gnu".into());
+        assert_eq!(t.as_str(), "linux_x64_gnu");
+        assert_eq!(t, Target("linux_x64_gnu".into()));
+        assert_ne!(t, Target("darwin_arm64".into()));
+    }
+
+    #[test]
+    fn target_display_writes_raw_string() {
+        let t = Target("win_x64".into());
+        assert_eq!(format!("{t}"), "win_x64");
+    }
 }

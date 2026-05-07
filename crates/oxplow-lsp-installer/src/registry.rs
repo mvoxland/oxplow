@@ -105,4 +105,39 @@ mod tests {
         let pkg = reg.fetch_package("rust-analyzer").await.unwrap();
         assert_eq!(pkg.name, "rust-analyzer");
     }
+
+    #[test]
+    fn cache_path_for_uses_per_package_subdir() {
+        let tmp = tempdir().unwrap();
+        let reg = Registry::new(tmp.path().to_path_buf());
+        let p = reg.cache_path_for("gopls");
+        assert_eq!(p, tmp.path().join("gopls").join("package.yaml"));
+    }
+
+    #[test]
+    fn cache_dir_returns_root_passed_in() {
+        let tmp = tempdir().unwrap();
+        let reg = Registry::new(tmp.path().to_path_buf());
+        assert_eq!(reg.cache_dir(), tmp.path());
+    }
+
+    #[tokio::test]
+    async fn fetch_package_surfaces_parse_error_for_corrupt_cache() {
+        // A cache hit with malformed YAML should return a Package
+        // error (not be silently swallowed) so callers know to
+        // invalidate the cache rather than serve garbage.
+        let tmp = tempdir().unwrap();
+        let reg = Registry::new(tmp.path().to_path_buf());
+        let target_dir = tmp.path().join("broken");
+        tokio::fs::create_dir_all(&target_dir).await.unwrap();
+        // Wildly invalid YAML — missing required fields.
+        tokio::fs::write(
+            target_dir.join("package.yaml"),
+            "not: a: package\n  bad: indent",
+        )
+        .await
+        .unwrap();
+        let err = reg.fetch_package("broken").await.unwrap_err();
+        assert!(matches!(err, RegistryError::Package(_)));
+    }
 }

@@ -2051,4 +2051,234 @@ mod tests {
         let body = text_payload(r);
         assert_eq!(body.trim(), "[]");
     }
+
+    // ---- Pure helpers: parse_kind / parse_status / parse_priority / parse_link_type ----
+
+    #[test]
+    fn parse_kind_accepts_each_canonical_string() {
+        assert!(matches!(parse_kind("epic"), Ok(WorkItemKind::Epic)));
+        assert!(matches!(parse_kind("task"), Ok(WorkItemKind::Task)));
+        assert!(matches!(parse_kind("subtask"), Ok(WorkItemKind::Subtask)));
+        assert!(matches!(parse_kind("bug"), Ok(WorkItemKind::Bug)));
+        assert!(matches!(parse_kind("note"), Ok(WorkItemKind::Note)));
+    }
+
+    #[test]
+    fn parse_kind_unknown_value_carries_value_in_error() {
+        let err = parse_kind("widget").unwrap_err();
+        let msg = err.message.to_string();
+        assert!(
+            msg.contains("widget"),
+            "error should name the offending value: {msg}"
+        );
+        assert!(
+            msg.contains("kind"),
+            "error should mention parameter family: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_kind_is_case_sensitive() {
+        // Mason-style canonical lowercase only — "Task" must NOT match.
+        assert!(parse_kind("Task").is_err());
+        assert!(parse_kind("EPIC").is_err());
+    }
+
+    #[test]
+    fn parse_status_accepts_every_status() {
+        assert!(matches!(parse_status("ready"), Ok(WorkItemStatus::Ready)));
+        assert!(matches!(
+            parse_status("in_progress"),
+            Ok(WorkItemStatus::InProgress)
+        ));
+        assert!(matches!(
+            parse_status("blocked"),
+            Ok(WorkItemStatus::Blocked)
+        ));
+        assert!(matches!(parse_status("done"), Ok(WorkItemStatus::Done)));
+        assert!(matches!(
+            parse_status("canceled"),
+            Ok(WorkItemStatus::Canceled)
+        ));
+        assert!(matches!(
+            parse_status("archived"),
+            Ok(WorkItemStatus::Archived)
+        ));
+    }
+
+    #[test]
+    fn parse_status_rejects_in_progress_with_dash() {
+        // The contract says snake_case `in_progress`; clients writing
+        // `in-progress` should get an actionable error rather than
+        // being silently coerced.
+        let err = parse_status("in-progress").unwrap_err();
+        assert!(err.message.contains("in-progress"));
+    }
+
+    #[test]
+    fn parse_priority_accepts_each_value() {
+        use oxplow_domain::WorkItemPriority as P;
+        assert!(matches!(parse_priority("low"), Ok(P::Low)));
+        assert!(matches!(parse_priority("medium"), Ok(P::Medium)));
+        assert!(matches!(parse_priority("high"), Ok(P::High)));
+        assert!(matches!(parse_priority("urgent"), Ok(P::Urgent)));
+    }
+
+    #[test]
+    fn parse_priority_unknown_errors() {
+        let err = parse_priority("critical").unwrap_err();
+        assert!(err.message.contains("critical"));
+    }
+
+    #[test]
+    fn parse_link_type_accepts_every_relation() {
+        use oxplow_domain::WorkItemLinkType as L;
+        assert!(matches!(parse_link_type("blocks"), Ok(L::Blocks)));
+        assert!(matches!(parse_link_type("relates_to"), Ok(L::RelatesTo)));
+        assert!(matches!(
+            parse_link_type("discovered_from"),
+            Ok(L::DiscoveredFrom)
+        ));
+        assert!(matches!(parse_link_type("duplicates"), Ok(L::Duplicates)));
+        assert!(matches!(parse_link_type("supersedes"), Ok(L::Supersedes)));
+        assert!(matches!(parse_link_type("replies_to"), Ok(L::RepliesTo)));
+    }
+
+    #[test]
+    fn parse_link_type_unknown_errors() {
+        let err = parse_link_type("flubs").unwrap_err();
+        assert!(err.message.contains("flubs"));
+    }
+
+    // ---- expect_id_kind ----
+
+    #[test]
+    fn expect_id_kind_accepts_matching_prefix() {
+        assert!(expect_id_kind(
+            "tool",
+            "thread_id",
+            "b-abc123",
+            oxplow_domain::IdKind::Thread,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn expect_id_kind_error_names_tool_param_value_and_kinds() {
+        let err = expect_id_kind(
+            "create_work_item",
+            "thread_id",
+            "s-abc123",
+            oxplow_domain::IdKind::Thread,
+        )
+        .unwrap_err();
+        let msg = err.message.to_string();
+        assert!(msg.contains("create_work_item"), "tool name missing: {msg}");
+        assert!(msg.contains("thread_id"), "param name missing: {msg}");
+        assert!(msg.contains("s-abc123"), "value missing: {msg}");
+        assert!(msg.contains("stream id"), "actual label missing: {msg}");
+        assert!(msg.contains("thread id"), "expected label missing: {msg}");
+    }
+
+    #[test]
+    fn expect_id_kind_unrecognised_id_shape_errors() {
+        // No `<prefix>-…` shape at all — should still be flagged.
+        let err = expect_id_kind(
+            "tool",
+            "id",
+            "no-prefix-shape",
+            oxplow_domain::IdKind::Thread,
+        )
+        .unwrap_err();
+        let msg = err.message.to_string();
+        assert!(msg.contains("no-prefix-shape"), "value missing: {msg}");
+    }
+
+    // ---- compose_delegate_query_prompt ----
+
+    #[test]
+    fn delegate_query_prompt_contains_required_sections() {
+        let s = compose_delegate_query_prompt("b-1", "Where is X?", "", "n-2");
+        assert!(s.contains("threadId: b-1"));
+        assert!(s.contains("noteId: n-2"));
+        assert!(s.contains("## Question"));
+        assert!(s.contains("Where is X?"));
+        assert!(s.contains("record_query_finding"));
+    }
+
+    #[test]
+    fn delegate_query_prompt_omits_focus_section_when_empty() {
+        let s = compose_delegate_query_prompt("b-1", "Q", "", "n-1");
+        assert!(!s.contains("## Focus"));
+    }
+
+    #[test]
+    fn delegate_query_prompt_includes_focus_when_provided() {
+        let s = compose_delegate_query_prompt("b-1", "Q", "look in src/foo.rs", "n-1");
+        assert!(s.contains("## Focus"));
+        assert!(s.contains("look in src/foo.rs"));
+    }
+
+    // ---- compose_dispatch_brief ----
+
+    #[test]
+    fn dispatch_brief_includes_identity_and_protocol() {
+        let mut item = make_work_item(None, "ship the thing");
+        item.description = String::new();
+        item.acceptance_criteria = None;
+        let s = compose_dispatch_brief(&item, "");
+        assert!(s.contains("Work item: ship the thing"));
+        assert!(s.contains(&format!("itemId: {}", item.id.0)));
+        assert!(s.contains("kind:"));
+        assert!(s.contains("priority:"));
+        assert!(s.contains("## Protocol"));
+        assert!(!s.contains("## Description"));
+        assert!(!s.contains("## Acceptance criteria"));
+        assert!(!s.contains("## Extra context"));
+    }
+
+    #[test]
+    fn dispatch_brief_includes_description_when_non_empty() {
+        let mut item = make_work_item(None, "x");
+        item.description = "do the thing carefully".into();
+        let s = compose_dispatch_brief(&item, "");
+        assert!(s.contains("## Description"));
+        assert!(s.contains("do the thing carefully"));
+    }
+
+    #[test]
+    fn dispatch_brief_includes_acceptance_criteria_when_non_empty() {
+        let mut item = make_work_item(None, "x");
+        item.acceptance_criteria = Some("- it works".into());
+        let s = compose_dispatch_brief(&item, "");
+        assert!(s.contains("## Acceptance criteria"));
+        assert!(s.contains("it works"));
+    }
+
+    #[test]
+    fn dispatch_brief_skips_empty_acceptance_criteria_string() {
+        // Some callers pass Some(""), which should still be treated
+        // as "no AC" rather than rendering an empty section header.
+        let mut item = make_work_item(None, "x");
+        item.acceptance_criteria = Some(String::new());
+        let s = compose_dispatch_brief(&item, "");
+        assert!(!s.contains("## Acceptance criteria"));
+    }
+
+    #[test]
+    fn dispatch_brief_appends_extra_context_when_provided() {
+        let item = make_work_item(None, "x");
+        let s = compose_dispatch_brief(&item, "see also note n-7");
+        assert!(s.contains("## Extra context"));
+        assert!(s.contains("see also note n-7"));
+    }
+
+    // ---- default_limit ----
+
+    #[test]
+    fn default_limit_is_stable() {
+        // The exact value is part of the MCP contract; a regression
+        // here changes how much data clients receive by default.
+        assert_eq!(default_limit(), 20);
+    }
 }

@@ -204,4 +204,78 @@ mod tests {
         assert_eq!(back.message, "hi");
         assert_eq!(back.cause.as_deref(), Some("inner"));
     }
+
+    #[test]
+    fn from_session_in_worktree_maps_with_path_in_message() {
+        let e: IpcError =
+            SessionError::InWorktree(std::path::PathBuf::from("/wt/secondary")).into();
+        assert_eq!(e.code, "IN_WORKTREE");
+        assert!(e.message.contains("/wt/secondary"), "msg: {}", e.message);
+    }
+
+    #[test]
+    fn from_session_primary_exists_maps() {
+        let e: IpcError = SessionError::PrimaryExists.into();
+        assert_eq!(e.code, "PRIMARY_EXISTS");
+    }
+
+    #[test]
+    fn from_session_duplicate_slug_includes_slug_and_stream() {
+        let sid = oxplow_domain::StreamId::from("s-fake");
+        let e: IpcError = SessionError::DuplicateWorktreeSlug("feature".into(), sid.clone()).into();
+        assert_eq!(e.code, "DUPLICATE_WORKTREE_SLUG");
+        assert!(e.message.contains("feature"), "msg: {}", e.message);
+        assert!(e.message.contains(sid.as_str()), "msg: {}", e.message);
+    }
+
+    #[test]
+    fn from_session_storage_passes_through_domain_mapping() {
+        // Storage(NotFound) should land as NOT_FOUND, not GIT.
+        let e: IpcError = SessionError::Storage(DomainError::NotFound).into();
+        assert_eq!(e.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn from_work_item_service_not_found_maps_to_not_found() {
+        let e: IpcError =
+            WorkItemServiceError::NotFound(oxplow_domain::WorkItemId::from("wi-x")).into();
+        assert_eq!(e.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn from_work_item_service_storage_propagates() {
+        let e: IpcError =
+            WorkItemServiceError::Storage(DomainError::Invalid("bad row".into())).into();
+        assert_eq!(e.code, "INVALID");
+        assert_eq!(e.message, "bad row");
+    }
+
+    #[test]
+    fn from_thread_error_not_found_maps_to_not_found() {
+        let e: IpcError = ThreadError::NotFound(oxplow_domain::ThreadId::from("b-x")).into();
+        assert_eq!(e.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn from_thread_error_closed_uses_dedicated_code() {
+        let id = oxplow_domain::ThreadId::from("b-closed");
+        let e: IpcError = ThreadError::Closed(id.clone()).into();
+        assert_eq!(e.code, "THREAD_CLOSED");
+        assert!(e.message.contains(id.as_str()), "msg: {}", e.message);
+    }
+
+    #[test]
+    fn from_thread_error_storage_passes_through() {
+        let e: IpcError = ThreadError::Storage(DomainError::Invariant("oops".into())).into();
+        assert_eq!(e.code, "INVARIANT");
+        assert_eq!(e.message, "oops");
+    }
+
+    #[test]
+    fn ipc_error_display_uses_message() {
+        // The Error/Display impl drives logging — make sure the
+        // human-readable message round-trips, not Debug-formatted noise.
+        let e = IpcError::invalid("user-friendly message");
+        assert_eq!(format!("{e}"), "user-friendly message");
+    }
 }
