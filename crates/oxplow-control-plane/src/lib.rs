@@ -967,4 +967,138 @@ mod tests {
         fs::write(tmp.path().join(".git/MERGE_HEAD"), b"deadbeef\n").unwrap();
         assert!(git_operation_in_progress(tmp.path()));
     }
+
+    #[test]
+    fn git_op_in_progress_detects_each_marker() {
+        use std::fs;
+        for marker in ["REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            fs::create_dir_all(tmp.path().join(".git")).unwrap();
+            assert!(!git_operation_in_progress(tmp.path()));
+            fs::write(tmp.path().join(".git").join(marker), b"deadbeef\n").unwrap();
+            assert!(
+                git_operation_in_progress(tmp.path()),
+                "expected {marker} to count"
+            );
+        }
+    }
+
+    #[test]
+    fn git_op_in_progress_follows_worktree_gitdir_pointer() {
+        // In a secondary worktree, `.git` is a *file* pointing at the
+        // real gitdir. The function must follow that pointer so a
+        // mid-merge worktree still trips the carve-out.
+        use std::fs;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let real_gitdir = tmp.path().join("real-gitdir");
+        let worktree = tmp.path().join("worktree");
+        fs::create_dir_all(&real_gitdir).unwrap();
+        fs::create_dir_all(&worktree).unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", real_gitdir.display()),
+        )
+        .unwrap();
+        assert!(!git_operation_in_progress(&worktree));
+        fs::write(real_gitdir.join("MERGE_HEAD"), b"x\n").unwrap();
+        assert!(git_operation_in_progress(&worktree));
+    }
+
+    #[test]
+    fn git_op_in_progress_no_dot_git_returns_false() {
+        // Bare directory with no .git at all — function must not
+        // panic and must report no-op.
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(!git_operation_in_progress(tmp.path()));
+    }
+
+    #[test]
+    fn wiki_slug_from_relative_path_in_notes_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // A relative path that resolves into .oxplow/wiki returns the slug.
+        let slug = wiki_page_slug_from_path(".oxplow/wiki/architecture.md", tmp.path());
+        assert_eq!(slug.as_deref(), Some("architecture"));
+    }
+
+    #[test]
+    fn wiki_slug_from_absolute_path_in_notes_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let abs = tmp.path().join(".oxplow/wiki/data-model.md");
+        let slug = wiki_page_slug_from_path(&abs.to_string_lossy(), tmp.path());
+        assert_eq!(slug.as_deref(), Some("data-model"));
+    }
+
+    #[test]
+    fn wiki_slug_rejects_non_md_extension() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(wiki_page_slug_from_path(".oxplow/wiki/foo.txt", tmp.path()).is_none());
+        // No extension at all.
+        assert!(wiki_page_slug_from_path(".oxplow/wiki/foo", tmp.path()).is_none());
+    }
+
+    #[test]
+    fn wiki_slug_rejects_subdirectory_paths() {
+        // Wiki notes must be flat under .oxplow/wiki — a path with a
+        // subdirectory shouldn't accidentally adopt the basename.
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(wiki_page_slug_from_path(".oxplow/wiki/sub/inner.md", tmp.path()).is_none());
+    }
+
+    #[test]
+    fn wiki_slug_rejects_paths_outside_notes_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(wiki_page_slug_from_path("README.md", tmp.path()).is_none());
+        assert!(wiki_page_slug_from_path(".oxplow/other/foo.md", tmp.path()).is_none());
+        assert!(wiki_page_slug_from_path("/etc/hosts", tmp.path()).is_none());
+    }
+
+    #[test]
+    fn parse_hook_kind_covers_each_known_kind() {
+        assert!(matches!(
+            parse_hook_kind("PreToolUse"),
+            Some(HookKind::PreToolUse)
+        ));
+        assert!(matches!(
+            parse_hook_kind("PostToolUse"),
+            Some(HookKind::PostToolUse)
+        ));
+        assert!(matches!(
+            parse_hook_kind("UserPromptSubmit"),
+            Some(HookKind::UserPromptSubmit)
+        ));
+        assert!(matches!(parse_hook_kind("Stop"), Some(HookKind::Stop)));
+        assert!(parse_hook_kind("").is_none());
+        assert!(parse_hook_kind("PRETOOLUSE").is_none()); // case-sensitive
+    }
+
+    #[test]
+    fn bearer_check_rejects_malformed_header() {
+        // No "Bearer " prefix — even if the token bytes match.
+        let mut h = HeaderMap::new();
+        h.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static("abc"),
+        );
+        assert!(!check_bearer(&h, "abc"));
+    }
+
+    #[test]
+    fn bearer_check_is_case_sensitive_on_scheme() {
+        // "bearer " (lowercase) is rejected — clients must send the
+        // canonical "Bearer " scheme.
+        let mut h = HeaderMap::new();
+        h.insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_static("bearer abc"),
+        );
+        assert!(!check_bearer(&h, "abc"));
+    }
+
+    #[test]
+    fn generated_tokens_are_unique() {
+        // Sanity: the OS RNG produces distinct tokens across calls.
+        let a = generate_token();
+        let b = generate_token();
+        assert_ne!(a, b);
+    }
 }
