@@ -31,15 +31,15 @@ to keep working. The pipeline runs in priority order:
    activity (no edits, no work-item filing, no dispatch), the
    agent answered or asked a question and is allowed to stop.
    Every directive is suppressed.
-2. **Awaiting-user gate.** If the agent called
-   `await_user({ question })`, the runtime allows the stop and
+2. **Awaiting-user gate.** If the agent has flagged that it is
+   waiting on the user, the runtime allows the stop and
    suppresses every directive until the user replies.
 3. **In-progress audit.** If the writer thread has any
    `in_progress` work items, the runtime blocks with an audit
    directive: reconcile each item — still active → leave alone;
-   acceptance criteria met → `complete_task`; stuck →
-   `blocked`; obsolete → `canceled`. A signature dedup prevents
-   the same audit firing repeatedly when nothing changed.
+   acceptance criteria met → close it; stuck → mark `blocked`;
+   obsolete → mark `canceled`. A signature dedup prevents the
+   same audit firing repeatedly when nothing changed.
 4. **Filed-but-didn't-ship advisory.** Catches the misread
    where the agent logged a `ready` row instead of doing the
    work the user asked for.
@@ -47,9 +47,8 @@ to keep working. The pipeline runs in priority order:
 
 Cross-turn queue progression is **user-driven**. When the agent
 finishes its obligations and Stops, it stops — you resume queue
-work by sending a new prompt or running the bundled
-`/work-next` slash command (which calls `read_work_options` and
-dispatches the next ready cluster).
+work by sending a new prompt or running the bundled `/work-next`
+slash command (which dispatches the next ready cluster).
 
 ## Filing-enforcement hook (PreToolUse)
 
@@ -80,46 +79,22 @@ This is non-bypassable from the agent side — the guard is
 out-of-process. Promote a different thread to writer (or switch
 to the writer thread) if you need to edit.
 
-The wiki notes directory (`.oxplow/wiki/`) is exempt — note
-capture works on read-only threads too, because the wiki is
-research output, not authored project change.
+The wiki directory (`.oxplow/wiki/`) is exempt — wiki capture
+works on read-only threads too, because the wiki is research
+output, not authored project change.
 
 ## MCP control plane
 
-Oxplow exposes its primitives as MCP tools the agent can call
-directly. The full list is in
-[MCP tools](../reference/mcp-tools.md). Highlights:
+Oxplow exposes its primitives over MCP — work items, dispatch,
+threads, follow-ups, wiki pages, LSP — so the agent can drive
+them directly without raw shell escapes. Each thread gets its
+own MCP endpoint scoped to that thread, so tool calls implicitly
+target the right stream and writer status.
 
-- **Work items.** `create_work_item`, `update_work_item`,
-  `complete_task`, `add_work_note`, `transition_work_items`,
-  `file_epic_with_children`, `link_work_items`,
-  `reorder_work_items`.
-- **Dispatch.** `read_work_options`, `dispatch_work_item` for
-  orchestrator-style flows where one agent hands a brief to a
-  subagent.
-- **Threads.** `get_thread_context`, `list_thread_work`,
-  `fork_thread`, `await_user`.
-- **Followups.** `add_followup`, `list_followups`,
-  `remove_followup` for transient sub-asks.
-- **Wiki notes.** `list_notes`, `search_notes`,
-  `search_note_bodies`, `find_notes_for_file`,
-  `get_note_metadata`, `resync_note`, `delete_note`. Bodies
-  are written directly with the agent's `Write` / `Edit`
-  tools — there is intentionally no create-note MCP call.
-- **Subsystem docs.** `get_subsystem_doc({ name })` for cheap
-  reads of `.context/<name>.md`.
-- **LSP.** `lsp_definition`, `lsp_hover`, `lsp_references`,
-  `lsp_diagnostics`.
-
-All MCP tools take a `threadId` so the runtime can resolve the
-right stream and writer status.
-
-## Per-thread MCP server
-
-Each thread gets its own MCP server endpoint, scoped to that
-thread's `threadId`. Tool calls implicitly target the right
-stream. From the agent's side, it's just
-"`mcp__oxplow__create_work_item` works."
+Wiki bodies are an exception: the agent writes them directly
+with its built-in `Write` / `Edit` tools rather than through
+MCP, which avoids round-tripping full bodies through tool args.
+The wiki watcher syncs metadata on every file event.
 
 ## What you can change
 

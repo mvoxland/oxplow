@@ -47,7 +47,7 @@ on disk.
 ## Page
 
 A **page** is anything addressable inside a tab — a file, a
-diff, a work item, a wiki note, a code-quality finding, a
+diff, a work item, a wiki page, a code-quality finding, a
 dashboard, a settings panel, the agent terminal. Pages share
 common chrome: title + status chips + collapsible **Backlinks**
 panel + browser-style back/forward navigation.
@@ -70,16 +70,31 @@ crashes. The agent files them before changing project files
 closes them when acceptance criteria are met. You can reopen
 anything by flipping it back to `in_progress`.
 
-## Wiki note
+## Wiki page
 
 The project's **wiki** is a folder of markdown files under
-`.oxplow/wiki/`, indexed in SQLite. Notes support
-`[[wikilinks]]` for cross-references — across notes, to repo
-files (`[[src/foo.ts]]`), and to git commits (`[[abc1234]]`).
+`.oxplow/wiki/`, indexed in SQLite. Wiki pages support
+`[[wikilinks]]` for cross-references — across pages, to repo
+files (`[[src/foo.ts]]`), to specific lines (`[[src/foo.ts:42]]`),
+and to git commits (`[[abc1234]]`).
 
-The agent captures non-trivial Q&A here automatically — codebase
-walkthroughs, design rationale, comparisons, recommendations —
-so the durable understanding survives past the chat reply.
+The agent captures non-trivial Q&A as wiki pages automatically
+— codebase walkthroughs, design rationale, comparisons,
+recommendations — so the durable understanding survives past
+the chat reply.
+
+## Change Analysis
+
+A **change** is any pair of refs you want to compare — typically
+a feature branch against its parent, or your working tree against
+`HEAD`. The Change Analysis dashboard turns a change into a
+ranked summary: *which files should I look at first, and why*.
+Files are scored by a multiplicative interestingness score
+(churn × complexity × tests-missing × duplication), with pivots
+to drill into a slice (one extension, one directory, only the
+added files), and per-function before/after metrics so you can
+see exactly which functions grew, shrank, or changed shape. See
+[Change Analysis](../guide/change-analysis.md).
 
 ## Effort and snapshot
 
@@ -94,11 +109,12 @@ restore the files this effort touched.
 
 ## Backlinks
 
-Notes, work items, files, and code-quality findings are linked
-both ways. Open a work item and the Backlinks panel shows every
-note that mentions it; open a note and you see every work item
-or finding that points back. The rail's recent-files and active
-items also surface as backlinks where relevant.
+Wiki pages, work items, files, and code-quality findings are
+linked both ways. Open a work item and the Backlinks panel
+shows every wiki page that mentions it; open a wiki page and
+you see every work item or finding that points back. The rail's
+recent-files and active items also surface as backlinks where
+relevant.
 
 ## How they fit together
 
@@ -106,7 +122,7 @@ You start a **stream** on a branch. You give it a writer
 **thread**. You file **work items** describing what you want
 done; the agent works through them, capturing **efforts** and
 **snapshots** as it goes. Decisions and exploration land in
-**wiki notes**. You navigate the project as **pages** in a
+**wiki pages**. You navigate the project as **pages** in a
 browser-like tab UI, with the rail HUD as your home base.
 
 Repeat for as many streams as you can supervise.

@@ -1,4 +1,4 @@
-# Pair programming, inverted
+# Pair programming
 
 Pair programming has two roles. The **driver** has the keyboard:
 they type the code, run the tests, fight the syntax, navigate the
@@ -39,8 +39,8 @@ Each navigator job has a primitive in the product:
 | Navigator job | Oxplow primitive |
 |---|---|
 | Hold the scope | **Work queue** — the durable list of what's in this thread and what isn't |
-| Capture rationale | **Wiki notes** — durable Q&A and decisions, with backlinks |
-| Pause for taste | **`await_user`** — the agent asks; the runtime suppresses every directive until you reply |
+| Capture rationale | **Wiki pages** — durable Q&A and decisions, with backlinks |
+| Pause for taste | **Awaiting-user gate** — the agent asks; the runtime suppresses every directive until you reply |
 | Catch regressions | **Local History** — every effort snapshots the files it touched |
 | Switch contexts cleanly | **Streams** — each agent has its own branch, worktree, and queue |
 | Talk without losing your place | **Threads** — query an agent in a read-only thread without risking writes |

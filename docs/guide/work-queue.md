@@ -17,7 +17,7 @@ ready → in_progress → done
 - **in_progress** — the agent (or you) is actively working it.
 - **blocked** — paused; needs your input or an external answer.
 - **done** — acceptance criteria met. The agent closes its own
-  items via `complete_task`; you can reopen anything by flipping
+  items when it's finished; you can reopen anything by flipping
   it back to `in_progress`.
 - **canceled** — abandoned without shipping.
 - **archived** — drops out of the default views.
@@ -53,11 +53,9 @@ The agent files an item before it starts changing project files.
 Two shapes:
 
 - **Task** — one coherent change, even if it touches a few files.
-  Most work is tasks. (`create_work_item`, kind defaults to
-  `task`.)
+  Most work is tasks.
 - **Epic with children** — work that has three or more sub-steps a
   reviewer would naturally check off independently.
-  (`file_epic_with_children`.)
 
 A `PreToolUse` hook on the writer thread denies `Edit` / `Write` /
 `MultiEdit` / `NotebookEdit` if the thread has no `in_progress`
@@ -81,8 +79,8 @@ whichever item happened to be open.
 
 When you push back on a `done` row — "no, redo this" — the
 correct move is to flip it back to `in_progress`, redo the work,
-and `complete_task` again. A new effort opens against the same
-item, attributed to the redo.
+and close it again. A new effort opens against the same item,
+attributed to the redo.
 
 This is why oxplow does *not* file new tasks for fixes: a redo of
 the same concern stays on the same row, with multiple efforts
@@ -104,15 +102,14 @@ under the epic header.
 - **Rail HUD** — quick navigation; never auto-opens tabs.
 - **Inline new-row** at the top of any work list — type a title,
   press Enter.
-- **MCP tools** — `create_work_item`, `update_work_item`,
-  `complete_task`, `add_work_note`, `file_epic_with_children`,
-  `transition_work_items`. See [MCP tools](../reference/mcp-tools.md).
+- **The agent itself** — drives the queue from inside the work
+  it's already doing.
 
 ## Followups
 
 The agent can stash transient sub-asks ("come back to this in
-this same turn") via `add_followup` / `remove_followup`. They
-aren't durable rows — they live in memory, survive only until the
-runtime restarts, and surface as italic muted "↳ follow-up: …"
-lines at the top of To Do. Use them to defer something mid-turn
-without polluting the work queue.
+this same turn") as in-memory follow-ups. They aren't durable
+rows — they live in memory, survive only until the runtime
+restarts, and surface as italic muted "↳ follow-up: …" lines at
+the top of To Do. Use them to defer something mid-turn without
+polluting the work queue.

@@ -15,9 +15,9 @@ rename. Each piece looks reasonable. The combined diff is
 unreviewable.
 
 **Oxplow primitive: the work queue.** A task is a row, not a vibe.
-The agent is steered by `mcp__oxplow__create_work_item` and the
-work-queue lifecycle. If new scope appears mid-flight, it gets a
-new row — visible to you, not silently rolled into the current diff.
+The agent is steered by the queue lifecycle, with filing required
+before any edit. If new scope appears mid-flight, it gets a new
+row — visible to you, not silently rolled into the current diff.
 
 ## Failure mode 2: silent regressions
 
@@ -38,11 +38,11 @@ why this approach was chosen over the alternative, or what was
 tried and rejected. The agent re-explores, sometimes re-introduces
 the rejected approach.
 
-**Oxplow primitive: durable work items + wiki notes + threads.**
+**Oxplow primitive: durable work items + wiki pages + threads.**
 The work item is the persistent intent. Notes on it carry rationale
-across turns. The project wiki captures non-trivial Q&A
-automatically — design rationale, comparisons, walkthroughs — with
-backlinks so it stays discoverable. A read-only thread can ask the
+across turns. The project wiki captures non-trivial Q&A as wiki
+pages automatically — design rationale, comparisons, walkthroughs —
+with backlinks so it stays discoverable. A read-only thread can ask the
 writer thread anything without changing files, so context can be
 reconstructed without restarting work.
 

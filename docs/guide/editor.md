@@ -1,7 +1,7 @@
 # Editor and pages
 
 The center of the window is a stack of **page tabs**. Most
-pages are one of: file, diff, work item, wiki note,
+pages are one of: file, diff, work item, wiki page,
 code-quality finding, dashboard, settings, agent terminal, or
 a panel-style index page (Files, Notes, Code quality, Local
 history, Git history, etc.).
@@ -86,9 +86,30 @@ talks to language servers through Monaco's LSP client, scoped
 to the stream's worktree. Hover, go-to-definition, and
 find-references work against the workspace root.
 
-The agent can also call LSP via MCP tools (`lsp_definition`,
-`lsp_hover`, `lsp_references`, `lsp_diagnostics`) — same
+Servers are auto-installed on first use via the bundled LSP
+installer: Mason packages are fetched and cached under
+`.oxplow/lsp/`, and the proxy hands the right binary to whichever
+stream asked. Ten languages are supported out of the box,
+including Clojure as of 0.3 — no manual `lsp.json` to maintain.
+
+The agent can also reach LSP through the same bridge — same
 servers as the editor, so answers stay consistent.
+
+## Change Analysis
+
+A separate top-level page (rail → **Pages** → **Change Analysis**)
+for understanding diffs. Ranks files by interestingness, supports
+drilldown by extension / directory / status, and shows per-function
+before/after metrics. See [Change Analysis](change-analysis.md).
+
+## Code quality
+
+The **Code quality** page surfaces findings from oxplow's
+in-process scanners — complexity (cyclomatic) and duplication —
+both running as Rust tree-sitter scanners against the worktree
+and persisted in the project SQLite store. Findings open as
+their own pages with a *Jump to source* action; the same
+findings feed the Change Analysis dashboard.
 
 ## What's deliberately missing
 

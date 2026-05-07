@@ -31,7 +31,7 @@ Those are the parts that were always hard. They're still hard. The
 human now spends *more* of their time on them, not less, because the
 typing no longer dilutes the day.
 
-## Pair programming, with the roles inverted
+## Pair programming
 
 The closest historical analogue is pair programming — two people,
 one keyboard, one driver, one navigator. With an agent on the

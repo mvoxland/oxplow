@@ -4,10 +4,13 @@
   {{ super() }}
 
   <section class="ox-hero">
-    <div class="ox-hero__glyph" aria-hidden="true">&gt;_</div>
+    <img class="ox-hero__watermark" src="assets/logo-full.png" alt="" aria-hidden="true">
     <div class="ox-hero__inner">
       <div class="ox-hero__left">
-        <div class="ox-hero__brand">// oxplow</div>
+        <div class="ox-hero__brand">
+          <img class="ox-hero__logo" src="assets/logo-full.png" alt="Oxplow logo">
+          <span>// oxplow</span>
+        </div>
         <h1 class="ox-hero__title">
           The cockpit for <em>agent-assisted</em> development.
         </h1>
@@ -25,14 +28,6 @@
         </div>
       </div>
 
-      <div class="ox-hero__sample" aria-hidden="true">
-        <div class="ox-hero__sample-header">work — main</div>
-        <div class="ox-hero__row"><span class="status run">RUN</span><span>refactor effort attribution</span></div>
-        <div class="ox-hero__row"><span class="status run">RUN</span><span>add wiki backlinks panel</span></div>
-        <div class="ox-hero__row"><span class="status wait">WAIT</span><span>migration 0014 — blocked on review</span></div>
-        <div class="ox-hero__row"><span class="status done">DONE</span><span>fix rail HUD overflow</span></div>
-        <div class="ox-hero__row"><span class="status done">DONE</span><span>release workflow lowercase artifacts</span></div>
-      </div>
     </div>
   </section>
 
@@ -60,8 +55,12 @@
         <p>Every effort snapshots the files it touched. Browse efforts per work item, restore a single file without disturbing the rest.</p>
       </div>
       <div class="ox-card">
+        <h3>Change Analysis</h3>
+        <p>A diff-aware dashboard that ranks files by interestingness (churn × complexity × tests-missing × duplication), with drilldown by extension / directory / status and per-function before/after metrics.</p>
+      </div>
+      <div class="ox-card">
         <h3>Web-style UI</h3>
-        <p>Pages, tabs per thread, browser back/forward, drag-to-add-context onto the agent. The whole project is one navigable graph.</p>
+        <p>Pages, tabs per thread, browser back/forward, kebabs instead of modals, drag-to-add-context onto the agent. The whole project is one navigable graph.</p>
       </div>
     </div>
   </section>

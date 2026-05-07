@@ -13,6 +13,8 @@ package-mode = false
 optional = true
 
 [tool.poetry.group.docs.dependencies]
+# Pin click<8.3 — newer click breaks mkdocs serve auto-reload.
+click = "<8.3.0"
 mkdocs = "^1.6.0"
 mkdocs-material = "^9.5.0"
 pymdown-extensions = "^10.12.0"

@@ -27,12 +27,11 @@ opens a *second* effort on the same item. The Local History
 page groups snapshots by effort, so you can see the full
 history of attempts against a single concern.
 
-The closing call (`complete_task` / `update_work_item` →
-`done`) accepts a `touchedFiles` array — the agent passes the
-repo-relative paths it edited so attribution is precise even
-when multiple work items run in parallel. If `touchedFiles` is
-omitted, oxplow falls back to "assume all" (every file
-modified during the effort).
+When the agent closes an item, it passes the list of
+repo-relative paths it edited, so attribution is precise even
+when multiple work items run in parallel. If that list is
+omitted, oxplow falls back to "assume all" (every file modified
+during the effort).
 
 ## Opening Local History
 

@@ -5,9 +5,12 @@ send a prompt, watch what oxplow does, accept the work.
 
 ## 1. Open the project
 
-**File → Open Project** and pick a git repo. Oxplow scopes itself
-to that directory — it will not climb upward looking for an
-enclosing repo. Whatever you opened *is* the workspace.
+Launch oxplow from the directory you want to work in. The launcher
+(`bin/oxplow` if you're building from source) treats the current
+working directory as the project root, and the prebuilt app
+prompts you to pick one on first launch. Oxplow scopes itself to
+that directory — it will not climb upward looking for an enclosing
+repo. Whatever you opened *is* the workspace.
 
 The first time you open a project, oxplow creates `.oxplow/`
 inside it:
@@ -15,10 +18,14 @@ inside it:
 ```
 .oxplow/
   state.sqlite           # work items, threads, snapshots, settings
-  notes/                 # wiki markdown files (`<slug>.md`)
-  worktrees/             # checkouts for non-primary streams (siblings of the repo)
+  wiki/                  # wiki markdown files (`<slug>.md`)
+  snapshots/             # per-effort file snapshots (Local History)
   runtime/               # the Claude Code plugin oxplow installs per project
+  lsp/                   # cached LSP server binaries (Mason packages)
 ```
+
+Worktree streams live as siblings of the project root, not under
+`.oxplow/` (git's `worktree add` defaults).
 
 The first stream — the **primary** — uses the project directory
 itself as its worktree and tracks whatever branch is currently
@@ -35,7 +42,7 @@ The window is web-style, not IDE-style:
 - **Rail HUD** (left) — your home base. Search trigger, active
   item, up-next, bookmarks, recent files, and a directory of
   every page you can open.
-- **Page tabs** (center) — files, diffs, work items, notes,
+- **Page tabs** (center) — files, diffs, work items, wiki pages,
   dashboards, the agent terminal, code-quality findings, and
   more. Each page has back/forward navigation and a Backlinks
   panel.
@@ -58,7 +65,7 @@ while it's working; it goes red when the agent is waiting on
 you. Asking the agent a question that doesn't need file edits
 just stops cleanly when it's answered — there's nothing to file.
 
-Non-trivial Q&A is captured into a wiki note automatically (the
+Non-trivial Q&A is captured into a wiki page automatically (the
 runtime nudges the agent to do this). Look for a new file under
 `.oxplow/wiki/` after the answer.
 
@@ -107,10 +114,10 @@ it to ship changes (only one writer per stream).
 ## 7. What to read next
 
 - [Concepts](concepts.md) — streams, threads, pages, work items,
-  notes, efforts.
+  wiki pages, efforts.
 - [Work queue](../guide/work-queue.md) — when to file work
   items and how the lifecycle behaves.
-- [Notes](../guide/notes.md) — wiki notes, wikilinks, backlinks,
-  how the agent uses them.
+- [Wiki pages](../guide/wiki.md) — wiki pages, wikilinks,
+  backlinks, how the agent uses them.
 - [Agent control](../guide/agent-control.md) — Stop hook, write
   guard, filing enforcement.

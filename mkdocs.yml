@@ -56,13 +56,13 @@ nav:
       - Concepts: getting-started/concepts.md
   - Guide:
       - Work queue: guide/work-queue.md
-      - Notes (the wiki): guide/notes.md
+      - Wiki pages: guide/wiki.md
       - Local History: guide/local-history.md
+      - Change Analysis: guide/change-analysis.md
       - Editor and pages: guide/editor.md
       - Terminal: guide/terminal.md
       - Agent control: guide/agent-control.md
   - Reference:
-      - MCP tools: reference/mcp-tools.md
       - Keybindings: reference/keybindings.md
       - Settings: reference/settings.md
   - Philosophy:

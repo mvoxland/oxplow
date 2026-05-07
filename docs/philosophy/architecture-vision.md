@@ -18,33 +18,48 @@ shipped today; most is not.
   Stop-hook audits keep the queue honest.
 - **Local History.** Per-effort file snapshots, grouped under their
   work item, with a page that lets you compare and restore.
-- **Project wiki.** First-class markdown notes under
-  `.oxplow/wiki/`, with `[[wikilinks]]` to other notes, files,
-  and commits, plus cross-kind backlinks.
+- **Project wiki.** First-class markdown pages under
+  `.oxplow/wiki/`, with `[[wikilinks]]` to other wiki pages,
+  files, and commits, plus cross-kind backlinks.
 - **Web-style UI.** Pages, tabs per thread, browser-style
-  back/forward, kebabs instead of right-click menus, drag-to-add-
-  context onto the agent terminal.
-- **MCP control plane.** Oxplow exposes its primitives (work items,
-  notes, threads, dispatch, LSP, subsystem docs) as MCP tools so
-  the agent can drive them directly.
+  back / forward, kebabs instead of right-click menus, drag-to-
+  add-context onto the agent terminal. Plain-click navigates
+  in-tab; modifier-click opens a new tab. Modals have been
+  retired in favor of inline confirms / inline edits / kebab
+  popovers.
+- **MCP control plane.** Oxplow exposes its primitives (work
+  items, wiki pages, threads, dispatch, LSP) over MCP so the
+  agent can drive them directly.
+- **Change Analysis.** A diff-aware dashboard that ranks files
+  by interestingness (churn × complexity × tests-missing ×
+  duplication) and supports drilldown by extension / directory /
+  status. Per-function before/after metrics come from
+  `analyze_functions_at_refs`; cards read from in-process
+  scanners (complexity, duplication) — no external `lizard` /
+  `jscpd` invocation.
+- **Tauri shell over Rust.** As of 0.3 the app runs on Tauri 2
+  with a Rust backend (`oxplow-domain`, `oxplow-db`,
+  `oxplow-app`, `oxplow-mcp`, `oxplow-tauri-ipc`, …) under the
+  same React / Monaco / xterm frontend. The runtime fits in a
+  fraction of what the Electron version needed.
 
 ## Near-term direction
 
 - **Richer review affordances.** The work-item-level diff is a
   better unit than the file-level diff. Surface it more
   prominently. Make accept / push-back / reopen one click.
-- **Better notes.** A first-class wiki-style notes pane is
-  shipping; the next step is treating notes as durable memory the
+- **Better wiki.** Wiki pages are shipping as a first-class
+  surface; the next step is treating them as durable memory the
   agent can consult, not just the human.
 - **Tighter LSP and test-runner integration.** The editor knows
   more than the agent does about the project. The agent should be
   able to ask: where is this defined, what tests cover this file,
   what does the type checker think.
 - **Smarter dispatch.** Today the user resumes queue work by
-  prompting or running `/work-next`; `read_work_options` returns
-  either an epic-as-unit or the next standalone cluster.
-  Eventually the runtime should propose the next item with
-  rationale, not just hand back the head of the queue.
+  prompting or running `/work-next`, which dispatches either an
+  epic-as-unit or the next standalone cluster. Eventually the
+  runtime should propose the next item with rationale, not just
+  hand back the head of the queue.
 
 ## Medium-term direction
 
