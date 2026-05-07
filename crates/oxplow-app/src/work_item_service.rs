@@ -634,4 +634,204 @@ mod tests {
         assert_eq!(st.done.len(), 1);
         assert_eq!(st.waiting.len(), 1);
     }
+
+    #[test]
+    fn backlog_state_collapses_canceled_and_archived_into_done() {
+        // Canceled and Archived rows ride in the same bucket as Done
+        // — the Backlog page renders them under one "Done" header.
+        let now = Timestamp::from_unix_ms(1);
+        let mk = |id: &str, status| WorkItem {
+            id: WorkItemId::from(id),
+            thread_id: None,
+            parent_id: None,
+            kind: WorkItemKind::Task,
+            title: id.into(),
+            description: String::new(),
+            acceptance_criteria: None,
+            status,
+            priority: WorkItemPriority::Medium,
+            sort_index: 0,
+            created_by: WorkItemActorKind::User,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: Some(WorkItemAuthor::User),
+            category: None,
+            tags: None,
+        };
+        let st = BacklogState::from_rows(vec![
+            mk("a", WorkItemStatus::Done),
+            mk("b", WorkItemStatus::Canceled),
+            mk("c", WorkItemStatus::Archived),
+        ]);
+        assert_eq!(st.done.len(), 3);
+        assert!(st.items.is_empty());
+        assert!(st.in_progress.is_empty());
+        assert!(st.waiting.is_empty());
+    }
+
+    #[test]
+    fn backlog_state_empty_input() {
+        let st = BacklogState::from_rows(vec![]);
+        assert!(
+            st.items.is_empty()
+                && st.waiting.is_empty()
+                && st.in_progress.is_empty()
+                && st.done.is_empty()
+        );
+    }
+
+    // ---- read_work_options edge cases ----
+
+    /// Build a link store backed by the same in-memory DB the
+    /// fixture's WorkItemService uses, so both surfaces see the same
+    /// rows when read_work_options walks links.
+    async fn link_store_fixture() -> (
+        WorkItemService,
+        oxplow_db::SqliteWorkItemLinkStore,
+        ThreadId,
+    ) {
+        let db = Database::in_memory();
+        let streams = SqliteStreamStore::new(db.clone());
+        let threads = SqliteThreadStore::new(db.clone());
+        let store = Arc::new(SqliteWorkItemStore::new(db.clone()));
+        let link_store = oxplow_db::SqliteWorkItemLinkStore::new(db.clone());
+        let s = Stream {
+            id: StreamId::from("s-1"),
+            kind: StreamKind::Primary,
+            title: "p".into(),
+            branch: "main".into(),
+            branch_ref: "refs/heads/main".into(),
+            branch_source: "main".into(),
+            worktree_path: "/p".into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(1),
+            updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
+        };
+        streams.upsert(&s).await.unwrap();
+        let t = Thread {
+            id: ThreadId::from("b-1"),
+            stream_id: s.id.clone(),
+            title: "x".into(),
+            status: ThreadStatus::Active,
+            sort_index: 0,
+            pane_target: "working".into(),
+            resume_session_id: String::new(),
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(1),
+            updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
+        };
+        threads.upsert(&t).await.unwrap();
+        (WorkItemService::new(store), link_store, t.id)
+    }
+
+    #[tokio::test]
+    async fn read_work_options_empty_when_no_ready_items() {
+        let (svc, links, tid) = link_store_fixture().await;
+        // Create one item but mark it in-progress, not ready.
+        let a = svc
+            .create(
+                Some(tid.clone()),
+                CreateWorkItemInput {
+                    kind: Some(WorkItemKind::Task),
+                    title: "in flight".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        svc.update(
+            &a.id,
+            UpdateWorkItemChanges {
+                status: Some(WorkItemStatus::InProgress),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let result = svc.read_work_options(&tid, &links).await.unwrap();
+        assert!(matches!(result, ReadWorkOptionsResult::Empty));
+    }
+
+    #[tokio::test]
+    async fn read_work_options_returns_standalone_for_plain_task() {
+        let (svc, links, tid) = link_store_fixture().await;
+        svc.create(
+            Some(tid.clone()),
+            CreateWorkItemInput {
+                kind: Some(WorkItemKind::Task),
+                title: "ready task".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let result = svc.read_work_options(&tid, &links).await.unwrap();
+        match result {
+            ReadWorkOptionsResult::Standalone { items } => {
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].title, "ready task");
+            }
+            other => panic!("expected Standalone, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn read_work_options_returns_epic_with_ready_children() {
+        let (svc, links, tid) = link_store_fixture().await;
+        let epic = svc
+            .create(
+                Some(tid.clone()),
+                CreateWorkItemInput {
+                    kind: Some(WorkItemKind::Epic),
+                    title: "the epic".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let _child_a = svc
+            .create(
+                Some(tid.clone()),
+                CreateWorkItemInput {
+                    kind: Some(WorkItemKind::Task),
+                    title: "child A".into(),
+                    parent_id: Some(epic.id.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let _child_b = svc
+            .create(
+                Some(tid.clone()),
+                CreateWorkItemInput {
+                    kind: Some(WorkItemKind::Task),
+                    title: "child B".into(),
+                    parent_id: Some(epic.id.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let result = svc.read_work_options(&tid, &links).await.unwrap();
+        match result {
+            ReadWorkOptionsResult::Epic { epic: e, children } => {
+                assert_eq!(e.id, epic.id);
+                assert_eq!(children.len(), 2);
+            }
+            other => panic!("expected Epic, got {other:?}"),
+        }
+    }
 }
