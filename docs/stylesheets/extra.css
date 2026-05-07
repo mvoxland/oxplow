@@ -63,7 +63,11 @@
   width: 32rem;
   height: auto;
   transform: translateY(-50%);
-  opacity: 0.07;
+  opacity: 0.12;
+  /* Tint black PNG to amber #f59e0b. brightness(0) saturate(100%)
+     normalizes any input to opaque black; the remaining filters
+     re-tint to the target color. */
+  filter: brightness(0) saturate(100%) invert(64%) sepia(57%) saturate(1845%) hue-rotate(2deg) brightness(102%) contrast(97%);
   pointer-events: none;
   user-select: none;
   z-index: 0;
@@ -90,12 +94,12 @@
 }
 
 .ox-hero__logo {
-  width: 1.8rem;
-  height: 1.8rem;
-  border-radius: 4px;
-  background: #f1f5f9;
-  padding: 2px;
+  width: 2.4rem;
+  height: 2.4rem;
   flex-shrink: 0;
+  /* Same amber tint as the watermark; the wordmark and the logo
+     read as one piece of brand. */
+  filter: brightness(0) saturate(100%) invert(64%) sepia(57%) saturate(1845%) hue-rotate(2deg) brightness(102%) contrast(97%);
 }
 
 .ox-hero__title {
