@@ -1,10 +1,10 @@
 name: Release
 
 # Tag-triggered release flow. Push a `v<version>` tag (matching
-# package.json's version field) and this workflow builds installers on
-# all three platforms and publishes them to a GitHub Release via
-# electron-builder's built-in GitHub provider. Also runnable manually
-# from the Actions tab for dry runs / re-runs.
+# package.json's version field) and this workflow builds Tauri
+# installers on all three platforms and publishes them to a GitHub
+# Release. Also runnable manually from the Actions tab for dry runs /
+# re-runs.
 #
 # To create a release:
 # 1. Tag: git tag vX.Y.Z
@@ -19,18 +19,16 @@ on:
   workflow_dispatch:
 
 env:
-  BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/.ci-cache/bun
-  ELECTRON_CACHE: ${{ github.workspace }}/.ci-cache/electron
-  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.ci-cache/electron-builder
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
 
 jobs:
   # Tag-vs-package.json sanity check. Fails fast if someone pushed a
   # v0.0.2 tag while package.json still says 0.0.1 — avoids cutting a
-  # release with a version mismatch that electron-builder would bake
-  # into the installer filenames and update metadata. The verify step
-  # no-ops on workflow_dispatch runs that weren't fired against a
-  # tag ref (manual dry runs from a branch), so the job always
-  # reports success and doesn't block downstream jobs.
+  # release with a version mismatch baked into installer filenames.
+  # The verify step no-ops on workflow_dispatch runs that weren't
+  # fired against a tag ref (manual dry runs from a branch), so the
+  # job always reports success and doesn't block downstream jobs.
   check-tag:
     runs-on: ubuntu-latest
     steps:
@@ -56,14 +54,27 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - uses: actions/cache@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux Tauri deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            tmux
+      - name: Cache Cargo registry + target
+        uses: actions/cache@v5
         with:
-          path: .ci-cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: ${{ runner.os }}-bun-
-      - name: Install Linux build deps for node-pty
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3
-      - name: Install dependencies
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: Install JS deps
         run: bun install --frozen-lockfile
       - name: Test
         run: bun test
@@ -75,9 +86,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # `contents: write` is what electron-builder needs in order to
-    # create the draft release and upload assets through the GitHub
-    # provider (GH_TOKEN uses GITHUB_TOKEN under the hood).
+    # `contents: write` is what tauri-action needs to create the draft
+    # release and upload assets via GITHUB_TOKEN.
     permissions:
       contents: write
     steps:
@@ -85,34 +95,54 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - uses: actions/cache@v5
-        with:
-          path: .ci-cache
-          key: ${{ runner.os }}-build-${{ hashFiles('bun.lock') }}
-          restore-keys: ${{ runner.os }}-build-
-      - name: Install Linux build deps for node-pty
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux Tauri deps
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3
-      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential
+      - name: Cache Cargo registry + target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-build-
+      - name: Install JS deps
         run: bun install --frozen-lockfile
-      - name: Build JS bundles
-        run: bun run build
 
-      # `--publish always` tells electron-builder to upload artifacts to
-      # a GitHub Release. First platform to arrive creates the draft
-      # release (name + tag pulled from the pushed tag); subsequent
-      # matrix legs attach their artifacts to the same draft. Still
-      # unsigned — users will see the "unsigned developer" OS warnings.
-      - name: Package + publish
-        run: bunx electron-builder --publish always
+      # tauri-action runs `tauri build`, then (when tagName is set)
+      # creates/updates a draft GitHub Release and uploads the bundles
+      # produced for the current platform. The first matrix leg
+      # creates the draft; the rest attach to it. Still unsigned —
+      # users will see OS "unsigned developer" warnings.
+      - name: Build + publish Tauri bundles
+        uses: tauri-apps/tauri-action@v0
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # vite build under bun spawns Node for some plugins and the
+          # default 1.5–2 GB heap is tight on macOS runners (observed
+          # FATAL: heap out of memory during the bundler pass). 6 GB
+          # leaves comfortable headroom on every runner.
+          NODE_OPTIONS: "--max-old-space-size=6144"
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseDraft: true
+          prerelease: false
 
-  # electron-builder leaves the release as a draft and without notes.
-  # After every platform has attached its assets, generate release
-  # notes from commits/PRs since the previous tag and flip the draft
-  # to published. Only runs on real tag pushes — workflow_dispatch dry
+  # tauri-action leaves the release as a draft without notes. After
+  # every platform has attached its assets, generate release notes
+  # from commits/PRs since the previous tag and flip the draft to
+  # published. Only runs on real tag pushes — workflow_dispatch dry
   # runs from a branch skip this step (there's no release to finalize).
   finalize:
     needs: release
