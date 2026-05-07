@@ -44,6 +44,10 @@ export function installUiLogging(): void {
   });
 
   window.addEventListener("unhandledrejection", (event) => {
+    if (isMonacoCancellation(event.reason)) {
+      event.preventDefault();
+      return;
+    }
     void sendUiLog("error", "window.unhandledrejection", {
       reason: serializeValue(event.reason),
     });
@@ -81,6 +85,17 @@ async function sendUiLog(level: UiLogLevel, message: string, context?: Record<st
       timestamp: new Date().toISOString(),
     });
   } catch {}
+}
+
+// Monaco aborts in-flight model/tokenizer/code-lens work by rejecting
+// internal promises with a `Canceled` error when an editor or model
+// gets disposed. Those rejections aren't bugs — they're just lifecycle
+// noise — but they bubble up to `unhandledrejection`, polluting the
+// error log. Filter them out at the listener.
+function isMonacoCancellation(reason: unknown): boolean {
+  if (!reason || typeof reason !== "object") return false;
+  const r = reason as { name?: unknown; message?: unknown };
+  return r.name === "Canceled" || r.name === "CancellationError" || r.message === "Canceled";
 }
 
 function serializeValue(value: unknown): unknown {

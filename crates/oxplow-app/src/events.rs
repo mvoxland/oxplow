@@ -145,6 +145,13 @@ pub enum OxplowEvent {
     /// A ref under `.git/refs/` changed. Drives history, branch list,
     /// and ahead/behind refreshes. Coarse per stream.
     GitRefsChanged { stream_id: StreamId },
+    /// A non-primary stream's backing worktree was deleted out from
+    /// under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
+    /// The runtime has already archived the stream by the time this
+    /// fires; the renderer surfaces a toast so the user knows why the
+    /// rail row vanished. `title` carries the archived stream's display
+    /// name.
+    StreamOrphaned { stream_id: StreamId, title: String },
 }
 
 /// Cheap-to-clone broadcast hub. Capacity is small — subscribers

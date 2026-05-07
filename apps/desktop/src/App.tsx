@@ -1425,6 +1425,20 @@ export function App() {
     return unsubscribe;
   }, []);
 
+  // Backing worktree was deleted out from under a stream — runtime has
+  // already archived it, we just surface the toast so the user knows
+  // why the rail row vanished.
+  useEffect(() => {
+    const unsubscribe = subscribeOxplowEvents((event) => {
+      if (event.kind !== "streamOrphaned") return;
+      const title = typeof event.title === "string" ? event.title : "Stream";
+      showToast({
+        message: `“${title}” was closed: its worktree directory was deleted.`,
+      });
+    });
+    return unsubscribe;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const reload = () => {

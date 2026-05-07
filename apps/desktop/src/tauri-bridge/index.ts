@@ -39,7 +39,8 @@ export type OxplowEventKind =
   | "codeQualityScanned"
   | "workspaceContextChanged"
   | "workspaceChanged"
-  | "gitRefsChanged";
+  | "gitRefsChanged"
+  | "streamOrphaned";
 
 /// Subscribe to all oxplow events on the cross-store bus. Returns an
 /// unlisten callback. Each event is the raw `OxplowEvent` payload —

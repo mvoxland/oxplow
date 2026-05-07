@@ -97,7 +97,7 @@ fn main() {
     // worktrees. Surfacing it as a BackgroundTask lets the renderer
     // paint while watchers settle.
     {
-        let stream_store = state.stream_store.clone();
+        let stream_service = state.streams.clone();
         let watch_bus = event_bus.clone();
         let watch_project_dir = project_dir.clone();
         let bts = state.background_tasks.clone();
@@ -109,7 +109,7 @@ fn main() {
         let task_id = task.id.clone();
         boot_runtime.spawn(async move {
             let registry = oxplow_app::workspace_watch::WorkspaceWatchRegistry::spawn(
-                stream_store,
+                stream_service,
                 watch_bus,
                 watch_project_dir,
             )

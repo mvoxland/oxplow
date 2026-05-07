@@ -109,6 +109,27 @@ Every write is treated identically — agent and user edits both
 re-baseline freshness — so the watcher is the single sync path for
 `wiki_page` metadata. See `data-model.md` → `wiki_page`.
 
+### Orphan detection (boot + runtime)
+
+`WorkspaceWatchRegistry::spawn` checks `worktree_path.exists()` before
+spawning a stream's watchers. If a non-primary stream's worktree was
+deleted out from under us while oxplow was offline (e.g. external
+`rm -rf`, `git worktree remove`), the registry calls
+`StreamService::archive_stream(id, false)` to take the row out of the
+rail and emits `OxplowEvent::StreamOrphaned { stream_id, title }` so
+the renderer can toast ("Stream X was closed: its worktree directory
+was deleted."). Primary streams are exempt — a missing project root
+is a different failure mode (the daemon shouldn't have booted).
+
+Ongoing detection works the same way: each per-stream fs watcher
+holds a one-shot `OnOrphan` callback, and on every event it cheaply
+re-checks `worktree_path.exists()`. If the root is gone, the callback
+runs the same archive + emit path and the watcher loop exits (it can't
+do anything useful anyway). The check is on every event, not just
+`Removed`, because macOS FSEvents surfaces a directory's own deletion
+as an `Updated` event of its parent — keying on the kind would miss
+the case the user actually cares about.
+
 ### Why three
 
 They watch overlapping but disjoint things:
