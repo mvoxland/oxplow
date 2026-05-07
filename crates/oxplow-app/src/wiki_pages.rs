@@ -486,11 +486,23 @@ fn find_inline_paths(body: &str) -> Vec<String> {
         if trimmed.is_empty() || trimmed.starts_with('/') {
             continue;
         }
-        // Must look like file AND not be a single dotted token.
-        if looks_like_file(trimmed) && !trimmed.starts_with("//") {
-            // Strip any trailing :Symbol anchor.
-            let bare = trimmed.split(':').next().unwrap_or(trimmed);
-            out.insert(bare.to_string());
+        // Strip a trailing `:line` anchor (numeric only) so
+        // `src/foo.rs:42` from a stack trace still parses as a file.
+        // Wikilinks already accept this anchor; the inline scan needs
+        // to match. Non-numeric anchors (e.g. `:fn_name`) are dropped
+        // — `looks_like_file` will reject the polluted extension and
+        // we don't try to recover a Symbol-style anchor here.
+        let candidate: &str = if let Some((path_part, anchor)) = trimmed.rsplit_once(':') {
+            if !anchor.is_empty() && anchor.chars().all(|c| c.is_ascii_digit()) {
+                path_part
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        };
+        if looks_like_file(candidate) && !candidate.starts_with("//") {
+            out.insert(candidate.to_string());
         }
     }
     out.into_iter().collect()
@@ -663,5 +675,211 @@ mod tests {
     fn extract_title_picks_first_h1() {
         assert_eq!(extract_title("# Hello\n\nbody", "fallback"), "Hello");
         assert_eq!(extract_title("no heading", "fallback"), "fallback");
+    }
+
+    // ---- Edge cases: looks_like_file ----
+
+    #[test]
+    fn looks_like_file_requires_slash_and_extension() {
+        assert!(looks_like_file("src/foo.rs"));
+        assert!(looks_like_file("a/b/c.tsx"));
+        assert!(looks_like_file("docs/README.md"));
+        assert!(!looks_like_file("foo.rs")); // no slash
+        assert!(!looks_like_file("src/foo")); // no extension
+        assert!(!looks_like_file("")); // empty
+    }
+
+    #[test]
+    fn looks_like_file_rejects_non_alphanumeric_extension() {
+        // Trailing colon polluted the extension check before the
+        // line-anchor strip in find_inline_paths landed.
+        assert!(!looks_like_file("src/foo.rs:42"));
+        assert!(!looks_like_file("src/foo.r$"));
+    }
+
+    #[test]
+    fn looks_like_file_extension_length_bounds() {
+        assert!(looks_like_file("a/b.x")); // 1 char ext
+        assert!(looks_like_file("a/b.abcdef")); // 6 char ext
+        assert!(!looks_like_file("a/b.abcdefg")); // 7 char ext rejected
+    }
+
+    // ---- Edge cases: looks_like_dir ----
+
+    #[test]
+    fn looks_like_dir_strips_prefix_and_trailing_slash() {
+        assert_eq!(
+            looks_like_dir("dir:src/components"),
+            Some("src/components".into())
+        );
+        assert_eq!(looks_like_dir("dir:src/foo/"), Some("src/foo".into()));
+    }
+
+    #[test]
+    fn looks_like_dir_rejects_absolute_and_double_slash() {
+        assert_eq!(looks_like_dir("dir:/abs"), None);
+        assert_eq!(looks_like_dir("dir:src//double"), None);
+    }
+
+    #[test]
+    fn looks_like_dir_rejects_empty_and_missing_prefix() {
+        assert_eq!(looks_like_dir("dir:"), None);
+        assert_eq!(looks_like_dir("src/components"), None); // no prefix
+    }
+
+    // ---- Edge cases: looks_like_slug ----
+
+    #[test]
+    fn looks_like_slug_accepts_kebab_and_underscore() {
+        assert!(looks_like_slug("work-item-lifecycle"));
+        assert!(looks_like_slug("snake_case_slug"));
+        assert!(looks_like_slug("a"));
+    }
+
+    #[test]
+    fn looks_like_slug_rejects_dotted_and_pathy() {
+        assert!(!looks_like_slug("foo.bar"));
+        assert!(!looks_like_slug("foo/bar"));
+        assert!(!looks_like_slug("foo bar"));
+        assert!(!looks_like_slug(""));
+    }
+
+    #[test]
+    fn looks_like_slug_rejects_commit_hash_shape() {
+        // 7-40 char all-hex strings look like git shas; the wiki
+        // doesn't index them.
+        assert!(!looks_like_slug("abc1234"));
+        assert!(!looks_like_slug("abc1234567890ab"));
+        // 6-char and 41-char hex strings are NOT rejected (just
+        // outside the commit-hash heuristic window).
+        assert!(looks_like_slug("abcdef"));
+    }
+
+    #[test]
+    fn looks_like_slug_too_long_rejected() {
+        let s = "a".repeat(81);
+        assert!(!looks_like_slug(&s));
+    }
+
+    // ---- Edge cases: parse_wiki_file_ref ----
+
+    #[test]
+    fn parse_wiki_file_ref_handles_disk_alias_case_insensitive() {
+        let r = parse_wiki_file_ref("src/foo.rs@DISK").unwrap();
+        assert_eq!(r.version, WikiVersion::Disk);
+        let r = parse_wiki_file_ref("src/foo.rs@Local").unwrap();
+        assert_eq!(r.version, WikiVersion::Disk);
+    }
+
+    #[test]
+    fn parse_wiki_file_ref_empty_version_falls_back_to_disk() {
+        // `path@` (trailing @ with nothing after) should not crash;
+        // it degrades to Disk so the link still resolves.
+        let r = parse_wiki_file_ref("src/foo.rs@").unwrap();
+        assert_eq!(r.version, WikiVersion::Disk);
+    }
+
+    #[test]
+    fn parse_wiki_file_ref_returns_none_for_non_path() {
+        assert!(parse_wiki_file_ref("").is_none());
+        assert!(parse_wiki_file_ref("just-a-slug").is_none());
+        assert!(parse_wiki_file_ref("nodot/path").is_none());
+    }
+
+    #[test]
+    fn parse_wiki_file_ref_strips_line_only_when_all_digits() {
+        let r = parse_wiki_file_ref("src/foo.rs:42").unwrap();
+        assert_eq!(r.path, "src/foo.rs");
+        assert_eq!(r.line, Some(42));
+        // Non-numeric anchor is rejected (we don't try to recover
+        // by stripping it — the user has to write `:N` or omit it).
+        assert!(parse_wiki_file_ref("src/foo.rs:fn_name").is_none());
+    }
+
+    // ---- TDD: inline paths must accept :line anchors ----
+    //
+    // Prior to this commit, find_inline_paths called looks_like_file
+    // on the raw token, so `src/foo.rs:42` failed the extension check
+    // (ext became "rs:42") and was silently dropped. Wikilinks like
+    // `[[src/foo.rs:42]]` already supported the :line anchor — the
+    // inline scan didn't, so a stack-trace-style mention couldn't be
+    // backlinked.
+
+    #[test]
+    fn parse_picks_up_inline_path_with_line_anchor() {
+        let refs = parse_refs("error at src/foo.rs:42 in the trace");
+        assert_eq!(refs.file_refs, vec!["src/foo.rs"]);
+    }
+
+    #[test]
+    fn parse_picks_up_inline_path_with_multi_digit_line() {
+        let refs = parse_refs("see crates/oxplow-app/src/lib.rs:1234");
+        assert_eq!(refs.file_refs, vec!["crates/oxplow-app/src/lib.rs"]);
+    }
+
+    #[test]
+    fn parse_inline_path_rejects_non_numeric_anchor() {
+        // Symbol-anchor (`:fn_name`) is not a line anchor — keep the
+        // current "ignore" behavior so we don't accidentally index
+        // `foo.rs:bar` as a file `foo.rs`. The inline scan only
+        // recognizes numeric line anchors.
+        let refs = parse_refs("see src/foo.rs:fn_name in the impl");
+        assert!(refs.file_refs.is_empty());
+    }
+
+    #[test]
+    fn parse_url_immediately_after_path_does_not_eat_path() {
+        // Defends against the strip_urls rewinder over-popping past
+        // a file path. With a separating space the URL strip is
+        // straightforward; the file path survives.
+        let refs = parse_refs("see src/foo.rs https://example.com/x.html");
+        assert_eq!(refs.file_refs, vec!["src/foo.rs"]);
+    }
+
+    // ---- Edge cases: extract_title ----
+
+    #[test]
+    fn extract_title_skips_empty_h1() {
+        // A `# ` with nothing after isn't a useful title; fall through
+        // to the next line / fallback.
+        assert_eq!(
+            extract_title("#  \n# Real Title\n", "fallback"),
+            "Real Title"
+        );
+    }
+
+    #[test]
+    fn extract_title_tolerates_leading_whitespace() {
+        assert_eq!(extract_title("   # Indented\n", "fb"), "Indented");
+    }
+
+    #[test]
+    fn extract_title_ignores_h2_and_lower() {
+        // Only `# ` (h1) counts; `## h2` is body content.
+        assert_eq!(extract_title("## H2\n# H1\n", "fb"), "H1");
+    }
+
+    // ---- Edge cases: find_wikilinks ----
+
+    #[test]
+    fn find_wikilinks_unclosed_bracket_does_not_panic() {
+        // `[[unclosed` — the byte scanner should walk to the end and
+        // emit nothing, not panic on the truncated buffer.
+        let v = find_wikilinks("text [[unclosed and more text");
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn find_wikilinks_empty_pair_emits_empty_interior() {
+        let v = find_wikilinks("[[]]");
+        assert_eq!(v, vec![""]);
+    }
+
+    #[test]
+    fn find_wikilinks_handles_unicode_around() {
+        // The scanner indexes by bytes; UTF-8 multi-byte chars
+        // outside the brackets must not break the match.
+        let v = find_wikilinks("café [[src/foo.rs]] résumé");
+        assert_eq!(v, vec!["src/foo.rs"]);
     }
 }
