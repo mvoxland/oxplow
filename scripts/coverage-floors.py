@@ -20,10 +20,10 @@ from collections import defaultdict
 # Floors are line-coverage percentages. Crates not listed are not
 # enforced individually (still counted in the workspace total).
 FLOORS = {
-    # oxplow-app drifted down as new service code (git, code-quality,
-    # wiki, …) landed faster than tests; baseline is currently ~65%.
-    # Raise the floor as integration coverage of those services lands.
-    "oxplow-app": 62.0,
+    # oxplow-app: baseline ~68% after the wiki_pages + work_item_service
+    # edge-case test batch landed. Floor sits 3pt below to absorb churn
+    # without flaking; raise as integration coverage continues to grow.
+    "oxplow-app": 65.0,
     "oxplow-config": 70.0,
     "oxplow-db": 70.0,
     "oxplow-domain": 70.0,
