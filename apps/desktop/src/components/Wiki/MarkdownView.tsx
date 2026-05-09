@@ -62,6 +62,31 @@ function loadSvgPanZoom() {
  * element so the viewport math works. We give the wrapper a fixed
  * height and let the SVG fill it.
  */
+/**
+ * Wait for the host to have a non-zero layout box. b775f12 mounts
+ * back/forward history tabs as `display:none` siblings, so this
+ * effect can fire while the host is laid out at 0×0; svg-pan-zoom
+ * then calls `getCTM().inverse()` on a zero-size SVG and throws
+ * `InvalidStateError: Matrix is not invertible`, leaving the diagram
+ * permanently blank. IntersectionObserver fires when the host first
+ * intersects the viewport; until then we defer init.
+ */
+function waitForVisible(host: HTMLElement): Promise<void> {
+  if (host.offsetWidth > 0 && host.offsetHeight > 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    const obs = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && host.offsetWidth > 0 && host.offsetHeight > 0) {
+          obs.disconnect();
+          resolve();
+          return;
+        }
+      }
+    });
+    obs.observe(host);
+  });
+}
+
 async function attachPanZoom(host: HTMLElement): Promise<(() => void) | null> {
   const svg = host.querySelector<SVGSVGElement>("svg");
   if (!svg) return null;
@@ -75,9 +100,16 @@ async function attachPanZoom(host: HTMLElement): Promise<(() => void) | null> {
   host.style.border = "1px solid var(--border-subtle)";
   host.style.borderRadius = "6px";
   host.style.overflow = "hidden";
+  // Block until the host has real dimensions — see waitForVisible
+  // comment for the b775f12 hidden-tab interaction.
+  await waitForVisible(host);
   const svgPanZoom = await loadSvgPanZoom();
   const instance = svgPanZoom(svg, {
     zoomEnabled: true,
+    // Mouse-wheel zoom is hostile inside a scrollable wiki page —
+    // users expect the wheel to scroll the article, not silently
+    // resize the diagram. The +/− toolbar buttons drive zoom.
+    mouseWheelZoomEnabled: false,
     panEnabled: true,
     controlIconsEnabled: false,
     fit: true,
@@ -483,6 +515,7 @@ export function MarkdownView({
     const root = ref.current;
     if (!root) return;
     const cleanups: Array<() => void> = [];
+    let cancelled = false;
     const blocks = root.querySelectorAll<HTMLElement>("code.language-mermaid");
     blocks.forEach(async (code, idx) => {
       const source = code.textContent ?? "";
@@ -490,12 +523,17 @@ export function MarkdownView({
       try {
         const mermaid = await loadMermaid();
         const { svg } = await mermaid.render(id, source);
+        if (cancelled) return;
         const host = document.createElement("div");
         host.className = "mermaid-rendered";
         host.innerHTML = svg;
         const pre = code.parentElement;
         if (pre && pre.tagName === "PRE") pre.replaceWith(host);
         const cleanup = await attachPanZoom(host);
+        if (cancelled) {
+          cleanup?.();
+          return;
+        }
         if (cleanup) cleanups.push(cleanup);
       } catch (error) {
         const pre = code.parentElement;
@@ -509,6 +547,7 @@ export function MarkdownView({
       }
     });
     return () => {
+      cancelled = true;
       for (const fn of cleanups) {
         try { fn(); } catch { /* ignore destroy errors */ }
       }
