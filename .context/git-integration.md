@@ -325,9 +325,35 @@ writer's in-progress work. The write-guard hook denies Write/Edit/
 MultiEdit/NotebookEdit in those threads, and the prompt block covers
 Bash (which the hook can't classify reliably).
 
+## Commit indexer
+
+`crates/oxplow-app/src/commit_indexer.rs` walks the most-recent
+`DEFAULT_INDEX_DEPTH` (500) commits reachable from HEAD and projects
+each one into the unified `page_ref` graph (see
+[data-model.md](./data-model.md)):
+
+- Diff against parent#0 → one `(git-commit:<sha>) -- touched_file -->
+  (file:<path>)` edge per file.
+- Subject + body run through `oxplow_domain::refs::extract` so the
+  same wikilink + inline-mention rules used by wiki bodies and
+  work-item descriptions also apply to commit messages
+  (`wi-…`, `[[architecture]]`, `finding:fnd-1`, bare 7-40 hex shas).
+
+Idempotent. Each commit is keyed by its full sha, and a one-row
+existence probe before re-diffing skips already-indexed commits, so
+repeated scans are cheap. No separate cursor table.
+
+The boot path runs the initial scan in a detached task. The same
+function is re-run on every `OxplowEvent::GitRefsChanged` (debounced
+by `GitRefsWatcher` upstream), which catches new commits whether
+they came from the in-app commit affordance or an external
+`git commit` in the user's terminal.
+
 ## Related
 
-- [data-model.md](./data-model.md) — schema overview.
+- [data-model.md](./data-model.md) — schema overview, including the
+  `page_ref` table the commit indexer writes into.
 - [agent-model.md](./agent-model.md) — Stop-hook pipeline (no commit
-  branches; commits are user-driven).
+  branches; commits are user-driven), plus the `list_backlinks` /
+  `list_outbound` MCP tools that read the commit indexer's output.
 - [editor-and-monaco.md](./editor-and-monaco.md) — blame overlay UI.

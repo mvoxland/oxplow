@@ -257,6 +257,23 @@ impl SqliteWorkItemLinkStore {
         }
     }
 
+    /// Distinct `from_item_id` values across every link row. Used
+    /// by the page-ref backfill so we can re-project each owning
+    /// item's slice exactly once.
+    pub async fn list_distinct_from_items(&self) -> Result<Vec<WorkItemId>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare("SELECT DISTINCT from_item_id FROM work_item_links")?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+                rows.map(|r| r.map(WorkItemId::from))
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     /// When set, every link create/delete also re-projects the
     /// affected work-item's outgoing link edges into `page_ref`.
     /// We project the WHOLE outgoing slice for `from_item_id` rather

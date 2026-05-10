@@ -712,6 +712,23 @@ impl SqliteCodeQualityStore {
         Ok(())
     }
 
+    /// All findings across every scan as `(rowid, path)`. Used by
+    /// the page-ref backfill — each finding row owns one
+    /// `(finding:<rowid>) -> (file:<path>)` edge.
+    pub async fn list_all_findings_for_backfill(&self) -> Result<Vec<(i64, String)>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare("SELECT id, path FROM code_quality_finding")?;
+                let rows =
+                    stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     pub async fn list_scans(&self, limit: usize) -> Result<Vec<CodeQualityScan>, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {

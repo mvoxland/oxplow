@@ -218,6 +218,24 @@ const SELECT_BASE: &str =
      FROM work_items wi";
 
 impl SqliteWorkItemStore {
+    /// Every work item across every thread, including deleted /
+    /// archived rows. Used by the page-ref backfill on boot — pages
+    /// that don't expose this in the UI shouldn't bypass the soft-
+    /// delete filter elsewhere.
+    pub async fn list_all_for_backfill(&self) -> Result<Vec<WorkItem>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let sql = format!("{} ORDER BY wi.created_at ASC", SELECT_BASE);
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map([], row_to_work_item)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     /// Most-recently completed work items across every thread, ordered
     /// by `completed_at DESC`. Drives the rail's "Recently finished"
     /// section. `status='done'` and `deleted_at IS NULL`; rows without

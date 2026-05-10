@@ -413,6 +413,68 @@ the `wiki_page_fts` FTS5 virtual table (migration v39); insert/update/
 delete triggers keep it in sync, so `WikiPageStore.searchBodies()`
 returns ranked results with `<mark>…</mark>`-highlighted snippets.
 
+### `page_ref` — unified cross-page reference graph (`crates/oxplow-db/src/page_ref_store.rs`, migration `V11__page_ref.sql`)
+
+One row per directed edge `(source) --ref_type--> (target)` across
+every page kind. Replaces the in-memory `computeBacklinks` indexer
+that used to live in the desktop frontend; both backlinks ("what
+points at me?") and outbound ("what do I point at?") are SQL
+queries against this table.
+
+Columns: `source_kind, source_id, target_kind, target_id, ref_type,
+source_extra` (PK on the first five). Indexes on
+`(target_kind, target_id)` for backlinks and `(source_kind,
+source_id)` for outbound. `kind` is denormalised next to `id` so
+kind-filtered queries don't need LIKE on a synthetic combined
+column.
+
+Canonical id shapes match the frontend's `TabRef.id`:
+- `wiki:<slug>` source kind uses just the slug as the id
+- `work-item:wi-…`
+- `file:<repo-relative path>` (id is the bare path; the `file:`
+  prefix is implicit from the kind)
+- `directory:<repo-relative path, no trailing slash>`
+- `git-commit:<full sha>`
+- `finding:<rowid as string>`
+
+**Writers own slices by `ref_type`.** A single `(source_kind,
+source_id)` can have rows from multiple owners — a work-item's
+body-mention edges (from `work_item_store`), link edges (from the
+link store), and touched-file edges (from the effort store) all
+land under `(work-item, wi-X)` but with distinct `ref_type`s.
+`SqlitePageRefStore::replace_source_for_ref_types` lets each
+writer wipe + re-insert only the rows whose `ref_type` it owns,
+so other owners' rows survive.
+
+Writers (one per source kind / slice):
+
+| Owner | Source | Slice (`ref_type`s) |
+|---|---|---|
+| `wiki_pages.rs` (`oxplow-app`) | `wiki:<slug>` | full source — uses `replace_source` |
+| `work_item_store::upsert` | `work-item:wi-X` body slice | `wi_body_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
+| `work_satellite::SqliteWorkItemLinkStore` create/delete | `work-item:wi-X` link slice | `work_item_link:blocks` / `relates_to` / … |
+| `effort_store::record_file` | `work-item:wi-X` touched slice | `touched_file` |
+| `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
+| `commit_indexer.rs` (`oxplow-app`) | `git-commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
+
+The shared extractor `oxplow_domain::refs::extract(body) ->
+ExtractedRefs` is the single parser used by every writer that
+takes a free-text body, so wiki/work-item/commit-message ref
+recognition stays in lock-step. Pure projections live in
+`crates/oxplow-db/src/page_ref_projections.rs`.
+
+Reader: `SqlitePageRefStore::list_backlinks(target_kind, target_id,
+limit)` and `list_outbound(source_kind, source_id, limit)`. Both
+are exposed as Tauri commands (`list_backlinks` / `list_outbound`,
+which decorate each row with a best-effort `source_label` from
+the source store) and as MCP tools of the same names.
+
+Boot-time backfill: `oxplow_app::page_ref_backfill::run(...)` re-
+projects every existing work-item body, link, effort, and finding
+into the table on app start, idempotently. Wiki bodies and recent
+commits are covered by their own initial-scan paths and don't
+need separate backfill.
+
 ### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_store.rs`)
 
 Per-thread attribution side table for wiki page edits. Notes themselves

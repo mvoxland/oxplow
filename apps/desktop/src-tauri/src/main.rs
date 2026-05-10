@@ -166,6 +166,25 @@ fn main() {
         });
     }
 
+    // Unified page-ref graph backfill: re-project every existing
+    // work-item, link, effort, and finding into the `page_ref`
+    // table. Idempotent — second-run touches the same rows. Wiki
+    // bodies and recent commits are covered by their own watchers
+    // (above + below).
+    {
+        let page_refs = state.page_ref_store.clone();
+        let work_items = state.work_item_store.clone();
+        let links = state.work_item_link_store.clone();
+        let efforts = state.effort_store.clone();
+        let findings = state.code_quality_store.clone();
+        boot_runtime.spawn(async move {
+            let counts =
+                oxplow_app::page_ref_backfill::run(page_refs, work_items, links, efforts, findings)
+                    .await;
+            tracing::info!(?counts, "page-ref backfill done");
+        });
+    }
+
     // Commit indexer: walk the most-recent N commits at boot to
     // populate `(git-commit:<sha>) -> (file/work-item/wiki/finding)`
     // edges, then re-scan whenever git refs change. Idempotent —

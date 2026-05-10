@@ -24,6 +24,7 @@ pub mod hook_ingest;
 pub mod lsp_clients;
 pub mod lsp_installer;
 pub mod lsp_sessions;
+pub mod page_ref_backfill;
 pub mod recovery;
 pub mod snapshot_capture;
 pub mod terminal_sessions;

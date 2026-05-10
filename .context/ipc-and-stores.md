@@ -427,8 +427,53 @@ When adding a third CLI tool, you only touch the subprocess module
 (new `runFoo` + parser) and the `CodeQualityTool` union — the
 store, runtime, IPC, and UI are tool-agnostic.
 
+## Multi-owner stores: the `page_ref` slice pattern
+
+Most stores have a single writer per row. The unified
+cross-page-reference graph (`page_ref` table; see
+[data-model.md](./data-model.md)) is the exception: a single
+`(source_kind, source_id)` like `(work-item, wi-42)` accumulates
+rows from three different writers (the work-item store's body
+mentions, the link store's `work_item_link:*` edges, the effort
+store's `touched_file` edges), each owning a slice keyed by
+`ref_type`.
+
+The pattern that lets writers co-own a source without trampling
+each other:
+
+1. **Pure projections** (`crates/oxplow-db/src/page_ref_projections.rs`)
+   turn each writer's domain rows into `Vec<PageRefEdge>`. Each
+   helper also exposes a small list of the `ref_type`s it owns
+   (`work_item_body_ref_types()`, `work_item_link_ref_types()`,
+   `effort_ref_types()`).
+2. **Slice-replace** at the store
+   (`SqlitePageRefStore::replace_source_for_ref_types`) takes
+   `(source_kind, source_id, ref_types, edges)` and atomically
+   `DELETE`s only rows matching the source AND one of the
+   ref_types, then inserts the new edges. Other slices for the
+   same source survive untouched.
+3. **Builder-attached projection** at each writer store. Each
+   `Sqlite*Store` gains a `with_page_refs(store: SqlitePageRefStore)
+   -> Self` builder; when set, the relevant write methods (upsert,
+   record_file, link create/delete) call the slice helper after
+   the primary write. Stores not given a `page_refs` are unchanged
+   — useful for tests that don't need backlinks.
+
+When a single writer owns the WHOLE source (wiki sync, findings
+write, commit indexer), use the simpler `replace_source` instead.
+
+To add a new source kind to the graph: add a projection helper, a
+ref-type-list helper, attach a `with_page_refs` to the owning
+store, and call the slice or full replace from its write methods.
+For body-text sources that should pick up the same wikilink rules
+the wiki + work-items use, route through
+`oxplow_domain::refs::extract` rather than re-implementing the
+parser.
+
 ## Related
 
-- [data-model.md](./data-model.md) — the actual schemas.
+- [data-model.md](./data-model.md) — the actual schemas, including
+  the `page_ref` graph and its column conventions.
 - [agent-model.md](./agent-model.md) — how the agent calls into MCP
-  tools that wrap these stores.
+  tools that wrap these stores, including `list_backlinks` /
+  `list_outbound`.

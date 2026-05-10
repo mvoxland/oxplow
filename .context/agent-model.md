@@ -484,11 +484,32 @@ intermediate `ready` step.
 queries (definition, references, hover) the agent can use without
 shelling out.
 
+**Unified backlinks graph (`list_backlinks` / `list_outbound`).** Every
+page kind — wiki, work-item, file, commit, finding, directory — lives
+in one persisted edge table (`page_ref`; see
+[data-model.md](./data-model.md)). The two MCP tools query both
+directions of any edge:
+
+- `list_backlinks({ kind, id, limit? })` — pages pointing AT
+  `(kind, id)`. Use this for cross-kind backlinks of any sort:
+  "what work-items / commits / wiki pages reference src/foo.rs?",
+  "who links to wi-42?", "what mentions finding:fnd-1?".
+- `list_outbound({ kind, id, limit? })` — what `(kind, id)` itself
+  points at.
+
+Canonical id shapes: `wiki:<slug>` uses just the slug; `work-item`
+uses the full `wi-…` id; `file` uses the bare repo-relative path;
+`directory` the bare path with no trailing slash; `git-commit` the
+full sha; `finding` the rowid as a string. Each row carries
+`ref_type` so you can tell e.g. a commit's `touched_file` edge from
+a wiki body's `wikilink`.
+
 `buildWikiPageMcpTools` (`crates/oxplow-mcp/src/lib.rs`) surfaces the
 per-project wiki (`wiki_page` table + `.oxplow/wiki/*.md` files — see
 `data-model.md`). Tools are metadata-only: `list_wiki_pages`,
 `get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages` (title),
-`search_wiki_page_bodies` (content), `find_wiki_pages_for_file` (backlinks),
+`search_wiki_page_bodies` (content), `find_wiki_pages_for_file` (wiki-only
+backlinks; for cross-kind backlinks use `list_backlinks` below),
 `delete_wiki_page`. **There is intentionally no create/update tool** —
 the agent writes bodies directly with its Write/Edit tools on
 `.oxplow/wiki/<slug>.md` (far cheaper than round-tripping full
