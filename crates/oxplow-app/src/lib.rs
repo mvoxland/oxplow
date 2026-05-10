@@ -190,7 +190,9 @@ impl Services {
         let work_item_store = Arc::new(
             SqliteWorkItemStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
-        let work_note_store = Arc::new(SqliteWorkNoteStore::new(db.clone()));
+        let work_note_store = Arc::new(
+            SqliteWorkNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
+        );
         let work_item_link_store = Arc::new(
             SqliteWorkItemLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
@@ -315,7 +317,9 @@ impl Services {
         let work_item_store = Arc::new(
             SqliteWorkItemStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
-        let work_note_store = Arc::new(SqliteWorkNoteStore::new(db.clone()));
+        let work_note_store = Arc::new(
+            SqliteWorkNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
+        );
         let work_item_link_store = Arc::new(
             SqliteWorkItemLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );

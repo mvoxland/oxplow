@@ -14,7 +14,9 @@ use oxplow_domain::{
 };
 
 use crate::database::Database;
-use crate::page_ref_projections::{link_edge, work_item_link_ref_types, KIND_WORK_ITEM};
+use crate::page_ref_projections::{
+    link_edge, note_edges, work_item_link_ref_types, KIND_WORK_ITEM, KIND_WORK_NOTE,
+};
 use crate::page_ref_store::SqlitePageRefStore;
 
 fn ts_to_string(ts: Timestamp) -> String {
@@ -74,11 +76,46 @@ fn str_to_actor(s: &str) -> Result<WorkItemActorKind, DomainError> {
 #[derive(Clone)]
 pub struct SqliteWorkNoteStore {
     db: Database,
+    page_refs: Option<SqlitePageRefStore>,
 }
 
 impl SqliteWorkNoteStore {
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            page_refs: None,
+        }
+    }
+
+    /// When set, every add / update_body / delete also re-projects
+    /// the note's body into `page_ref` under
+    /// `(work-note, <note id>)` (single-owner full replace).
+    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
+        self.page_refs = Some(store);
+        self
+    }
+
+    /// Iterate every note id + body for the boot-time backfill.
+    pub async fn list_all_for_backfill(&self) -> Result<Vec<(String, String)>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare("SELECT id, body FROM work_notes")?;
+                let rows =
+                    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn project_note(&self, id: &str, body: &str) -> Result<(), DomainError> {
+        let Some(refs) = &self.page_refs else {
+            return Ok(());
+        };
+        let edges = note_edges(id, body);
+        refs.replace_source(KIND_WORK_NOTE, id, edges).await
     }
 }
 
@@ -112,16 +149,22 @@ impl WorkNoteStore for SqliteWorkNoteStore {
     ) -> Result<WorkNote, DomainError> {
         let db = self.db.clone();
         let item = item.clone();
-        let body = body.to_string();
+        let body_owned = body.to_string();
         let author = author.to_string();
-        tokio::task::spawn_blocking(move || {
+        let note = tokio::task::spawn_blocking(move || -> Result<WorkNote, DomainError> {
             let id = NoteId::new();
             let now = Timestamp::now();
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT INTO work_notes (id, work_item_id, body, author, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![id.as_str(), item.as_str(), body, author, ts_to_string(now)],
+                    params![
+                        id.as_str(),
+                        item.as_str(),
+                        body_owned,
+                        author,
+                        ts_to_string(now)
+                    ],
                 )?;
                 Ok(())
             })?;
@@ -129,13 +172,15 @@ impl WorkNoteStore for SqliteWorkNoteStore {
                 id,
                 work_item_id: Some(item),
                 thread_id: None,
-                body,
+                body: body_owned,
                 author,
                 created_at: now,
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        self.project_note(note.id.as_str(), &note.body).await?;
+        Ok(note)
     }
 
     async fn add_for_thread(
@@ -146,9 +191,9 @@ impl WorkNoteStore for SqliteWorkNoteStore {
     ) -> Result<WorkNote, DomainError> {
         let db = self.db.clone();
         let thread = thread.clone();
-        let body = body.to_string();
+        let body_owned = body.to_string();
         let author = author.to_string();
-        tokio::task::spawn_blocking(move || {
+        let note = tokio::task::spawn_blocking(move || -> Result<WorkNote, DomainError> {
             let id = NoteId::new();
             let now = Timestamp::now();
             db.with_conn(|conn| {
@@ -158,7 +203,7 @@ impl WorkNoteStore for SqliteWorkNoteStore {
                     params![
                         id.as_str(),
                         thread.as_str(),
-                        body,
+                        body_owned,
                         author,
                         ts_to_string(now)
                     ],
@@ -169,13 +214,15 @@ impl WorkNoteStore for SqliteWorkNoteStore {
                 id,
                 work_item_id: None,
                 thread_id: Some(thread),
-                body,
+                body: body_owned,
                 author,
                 created_at: now,
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        self.project_note(note.id.as_str(), &note.body).await?;
+        Ok(note)
     }
 
     async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkNote>, DomainError> {
@@ -212,32 +259,42 @@ impl WorkNoteStore for SqliteWorkNoteStore {
 
     async fn update_body(&self, id: &NoteId, body: &str) -> Result<(), DomainError> {
         let db = self.db.clone();
-        let id = id.clone();
-        let body = body.to_string();
+        let id_clone = id.clone();
+        let body_clone = body.to_string();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
                     "UPDATE work_notes SET body = ?2 WHERE id = ?1",
-                    params![id.as_str(), body],
+                    params![id_clone.as_str(), body_clone],
                 )?;
                 Ok(())
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        self.project_note(id.as_str(), body).await?;
+        Ok(())
     }
 
     async fn delete(&self, id: &NoteId) -> Result<(), DomainError> {
         let db = self.db.clone();
-        let id = id.clone();
+        let id_clone = id.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                conn.execute("DELETE FROM work_notes WHERE id = ?1", params![id.as_str()])?;
+                conn.execute(
+                    "DELETE FROM work_notes WHERE id = ?1",
+                    params![id_clone.as_str()],
+                )?;
                 Ok(())
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        if let Some(refs) = &self.page_refs {
+            refs.replace_source(KIND_WORK_NOTE, id.as_str(), vec![])
+                .await?;
+        }
+        Ok(())
     }
 }
 
@@ -670,6 +727,64 @@ mod tests {
         let note = store.add_for_item(&item_id, "x", "u").await.unwrap();
         store.delete(&note.id).await.unwrap();
         assert!(store.list_for_item(&item_id).await.unwrap().is_empty());
+    }
+
+    /// Notes attached to a page_refs store mirror their parsed body
+    /// into `page_ref` on add / update / delete.
+    #[tokio::test]
+    async fn note_with_page_refs_projects_body() {
+        use crate::page_ref_store::SqlitePageRefStore;
+        let (db, tid, item_id) = fixture().await;
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        let store = SqliteWorkNoteStore::new(db).with_page_refs(page_refs.clone());
+
+        let note = store
+            .add_for_item(&item_id, "blocked by wi-019zzz-1 see [[src/app.rs]]", "u")
+            .await
+            .unwrap();
+        let inbound_wi = page_refs
+            .list_backlinks("work-item", "wi-019zzz-1", None)
+            .await
+            .unwrap();
+        assert!(
+            inbound_wi
+                .iter()
+                .any(|e| e.source_kind == "work-note" && e.source_id == note.id.as_str()),
+            "expected note to backlink wi-019zzz-1; got {inbound_wi:?}"
+        );
+        let inbound_file = page_refs
+            .list_backlinks("file", "src/app.rs", None)
+            .await
+            .unwrap();
+        assert!(inbound_file.iter().any(|e| e.source_id == note.id.as_str()));
+
+        // Editing the body replaces the slice cleanly.
+        store.update_body(&note.id, "no refs").await.unwrap();
+        let inbound_file = page_refs
+            .list_backlinks("file", "src/app.rs", None)
+            .await
+            .unwrap();
+        assert!(inbound_file.iter().all(|e| e.source_id != note.id.as_str()));
+
+        // Delete clears every edge.
+        store.delete(&note.id).await.unwrap();
+        let inbound_wi = page_refs
+            .list_backlinks("work-item", "wi-019zzz-1", None)
+            .await
+            .unwrap();
+        assert!(inbound_wi.iter().all(|e| e.source_id != note.id.as_str()));
+
+        // Threaded notes also work — body parsing doesn't depend on
+        // which parent the note attaches to.
+        let tnote = store
+            .add_for_thread(&tid, "see [[src/lib.rs]]", "u")
+            .await
+            .unwrap();
+        let inbound_lib = page_refs
+            .list_backlinks("file", "src/lib.rs", None)
+            .await
+            .unwrap();
+        assert!(inbound_lib.iter().any(|e| e.source_id == tnote.id.as_str()));
     }
 
     /// When a page-ref store is attached, link create/delete mirrors

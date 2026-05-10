@@ -177,10 +177,12 @@ fn main() {
         let links = state.work_item_link_store.clone();
         let efforts = state.effort_store.clone();
         let findings = state.code_quality_store.clone();
+        let notes = state.work_note_store.clone();
         boot_runtime.spawn(async move {
-            let counts =
-                oxplow_app::page_ref_backfill::run(page_refs, work_items, links, efforts, findings)
-                    .await;
+            let counts = oxplow_app::page_ref_backfill::run(
+                page_refs, work_items, links, efforts, findings, notes,
+            )
+            .await;
             tracing::info!(?counts, "page-ref backfill done");
         });
     }

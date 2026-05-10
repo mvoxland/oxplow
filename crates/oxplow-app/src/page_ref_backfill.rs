@@ -20,14 +20,14 @@
 use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{
-    effort_ref_types, effort_touched_file_edges, finding_edges, link_edge,
+    effort_ref_types, effort_touched_file_edges, finding_edges, link_edge, note_edges,
     work_item_body_ref_types, work_item_edges, work_item_link_ref_types, KIND_FINDING,
-    KIND_WORK_ITEM,
+    KIND_WORK_ITEM, KIND_WORK_NOTE,
 };
 use oxplow_db::WorkItemEffortStore as _;
 use oxplow_db::{
     SqliteCodeQualityStore, SqlitePageRefStore, SqliteWorkItemEffortStore, SqliteWorkItemLinkStore,
-    SqliteWorkItemStore,
+    SqliteWorkItemStore, SqliteWorkNoteStore,
 };
 use oxplow_domain::stores::WorkItemLinkStore as _;
 
@@ -39,6 +39,7 @@ pub struct BackfillCounts {
     pub links: usize,
     pub efforts: usize,
     pub findings: usize,
+    pub notes: usize,
 }
 
 /// Project every existing row into `page_ref`. Idempotent.
@@ -48,6 +49,7 @@ pub async fn run(
     links: Arc<SqliteWorkItemLinkStore>,
     efforts: Arc<SqliteWorkItemEffortStore>,
     findings_store: Arc<SqliteCodeQualityStore>,
+    work_notes: Arc<SqliteWorkNoteStore>,
 ) -> BackfillCounts {
     let mut counts = BackfillCounts::default();
 
@@ -122,7 +124,21 @@ pub async fn run(
         }
     }
 
-    // 3. Findings — one edge per row.
+    // 3. Work notes — one source per note row, parsed from body.
+    if let Ok(rows) = work_notes.list_all_for_backfill().await {
+        for (id, body) in rows {
+            let edges = note_edges(&id, &body);
+            if page_refs
+                .replace_source(KIND_WORK_NOTE, &id, edges)
+                .await
+                .is_ok()
+            {
+                counts.notes += 1;
+            }
+        }
+    }
+
+    // 4. Findings — one edge per row.
     if let Ok(rows) = findings_store.list_all_findings_for_backfill().await {
         for (id, path) in rows {
             let id_str = id.to_string();
@@ -247,6 +263,8 @@ mod tests {
         );
         let findings_store =
             Arc::new(SqliteCodeQualityStore::new(db.clone()).with_page_refs((*page_refs).clone()));
+        let notes =
+            Arc::new(SqliteWorkNoteStore::new(db.clone()).with_page_refs((*page_refs).clone()));
 
         let counts = run(
             page_refs.clone(),
@@ -254,6 +272,7 @@ mod tests {
             links,
             efforts,
             findings_store,
+            notes,
         )
         .await;
         assert!(counts.work_items >= 1);

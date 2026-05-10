@@ -22,6 +22,7 @@ use crate::page_ref_store::PageRefEdge;
 
 pub const KIND_WIKI: &str = "wiki";
 pub const KIND_WORK_ITEM: &str = "work-item";
+pub const KIND_WORK_NOTE: &str = "work-note";
 pub const KIND_FILE: &str = "file";
 pub const KIND_DIRECTORY: &str = "directory";
 pub const KIND_FINDING: &str = "finding";
@@ -129,6 +130,69 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
         out.push(PageRefEdge::new(
             KIND_WIKI,
             slug,
+            KIND_GIT_COMMIT,
+            c,
+            RT_BODY_COMMIT,
+        ));
+    }
+    out
+}
+
+/// Edges contributed by a work-note body (whether the note is
+/// attached to a work-item or a thread). Single-owner source —
+/// uses the full `replace_source` form.
+pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
+    let refs = extract(body);
+    let mut out = Vec::new();
+    for fd in refs.files_detail {
+        out.push(PageRefEdge::new(
+            KIND_WORK_NOTE,
+            note_id,
+            KIND_FILE,
+            fd.path,
+            RT_WIKI_FILE,
+        ));
+    }
+    for d in refs.dirs {
+        out.push(PageRefEdge::new(
+            KIND_WORK_NOTE,
+            note_id,
+            KIND_DIRECTORY,
+            d,
+            RT_WIKI_DIR,
+        ));
+    }
+    for w in refs.wikis {
+        out.push(PageRefEdge::new(
+            KIND_WORK_NOTE,
+            note_id,
+            KIND_WIKI,
+            w,
+            RT_WIKILINK,
+        ));
+    }
+    for wi in refs.work_items {
+        out.push(PageRefEdge::new(
+            KIND_WORK_NOTE,
+            note_id,
+            KIND_WORK_ITEM,
+            wi,
+            RT_BODY_WORK_ITEM,
+        ));
+    }
+    for f in refs.findings {
+        out.push(PageRefEdge::new(
+            KIND_WORK_NOTE,
+            note_id,
+            KIND_FINDING,
+            f,
+            RT_BODY_FINDING,
+        ));
+    }
+    for c in refs.commits {
+        out.push(PageRefEdge::new(
+            KIND_WORK_NOTE,
+            note_id,
             KIND_GIT_COMMIT,
             c,
             RT_BODY_COMMIT,
