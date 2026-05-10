@@ -5,7 +5,7 @@ import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { fileRef, findingRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
-import { useBacklinks } from "../tabs/useBacklinks.js";
+import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 
 export interface FindingPageProps {
   stream: Stream | null;
@@ -23,11 +23,20 @@ export interface FindingPageProps {
  * caller wires it).
  */
 export function FindingPage({ stream, findingId, threadWork, onOpenPage, onOpenFileAtLine }: FindingPageProps) {
-  const backlinkEntries = useBacklinks(findingRef(findingId));
+  const refForGraph = findingRef(findingId);
+  const backlinkEntries = useBacklinks(refForGraph);
+  const outboundEntries = usePageOutbound(refForGraph);
   const backlinks = {
     count: backlinkEntries.length,
     body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
   };
+  const outbound =
+    outboundEntries.length > 0
+      ? {
+          count: outboundEntries.length,
+          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
+        }
+      : undefined;
   const [row, setRow] = useState<CodeQualityFindingRow | null>(null);
   const [snippet, setSnippet] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +102,7 @@ export function FindingPage({ stream, findingId, threadWork, onOpenPage, onOpenF
   };
 
   return (
-    <Page testId="page-finding" title={title} kind="finding" chips={chips} backlinks={backlinks}>
+    <Page testId="page-finding" title={title} kind="finding" chips={chips} backlinks={backlinks} outbound={outbound}>
       <div style={{ padding: "16px 20px", maxWidth: 880 }}>
         {error ? (
           <div data-testid="page-finding-error" style={{ color: "var(--severity-critical)", fontSize: 12 }}>{error}</div>

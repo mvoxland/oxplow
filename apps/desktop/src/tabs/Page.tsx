@@ -32,6 +32,10 @@ export interface PageNavBarConfig {
    *  legacy footer panel — when this is supplied, the footer is
    *  suppressed even if the `backlinks` prop is also set. */
   backlinks?: { count: number; body: ReactNode };
+  /** Outbound dropdown — same shape as backlinks. Pages set this
+   *  when they want to surface what they point AT in addition to
+   *  what points at them. */
+  outbound?: { count: number; body: ReactNode };
   actions?: ReactNode;
 }
 
@@ -65,6 +69,10 @@ export interface PageProps {
    *  legacy collapsible footer renders. Pass either a bare `ReactNode`
    *  (count unknown) or `{ count, body }` to surface a badge. */
   backlinks?: ReactNode | { count: number; body: ReactNode };
+  /** Optional outbound list — what THIS page points AT. Renders as a
+   *  sibling dropdown next to Backlinks in the nav bar. Sibling to
+   *  backlinks; same shape. */
+  outbound?: { count: number; body: ReactNode };
   /** Optional nav-bar config. When supplied, the browser-style nav bar
    *  renders between header and body, and (if it carries a `backlinks`
    *  block) suppresses the legacy footer panel. */
@@ -89,7 +97,7 @@ export interface PageProps {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, navBar, testId, showNavBar = true, showHeader = true }: PageProps) {
+export function Page({ title, kind, chips, actions, children, backlinks, outbound, navBar, testId, showNavBar = true, showHeader = true }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -151,6 +159,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           ?? (backlinksBody !== undefined
             ? { count: backlinksCount ?? 0, body: backlinksBody }
             : undefined),
+        outbound: baseNavBar.outbound ?? outbound,
       }
     : undefined;
   const navBarOwnsBacklinks = effectiveNavBar?.backlinks !== undefined;
@@ -178,6 +187,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, navBar,
           kind={kind}
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
+          outbound={effectiveNavBar.outbound}
           actions={effectiveNavBar.actions}
         />
       ) : null}

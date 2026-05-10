@@ -10,7 +10,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, workItemRef } from "../tabs/pageRefs.js";
 import { ActivityTimeline, WorkItemDetail } from "../components/Plan/WorkItemDetail.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
-import { useBacklinks } from "../tabs/useBacklinks.js";
+import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { SnapshotDetailSlideover } from "../components/Snapshots/SnapshotDetailSlideover.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
@@ -51,7 +51,9 @@ export function WorkItemPage({
   onOpenDiff,
 }: WorkItemPageProps) {
   const item = items.find((i) => i.id === itemId) ?? null;
-  const backlinkEntries = useBacklinks(workItemRef(itemId));
+  const refForGraph = workItemRef(itemId);
+  const backlinkEntries = useBacklinks(refForGraph);
+  const outboundEntries = usePageOutbound(refForGraph);
   const [efforts, setEfforts] = useState<EffortDetail[]>([]);
   // Slideover state lives on this host page (the brief calls for it).
   // Single instance — opening another snapshot replaces the current one.
@@ -96,6 +98,13 @@ export function WorkItemPage({
       />
     ),
   };
+  const outbound =
+    outboundEntries.length > 0
+      ? {
+          count: outboundEntries.length,
+          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
+        }
+      : undefined;
 
   useEffect(() => {
     if (!item) return;
@@ -141,7 +150,7 @@ export function WorkItemPage({
 
   if (!item) {
     return (
-      <Page testId="page-work-item" title={itemId} kind="work item" backlinks={backlinks}>
+      <Page testId="page-work-item" title={itemId} kind="work item" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
           This work item is not loaded in the current thread. Open the thread that owns it to edit, or use the rail to navigate.
         </div>
@@ -156,7 +165,7 @@ export function WorkItemPage({
   ];
 
   return (
-    <Page testId="page-work-item" title={item.title} kind="work item" chips={chips} backlinks={backlinks}>
+    <Page testId="page-work-item" title={item.title} kind="work item" chips={chips} backlinks={backlinks} outbound={outbound}>
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
         <WorkItemDetail
           item={item}

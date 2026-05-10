@@ -4,7 +4,7 @@ import { WikiPageTab } from "../components/Wiki/WikiPageTab.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { wikiPageRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
-import { useBacklinks } from "../tabs/useBacklinks.js";
+import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 
 export interface WikiPageProps {
@@ -28,14 +28,23 @@ export interface WikiPageProps {
  */
 export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, onOpenFile, onOpenDirectory, onOpenPage, onOpenCommit, onOpenExternalUrl }: WikiPageProps) {
   const nav = useOptionalPageNavigation();
-  const backlinkEntries = useBacklinks(wikiPageRef(slug));
+  const ref = wikiPageRef(slug);
+  const backlinkEntries = useBacklinks(ref);
+  const outboundEntries = usePageOutbound(ref);
   const backlinks = {
     count: backlinkEntries.length,
     body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
   };
+  const outbound =
+    outboundEntries.length > 0
+      ? {
+          count: outboundEntries.length,
+          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
+        }
+      : undefined;
   if (!stream) {
     return (
-      <Page testId="page-wiki" kind="wiki page" backlinks={backlinks}>
+      <Page testId="page-wiki" kind="wiki page" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
           No stream selected.
         </div>
@@ -43,7 +52,7 @@ export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, o
     );
   }
   return (
-    <Page testId="page-wiki" kind="wiki page" backlinks={backlinks}>
+    <Page testId="page-wiki" kind="wiki page" backlinks={backlinks} outbound={outbound}>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <WikiPageTab
           stream={stream}

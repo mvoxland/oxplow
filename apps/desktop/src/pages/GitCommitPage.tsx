@@ -4,7 +4,7 @@ import { getCommitDetail } from "../api.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page } from "../tabs/Page.js";
-import { useBacklinks } from "../tabs/useBacklinks.js";
+import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { gitCommitRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -89,11 +89,20 @@ export function GitCommitPage({
     ro.observe(el);
     return () => ro.disconnect();
   }, [analysis.files.length, sha, stream?.id]);
-  const backlinkEntries = useBacklinks(gitCommitRef(sha));
+  const refForGraph = gitCommitRef(sha);
+  const backlinkEntries = useBacklinks(refForGraph);
+  const outboundEntries = usePageOutbound(refForGraph);
   const backlinks = {
     count: backlinkEntries.length,
     body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
   };
+  const outbound =
+    outboundEntries.length > 0
+      ? {
+          count: outboundEntries.length,
+          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
+        }
+      : undefined;
 
   useEffect(() => {
     if (!sha || !stream) {
@@ -119,7 +128,7 @@ export function GitCommitPage({
   const headerTitle = buildCommitTitle({ sha, subject: detail?.subject ?? subject });
 
   return (
-    <Page testId="page-git-commit" title={headerTitle} kind="commit" backlinks={backlinks}>
+    <Page testId="page-git-commit" title={headerTitle} kind="commit" backlinks={backlinks} outbound={outbound}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "12px 16px" }}>
         {scope ? (
           <ScopeFilterBanner

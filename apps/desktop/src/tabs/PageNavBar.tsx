@@ -49,6 +49,13 @@ export interface PageNavBarProps {
     count: number;
     body: ReactNode;
   };
+  /** Optional outbound dropdown — same shape as `backlinks`. Sits
+   *  next to the backlinks button so a user can see both directions
+   *  of the page-ref graph from the chrome. */
+  outbound?: {
+    count: number;
+    body: ReactNode;
+  };
   /** Optional kebab actions slot at the right edge. */
   actions?: ReactNode;
 }
@@ -69,9 +76,11 @@ export function PageNavBar({
   kind,
   bookmark,
   backlinks,
+  outbound,
   actions,
 }: PageNavBarProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
+  const [outboundOpen, setOutboundOpen] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [siblingListOpen, setSiblingListOpen] = useState(false);
   const siblingPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -440,6 +449,47 @@ export function PageNavBar({
               }}
             >
               {backlinks.body}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {outbound ? (
+        <div style={{ position: "relative" }}>
+          <button
+            type="button"
+            data-testid="page-nav-outbound-toggle"
+            onClick={() => setOutboundOpen((v) => !v)}
+            disabled={outbound.count === 0}
+            aria-expanded={outboundOpen}
+            style={{
+              ...navButtonStyle(outbound.count > 0),
+              padding: "4px 10px",
+              fontSize: 12,
+            }}
+          >
+            Outbound ({outbound.count}) {outboundOpen ? "▾" : "▸"}
+          </button>
+          {outboundOpen && outbound.count > 0 ? (
+            <div
+              data-testid="page-nav-outbound-popover"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                minWidth: 280,
+                maxWidth: 480,
+                maxHeight: 360,
+                overflow: "auto",
+                background: "var(--surface-card)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 6,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+                padding: 8,
+                zIndex: 10,
+              }}
+            >
+              {outbound.body}
             </div>
           ) : null}
         </div>
