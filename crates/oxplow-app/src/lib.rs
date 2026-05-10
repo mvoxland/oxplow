@@ -14,6 +14,7 @@ pub mod agent_status_derive;
 pub mod background_task;
 pub mod blob_store;
 pub mod code_quality_runner;
+pub mod commit_indexer;
 pub mod config_service;
 pub mod diagnostics;
 pub mod events;

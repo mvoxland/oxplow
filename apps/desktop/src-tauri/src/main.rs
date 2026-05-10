@@ -166,6 +166,43 @@ fn main() {
         });
     }
 
+    // Commit indexer: walk the most-recent N commits at boot to
+    // populate `(git-commit:<sha>) -> (file/work-item/wiki/finding)`
+    // edges, then re-scan whenever git refs change. Idempotent —
+    // already-indexed commits are skipped via a one-row probe.
+    {
+        let repo_path = state.layout.project_dir.clone();
+        let page_refs = state.page_ref_store.clone();
+        let mut rx = state.events.subscribe();
+        boot_runtime.spawn(async move {
+            let n = oxplow_app::commit_indexer::index_recent(
+                &repo_path,
+                &page_refs,
+                oxplow_app::commit_indexer::DEFAULT_INDEX_DEPTH,
+            )
+            .await;
+            tracing::info!(indexed = n, "commit indexer initial scan done");
+            // Re-index on every refs change. The watcher debounces;
+            // the indexer's own existence-probe makes the scan cheap
+            // when nothing's new.
+            loop {
+                match rx.recv().await {
+                    Ok(oxplow_app::events::OxplowEvent::GitRefsChanged { .. }) => {
+                        let _ = oxplow_app::commit_indexer::index_recent(
+                            &repo_path,
+                            &page_refs,
+                            oxplow_app::commit_indexer::DEFAULT_INDEX_DEPTH,
+                        )
+                        .await;
+                    }
+                    Ok(_) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
     // Boot the in-process control plane (axum server hosting the
     // plugin's HTTP hook receiver + the streamable-HTTP MCP transport).
     // The handle's URLs + token feed the per-spawn plugin writer in
