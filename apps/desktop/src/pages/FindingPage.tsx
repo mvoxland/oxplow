@@ -23,7 +23,7 @@ export interface FindingPageProps {
  * caller wires it).
  */
 export function FindingPage({ stream, findingId, threadWork, onOpenPage, onOpenFileAtLine }: FindingPageProps) {
-  const backlinkEntries = useBacklinks(findingRef(findingId), stream, threadWork);
+  const backlinkEntries = useBacklinks(findingRef(findingId));
   const backlinks = {
     count: backlinkEntries.length,
     body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,

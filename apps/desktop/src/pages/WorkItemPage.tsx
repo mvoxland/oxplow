@@ -51,7 +51,7 @@ export function WorkItemPage({
   onOpenDiff,
 }: WorkItemPageProps) {
   const item = items.find((i) => i.id === itemId) ?? null;
-  const backlinkEntries = useBacklinks(workItemRef(itemId), stream, threadWork);
+  const backlinkEntries = useBacklinks(workItemRef(itemId));
   const [efforts, setEfforts] = useState<EffortDetail[]>([]);
   // Slideover state lives on this host page (the brief calls for it).
   // Single instance — opening another snapshot replaces the current one.

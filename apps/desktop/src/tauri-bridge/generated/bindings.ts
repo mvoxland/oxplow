@@ -214,6 +214,8 @@ export const commands = {
 	searchWikiBodies: (query: string, limit: number) => typedError<WikiPageSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
 	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
 	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
+	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
+	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
 	recordPageVisit: (pageKind: string, pageId: string, label: string | null, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, durationMs, threadId })),
 	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
 	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
@@ -679,6 +681,22 @@ export type BackgroundTask = {
 export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync";
 
 export type BackgroundTaskStatus = "running" | "done" | "failed";
+
+// Edge plus a best-effort renderer label for the source.
+export type BacklinkEdge = {
+	source_kind: string,
+	source_id: string,
+	target_kind: string,
+	target_id: string,
+	ref_type: string,
+	source_extra: string | null,
+	/**
+	 *  Human label for the source (wiki title, work-item title,
+	 *  commit subject, …). Falls back to `source_id` in the
+	 *  renderer when None.
+	 */
+	source_label: string | null,
+};
 
 // The bucketed view the Backlog page renders.
 export type BacklogState = {

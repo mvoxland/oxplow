@@ -2016,3 +2016,27 @@ export async function openExternalUrl(url: string): Promise<{ ok: boolean; reaso
     return { ok: false, reason: e instanceof Error ? e.message : String(e) };
   }
 }
+
+// ----------------------------------------------------------------------
+// Unified page-ref graph (cross-page backlinks + outbound).
+// ----------------------------------------------------------------------
+
+export type BacklinkEdge = import("./tauri-bridge/generated/bindings.js").BacklinkEdge;
+
+/** Pages pointing AT (target_kind, target_id). */
+export async function listBacklinks(
+  targetKind: string,
+  targetId: string,
+  limit: number | null = null,
+): Promise<BacklinkEdge[]> {
+  return unwrap(await commands.listBacklinks(targetKind, targetId, limit));
+}
+
+/** Pages this source points AT. Inverse of `listBacklinks`. */
+export async function listPageOutbound(
+  sourceKind: string,
+  sourceId: string,
+  limit: number | null = null,
+): Promise<BacklinkEdge[]> {
+  return unwrap(await commands.listOutbound(sourceKind, sourceId, limit));
+}

@@ -85,6 +85,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::wiki::search_wiki_bodies,
         commands::wiki::read_wiki_page_body,
         commands::wiki::write_wiki_page_body,
+        // page refs (unified backlinks/outbound)
+        commands::page_refs::list_backlinks,
+        commands::page_refs::list_outbound,
         // page visit
         commands::page_visit::record_page_visit,
         commands::page_visit::list_recent_page_visits,

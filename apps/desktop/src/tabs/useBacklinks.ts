@@ -1,139 +1,189 @@
 import { useEffect, useState } from "react";
-import type { CommitDetail, GitLogCommit, Stream, ThreadWorkState } from "../api.js";
-import { getBranchChanges, getCommitDetail, getGitLog, listCodeQualityFindings, listWikiPages, readWikiPageBody, listWorkItemEfforts } from "../api.js";
-import type { BacklinkContext, BacklinkEntry, BacklinkFindingEntry, BacklinkNoteEntry, BacklinkWorkItemEntry } from "./backlinksIndex.js";
-import { computeBacklinks } from "./backlinksIndex.js";
-import { APP_PAGE_BACKLINKS } from "./appPageBacklinks.js";
+import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
+import {
+  directoryRef,
+  fileRef,
+  findingRef,
+  gitCommitRef,
+  wikiPageRef,
+  workItemRef,
+} from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
+import type { BacklinkEntry } from "./backlinkTypes.js";
 
 /**
- * Hook that materializes a `BacklinkContext` from live data and computes
- * backlinks for the given target. Pages call this to render their
- * footer panel without reaching into App.tsx's state slices.
+ * Backlinks for a page. One IPC call to the unified `page_ref`
+ * graph; the SQLite reader joins source labels (wiki title, work-
+ * item title, commit subject) at read time so the renderer doesn't
+ * need a second round-trip per row.
  *
- * The context is best-effort: each data source is fetched once on mount
- * and then cached for the lifetime of the page. Notes are loaded
- * lazily (titles + bodies); findings are pulled in bulk from the
- * `code_quality_finding` store; work items come from the already-loaded
- * thread work state passed in by the caller.
+ * Replaces the old in-memory `computeBacklinks` indexer + per-kind
+ * `appPageBacklinks` providers — every page kind goes through the
+ * same code path now, including FilePage (which used to render an
+ * empty list because it never wired the indexer).
  */
-export function useBacklinks(
-  target: TabRef,
-  stream: Stream | null,
-  threadWork: ThreadWorkState | null,
-): BacklinkEntry[] {
-  const [ctx, setCtx] = useState<BacklinkContext>({ notes: [], workItems: [], findings: [] });
-  const [recentLog, setRecentLog] = useState<GitLogCommit[] | undefined>(undefined);
-  const [uncommittedPaths, setUncommittedPaths] = useState<string[] | undefined>(undefined);
-  const [currentBranch, setCurrentBranch] = useState<string | undefined>(undefined);
-  const [commitDetail, setCommitDetail] = useState<CommitDetail | undefined>(undefined);
+export function useBacklinks(target: TabRef): BacklinkEntry[] {
+  const [entries, setEntries] = useState<BacklinkEntry[]>([]);
 
   useEffect(() => {
-    if (!stream) {
-      setCtx({ notes: [], workItems: [], findings: [] });
+    let cancelled = false;
+    const targetId = canonicalIdForTarget(target);
+    if (!targetId) {
+      setEntries([]);
       return;
     }
-    let cancelled = false;
-
-    const items: BacklinkWorkItemEntry[] = (threadWork?.items ?? []).map((wi) => ({
-      id: wi.id,
-      title: wi.title,
-      description: wi.description,
-      acceptance_criteria: wi.acceptance_criteria,
-      touched_files: [],
-    }));
-
-    // Fetch efforts per work item so we know which files each one
-    // touched. Bounded to 100 items in the worst case (Phase-4-acceptable).
-    void Promise.all(
-      items.map(async (item) => {
-        try {
-          const efforts = await listWorkItemEfforts(item.id);
-          const touched = new Set<string>();
-          for (const detail of efforts) {
-            for (const path of detail.changed_paths) touched.add(path);
-          }
-          item.touched_files = [...touched];
-        } catch {
-          // ignore — missing touched_files just means weaker backlinks.
-        }
-      }),
-    ).then(() => {
-      if (!cancelled) setCtx((prev) => ({ ...prev, workItems: items }));
-    });
-
-    void listCodeQualityFindings({ streamId: stream.id }).then((rows) => {
-      if (cancelled) return;
-      const findings: BacklinkFindingEntry[] = rows.map((r) => ({
-        id: String(r.id),
-        path: r.path,
-        startLine: r.startLine,
-        endLine: r.endLine,
-        kind: r.kind,
-        metricValue: r.metricValue,
-      }));
-      setCtx((prev) => ({ ...prev, findings }));
-    });
-
-    void listWikiPages(stream.id).then(async (summaries) => {
-      const notes: BacklinkNoteEntry[] = [];
-      for (const summary of summaries) {
-        try {
-          const body = await readWikiPageBody(stream.id, summary.slug);
-          notes.push({ slug: summary.slug, title: summary.title, body });
-        } catch {
-          // skip
-        }
-      }
-      if (!cancelled) setCtx((prev) => ({ ...prev, notes }));
-    });
-
+    void listBacklinks(target.kind, targetId, null)
+      .then((edges) => {
+        if (cancelled) return;
+        setEntries(edges.map(edgeToInboundEntry).filter((e): e is BacklinkEntry => e !== null));
+      })
+      .catch(() => {
+        if (!cancelled) setEntries([]);
+      });
     return () => {
       cancelled = true;
     };
-  }, [stream?.id, threadWork?.threadId]);
+  }, [target.kind, target.id]);
 
-  // Fetch git data slices when the target is an app-page kind that
-  // needs them. Cheap to skip when not relevant.
-  const isAppPage = target.kind in APP_PAGE_BACKLINKS;
+  return entries;
+}
+
+/**
+ * Outbound: what this page points AT. Sibling to `useBacklinks` and
+ * drives the new Outbound dropdown / panel in the Page chrome.
+ */
+export function usePageOutbound(source: TabRef): BacklinkEntry[] {
+  const [entries, setEntries] = useState<BacklinkEntry[]>([]);
+
   useEffect(() => {
-    if (!isAppPage || !stream) return;
     let cancelled = false;
-    void getGitLog(stream.id, { all: false, limit: 30 }).then((res) => {
-      if (cancelled) return;
-      setRecentLog(res.commits);
-      setCurrentBranch(res.currentBranch ?? undefined);
-    }).catch(() => { /* ignore */ });
-    if (target.kind === "uncommitted-changes") {
-      void getBranchChanges(stream.id, "HEAD").then((res) => {
-        if (cancelled) return;
-        setUncommittedPaths(res.files.map((c) => c.path));
-      }).catch(() => { /* ignore */ });
-    }
-    return () => { cancelled = true; };
-  }, [isAppPage, target.kind, stream?.id]);
-
-  // Per-commit detail (touched files) for git-commit pages — bounded
-  // single fetch per (stream, sha) pair.
-  const commitSha = target.kind === "git-commit"
-    ? (target.payload as { sha?: string } | null)?.sha ?? ""
-    : "";
-  useEffect(() => {
-    if (!stream || !commitSha) {
-      setCommitDetail(undefined);
+    const sourceId = canonicalIdForTarget(source);
+    if (!sourceId) {
+      setEntries([]);
       return;
     }
-    let cancelled = false;
-    void getCommitDetail(stream.id, commitSha).then((res) => {
-      if (cancelled) return;
-      setCommitDetail(res ?? undefined);
-    }).catch(() => { /* ignore */ });
-    return () => { cancelled = true; };
-  }, [stream?.id, commitSha]);
+    void listPageOutbound(source.kind, sourceId, null)
+      .then((edges) => {
+        if (cancelled) return;
+        setEntries(
+          edges.map(edgeToOutboundEntry).filter((e): e is BacklinkEntry => e !== null),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setEntries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source.kind, source.id]);
 
-  const provider = APP_PAGE_BACKLINKS[target.kind];
-  if (provider) {
-    return provider(target.payload, { ...ctx, recentLog, uncommittedPaths, currentBranch, commitDetail });
+  return entries;
+}
+
+/**
+ * Extract the canonical SQLite id from a TabRef. Most kinds carry
+ * their canonical id directly in `payload`; some encode it inside
+ * the prefixed `ref.id`. Returns null for kinds the page-ref graph
+ * doesn't track (settings, dialogs, …) so the hook short-circuits.
+ */
+function canonicalIdForTarget(ref: TabRef): string | null {
+  switch (ref.kind) {
+    case "wiki": {
+      const p = ref.payload as { slug?: string } | null;
+      return p?.slug ?? null;
+    }
+    case "work-item": {
+      const p = ref.payload as { itemId?: string } | null;
+      return p?.itemId ?? null;
+    }
+    case "file": {
+      const p = ref.payload as { path?: string } | null;
+      return p?.path ?? null;
+    }
+    case "directory": {
+      const p = ref.payload as { path?: string } | null;
+      return p?.path ?? null;
+    }
+    case "git-commit": {
+      const p = ref.payload as { sha?: string } | null;
+      return p?.sha ?? null;
+    }
+    case "finding": {
+      const p = ref.payload as { findingId?: string } | null;
+      return p?.findingId ?? null;
+    }
+    default:
+      return null;
   }
-  return computeBacklinks(target, ctx);
+}
+
+/** Convert one inbound edge (source -> me) into a renderer entry. */
+function edgeToInboundEntry(edge: BacklinkEdge): BacklinkEntry | null {
+  const ref = refFor(edge.source_kind, edge.source_id);
+  if (!ref) return null;
+  const label = edge.source_label ?? edge.source_id;
+  const subtitle = humanRefType(edge.ref_type);
+  return { ref, label, subtitle };
+}
+
+/** Convert one outbound edge (me -> target) into a renderer entry. */
+function edgeToOutboundEntry(edge: BacklinkEdge): BacklinkEntry | null {
+  const ref = refFor(edge.target_kind, edge.target_id);
+  if (!ref) return null;
+  const label = edge.source_label ?? edge.target_id;
+  const subtitle = humanRefType(edge.ref_type);
+  return { ref, label, subtitle };
+}
+
+/**
+ * Build a navigable `TabRef` from a (kind, id) pair. Kinds the
+ * frontend doesn't render directly (rare today but possible for
+ * future page kinds) yield null so the row is dropped rather than
+ * rendering as a dead button.
+ */
+function refFor(kind: string, id: string): TabRef | null {
+  switch (kind) {
+    case "wiki":
+      return wikiPageRef(id);
+    case "work-item":
+      return workItemRef(id);
+    case "file":
+      return fileRef(id);
+    case "directory":
+      return directoryRef(id);
+    case "git-commit":
+      return gitCommitRef(id);
+    case "finding":
+      return findingRef(id);
+    default:
+      return null;
+  }
+}
+
+/** Short label for the relationship type, used as the row's subtitle. */
+function humanRefType(refType: string): string {
+  if (refType.startsWith("work_item_link:")) {
+    const sub = refType.slice("work_item_link:".length);
+    return sub.replace(/_/g, " ");
+  }
+  switch (refType) {
+    case "wiki_file_ref":
+      return "wiki link";
+    case "wiki_dir_ref":
+      return "wiki link";
+    case "wikilink":
+      return "wiki link";
+    case "wi_body_mention":
+      return "mention";
+    case "finding_mention":
+      return "mention";
+    case "commit_mention":
+      return "mention";
+    case "touched_file":
+      return "touched";
+    case "finding_path":
+      return "found in";
+    default:
+      return refType;
+  }
 }

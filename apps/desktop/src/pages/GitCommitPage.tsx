@@ -89,7 +89,7 @@ export function GitCommitPage({
     ro.observe(el);
     return () => ro.disconnect();
   }, [analysis.files.length, sha, stream?.id]);
-  const backlinkEntries = useBacklinks(gitCommitRef(sha), stream, threadWork);
+  const backlinkEntries = useBacklinks(gitCommitRef(sha));
   const backlinks = {
     count: backlinkEntries.length,
     body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,

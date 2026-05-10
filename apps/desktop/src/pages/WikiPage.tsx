@@ -28,7 +28,7 @@ export interface WikiPageProps {
  */
 export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, onOpenFile, onOpenDirectory, onOpenPage, onOpenCommit, onOpenExternalUrl }: WikiPageProps) {
   const nav = useOptionalPageNavigation();
-  const backlinkEntries = useBacklinks(wikiPageRef(slug), stream, threadWork);
+  const backlinkEntries = useBacklinks(wikiPageRef(slug));
   const backlinks = {
     count: backlinkEntries.length,
     body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,

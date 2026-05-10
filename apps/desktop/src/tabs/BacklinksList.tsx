@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
-import type { BacklinkEntry } from "./backlinksIndex.js";
+import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { TabRef } from "./tabState.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";

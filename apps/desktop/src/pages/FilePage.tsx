@@ -1,7 +1,10 @@
 import type { ComponentProps } from "react";
 import { Page } from "../tabs/Page.js";
 import { EditorPane } from "../components/EditorPane.js";
-import { usePageTitle } from "../tabs/PageNavigationContext.js";
+import { usePageTitle, useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { useBacklinks } from "../tabs/useBacklinks.js";
+import { fileRef } from "../tabs/pageRefs.js";
+import { BacklinksList } from "../tabs/BacklinksList.js";
 
 export interface FilePageProps extends ComponentProps<typeof EditorPane> {
   /** True when the file's draft differs from saved content. Drives the
@@ -16,14 +19,30 @@ export interface FilePageProps extends ComponentProps<typeof EditorPane> {
  *
  * EditorPane keeps owning all of its internal toolbar / Monaco
  * decorations / blame overlay — the chrome only adds the title row +
- * optional nav bar above it.
+ * optional nav bar above it. Backlinks come from the unified
+ * `page_ref` graph: every wiki page, work-item, commit, or finding
+ * that references this file's path appears in the dropdown.
  */
 export function FilePage({ dirty, ...editorProps }: FilePageProps) {
   const path = editorProps.filePath ?? "";
   const basename = path.split("/").pop() ?? path;
   usePageTitle(basename ? `${dirty ? "● " : ""}${basename}` : "");
+  const ctxNav = useOptionalPageNavigation();
+  const backlinkEntries = useBacklinks(fileRef(path));
+  const backlinks =
+    backlinkEntries.length > 0
+      ? {
+          count: backlinkEntries.length,
+          body: (
+            <BacklinksList
+              entries={backlinkEntries}
+              onOpenPage={(ref) => ctxNav?.navigate(ref)}
+            />
+          ),
+        }
+      : undefined;
   return (
-    <Page testId="page-file" kind="file">
+    <Page testId="page-file" kind="file" backlinks={backlinks}>
       <EditorPane {...editorProps} />
     </Page>
   );

@@ -260,6 +260,23 @@ pub struct FindNotesForNoteParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PageRefParams {
+    /// Page kind, e.g. "wiki", "work-item", "file", "git-commit",
+    /// "finding", "directory".
+    pub kind: String,
+    /// Canonical page id within the kind. For files this is the
+    /// repo-relative path; for work-items the `wi-…` id; for
+    /// commits the full sha; for wiki pages the slug.
+    pub id: String,
+    #[serde(default = "default_page_ref_limit")]
+    pub limit: u32,
+}
+
+fn default_page_ref_limit() -> u32 {
+    100
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ResyncNoteParams {
     pub slug: String,
 }
@@ -1438,6 +1455,48 @@ impl OxplowMcp {
             hits.truncate(p.limit as usize);
         }
         json_result(&hits)
+    }
+
+    #[tool(
+        description = "Unified backlinks: every page (wiki, work-item, commit, finding, \
+                       …) that points AT the given target page. The target is identified \
+                       by `kind` (e.g. \"file\", \"wiki\", \"work-item\", \"git-commit\", \
+                       \"finding\", \"directory\") and `id` (path / slug / wi-… / sha / id). \
+                       Returns one row per inbound edge, including ref_type so the caller \
+                       can distinguish e.g. a commit's touched_file edge from a wiki body \
+                       mention."
+    )]
+    async fn list_backlinks(
+        &self,
+        params: Parameters<PageRefParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let edges = self
+            .services
+            .page_ref_store
+            .list_backlinks(&p.kind, &p.id, Some(p.limit as i64))
+            .await
+            .map_err(internal)?;
+        json_result(&edges)
+    }
+
+    #[tool(
+        description = "Unified outbound: every page the given source page points AT. \
+                       Inverse of `list_backlinks` — ask \"what does THIS page reference?\". \
+                       Same `kind`/`id` shape as list_backlinks."
+    )]
+    async fn list_outbound(
+        &self,
+        params: Parameters<PageRefParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let edges = self
+            .services
+            .page_ref_store
+            .list_outbound(&p.kind, &p.id, Some(p.limit as i64))
+            .await
+            .map_err(internal)?;
+        json_result(&edges)
     }
 
     #[tool(
