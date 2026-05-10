@@ -8,6 +8,7 @@
 pub mod error;
 pub mod hook;
 pub mod ids;
+pub mod refs;
 pub mod stores;
 pub mod stream;
 pub mod thread;

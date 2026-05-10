@@ -14,6 +14,8 @@ use oxplow_domain::{
 };
 
 use crate::database::Database;
+use crate::page_ref_projections::{link_edge, work_item_link_ref_types, KIND_WORK_ITEM};
+use crate::page_ref_store::SqlitePageRefStore;
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
@@ -244,11 +246,55 @@ impl WorkNoteStore for SqliteWorkNoteStore {
 #[derive(Clone)]
 pub struct SqliteWorkItemLinkStore {
     db: Database,
+    page_refs: Option<SqlitePageRefStore>,
 }
 
 impl SqliteWorkItemLinkStore {
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            page_refs: None,
+        }
+    }
+
+    /// When set, every link create/delete also re-projects the
+    /// affected work-item's outgoing link edges into `page_ref`.
+    /// We project the WHOLE outgoing slice for `from_item_id` rather
+    /// than just the changed row so removals are clean.
+    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
+        self.page_refs = Some(store);
+        self
+    }
+
+    /// Re-emit `work_item_link:*` edges for all currently-stored
+    /// outgoing links of `from_item`. Called after create/delete
+    /// when `page_refs` is attached. Uses the slice variant so
+    /// body-mention edges from `work_item_store` survive.
+    async fn project_outgoing_links(&self, from_item: &WorkItemId) -> Result<(), DomainError> {
+        let Some(refs) = &self.page_refs else {
+            return Ok(());
+        };
+        let db = self.db.clone();
+        let from = from_item.clone();
+        let links: Vec<WorkItemLink> = tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM work_item_links WHERE from_item_id = ?1 ORDER BY created_at ASC",
+                )?;
+                let rows = stmt.query_map(params![from.as_str()], row_to_link)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()?;
+        let edges: Vec<_> = links.iter().map(link_edge).collect();
+        refs.replace_source_for_ref_types(
+            KIND_WORK_ITEM,
+            from_item.as_str(),
+            work_item_link_ref_types(),
+            edges,
+        )
+        .await
     }
 }
 
@@ -282,10 +328,10 @@ impl WorkItemLinkStore for SqliteWorkItemLinkStore {
         link_type: WorkItemLinkType,
     ) -> Result<WorkItemLink, DomainError> {
         let db = self.db.clone();
-        let thread = thread.clone();
-        let from = from.clone();
-        let to = to.clone();
-        tokio::task::spawn_blocking(move || {
+        let thread_clone = thread.clone();
+        let from_clone = from.clone();
+        let to_clone = to.clone();
+        let link = tokio::task::spawn_blocking(move || -> Result<WorkItemLink, DomainError> {
             let id = format!("wil-{}", uuid::Uuid::new_v4().simple());
             let now = Timestamp::now();
             db.with_conn(|conn| {
@@ -294,9 +340,9 @@ impl WorkItemLinkStore for SqliteWorkItemLinkStore {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         id,
-                        thread.as_str(),
-                        from.as_str(),
-                        to.as_str(),
+                        thread_clone.as_str(),
+                        from_clone.as_str(),
+                        to_clone.as_str(),
                         link_type_to_str(link_type),
                         ts_to_string(now),
                     ],
@@ -305,15 +351,17 @@ impl WorkItemLinkStore for SqliteWorkItemLinkStore {
             })?;
             Ok(WorkItemLink {
                 id,
-                thread_id: thread,
-                from_item_id: from,
-                to_item_id: to,
+                thread_id: thread_clone,
+                from_item_id: from_clone,
+                to_item_id: to_clone,
                 link_type,
                 created_at: now,
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        self.project_outgoing_links(from).await?;
+        Ok(link)
     }
 
     async fn list_outgoing(&self, item: &WorkItemId) -> Result<Vec<WorkItemLink>, DomainError> {
@@ -349,16 +397,39 @@ impl WorkItemLinkStore for SqliteWorkItemLinkStore {
     }
 
     async fn delete(&self, id: &str) -> Result<(), DomainError> {
+        // Capture the from_item_id BEFORE deletion so we can re-project.
         let db = self.db.clone();
-        let id = id.to_string();
+        let id_str = id.to_string();
+        let from_item: Option<WorkItemId> = tokio::task::spawn_blocking({
+            let db = db.clone();
+            let id = id_str.clone();
+            move || -> Result<Option<WorkItemId>, DomainError> {
+                db.with_conn(|conn| {
+                    let mut stmt =
+                        conn.prepare("SELECT from_item_id FROM work_item_links WHERE id = ?1")?;
+                    let mut rows = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
+                    Ok(rows.next().transpose()?.map(WorkItemId::from))
+                })
+            }
+        })
+        .await
+        .unwrap()?;
+        let id_str2 = id_str.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                conn.execute("DELETE FROM work_item_links WHERE id = ?1", params![id])?;
+                conn.execute(
+                    "DELETE FROM work_item_links WHERE id = ?1",
+                    params![id_str2],
+                )?;
                 Ok(())
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        if let Some(from) = from_item {
+            self.project_outgoing_links(&from).await?;
+        }
+        Ok(())
     }
 }
 
@@ -582,6 +653,84 @@ mod tests {
         let note = store.add_for_item(&item_id, "x", "u").await.unwrap();
         store.delete(&note.id).await.unwrap();
         assert!(store.list_for_item(&item_id).await.unwrap().is_empty());
+    }
+
+    /// When a page-ref store is attached, link create/delete mirrors
+    /// the work_item_link slice into `page_ref` and survives
+    /// alongside body-mention edges from the work-item store.
+    #[tokio::test]
+    async fn link_create_delete_projects_page_ref_slice() {
+        use crate::page_ref_store::SqlitePageRefStore;
+        let (db, tid, from_id) = fixture().await;
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        // Body-mention slice: from_id mentions a file; this should
+        // survive link mutations.
+        let items = SqliteWorkItemStore::new(db.clone()).with_page_refs(page_refs.clone());
+        let mut sender = items.get(&from_id).await.unwrap().unwrap();
+        sender.description = "see [[src/app.rs]]".into();
+        items.upsert(&sender).await.unwrap();
+
+        // Add a second item to link to.
+        let to = WorkItem {
+            id: WorkItemId::from("wi-2"),
+            thread_id: Some(tid.clone()),
+            parent_id: None,
+            kind: WorkItemKind::Task,
+            title: "y".into(),
+            description: String::new(),
+            acceptance_criteria: None,
+            status: WorkItemStatus::Ready,
+            priority: WorkItemPriority::Medium,
+            sort_index: 1,
+            created_by: WorkItemActorKind::User,
+            created_at: now(),
+            updated_at: now(),
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: Some(WorkItemAuthor::User),
+            category: None,
+            tags: None,
+        };
+        items.upsert(&to).await.unwrap();
+
+        let links = SqliteWorkItemLinkStore::new(db.clone()).with_page_refs(page_refs.clone());
+        let link = links
+            .create(&tid, &from_id, &to.id, WorkItemLinkType::Blocks)
+            .await
+            .unwrap();
+
+        // Backlinks for wi-2 include the link from wi-1.
+        let inbound_to = page_refs
+            .list_backlinks("work-item", to.id.as_str(), None)
+            .await
+            .unwrap();
+        assert!(inbound_to
+            .iter()
+            .any(|e| e.source_id == from_id.as_str() && e.ref_type == "work_item_link:blocks"));
+
+        // Body-mention slice still present.
+        let inbound_file = page_refs
+            .list_backlinks("file", "src/app.rs", None)
+            .await
+            .unwrap();
+        assert!(inbound_file.iter().any(|e| e.source_id == from_id.as_str()));
+
+        // Delete the link → only the link slice clears.
+        links.delete(&link.id).await.unwrap();
+        let inbound_to = page_refs
+            .list_backlinks("work-item", to.id.as_str(), None)
+            .await
+            .unwrap();
+        assert!(inbound_to.is_empty(), "link backlink should clear");
+        let inbound_file = page_refs
+            .list_backlinks("file", "src/app.rs", None)
+            .await
+            .unwrap();
+        assert!(
+            inbound_file.iter().any(|e| e.source_id == from_id.as_str()),
+            "body-mention slice must survive link deletion"
+        );
     }
 
     #[tokio::test]

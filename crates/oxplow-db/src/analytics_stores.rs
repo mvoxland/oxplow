@@ -11,6 +11,8 @@ use specta::Type;
 use oxplow_domain::{DomainError, StreamId, Timestamp};
 
 use crate::database::Database;
+use crate::page_ref_projections::finding_edges;
+use crate::page_ref_store::SqlitePageRefStore;
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
@@ -587,11 +589,20 @@ fn row_to_scan(row: &rusqlite::Row<'_>) -> rusqlite::Result<CodeQualityScan> {
 #[derive(Clone)]
 pub struct SqliteCodeQualityStore {
     db: Database,
+    page_refs: Option<SqlitePageRefStore>,
 }
 
 impl SqliteCodeQualityStore {
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            page_refs: None,
+        }
+    }
+
+    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
+        self.page_refs = Some(store);
+        self
     }
 
     pub async fn create_scan(&self, tool: &str, scope: &str) -> Result<i64, DomainError> {
@@ -671,7 +682,8 @@ impl SqliteCodeQualityStore {
         finding: CodeQualityFinding,
     ) -> Result<(), DomainError> {
         let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
+        let finding_clone = finding.clone();
+        let finding_id: i64 = tokio::task::spawn_blocking(move || -> Result<i64, DomainError> {
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT INTO code_quality_finding
@@ -679,19 +691,25 @@ impl SqliteCodeQualityStore {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         scan_id,
-                        finding.path,
-                        finding.start_line,
-                        finding.end_line,
-                        finding.kind,
-                        finding.metric_value,
-                        finding.extra_json,
+                        finding_clone.path,
+                        finding_clone.start_line,
+                        finding_clone.end_line,
+                        finding_clone.kind,
+                        finding_clone.metric_value,
+                        finding_clone.extra_json,
                     ],
                 )?;
-                Ok(())
+                Ok(conn.last_insert_rowid())
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        if let Some(refs) = &self.page_refs {
+            let edges = finding_edges(&finding_id.to_string(), &finding.path);
+            refs.replace_source("finding", &finding_id.to_string(), edges)
+                .await?;
+        }
+        Ok(())
     }
 
     pub async fn list_scans(&self, limit: usize) -> Result<Vec<CodeQualityScan>, DomainError> {

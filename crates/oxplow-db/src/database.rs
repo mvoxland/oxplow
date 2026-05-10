@@ -168,6 +168,7 @@ mod tests {
             "work_item_effort_file",
             "work_item_effort_turn",
             "wiki_page_thread_update",
+            "page_ref",
         ];
         let expected_absent = ["hook_event", "agent_status"];
         let mut stmt = conn

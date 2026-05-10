@@ -1,0 +1,548 @@
+//! Pure cross-kind reference extractor.
+//!
+//! Given a free-text body (wiki page, work-item description, commit
+//! message, work-note, …) extracts the references it makes to other
+//! pages: file paths, directory paths, wiki slugs, work-item ids
+//! (`wi-…`), finding ids (`finding:…`), and git commit shas.
+//!
+//! Lives in `oxplow-domain` because it has zero IO and no async — it
+//! takes a `&str` and returns plain data. Every writer that mirrors
+//! a body's outbound refs into the `page_ref` table calls this.
+//!
+//! Two ref shapes are recognised:
+//!
+//! 1. **`[[wikilinks]]`** — preferred form. The interior matches:
+//!    - `dir:<path>` → directory ref
+//!    - `git:<sha>` → commit ref (also `[[<sha>]]` if 7-40 hex)
+//!    - `finding:<id>` → finding ref
+//!    - `wi-<id>` → work-item ref
+//!    - `path/with/slash.ext[@version][:line]` → file ref
+//!    - `bare-slug` (kebab-case, no slash, no extension) → wiki slug
+//!
+//!    Custom display text after `|` is stripped (`[[a/b.ts|label]]`).
+//!
+//! 2. **Inline mentions** — fallback for free-text:
+//!    - bare `wi-<uuid>` work-item ids
+//!    - bare `finding:<id>` (with the prefix to disambiguate from words)
+//!    - bare file-shaped paths (slash + 1–6 char extension)
+//!
+//! URLs are stripped before the inline scan so
+//! `https://example.com/path.json` doesn't masquerade as a file ref.
+
+use std::collections::BTreeSet;
+
+/// Tree version a file ref is pinned to. `Disk` = working tree (the
+/// default, also `@disk` / `@local` literal). `Ref(s)` = a git ref
+/// (sha / branch / tag / `HEAD`) authored as `@<spec>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefVersion {
+    Disk,
+    Ref(String),
+}
+
+/// A file reference with optional version pin and line anchor, as
+/// authored in the source body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRefDetail {
+    pub path: String,
+    pub version: RefVersion,
+    pub line: Option<u32>,
+}
+
+/// All cross-kind references found in a body. Each list is
+/// deduplicated; file refs preserve insertion order in
+/// `files_detail` so the renderer can show them in author order
+/// while `files` is the version-stripped path-only set used for
+/// backlinks lookup.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExtractedRefs {
+    pub files: Vec<String>,
+    pub files_detail: Vec<FileRefDetail>,
+    pub dirs: Vec<String>,
+    pub wikis: Vec<String>,
+    pub work_items: Vec<String>,
+    pub findings: Vec<String>,
+    pub commits: Vec<String>,
+}
+
+/// Parse `body` into [`ExtractedRefs`]. Pure; never errors.
+pub fn extract(body: &str) -> ExtractedRefs {
+    if body.is_empty() {
+        return ExtractedRefs::default();
+    }
+    let mut files: BTreeSet<String> = BTreeSet::new();
+    let mut dirs: BTreeSet<String> = BTreeSet::new();
+    let mut wikis: BTreeSet<String> = BTreeSet::new();
+    let mut work_items: BTreeSet<String> = BTreeSet::new();
+    let mut findings: BTreeSet<String> = BTreeSet::new();
+    let mut commits: BTreeSet<String> = BTreeSet::new();
+    let mut files_detail: Vec<FileRefDetail> = Vec::new();
+    let mut files_seen: BTreeSet<(String, String, Option<u32>)> = BTreeSet::new();
+
+    for cap in find_wikilinks(body) {
+        let interior = cap.split('|').next().unwrap_or(cap).trim();
+        if interior.is_empty() {
+            continue;
+        }
+        // dir:<path>
+        if let Some(rest) = strip_prefix_ci(interior, "dir:") {
+            if let Some(d) = clean_dir(rest) {
+                dirs.insert(d);
+            }
+            continue;
+        }
+        // git:<sha>
+        if let Some(rest) = strip_prefix_ci(interior, "git:") {
+            if let Some(sha) = clean_commit(rest) {
+                commits.insert(sha);
+            }
+            continue;
+        }
+        // finding:<id>
+        if let Some(rest) = strip_prefix_ci(interior, "finding:") {
+            if let Some(id) = clean_finding(rest) {
+                findings.insert(id);
+            }
+            continue;
+        }
+        // wi-<id>
+        if looks_like_work_item(interior) {
+            work_items.insert(interior.to_string());
+            continue;
+        }
+        // path/file.ext[@version][:line]
+        if let Some(detail) = parse_file_ref(interior) {
+            if files.insert(detail.path.clone()) {
+                let key = (
+                    detail.path.clone(),
+                    version_key(&detail.version),
+                    detail.line,
+                );
+                if files_seen.insert(key) {
+                    files_detail.push(detail);
+                }
+            }
+            continue;
+        }
+        // bare wikilink slug or commit sha
+        let bare = interior.split(':').next().unwrap_or(interior);
+        if !bare.is_empty() && looks_like_commit_sha(bare) {
+            commits.insert(bare.to_string());
+            continue;
+        }
+        if looks_like_slug(bare) {
+            wikis.insert(bare.to_string());
+        }
+    }
+
+    // Inline mentions outside [[…]]. Strip URLs first so
+    // path-shaped URL tails don't masquerade as file refs.
+    let stripped = strip_urls(body);
+    for path in find_inline_paths(&stripped) {
+        if files.insert(path.clone()) {
+            let key = (path.clone(), "disk".to_string(), None);
+            if files_seen.insert(key) {
+                files_detail.push(FileRefDetail {
+                    path,
+                    version: RefVersion::Disk,
+                    line: None,
+                });
+            }
+        }
+    }
+    for wi in find_inline_work_items(&stripped) {
+        work_items.insert(wi);
+    }
+    for f in find_inline_findings(&stripped) {
+        findings.insert(f);
+    }
+
+    ExtractedRefs {
+        files: files.into_iter().collect(),
+        files_detail,
+        dirs: dirs.into_iter().collect(),
+        wikis: wikis.into_iter().collect(),
+        work_items: work_items.into_iter().collect(),
+        findings: findings.into_iter().collect(),
+        commits: commits.into_iter().collect(),
+    }
+}
+
+fn version_key(v: &RefVersion) -> String {
+    match v {
+        RefVersion::Disk => "disk".to_string(),
+        RefVersion::Ref(r) => format!("ref:{r}"),
+    }
+}
+
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    if s.len() < prefix.len() {
+        return None;
+    }
+    if s[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        Some(&s[prefix.len()..])
+    } else {
+        None
+    }
+}
+
+fn parse_file_ref(interior: &str) -> Option<FileRefDetail> {
+    let trimmed = interior.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (path_and_line, version) = match trimmed.split_once('@') {
+        Some((path_part, version_part)) => {
+            let (v, line_part) = match version_part.split_once(':') {
+                Some((v, l)) => (v, Some(l)),
+                None => (version_part, None),
+            };
+            let v = v.trim();
+            let parsed = if v.eq_ignore_ascii_case("disk") || v.eq_ignore_ascii_case("local") {
+                RefVersion::Disk
+            } else if !v.is_empty() {
+                RefVersion::Ref(v.to_string())
+            } else {
+                RefVersion::Disk
+            };
+            let pl = match line_part {
+                Some(l) => format!("{path_part}:{l}"),
+                None => path_part.to_string(),
+            };
+            (pl, parsed)
+        }
+        None => (trimmed.to_string(), RefVersion::Disk),
+    };
+    let (bare, line) = match path_and_line.rsplit_once(':') {
+        Some((p, l)) if !l.is_empty() && l.chars().all(|c| c.is_ascii_digit()) => {
+            (p.to_string(), l.parse::<u32>().ok())
+        }
+        _ => (path_and_line.clone(), None),
+    };
+    if !looks_like_file(&bare) {
+        return None;
+    }
+    Some(FileRefDetail {
+        path: bare,
+        version,
+        line,
+    })
+}
+
+fn clean_dir(raw: &str) -> Option<String> {
+    let bare = raw.trim().trim_end_matches('/');
+    if bare.is_empty() || bare.starts_with('/') || bare.contains("//") || bare.contains('\n') {
+        return None;
+    }
+    Some(bare.to_string())
+}
+
+fn clean_commit(raw: &str) -> Option<String> {
+    let bare = raw.trim();
+    if looks_like_commit_sha(bare) {
+        Some(bare.to_string())
+    } else {
+        None
+    }
+}
+
+fn clean_finding(raw: &str) -> Option<String> {
+    let bare = raw.trim();
+    if bare.is_empty() || bare.contains(' ') || bare.contains('\n') {
+        return None;
+    }
+    Some(bare.to_string())
+}
+
+fn looks_like_file(s: &str) -> bool {
+    if !s.contains('/') {
+        return false;
+    }
+    if let Some(dot) = s.rfind('.') {
+        let ext = &s[dot + 1..];
+        if (1..=6).contains(&ext.len()) && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return true;
+        }
+    }
+    false
+}
+
+fn looks_like_slug(s: &str) -> bool {
+    if s.is_empty() || s.len() > 80 {
+        return false;
+    }
+    if s.contains('/') || s.contains('.') || s.contains(' ') {
+        return false;
+    }
+    if matches!(s.len(), 7..=40) && s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return false;
+    }
+    if looks_like_work_item(s) {
+        return false;
+    }
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn looks_like_commit_sha(s: &str) -> bool {
+    matches!(s.len(), 7..=40) && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn looks_like_work_item(s: &str) -> bool {
+    s.len() > 3
+        && s.starts_with("wi-")
+        && s[3..]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn find_wikilinks(body: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
+            let start = i + 2;
+            let mut j = start;
+            while j + 1 < bytes.len() {
+                if bytes[j] == b']' && bytes[j + 1] == b']' {
+                    if let Ok(interior) = std::str::from_utf8(&bytes[start..j]) {
+                        out.push(interior);
+                    }
+                    i = j + 2;
+                    break;
+                }
+                j += 1;
+            }
+            if j + 1 >= bytes.len() {
+                break;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+fn strip_urls(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 3 < bytes.len() && &bytes[i..i + 3] == b"://" {
+            // Walk back to start of scheme word.
+            let mut start = i;
+            while start > 0 {
+                let c = bytes[start - 1];
+                if c.is_ascii_alphanumeric() || c == b'+' || c == b'-' || c == b'.' {
+                    start -= 1;
+                } else {
+                    break;
+                }
+            }
+            // Truncate already-pushed scheme chars.
+            let pushed_scheme = i - start;
+            for _ in 0..pushed_scheme {
+                out.pop();
+            }
+            // Walk forward to whitespace or terminator.
+            let mut end = i + 3;
+            while end < bytes.len() {
+                let c = bytes[end];
+                if c.is_ascii_whitespace() || c == b')' || c == b']' || c == b'"' || c == b'<' {
+                    break;
+                }
+                end += 1;
+            }
+            out.push(' ');
+            i = end;
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn find_inline_paths(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        let path_char =
+            c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.' || c == b'/';
+        if !path_char {
+            i += 1;
+            continue;
+        }
+        // Don't extract if preceded by alnum or `/` (already a URL tail or join).
+        if i > 0 {
+            let p = bytes[i - 1];
+            if p.is_ascii_alphanumeric() || p == b'/' {
+                i += 1;
+                continue;
+            }
+        }
+        let start = i;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.' || c == b'/' {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        let candidate = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
+        let trimmed = candidate.trim_end_matches('.');
+        if looks_like_file(trimmed) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
+}
+
+fn find_inline_work_items(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        if (i == 0 || !is_id_boundary_char(bytes[i - 1]))
+            && bytes[i] == b'w'
+            && bytes[i + 1] == b'i'
+            && bytes[i + 2] == b'-'
+        {
+            let start = i;
+            i += 3;
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c.is_ascii_alphanumeric() || c == b'-' {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            if i - start > 3 {
+                if let Ok(s) = std::str::from_utf8(&bytes[start..i]) {
+                    out.push(s.to_string());
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+fn find_inline_findings(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let prefix = b"finding:";
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i + prefix.len() < bytes.len() {
+        if (i == 0 || !is_id_boundary_char(bytes[i - 1]))
+            && bytes[i..i + prefix.len()].eq_ignore_ascii_case(prefix)
+        {
+            let start = i + prefix.len();
+            let mut end = start;
+            while end < bytes.len() {
+                let c = bytes[end];
+                if c.is_ascii_alphanumeric() || c == b'-' || c == b'_' {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            if end > start {
+                if let Ok(s) = std::str::from_utf8(&bytes[start..end]) {
+                    out.push(s.to_string());
+                }
+                i = end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+fn is_id_boundary_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_body() {
+        assert_eq!(extract(""), ExtractedRefs::default());
+    }
+
+    #[test]
+    fn wikilink_file_with_version_and_line() {
+        let r = extract("see [[src/app.rs@HEAD:42]] for context");
+        assert_eq!(r.files, vec!["src/app.rs"]);
+        assert_eq!(r.files_detail.len(), 1);
+        assert_eq!(r.files_detail[0].path, "src/app.rs");
+        assert_eq!(r.files_detail[0].version, RefVersion::Ref("HEAD".into()));
+        assert_eq!(r.files_detail[0].line, Some(42));
+    }
+
+    #[test]
+    fn wikilink_dir_and_slug_and_wi_and_finding_and_commit() {
+        let body = "[[dir:src/components]] and [[architecture]] and [[wi-019abc-def]] and [[finding:fnd-1]] and [[git:abcdef0]]";
+        let r = extract(body);
+        assert_eq!(r.dirs, vec!["src/components"]);
+        assert_eq!(r.wikis, vec!["architecture"]);
+        assert_eq!(r.work_items, vec!["wi-019abc-def"]);
+        assert_eq!(r.findings, vec!["fnd-1"]);
+        assert_eq!(r.commits, vec!["abcdef0"]);
+    }
+
+    #[test]
+    fn bare_hex_in_wikilink_is_commit() {
+        let r = extract("[[abc1234567]]");
+        assert_eq!(r.commits, vec!["abc1234567"]);
+        assert!(r.wikis.is_empty());
+    }
+
+    #[test]
+    fn inline_path_picked_up() {
+        let r = extract("touched src/lib.rs in this commit");
+        assert_eq!(r.files, vec!["src/lib.rs"]);
+    }
+
+    #[test]
+    fn url_is_not_a_file_ref() {
+        let r = extract("see https://example.com/foo.json");
+        assert!(r.files.is_empty(), "got {:?}", r.files);
+    }
+
+    #[test]
+    fn inline_work_item_and_finding_mention() {
+        let r = extract("blocked by wi-019abc-9999 see finding:fnd-2");
+        assert_eq!(r.work_items, vec!["wi-019abc-9999"]);
+        assert_eq!(r.findings, vec!["fnd-2"]);
+    }
+
+    #[test]
+    fn dedup_across_wikilink_and_inline() {
+        let r = extract("see [[src/lib.rs]] and src/lib.rs again");
+        assert_eq!(r.files, vec!["src/lib.rs"]);
+        assert_eq!(r.files_detail.len(), 1);
+    }
+
+    #[test]
+    fn pipe_alias_stripped() {
+        let r = extract("[[src/app.rs|application entry]]");
+        assert_eq!(r.files, vec!["src/app.rs"]);
+    }
+
+    #[test]
+    fn slug_does_not_capture_wi_form() {
+        let r = extract("[[wi-019abc-1]]");
+        assert!(r.wikis.is_empty());
+        assert_eq!(r.work_items, vec!["wi-019abc-1"]);
+    }
+}

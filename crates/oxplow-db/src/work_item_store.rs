@@ -8,15 +8,31 @@ use oxplow_domain::{
 };
 
 use crate::database::Database;
+use crate::page_ref_projections::{work_item_body_ref_types, work_item_edges, KIND_WORK_ITEM};
+use crate::page_ref_store::SqlitePageRefStore;
 
 #[derive(Clone)]
 pub struct SqliteWorkItemStore {
     db: Database,
+    page_refs: Option<SqlitePageRefStore>,
 }
 
 impl SqliteWorkItemStore {
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            page_refs: None,
+        }
+    }
+
+    /// Attach a page-ref store. When set, every successful upsert
+    /// also projects the work item's body refs into `page_ref` and
+    /// soft-delete clears them. Builder so existing call sites that
+    /// don't care (tests, the work_item_service test fixtures) keep
+    /// working with `::new`.
+    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
+        self.page_refs = Some(store);
+        self
     }
 }
 
@@ -287,6 +303,7 @@ impl WorkItemStore for SqliteWorkItemStore {
     async fn upsert(&self, item: &WorkItem) -> Result<(), DomainError> {
         let db = self.db.clone();
         let item = item.clone();
+        let edges_item = item.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
@@ -336,24 +353,45 @@ impl WorkItemStore for SqliteWorkItemStore {
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        if let Some(refs) = &self.page_refs {
+            let edges = work_item_edges(&edges_item);
+            refs.replace_source_for_ref_types(
+                KIND_WORK_ITEM,
+                edges_item.id.as_str(),
+                work_item_body_ref_types(),
+                edges,
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     async fn soft_delete(&self, id: &WorkItemId) -> Result<(), DomainError> {
         let db = self.db.clone();
-        let id = id.clone();
+        let id_for_sql = id.clone();
         let now = ts_to_string(Timestamp::now());
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
                     "UPDATE work_items SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
-                    params![id.as_str(), now],
+                    params![id_for_sql.as_str(), now],
                 )?;
                 Ok(())
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        if let Some(refs) = &self.page_refs {
+            refs.replace_source_for_ref_types(
+                KIND_WORK_ITEM,
+                id.as_str(),
+                work_item_body_ref_types(),
+                vec![],
+            )
+            .await?;
+        }
+        Ok(())
     }
 }
 
@@ -496,5 +534,74 @@ mod tests {
         let got = store.get(&it.id).await.unwrap().unwrap();
         assert_eq!(got.title, "renamed");
         assert_eq!(got.status, WorkItemStatus::InProgress);
+    }
+
+    /// When a page-ref store is attached, every upsert mirrors the
+    /// work item's body refs into `page_ref` and a follow-up upsert
+    /// with new body text replaces the slice cleanly.
+    #[tokio::test]
+    async fn upsert_with_page_refs_projects_body_mentions() {
+        use crate::page_ref_store::SqlitePageRefStore;
+        let db = Database::in_memory();
+        // Seed minimal stream + thread so the FK is satisfied.
+        let streams = SqliteStreamStore::new(db.clone());
+        let threads = SqliteThreadStore::new(db.clone());
+        let s = Stream {
+            id: StreamId::from("s-1"),
+            kind: StreamKind::Primary,
+            title: "oxplow".into(),
+            branch: "main".into(),
+            branch_ref: "refs/heads/main".into(),
+            branch_source: "main".into(),
+            worktree_path: "/repo".into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: ts(),
+            updated_at: ts(),
+            archived_at: None,
+        };
+        streams.upsert(&s).await.unwrap();
+        let t = Thread {
+            id: ThreadId::from("b-1"),
+            stream_id: s.id.clone(),
+            title: "x".into(),
+            status: ThreadStatus::Active,
+            sort_index: 0,
+            pane_target: "working".into(),
+            resume_session_id: String::new(),
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: ts(),
+            updated_at: ts(),
+            archived_at: None,
+        };
+        threads.upsert(&t).await.unwrap();
+
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        let store = SqliteWorkItemStore::new(db.clone()).with_page_refs(page_refs.clone());
+
+        let mut it = item("wi-7", Some(t.id.clone()));
+        it.description = "see [[src/app.rs]] and blocks wi-019zzz-2".into();
+        store.upsert(&it).await.unwrap();
+
+        let inbound = page_refs
+            .list_backlinks("file", "src/app.rs", None)
+            .await
+            .unwrap();
+        assert!(inbound.iter().any(|e| e.source_id == "wi-7"));
+
+        // Change the body — the file ref is removed.
+        it.description = "no refs anymore".into();
+        store.upsert(&it).await.unwrap();
+        let inbound = page_refs
+            .list_backlinks("file", "src/app.rs", None)
+            .await
+            .unwrap();
+        assert!(inbound.is_empty(), "expected no backlinks; got {inbound:?}");
     }
 }

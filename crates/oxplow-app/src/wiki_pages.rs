@@ -22,7 +22,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use oxplow_db::{SqliteWikiPageStore, WikiPage};
+use oxplow_db::page_ref_projections::{wiki_edges, KIND_WIKI};
+use oxplow_db::{SqlitePageRefStore, SqliteWikiPageStore, WikiPage};
 use oxplow_domain::{DomainError, Timestamp};
 
 /// Tree version a wikilink references. Mirrors the cross-cutting
@@ -216,8 +217,25 @@ pub async fn sync_from_disk(
     store: &SqliteWikiPageStore,
     slug: &str,
 ) -> Result<(), DomainError> {
+    sync_from_disk_with_refs(project_dir, store, None, slug).await
+}
+
+/// `sync_from_disk` plus a unified `page_ref` projection: when
+/// `page_refs` is `Some`, the wiki body's full ref set (files, dirs,
+/// related slugs, work-items, findings, commits) is mirrored as
+/// `(wiki:<slug>) -> (target)` edges. The wiki source is single-
+/// owner, so we use the full `replace_source` (clears + inserts).
+pub async fn sync_from_disk_with_refs(
+    project_dir: &Path,
+    store: &SqliteWikiPageStore,
+    page_refs: Option<&SqlitePageRefStore>,
+    slug: &str,
+) -> Result<(), DomainError> {
     let file_path = wiki_pages_dir(project_dir).join(format!("{slug}.md"));
     if !file_path.exists() {
+        if let Some(refs) = page_refs {
+            refs.replace_source(KIND_WIKI, slug, vec![]).await?;
+        }
         return store.delete(slug).await;
     }
     let body = fs::read_to_string(&file_path)
@@ -241,7 +259,12 @@ pub async fn sync_from_disk(
         created_at,
         updated_at: now,
     };
-    store.upsert(&note).await
+    store.upsert(&note).await?;
+    if let Some(page_refs) = page_refs {
+        let edges = wiki_edges(slug, &body);
+        page_refs.replace_source(KIND_WIKI, slug, edges).await?;
+    }
+    Ok(())
 }
 
 /// Sync every `.md` file in the notes dir + prune rows for deleted
@@ -249,6 +272,14 @@ pub async fn sync_from_disk(
 pub async fn scan_and_sync_all(
     project_dir: &Path,
     store: &SqliteWikiPageStore,
+) -> Result<(), DomainError> {
+    scan_and_sync_all_with_refs(project_dir, store, None).await
+}
+
+pub async fn scan_and_sync_all_with_refs(
+    project_dir: &Path,
+    store: &SqliteWikiPageStore,
+    page_refs: Option<&SqlitePageRefStore>,
 ) -> Result<(), DomainError> {
     let dir = wiki_pages_dir(project_dir);
     fs::create_dir_all(&dir).ok();
@@ -265,11 +296,14 @@ pub async fn scan_and_sync_all(
         }
     }
     for slug in &on_disk {
-        sync_from_disk(project_dir, store, slug).await?;
+        sync_from_disk_with_refs(project_dir, store, page_refs, slug).await?;
     }
     let known = store.list().await?;
     for note in known {
         if !on_disk.contains(&note.slug) {
+            if let Some(refs) = page_refs {
+                refs.replace_source(KIND_WIKI, &note.slug, vec![]).await?;
+            }
             store.delete(&note.slug).await?;
         }
     }
@@ -878,5 +912,107 @@ mod tests {
         // outside the brackets must not break the match.
         let v = find_wikilinks("café [[src/foo.rs]] résumé");
         assert_eq!(v, vec!["src/foo.rs"]);
+    }
+
+    // ---- Unified page_ref projection ----
+
+    /// End-to-end: write a wiki body that mentions `wi-1` and a file,
+    /// run the disk sync with the page-ref store attached, and verify
+    /// that `list_backlinks(work-item, wi-1)` and
+    /// `list_backlinks(file, …)` both return the wiki page as a
+    /// source. This is the user-visible promise: every page kind that
+    /// gets mentioned in a wiki body shows the wiki in its backlinks.
+    #[tokio::test]
+    async fn wiki_sync_projects_unified_backlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        std::fs::create_dir_all(wiki_pages_dir(project)).unwrap();
+        std::fs::write(
+            wiki_pages_dir(project).join("intro.md"),
+            "# Intro\nblocks [[wi-019abc-1]] and touches [[src/app.rs]] and finding:fnd-1\n",
+        )
+        .unwrap();
+
+        let db = oxplow_db::Database::in_memory();
+        let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
+        let page_refs = oxplow_db::SqlitePageRefStore::new(db);
+
+        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
+            .await
+            .unwrap();
+
+        // wi-1 backlink picks up the wiki source.
+        let inbound_wi = page_refs
+            .list_backlinks("work-item", "wi-019abc-1", None)
+            .await
+            .unwrap();
+        assert_eq!(inbound_wi.len(), 1);
+        assert_eq!(inbound_wi[0].source_kind, "wiki");
+        assert_eq!(inbound_wi[0].source_id, "intro");
+
+        // file backlink also points at the wiki.
+        let inbound_file = page_refs
+            .list_backlinks("file", "src/app.rs", None)
+            .await
+            .unwrap();
+        assert!(
+            inbound_file.iter().any(|e| e.source_id == "intro"),
+            "expected wiki:intro in file backlinks; got {inbound_file:?}"
+        );
+
+        // finding backlink works too.
+        let inbound_finding = page_refs
+            .list_backlinks("finding", "fnd-1", None)
+            .await
+            .unwrap();
+        assert!(inbound_finding.iter().any(|e| e.source_id == "intro"));
+
+        // Outbound view of the wiki shows the same edges.
+        let outbound = page_refs
+            .list_outbound("wiki", "intro", None)
+            .await
+            .unwrap();
+        let targets: std::collections::BTreeSet<_> = outbound
+            .iter()
+            .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
+            .collect();
+        assert!(targets.contains(&("work-item", "wi-019abc-1")));
+        assert!(targets.contains(&("file", "src/app.rs")));
+        assert!(targets.contains(&("finding", "fnd-1")));
+    }
+
+    /// When a wiki body changes to remove a ref, the next sync must
+    /// drop the corresponding backlink edge.
+    #[tokio::test]
+    async fn wiki_sync_replaces_old_edges() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        std::fs::create_dir_all(wiki_pages_dir(project)).unwrap();
+        let body_path = wiki_pages_dir(project).join("intro.md");
+        std::fs::write(&body_path, "[[wi-019abc-1]] [[wi-019abc-2]]").unwrap();
+
+        let db = oxplow_db::Database::in_memory();
+        let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
+        let page_refs = oxplow_db::SqlitePageRefStore::new(db);
+
+        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
+            .await
+            .unwrap();
+        // Now drop wi-2 from the body.
+        std::fs::write(&body_path, "[[wi-019abc-1]] only").unwrap();
+        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
+            .await
+            .unwrap();
+
+        let inbound_2 = page_refs
+            .list_backlinks("work-item", "wi-019abc-2", None)
+            .await
+            .unwrap();
+        assert!(inbound_2.is_empty(), "expected no backlinks after removal");
+        let inbound_1 = page_refs
+            .list_backlinks("work-item", "wi-019abc-1", None)
+            .await
+            .unwrap();
+        assert_eq!(inbound_1.len(), 1);
     }
 }

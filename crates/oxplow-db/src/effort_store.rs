@@ -18,6 +18,8 @@ use specta::Type;
 use oxplow_domain::{DomainError, EffortId, ThreadId, Timestamp, WorkItemId};
 
 use crate::database::Database;
+use crate::page_ref_projections::{effort_ref_types, effort_touched_file_edges, KIND_WORK_ITEM};
+use crate::page_ref_store::SqlitePageRefStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -139,11 +141,75 @@ pub trait WorkItemEffortStore: Send + Sync {
 #[derive(Clone)]
 pub struct SqliteWorkItemEffortStore {
     db: Database,
+    page_refs: Option<SqlitePageRefStore>,
 }
 
 impl SqliteWorkItemEffortStore {
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            page_refs: None,
+        }
+    }
+
+    pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
+        self.page_refs = Some(store);
+        self
+    }
+
+    /// Re-emit the `touched_file` slice for `work_item_id` from the
+    /// union of all efforts attached to it. We project per work-item
+    /// rather than per effort so removing an effort cleans up its
+    /// orphaned files automatically. Only the `touched_file` slice
+    /// is replaced; body-mention and link slices survive.
+    async fn project_touched_files(&self, work_item_id: &WorkItemId) -> Result<(), DomainError> {
+        let Some(refs) = &self.page_refs else {
+            return Ok(());
+        };
+        let db = self.db.clone();
+        let wi = work_item_id.clone();
+        let paths: Vec<String> = tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT f.path FROM work_item_effort_file f
+                       JOIN work_item_effort e ON e.id = f.effort_id
+                      WHERE e.work_item_id = ?1
+                      ORDER BY f.path",
+                )?;
+                let rows = stmt.query_map(params![wi.as_str()], |r| r.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()?;
+        let edges = effort_touched_file_edges(work_item_id.as_str(), &paths);
+        refs.replace_source_for_ref_types(
+            KIND_WORK_ITEM,
+            work_item_id.as_str(),
+            effort_ref_types(),
+            edges,
+        )
+        .await
+    }
+
+    /// Look up the work_item_id for an effort id (small helper used
+    /// by `record_file` so we know which work-item to re-project).
+    async fn work_item_for_effort(
+        &self,
+        effort_id: &EffortId,
+    ) -> Result<Option<WorkItemId>, DomainError> {
+        let db = self.db.clone();
+        let id = effort_id.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt =
+                    conn.prepare("SELECT work_item_id FROM work_item_effort WHERE id = ?1")?;
+                let mut rows = stmt.query_map(params![id.as_str()], |r| r.get::<_, String>(0))?;
+                Ok(rows.next().transpose()?.map(WorkItemId::from))
+            })
+        })
+        .await
+        .unwrap()
     }
 }
 
@@ -276,21 +342,27 @@ impl WorkItemEffortStore for SqliteWorkItemEffortStore {
         change: EffortFileChange,
     ) -> Result<(), DomainError> {
         let db = self.db.clone();
-        let id = id.clone();
-        let path = path.to_string();
+        let id_clone = id.clone();
+        let path_clone = path.to_string();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT OR REPLACE INTO work_item_effort_file
                        (effort_id, path, change_kind)
                      VALUES (?1, ?2, ?3)",
-                    params![id.as_str(), path, change_to_str(change)],
+                    params![id_clone.as_str(), path_clone, change_to_str(change)],
                 )?;
                 Ok(())
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        if self.page_refs.is_some() {
+            if let Some(wi) = self.work_item_for_effort(id).await? {
+                self.project_touched_files(&wi).await?;
+            }
+        }
+        Ok(())
     }
 
     async fn list_ending_at_snapshots(

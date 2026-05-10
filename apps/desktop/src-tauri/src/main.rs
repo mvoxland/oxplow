@@ -130,6 +130,7 @@ fn main() {
     oxplow_app::wiki_pages::migrate_legacy_notes_dir(&state.layout.project_dir);
     {
         let wiki_store = state.wiki_page_store.clone();
+        let wiki_page_refs = state.page_ref_store.clone();
         let wiki_dir = state.layout.project_dir.clone();
         let wiki_events = event_bus.clone();
         let bts = state.background_tasks.clone();
@@ -143,6 +144,7 @@ fn main() {
             if let Some(watcher) = oxplow_app::wiki_pages_watch::WikiPagesWatcher::spawn(
                 wiki_dir,
                 wiki_store,
+                wiki_page_refs,
                 wiki_events,
             )
             .await
