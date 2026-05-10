@@ -385,7 +385,10 @@ parser in `crates/oxplow-app/src/wiki_pages.rs`:
 MCP tools (`crates/oxplow-mcp/src/lib.rs`) are metadata-only —
 `list_wiki_pages`, `get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages`
 (title), `search_wiki_page_bodies` (content + ~200-char snippet),
-`find_wiki_pages_for_file` (backlinks via `captured_refs`), `delete_wiki_page`.
+`delete_wiki_page`. (Cross-kind file/wiki/work-item/finding/commit
+backlinks now go through the unified `list_backlinks` MCP tool —
+see the `page_ref` section below — so there's no separate
+`find_wiki_pages_for_file` tool.)
 There is no `create_note` or `update_note`: the agent Writes the
 file, then optionally calls `resync_wiki_page` to pin freshness
 immediately (otherwise the watcher catches up within a ~200ms

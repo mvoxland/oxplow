@@ -508,9 +508,10 @@ a wiki body's `wikilink`.
 per-project wiki (`wiki_page` table + `.oxplow/wiki/*.md` files — see
 `data-model.md`). Tools are metadata-only: `list_wiki_pages`,
 `get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages` (title),
-`search_wiki_page_bodies` (content), `find_wiki_pages_for_file` (wiki-only
-backlinks; for cross-kind backlinks use `list_backlinks` below),
-`delete_wiki_page`. **There is intentionally no create/update tool** —
+`search_wiki_page_bodies` (content), `delete_wiki_page`. The wiki-only
+`find_wiki_pages_for_file` was removed in favour of `list_backlinks`
+(below) — every cross-kind backlinks question goes through one tool
+now. **There is intentionally no create/update tool** —
 the agent writes bodies directly with its Write/Edit tools on
 `.oxplow/wiki/<slug>.md` (far cheaper than round-tripping full
 bodies through MCP args). The notes watcher re-syncs metadata + body

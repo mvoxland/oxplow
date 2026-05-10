@@ -1,6 +1,6 @@
 ---
 name: oxplow-wiki-capture
-description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_wiki_pages, search_wiki_pages, search_wiki_page_bodies, find_wiki_pages_for_file, get_wiki_page_metadata, resync_wiki_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_wiki_pages, search_wiki_pages, search_wiki_page_bodies, list_backlinks, get_wiki_page_metadata, resync_wiki_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
 # Wiki pages — exploratory capture
@@ -55,8 +55,11 @@ Before writing, search for an existing topic note. Don't fragment.
 1. `mcp__oxplow__search_wiki_pages` — title substring (cheap, scan first).
 2. `mcp__oxplow__search_wiki_page_bodies` — content substring; catches
    notes that discuss the topic but aren't named after it.
-3. `mcp__oxplow__find_wiki_pages_for_file` — for each non-trivial file you
-   read this turn, check whether an existing note already references it.
+3. `mcp__oxplow__list_backlinks` with `kind: "file"`, `id: <path>` —
+   for each non-trivial file you read this turn, check whether an
+   existing wiki page (or any other source) already references it.
+   Filter the result to `source_kind == "wiki"` if you only want
+   wiki backlinks.
 
 If a clearly-relevant note exists, **append a new dated section** to
 it. Only create a new note if no existing note fits.

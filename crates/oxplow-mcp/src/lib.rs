@@ -246,13 +246,6 @@ pub struct ForkThreadParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct FindNotesForFileParams {
-    pub path: String,
-    #[serde(default = "default_limit")]
-    pub limit: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FindNotesForNoteParams {
     pub slug: String,
     #[serde(default = "default_limit")]
@@ -1435,26 +1428,6 @@ impl OxplowMcp {
             .await
             .map_err(|e| internal(e.to_string()))?;
         json_result(&child)
-    }
-
-    #[tool(
-        description = "Wiki pages that reference the given file path in their parsed file_refs \
-                       (from [[wikilinks]] or inline path mentions). Use this for backlinks: \
-                       \"which notes discuss src/foo.ts?\""
-    )]
-    async fn find_wiki_pages_for_file(
-        &self,
-        params: Parameters<FindNotesForFileParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let p = params.0;
-        let mut hits =
-            oxplow_app::wiki_pages::backlinks_for_file(&self.services.wiki_page_store, &p.path)
-                .await
-                .map_err(internal)?;
-        if (p.limit as usize) > 0 && hits.len() > p.limit as usize {
-            hits.truncate(p.limit as usize);
-        }
-        json_result(&hits)
     }
 
     #[tool(
