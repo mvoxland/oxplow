@@ -33,7 +33,7 @@ export interface PageNavBarProps {
   };
   /** Page title rendered to the right of the back/forward arrows. */
   title?: ReactNode;
-  /** Small kind chip rendered after the title ("note", "file", …). */
+  /** Small kind chip rendered after the title ("wiki", "file", …). */
   kind?: string;
   /** Optional bookmark affordance — when omitted, no star renders.
    *  The button always opens a popover that lets the user toggle this

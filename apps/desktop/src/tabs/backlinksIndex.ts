@@ -158,7 +158,7 @@ export function computeBacklinks(target: TabRef, ctx: BacklinkContext): Backlink
 
       for (const note of ctx.notes) {
         if (noteMentionsPath(note, path)) {
-          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
+          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "wiki" }, target.id);
         }
       }
       for (const item of ctx.workItems) {
@@ -187,7 +187,7 @@ export function computeBacklinks(target: TabRef, ctx: BacklinkContext): Backlink
 
       for (const note of ctx.notes) {
         if (noteMentionsId(note, itemId)) {
-          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
+          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "wiki" }, target.id);
         }
       }
       for (const f of ctx.findings) {
@@ -216,13 +216,13 @@ export function computeBacklinks(target: TabRef, ctx: BacklinkContext): Backlink
       }
       for (const note of ctx.notes) {
         if (noteMentionsPath(note, f.path) || noteMentionsId(note, `finding:${f.id}`)) {
-          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "note" }, target.id);
+          pushUnique(out, seen, { ref: wikiPageRef(note.slug), label: note.title || note.slug, subtitle: "wiki" }, target.id);
         }
       }
       return out;
     }
 
-    case "note": {
+    case "wiki": {
       const slug = (target.payload as { slug?: string } | null)?.slug;
       if (!slug) return [];
       const note = ctx.notes.find((n) => n.slug === slug);

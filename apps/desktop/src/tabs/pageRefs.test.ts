@@ -39,7 +39,7 @@ describe("pageRefs", () => {
   });
 
   test("wikiPageRef and workItemRef encode their identifiers", () => {
-    expect(wikiPageRef("how-x-works").id).toBe("note:how-x-works");
+    expect(wikiPageRef("how-x-works").id).toBe("wiki:how-x-works");
     expect(workItemRef("wi-123").id).toBe("wi:wi-123");
   });
 

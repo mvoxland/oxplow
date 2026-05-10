@@ -1228,7 +1228,7 @@ export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
 
 /**
  * Subscribe to `usage.recorded` events. Optionally filter by `kind` so a
- * Notes-pane consumer only refetches on wiki-note visits.
+ * Wiki-pane consumer only refetches on wiki visits.
  */
 export function subscribeUsageEvents(
   onEvent: (e: { kind: string; key: string; streamId: string | null; threadId: string | null }) => void,
@@ -1693,7 +1693,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
 
 export type FinishedEntry =
   | { kind: "work-item"; itemId: string; title: string; t: string }
-  | { kind: "note"; slug: string; title: string; t: string };
+  | { kind: "wiki"; slug: string; title: string; t: string };
 
 export async function listRecentlyFinished(threadId: string | null, limit: number): Promise<FinishedEntry[]> {
   return unwrap(await commands.listRecentlyFinished(threadId, limit)) as FinishedEntry[];
@@ -1744,7 +1744,8 @@ export async function recordPageVisit(input: PageVisitInputApi): Promise<void> {
     await commands.recordPageVisit(
       input.refKind,
       input.refId,
-      typeof input.payload === "number" ? input.payload : null,
+      input.label,
+      null,
       input.threadId ?? null,
     ),
   );
@@ -1780,12 +1781,12 @@ export async function listRecentPageVisits(opts: {
       refKind: v.page_kind,
       refId: v.page_id,
       payload: null,
-      label: deriveDefaultLabelFromKind(v.page_kind, v.page_id),
+      label: v.label ?? v.page_id,
       source: null,
     });
     if (out.length >= (opts.limit ?? 50)) break;
   }
-  return resolveRefLabels(out);
+  return out;
 }
 
 export async function topVisitedPages(opts: {
@@ -1808,75 +1809,14 @@ export async function topVisitedPages(opts: {
       refId: v.page_id,
       refKind: v.page_kind,
       payload: null,
-      label: deriveDefaultLabelFromKind(v.page_kind, v.page_id),
+      label: v.page_id, // top-visited has no per-row label; rendered consumers
+                       // typically render their own derived form anyway.
       count: v.visit_count,
       lastT: "",
     });
     if (out.length >= (opts.limit ?? 50)) break;
   }
-  return resolveRefLabels(out);
-}
-
-function deriveDefaultLabelFromKind(kind: string, id: string): string {
-  switch (kind) {
-    case "tasks": return "Tasks";
-    case "files": return "Files";
-    case "wiki-index": return "Wiki";
-    case "git-dashboard": return "Git";
-    case "git-history": return "Git History";
-    case "git-commit": return "Git Commit";
-    case "settings": return "Settings";
-    case "code-quality": return "Code Quality";
-    case "hook-events": return "Hook Events";
-    case "subsystem-docs": return "Subsystem Docs";
-    case "file": return id.split("/").pop() ?? id;
-    default: return id;
-  }
-}
-
-/// Fetch human titles for the work-item / wiki-note refs in a list of
-/// page-visit-shaped rows. The backend page_visits table doesn't carry
-/// labels yet, so for each work-item/note ref we look up the row by
-/// id and substitute its title when found. Falls back to the ref-kind
-/// default (which for unknown kinds returns the raw id) when the
-/// underlying row has been deleted or the lookup fails.
-async function resolveRefLabels<T extends { refKind: string; refId: string; label: string }>(
-  rows: T[],
-): Promise<T[]> {
-  const workItemIds = Array.from(
-    new Set(
-      rows
-        .filter((r) => r.refKind === "work-item" || r.refKind === "wi")
-        .map((r) => r.refId),
-    ),
-  );
-  const titleById = new Map<string, string>();
-  if (workItemIds.length > 0) {
-    const summaries = await getWorkItemSummaries(workItemIds);
-    for (const s of summaries) titleById.set(s.id, s.title);
-  }
-  let notesByIdent: Map<string, string> | null = null;
-  const noteIds = rows.filter((r) => r.refKind === "note" || r.refKind === "wiki-note");
-  if (noteIds.length > 0) {
-    try {
-      const notes = await listWikiPages("");
-      notesByIdent = new Map();
-      for (const n of notes) {
-        notesByIdent.set(n.slug, n.title);
-      }
-    } catch {
-      notesByIdent = null;
-    }
-  }
-  return rows.map((r) => {
-    if ((r.refKind === "work-item" || r.refKind === "wi") && titleById.has(r.refId)) {
-      return { ...r, label: titleById.get(r.refId)! };
-    }
-    if ((r.refKind === "note" || r.refKind === "wiki-note") && notesByIdent?.has(r.refId)) {
-      return { ...r, label: notesByIdent.get(r.refId)! };
-    }
-    return r;
-  });
+  return out;
 }
 
 export async function countPageVisitsByDay(opts: {

@@ -104,7 +104,7 @@ pub enum OxplowEvent {
     /// Coarse — renderer refetches whatever view it cares about.
     PageVisitChanged,
     /// A usage event was recorded. The renderer's filtering uses
-    /// `usage_kind` to scope refetches (wiki-note vs editor-file vs
+    /// `usage_kind` to scope refetches (wiki vs editor-file vs
     /// work-item, etc.).
     UsageRecorded {
         usage_kind: String,

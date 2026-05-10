@@ -46,7 +46,7 @@ describe("gitDashboardBacklinks", () => {
       notes: [{ slug: "n1", title: "Plan", body: "see feature/x for details" }],
     });
     const out = gitDashboardBacklinks(null, ctx);
-    expect(out.some((e) => e.ref.id === "note:n1")).toBe(true);
+    expect(out.some((e) => e.ref.id === "wiki:n1")).toBe(true);
   });
 });
 
@@ -76,7 +76,7 @@ describe("uncommittedChangesBacklinks", () => {
       notes: [{ slug: "n1", title: "Foo notes", body: "see src/foo.ts" }],
     });
     const out = uncommittedChangesBacklinks(null, ctx);
-    expect(out.some((e) => e.ref.id === "note:n1")).toBe(true);
+    expect(out.some((e) => e.ref.id === "wiki:n1")).toBe(true);
   });
 });
 
@@ -88,7 +88,7 @@ describe("gitCommitBacklinks", () => {
     const out = gitCommitBacklinks({ sha: "abc1234567890" }, ctx);
     const ids = out.map((e) => e.ref.id);
     expect(ids).toContain("git-history");
-    expect(ids).toContain("note:n1");
+    expect(ids).toContain("wiki:n1");
   });
 
   test("links to previous and next commits when present in recentLog", () => {

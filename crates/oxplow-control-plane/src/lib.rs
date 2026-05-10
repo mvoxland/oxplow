@@ -342,8 +342,8 @@ async fn handle_hook(
     // left off (without this, every re-attach starts a fresh session).
     update_resume_session_id(&ctx, &envelope_for_resume).await;
 
-    // PostToolUse: attribute wiki-note edits to the originating thread
-    // so the rail's "Finished" list can surface only the notes this
+    // PostToolUse: attribute wiki-page edits to the originating thread
+    // so the rail's "Finished" list can surface only the pages this
     // thread authored or revised.
     if kind == HookKind::PostToolUse {
         if let (Some(thread_id), Some(body)) =
@@ -508,7 +508,7 @@ async fn pre_tool_check(
 
 /// When a PostToolUse hook reports an Edit/Write/MultiEdit/NotebookEdit
 /// targeting a `.oxplow/wiki/<slug>.md` path, record an entry in the
-/// per-thread wiki-note attribution table. Mirrors how main attributes
+/// per-thread wiki-page attribution table. Mirrors how main attributes
 /// note touches via the runtime's PostToolUse handler. Tolerant of
 /// missing fields — attribution is best-effort.
 async fn attribute_wiki_page_edit(ctx: &AppCtx, thread_id: &ThreadId, body: &serde_json::Value) {
@@ -535,11 +535,11 @@ async fn attribute_wiki_page_edit(ctx: &AppCtx, thread_id: &ThreadId, body: &ser
         .touch(thread_id, &slug, oxplow_domain::Timestamp::now())
         .await
     {
-        warn!(?err, slug, "wiki-note attribution failed");
+        warn!(?err, slug, "wiki-page attribution failed");
     }
 }
 
-/// Map an Edit-tool file path to a wiki-note slug iff the path is
+/// Map an Edit-tool file path to a wiki-page slug iff the path is
 /// inside `.oxplow/wiki/` with a `.md` extension. Accepts absolute
 /// or workspace-relative paths.
 fn wiki_page_slug_from_path(raw: &str, project_dir: &Path) -> Option<String> {

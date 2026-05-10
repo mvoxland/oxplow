@@ -37,10 +37,10 @@ describe("computeBacklinks", () => {
 
     const result = computeBacklinks(fileRef("src/a.ts"), ctx);
     const ids = result.map((r) => r.ref.id);
-    expect(ids).toContain("note:uses-file");
+    expect(ids).toContain("wiki:uses-file");
     expect(ids).toContain("wi:wi-1");
     expect(ids).toContain("finding:1");
-    expect(ids).not.toContain("note:unrelated");
+    expect(ids).not.toContain("wiki:unrelated");
     expect(ids).not.toContain("wi:wi-2");
     expect(ids).not.toContain("finding:2");
   });
@@ -60,11 +60,11 @@ describe("computeBacklinks", () => {
 
     const result = computeBacklinks(workItemRef("wi-42"), ctx);
     const ids = result.map((r) => r.ref.id);
-    expect(ids).toContain("note:links-wi");
-    expect(ids).toContain("note:mentions-id");
+    expect(ids).toContain("wiki:links-wi");
+    expect(ids).toContain("wiki:mentions-id");
     expect(ids).toContain("finding:1");
     expect(ids).not.toContain("finding:2");
-    expect(ids).not.toContain("note:unrelated");
+    expect(ids).not.toContain("wiki:unrelated");
   });
 
   test("finding ref → work items touching the finding's file, notes mentioning the file or finding id", () => {
@@ -84,10 +84,10 @@ describe("computeBacklinks", () => {
     const result = computeBacklinks(findingRef("7"), ctx);
     const ids = result.map((r) => r.ref.id);
     expect(ids).toContain("wi:wi-1");
-    expect(ids).toContain("note:mentions-file");
-    expect(ids).toContain("note:mentions-id");
+    expect(ids).toContain("wiki:mentions-file");
+    expect(ids).toContain("wiki:mentions-id");
     expect(ids).not.toContain("wi:wi-2");
-    expect(ids).not.toContain("note:unrelated");
+    expect(ids).not.toContain("wiki:unrelated");
   });
 
   test("note ref → work items, files, findings the note text mentions", () => {
@@ -141,7 +141,7 @@ describe("computeBacklinks", () => {
       findings: [],
     };
     const result = computeBacklinks(fileRef("src/a.ts"), ctx);
-    const noteHits = result.filter((r) => r.ref.id === "note:dup");
+    const noteHits = result.filter((r) => r.ref.id === "wiki:dup");
     expect(noteHits.length).toBe(1);
   });
 
@@ -154,6 +154,6 @@ describe("computeBacklinks", () => {
       findings: [],
     };
     const result = computeBacklinks(workItemRef("wi-7"), ctx);
-    expect(result.map((r) => r.ref.id)).toContain("note:n");
+    expect(result.map((r) => r.ref.id)).toContain("wiki:n");
   });
 });

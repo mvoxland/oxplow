@@ -15,7 +15,7 @@ export type PageKind =
   | "directory"
   | "diff"
   | "duplicate-block"
-  | "note"
+  | "wiki"
   | "work-item"
   | "finding"
   | "tasks"

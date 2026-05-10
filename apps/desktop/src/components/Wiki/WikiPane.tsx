@@ -70,7 +70,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
       return;
     }
     try {
-      setRecentUsage(await listRecentUsage({ kind: "wiki-note", streamId, limit: 32 }));
+      setRecentUsage(await listRecentUsage({ kind: "wiki", streamId, limit: 32 }));
     } catch (error) {
       logUi("error", "listRecentUsage failed", { error: String(error) });
     }
@@ -85,7 +85,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
   }, [refreshNotes]);
 
   useEffect(() => {
-    const unsub = subscribeUsageEvents(() => { void refreshUsage(); }, { kind: "wiki-note" });
+    const unsub = subscribeUsageEvents(() => { void refreshUsage(); }, { kind: "wiki" });
     return unsub;
   }, [refreshUsage]);
 
@@ -169,7 +169,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
           label: "Add to agent context",
           enabled: true,
           run: () => {
-            insertIntoAgent(formatContextMention({ kind: "note", slug: contextMenu.slug }));
+            insertIntoAgent(formatContextMention({ kind: "wiki", slug:contextMenu.slug }));
             setContextMenu(null);
           },
         },
@@ -491,7 +491,7 @@ function SearchRow({
       onContextMenu={handlers.onContextMenu}
       onDoubleClick={handlers.onClick}
       draggable
-      onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: hit.slug })}
+      onDragStart={(e) => setContextRefDrag(e, { kind: "wiki", slug:hit.slug })}
       title={hit.title}
       style={{
         padding: "10px 12px",
@@ -566,7 +566,7 @@ function NoteRow({
       onContextMenu={handlers.onContextMenu}
       onDoubleClick={handlers.onClick}
       draggable
-      onDragStart={(e) => setContextRefDrag(e, { kind: "note", slug: note.slug })}
+      onDragStart={(e) => setContextRefDrag(e, { kind: "wiki", slug:note.slug })}
       style={{
         padding: "10px 12px",
         cursor: "pointer",

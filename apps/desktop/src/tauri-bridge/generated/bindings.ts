@@ -214,7 +214,7 @@ export const commands = {
 	searchWikiBodies: (query: string, limit: number) => typedError<WikiPageSearchHit[], IpcError>(__TAURI_INVOKE("search_wiki_bodies", { query, limit })),
 	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
 	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
-	recordPageVisit: (pageKind: string, pageId: string, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, durationMs, threadId })),
+	recordPageVisit: (pageKind: string, pageId: string, label: string | null, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, durationMs, threadId })),
 	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
 	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
 	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
@@ -885,7 +885,7 @@ export type FileSnapshot = {
  *  section. Items whose timestamp is `<= finished_cleared_at` are
  *  hidden until something newer lands.
  */
-export type FinishedEntry = { kind: "work-item"; itemId: string; title: string; t: Timestamp } | { kind: "note"; slug: string; title: string; t: Timestamp };
+export type FinishedEntry = { kind: "work-item"; itemId: string; title: string; t: Timestamp } | { kind: "wiki"; slug: string; title: string; t: Timestamp };
 
 export type Followup = {
 	id: string,
@@ -1119,6 +1119,12 @@ export type PageVisit = {
 	id: string,
 	page_kind: string,
 	page_id: string,
+	/**
+	 *  Human-readable label captured at activation time — the same
+	 *  string the tab strip displays. NULL for legacy rows recorded
+	 *  before V10 (renderer falls back to page_id for those).
+	 */
+	label: string | null,
 	visited_at: Timestamp,
 	duration_ms: number | null,
 	thread_id: string | null,

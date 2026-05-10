@@ -76,10 +76,10 @@ export function tabRefToContextRef(ref: TabRef): ContextRef | null {
     }
     return null;
   }
-  if (ref.kind === "note") {
+  if (ref.kind === "wiki") {
     const payload = ref.payload as { slug?: unknown } | null;
     if (payload && typeof payload.slug === "string") {
-      return { kind: "note", slug: payload.slug };
+      return { kind: "wiki", slug: payload.slug };
     }
     return null;
   }

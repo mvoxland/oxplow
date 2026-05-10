@@ -130,7 +130,8 @@ import { TerminalPane } from "./components/TerminalPane.js";
 import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { computePagesDirectory } from "./components/RailHud/sections.js";
-import { deriveDefaultLabel, NON_TRACKED_KINDS } from "./components/RailHud/history.js";
+import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
+import { resolveActiveTabRef } from "./tabs/resolveActiveTabRef.js";
 import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
 import { DISK } from "./file-version.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
@@ -1719,6 +1720,63 @@ export function App() {
   }, [currentSession.openOrder, diffTabs, pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive) ? centerActive : "agent";
 
+  // Central page-visit recorder. Fires whenever the resolved active
+  // tab changes — covers new-tab opens (any handler), switching to an
+  // already-open tab, and snap-back when the active tab closes. Skips
+  // the first commit so persisted-tab restoration on startup doesn't
+  // flood History.
+  //
+  // The effect's dependency list is intentionally minimal: only the
+  // active id + selected thread should re-fire it. The supporting
+  // context (page tabs, file open-order, work-item titles, stream id)
+  // is read through a ref so e.g. opening a SECOND tab doesn't
+  // re-record a visit for the FIRST (still-active) one.
+  // tabLabelByIdRef is the single source of "what's this tab called
+  // right now" — populated by the centerTabs builder after it has
+  // applied any pageTitles override. The history recorder reads from
+  // this so RailHud History shows the *same* string as the tab strip
+  // for every kind.
+  const tabLabelByIdRef = useRef<Record<string, string>>({});
+  const visitContextRef = useRef<{
+    pageTabs: TabRef[];
+    openOrder: string[];
+    streamId: string | null;
+  }>({ pageTabs: [], openOrder: [], streamId: null });
+  visitContextRef.current = {
+    pageTabs: pageTabsForActiveThread,
+    openOrder: currentSession.openOrder,
+    streamId: stream?.id ?? null,
+  };
+  const hydratedHistoryRef = useRef(false);
+  useEffect(() => {
+    if (!hydratedHistoryRef.current) {
+      hydratedHistoryRef.current = true;
+      return;
+    }
+    if (!selectedThreadId) return;
+    const ctx = visitContextRef.current;
+    const ref = resolveActiveTabRef(effectiveCenterActive, ctx.pageTabs, ctx.openOrder);
+    if (!ref || NON_TRACKED_KINDS.has(ref.kind)) return;
+    // Defer briefly so the freshly-activated page's `usePageTitle`
+    // effect fires and the centerTabs memo applies it before we
+    // snapshot the label. tabLabelByIdRef is what the tab strip
+    // currently displays — reading from it keeps the two surfaces
+    // consistent; there is no separate fallback derivation.
+    const timer = setTimeout(() => {
+      const ctxAfter = visitContextRef.current;
+      const label = tabLabelByIdRef.current[effectiveCenterActive] ?? ref.id;
+      void recordPageVisit({
+        refKind: ref.kind,
+        refId: ref.id,
+        payload: ref.payload,
+        label,
+        streamId: ctxAfter.streamId,
+        threadId: selectedThreadId,
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [effectiveCenterActive, selectedThreadId]);
+
   const handleOpenDiff = (request: DiffSpec) => {
     const id = computeDiffId(request);
     // Always (re)write the spec so per-click metadata that doesn't
@@ -1815,7 +1873,7 @@ export function App() {
   };
 
 
-  const handleOpenNote = useCallback((slug: string) => {
+  const handleOpenWiki = useCallback((slug: string) => {
     const tid = selectedThread?.id ?? null;
     if (!tid) return;
     const ref = wikiPageRef(slug);
@@ -1828,7 +1886,7 @@ export function App() {
     const sid = stream?.id ?? null;
     if (sid) {
       void recordUsage({
-        kind: "wiki-note",
+        kind: "wiki",
         key: slug,
         event: "open",
         streamId: sid,
@@ -1897,7 +1955,7 @@ export function App() {
 
   // Recently-finished work merged across closed work-item efforts
   // (per-thread) and updated wiki notes (global). Refetched on
-  // work-item or wiki-note changes; sub-100ms IPC, so coarse
+  // work-item or wiki-page changes; sub-100ms IPC, so coarse
   // invalidation is fine.
   const [uncommittedSummary, setUncommittedSummary] = useState<{
     added: number; modified: number; deleted: number; additions: number; deletions: number;
@@ -1952,30 +2010,9 @@ export function App() {
   }, [selectedThreadId]);
 
   const handleOpenPage = useCallback((ref: TabRef) => {
-    if (!NON_TRACKED_KINDS.has(ref.kind)) {
-      let label = deriveDefaultLabel(ref);
-      if (ref.kind === "work-item") {
-        const itemId = (ref.payload as { itemId?: string } | null)?.itemId;
-        const found = selectedThreadWork
-          ? [
-              ...selectedThreadWork.items,
-              ...selectedThreadWork.epics,
-              ...selectedThreadWork.inProgress,
-              ...selectedThreadWork.waiting,
-              ...selectedThreadWork.done,
-            ].find((i) => i.id === itemId)
-          : null;
-        if (found?.title) label = found.title;
-      }
-      void recordPageVisit({
-        refKind: ref.kind,
-        refId: ref.id,
-        payload: ref.payload,
-        label,
-        streamId: stream?.id ?? null,
-        threadId: selectedThreadId,
-      });
-    }
+    // Page-visit recording lives in the central activation effect
+    // below — it fires whenever `effectiveCenterActive` resolves to a
+    // new TabRef, regardless of which handler caused the activation.
     switch (ref.kind) {
       case "agent":
         setCenterActive("agent");
@@ -2001,7 +2038,7 @@ export function App() {
         }
         return;
       }
-      case "note":
+      case "wiki":
       case "directory":
       case "work-item":
       case "finding":
@@ -2042,7 +2079,7 @@ export function App() {
       default:
         return;
     }
-  }, [handleOpenFile, handleOpenNote, selectedThreadId, selectedThreadWork, setCenterActive, stream?.id]);
+  }, [handleOpenFile, handleOpenWiki, selectedThreadId, selectedThreadWork, setCenterActive, stream?.id]);
 
   /**
    * Browser-style in-tab navigation. Replaces the page tab whose
@@ -2716,8 +2753,8 @@ export function App() {
           render: () => (
             <WikiIndexPage
               stream={stream}
-              selectedSlug={centerActive.startsWith("note:") ? centerActive.slice("note:".length) : null}
-              onOpenWikiPage={handleOpenNote}
+              selectedSlug={centerActive.startsWith("wiki:") ? centerActive.slice("wiki:".length) : null}
+              onOpenWikiPage={handleOpenWiki}
             />
           ),
         });
@@ -2817,9 +2854,9 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "note") {
+      } else if (ref.kind === "wiki") {
         const slug = (ref.payload as { slug?: string } | null)?.slug ?? "";
-        const noteNavOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
+        const wikiNavOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
         tabs.push({
           id: ref.id,
           label: slug,
@@ -2830,10 +2867,10 @@ export function App() {
               slug={slug}
               threadWork={selectedThreadWork}
               onClosed={() => closePageTab(ref.id)}
-              onOpenWikiPage={handleOpenNote}
+              onOpenWikiPage={handleOpenWiki}
               onOpenFile={navOpenFile}
               onOpenDirectory={handleOpenDirectory}
-              onOpenPage={noteNavOpen}
+              onOpenPage={wikiNavOpen}
               onOpenCommit={handleOpenCommit}
               onOpenExternalUrl={handleOpenExternalUrl}
             />
@@ -3077,6 +3114,11 @@ export function App() {
         </PageNavigationContext.Provider>
       );
     }
+    // Snapshot the resolved labels for the history recorder so RailHud
+    // History shows the same text the tab strip shows.
+    const labelMap: Record<string, string> = {};
+    for (const t of tabs) labelMap[t.id] = t.label;
+    tabLabelByIdRef.current = labelMap;
     return tabs;
   }, [
     selectedThread,
@@ -3089,7 +3131,7 @@ export function App() {
     editorFindRequest,
     editorNavigationTarget,
     diffTabs,
-    handleOpenNote,
+    handleOpenWiki,
     handleOpenCommit,
     handleOpenExternalUrl,
     selectedThreadId,

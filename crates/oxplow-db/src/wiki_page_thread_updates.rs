@@ -1,10 +1,9 @@
 //! Per-thread "last touched" attribution for wiki pages.
 //!
 //! Wiki pages are global (one body per slug). Attribution is tracked
-//! here so the rail's "Finished" list can surface only the notes the
-//! *current* thread authored or revised. Mirrors
-//! `src/persistence/wiki-note-thread-update-store.ts` from main.
-//! Backing table is `wiki_page_thread_update` (see V1 migration).
+//! here so the rail's "Finished" list can surface only the pages the
+//! *current* thread authored or revised. Backing table is
+//! `wiki_page_thread_update` (see V1 migration).
 
 use rusqlite::params;
 

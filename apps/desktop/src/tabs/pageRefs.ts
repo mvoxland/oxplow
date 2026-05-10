@@ -79,7 +79,7 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
 }
 
 export function wikiPageRef(slug: string): TabRef {
-  return { id: `note:${slug}`, kind: "note", payload: { slug } };
+  return { id: `wiki:${slug}`, kind: "wiki", payload: { slug } };
 }
 
 export function workItemRef(itemId: string): TabRef {

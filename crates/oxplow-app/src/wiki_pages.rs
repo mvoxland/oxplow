@@ -13,13 +13,10 @@
 //!    - `bare-slug` (kebab-case, no slash, no extension) → related-note ref
 //!
 //!    Custom display text after `|` is stripped (`[[a/b.ts|label]]`).
-//! 2. **Inline file paths** — fallback for legacy notes that didn't
+//! 2. **Inline file paths** — fallback for legacy pages that didn't
 //!    use the `[[…]]` syntax. At least one slash + a 1-6 char extension,
 //!    not preceded by `/` or alphanumerics so we don't pick up partial
 //!    URLs.
-//!
-//! Mirrors `src/persistence/wiki-note-refs.ts` and
-//! `src/git/notes-watch.ts` from main.
 
 use std::collections::BTreeSet;
 use std::fs;

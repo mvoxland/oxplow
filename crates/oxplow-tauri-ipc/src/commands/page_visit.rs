@@ -22,12 +22,19 @@ pub async fn record_page_visit(
     state: tauri::State<'_, AppState>,
     page_kind: String,
     page_id: String,
+    label: Option<String>,
     duration_ms: Option<i64>,
     thread_id: Option<String>,
 ) -> Result<PageVisit, IpcError> {
     let visit = state
         .page_visit_store
-        .record(&page_kind, &page_id, duration_ms, thread_id.as_deref())
+        .record(
+            &page_kind,
+            &page_id,
+            label.as_deref(),
+            duration_ms,
+            thread_id.as_deref(),
+        )
         .await?;
     state.events.emit(OxplowEvent::PageVisitChanged);
     Ok(visit)
@@ -131,8 +138,8 @@ pub enum FinishedEntry {
         title: String,
         t: Timestamp,
     },
-    #[serde(rename = "note")]
-    Note {
+    #[serde(rename = "wiki")]
+    Wiki {
         slug: String,
         title: String,
         t: Timestamp,
@@ -143,7 +150,7 @@ impl FinishedEntry {
     fn timestamp(&self) -> Timestamp {
         match self {
             FinishedEntry::WorkItem { t, .. } => *t,
-            FinishedEntry::Note { t, .. } => *t,
+            FinishedEntry::Wiki { t, .. } => *t,
         }
     }
 }
@@ -187,14 +194,14 @@ pub async fn list_recently_finished(
             .list_for_thread(&tid, cap * 4)
             .await?;
         for touch in touches {
-            let Some(note) = state.wiki_page_store.get(&touch.slug).await? else {
+            let Some(page) = state.wiki_page_store.get(&touch.slug).await? else {
                 continue;
             };
-            entries.push(FinishedEntry::Note {
-                slug: note.slug,
-                title: note.title,
+            entries.push(FinishedEntry::Wiki {
+                slug: page.slug,
+                title: page.title,
                 // Use the per-thread timestamp so a different thread
-                // editing the same note doesn't promote this thread's
+                // editing the same page doesn't promote this thread's
                 // entry.
                 t: touch.last_seen_at,
             });
@@ -211,12 +218,12 @@ pub async fn list_recently_finished(
                 t,
             });
         }
-        let notes = state.wiki_page_store.list().await?;
-        for note in notes.into_iter().take(cap) {
-            entries.push(FinishedEntry::Note {
-                slug: note.slug,
-                title: note.title,
-                t: note.updated_at,
+        let pages = state.wiki_page_store.list().await?;
+        for page in pages.into_iter().take(cap) {
+            entries.push(FinishedEntry::Wiki {
+                slug: page.slug,
+                title: page.title,
+                t: page.updated_at,
             });
         }
     }

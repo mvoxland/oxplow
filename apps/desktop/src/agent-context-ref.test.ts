@@ -11,8 +11,8 @@ describe("formatContextMention", () => {
       .toBe("@src/ui/components/Wiki/WikiPane.tsx ");
   });
 
-  test("note → @.oxplow/wiki/<slug>.md with trailing space", () => {
-    expect(formatContextMention({ kind: "note", slug: "auth-flow" })).toBe("@.oxplow/wiki/auth-flow.md ");
+  test("wiki → @.oxplow/wiki/<slug>.md with trailing space", () => {
+    expect(formatContextMention({ kind: "wiki", slug: "auth-flow" })).toBe("@.oxplow/wiki/auth-flow.md ");
   });
 
   test("work-item → bracketed reference with id, title, status, trailing space", () => {
@@ -35,7 +35,7 @@ describe("formatContextMention", () => {
 
   test("every output ends with a space so the user can keep typing", () => {
     expect(formatContextMention({ kind: "file", path: "x" }).endsWith(" ")).toBe(true);
-    expect(formatContextMention({ kind: "note", slug: "x" }).endsWith(" ")).toBe(true);
+    expect(formatContextMention({ kind: "wiki", slug: "x" }).endsWith(" ")).toBe(true);
     expect(formatContextMention({
       kind: "work-item", itemId: "x", title: "x", status: "x",
     }).endsWith(" ")).toBe(true);

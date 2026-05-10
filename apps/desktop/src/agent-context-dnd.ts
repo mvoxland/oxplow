@@ -32,7 +32,7 @@ export function setContextRefDrag(e: AnyDragEvent, ref: ContextRef): void {
   // does a sensible thing (e.g. a chat outside the terminal).
   const fallback = ref.kind === "file"
     ? `@${ref.path}`
-    : ref.kind === "note"
+    : ref.kind === "wiki"
       ? `@.oxplow/wiki/${ref.slug}.md`
       : `[oxplow work-item ${ref.itemId}]`;
   dt.setData("text/plain", fallback);
@@ -61,7 +61,7 @@ export function readContextRef(e: AnyDragEvent): ContextRef | null {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
     if (parsed.kind === "file" && typeof parsed.path === "string") return { kind: "file", path: parsed.path };
-    if (parsed.kind === "note" && typeof parsed.slug === "string") return { kind: "note", slug: parsed.slug };
+    if (parsed.kind === "wiki" && typeof parsed.slug === "string") return { kind: "wiki", slug: parsed.slug };
     if (parsed.kind === "work-item"
       && typeof parsed.itemId === "string"
       && typeof parsed.title === "string"

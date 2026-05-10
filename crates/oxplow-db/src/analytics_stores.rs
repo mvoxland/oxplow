@@ -31,6 +31,10 @@ pub struct PageVisit {
     pub id: String,
     pub page_kind: String,
     pub page_id: String,
+    /// Human-readable label captured at activation time — the same
+    /// string the tab strip displays. NULL for legacy rows recorded
+    /// before V10 (renderer falls back to page_id for those).
+    pub label: Option<String>,
     pub visited_at: Timestamp,
     pub duration_ms: Option<i64>,
     pub thread_id: Option<String>,
@@ -53,6 +57,7 @@ pub trait PageVisitStore: Send + Sync {
         &self,
         page_kind: &str,
         page_id: &str,
+        label: Option<&str>,
         duration_ms: Option<i64>,
         thread_id: Option<&str>,
     ) -> Result<PageVisit, DomainError>;
@@ -83,21 +88,23 @@ impl PageVisitStore for SqlitePageVisitStore {
         &self,
         page_kind: &str,
         page_id: &str,
+        label: Option<&str>,
         duration_ms: Option<i64>,
         thread_id: Option<&str>,
     ) -> Result<PageVisit, DomainError> {
         let db = self.db.clone();
         let page_kind = page_kind.to_string();
         let page_id = page_id.to_string();
+        let label = label.map(|s| s.to_string());
         let thread_id = thread_id.map(|s| s.to_string());
         tokio::task::spawn_blocking(move || {
             let id = format!("pv-{}", uuid::Uuid::new_v4().simple());
             let now = Timestamp::now();
             db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO page_visit (id, page_kind, page_id, visited_at, duration_ms, thread_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![id, page_kind, page_id, ts_to_string(now), duration_ms, thread_id],
+                    "INSERT INTO page_visit (id, page_kind, page_id, label, visited_at, duration_ms, thread_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![id, page_kind, page_id, label, ts_to_string(now), duration_ms, thread_id],
                 )?;
                 Ok(())
             })?;
@@ -105,6 +112,7 @@ impl PageVisitStore for SqlitePageVisitStore {
                 id,
                 page_kind,
                 page_id,
+                label,
                 visited_at: now,
                 duration_ms,
                 thread_id,
@@ -125,14 +133,14 @@ impl PageVisitStore for SqlitePageVisitStore {
             db.with_conn(|conn| {
                 let mut stmt = if thread_id.is_some() {
                     conn.prepare(
-                        "SELECT id, page_kind, page_id, visited_at, duration_ms, thread_id
+                        "SELECT id, page_kind, page_id, label, visited_at, duration_ms, thread_id
                          FROM page_visit
                          WHERE thread_id = ?2
                          ORDER BY visited_at DESC LIMIT ?1",
                     )?
                 } else {
                     conn.prepare(
-                        "SELECT id, page_kind, page_id, visited_at, duration_ms, thread_id
+                        "SELECT id, page_kind, page_id, label, visited_at, duration_ms, thread_id
                          FROM page_visit
                          ORDER BY visited_at DESC LIMIT ?1",
                     )?
@@ -141,9 +149,10 @@ impl PageVisitStore for SqlitePageVisitStore {
                     let id: String = row.get(0)?;
                     let page_kind: String = row.get(1)?;
                     let page_id: String = row.get(2)?;
-                    let visited_at: String = row.get(3)?;
-                    let duration_ms: Option<i64> = row.get(4)?;
-                    let thread_id: Option<String> = row.get(5)?;
+                    let label: Option<String> = row.get(3)?;
+                    let visited_at: String = row.get(4)?;
+                    let duration_ms: Option<i64> = row.get(5)?;
+                    let thread_id: Option<String> = row.get(6)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -155,6 +164,7 @@ impl PageVisitStore for SqlitePageVisitStore {
                         id,
                         page_kind,
                         page_id,
+                        label,
                         visited_at: string_to_ts(&visited_at).map_err(map_err)?,
                         duration_ms,
                         thread_id,
@@ -246,7 +256,7 @@ impl PageVisitStore for SqlitePageVisitStore {
             db.with_conn(|conn| {
                 // Most-recent visit per page, ordered by visit count desc.
                 let mut stmt = conn.prepare(
-                    "SELECT id, page_kind, page_id, visited_at, duration_ms, thread_id
+                    "SELECT id, page_kind, page_id, label, visited_at, duration_ms, thread_id
                      FROM page_visit pv
                      WHERE id = (
                          SELECT id FROM page_visit pv2
@@ -263,9 +273,10 @@ impl PageVisitStore for SqlitePageVisitStore {
                     let id: String = row.get(0)?;
                     let page_kind: String = row.get(1)?;
                     let page_id: String = row.get(2)?;
-                    let visited_at: String = row.get(3)?;
-                    let duration_ms: Option<i64> = row.get(4)?;
-                    let thread_id: Option<String> = row.get(5)?;
+                    let label: Option<String> = row.get(3)?;
+                    let visited_at: String = row.get(4)?;
+                    let duration_ms: Option<i64> = row.get(5)?;
+                    let thread_id: Option<String> = row.get(6)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -277,6 +288,7 @@ impl PageVisitStore for SqlitePageVisitStore {
                         id,
                         page_kind,
                         page_id,
+                        label,
                         visited_at: string_to_ts(&visited_at).map_err(map_err)?,
                         duration_ms,
                         thread_id,
@@ -904,8 +916,14 @@ mod tests {
     #[tokio::test]
     async fn page_visit_record_then_recent() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("note", "abc", Some(1234), None).await.unwrap();
-        store.record("workItem", "wi-1", None, None).await.unwrap();
+        store
+            .record("wiki", "abc", None, Some(1234), None)
+            .await
+            .unwrap();
+        store
+            .record("workItem", "wi-1", None, None, None)
+            .await
+            .unwrap();
         let recent = store.list_recent(10, None).await.unwrap();
         assert_eq!(recent.len(), 2);
         // newest first
@@ -915,9 +933,9 @@ mod tests {
     #[tokio::test]
     async fn page_visit_top_groups_correctly() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("note", "a", None, None).await.unwrap();
-        store.record("note", "a", None, None).await.unwrap();
-        store.record("note", "b", None, None).await.unwrap();
+        store.record("wiki", "a", None, None, None).await.unwrap();
+        store.record("wiki", "a", None, None, None).await.unwrap();
+        store.record("wiki", "b", None, None, None).await.unwrap();
         let top = store.list_top(10, None).await.unwrap();
         assert_eq!(top[0].1, "a");
         assert_eq!(top[0].2, 2);
@@ -926,9 +944,9 @@ mod tests {
     #[tokio::test]
     async fn page_visit_forget_clears_only_target() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("note", "a", None, None).await.unwrap();
-        store.record("note", "b", None, None).await.unwrap();
-        store.forget_page("note", "a").await.unwrap();
+        store.record("wiki", "a", None, None, None).await.unwrap();
+        store.record("wiki", "b", None, None, None).await.unwrap();
+        store.forget_page("wiki", "a").await.unwrap();
         let recent = store.list_recent(10, None).await.unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].page_id, "b");
@@ -937,9 +955,15 @@ mod tests {
     #[tokio::test]
     async fn page_visit_recent_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("note", "a", None, Some("b-1")).await.unwrap();
-        store.record("note", "b", None, Some("b-2")).await.unwrap();
-        store.record("note", "c", None, None).await.unwrap();
+        store
+            .record("wiki", "a", None, None, Some("b-1"))
+            .await
+            .unwrap();
+        store
+            .record("wiki", "b", None, None, Some("b-2"))
+            .await
+            .unwrap();
+        store.record("wiki", "c", None, None, None).await.unwrap();
         let in_thread = store.list_recent(10, Some("b-1")).await.unwrap();
         assert_eq!(in_thread.len(), 1);
         assert_eq!(in_thread[0].page_id, "a");
@@ -950,10 +974,22 @@ mod tests {
     #[tokio::test]
     async fn page_visit_top_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("note", "a", None, Some("b-1")).await.unwrap();
-        store.record("note", "a", None, Some("b-1")).await.unwrap();
-        store.record("note", "a", None, Some("b-2")).await.unwrap();
-        store.record("note", "b", None, Some("b-1")).await.unwrap();
+        store
+            .record("wiki", "a", None, None, Some("b-1"))
+            .await
+            .unwrap();
+        store
+            .record("wiki", "a", None, None, Some("b-1"))
+            .await
+            .unwrap();
+        store
+            .record("wiki", "a", None, None, Some("b-2"))
+            .await
+            .unwrap();
+        store
+            .record("wiki", "b", None, None, Some("b-1"))
+            .await
+            .unwrap();
         let in_thread = store.list_top(10, Some("b-1")).await.unwrap();
         // a appears twice in b-1, b once
         assert_eq!(in_thread[0].1, "a");
@@ -997,10 +1033,7 @@ mod tests {
             .unwrap();
         // A different kind in the same stream — must not appear.
         store
-            .record(
-                "wiki-note",
-                serde_json::json!({"slug": "z", "streamId": "s-1"}),
-            )
+            .record("wiki", serde_json::json!({"slug": "z", "streamId": "s-1"}))
             .await
             .unwrap();
 

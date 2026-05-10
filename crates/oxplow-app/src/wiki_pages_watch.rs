@@ -16,7 +16,7 @@ use tracing::{info, warn};
 use crate::events::{EventBus, OxplowEvent};
 use crate::wiki_pages;
 
-/// Spawn a wiki-note watcher. Holding the returned struct keeps the
+/// Spawn a wiki-page watcher. Holding the returned struct keeps the
 /// watcher alive; dropping it cancels the OS handles + the relay
 /// task (channel close).
 pub struct WikiPagesWatcher {
