@@ -1,33 +1,18 @@
-//! WorkItem domain types.
+//! Task domain types.
 //!
-//! Mirrors the TS `src/persistence/work-item-store.ts` types and the
-//! schema introduced over migrations 1..N. The work item is the
-//! durable unit of authored change in oxplow — every Edit/Write the
-//! agent makes must trace back to one.
+//! The task is the durable unit of authored change in oxplow — every
+//! Edit/Write the agent makes must trace back to one. Tasks form a
+//! parent/child tree: an "epic" is any task that has children.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ids::{ThreadId, WorkItemId};
+use crate::ids::{TaskId, TaskLinkId, ThreadId};
 use crate::time::Timestamp;
 
-/// What kind of work item this is.
-///
-/// The hierarchy: `epic` parents `task`s parent `subtask`s. `bug` and
-/// `note` are flat — they don't normally parent anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkItemKind {
-    Epic,
-    Task,
-    Subtask,
-    Bug,
-    Note,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkItemStatus {
+pub enum TaskStatus {
     Ready,
     InProgress,
     Blocked,
@@ -38,37 +23,34 @@ pub enum WorkItemStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkItemPriority {
+pub enum TaskPriority {
     Low,
     Medium,
     High,
     Urgent,
 }
 
-/// Who or what wrote a work-item row to the DB.
+/// Who or what wrote a task row to the DB.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkItemActorKind {
+pub enum TaskActorKind {
     User,
     Agent,
     System,
 }
 
 /// Semantic origin — distinct from `created_by` (the writer).
-///
-/// Narrowed to user/agent after auto-file was removed in v29+. Legacy
-/// `agent-auto` rows get mapped to `None` on read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkItemAuthor {
+pub enum TaskAuthor {
     User,
     Agent,
 }
 
-/// The relationship type between two work items.
+/// The relationship type between two tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkItemLinkType {
+pub enum TaskLinkType {
     Blocks,
     RelatesTo,
     DiscoveredFrom,
@@ -77,33 +59,26 @@ pub enum WorkItemLinkType {
     RepliesTo,
 }
 
-/// A work item row.
-///
-/// Field shape mirrors the TS interface so JSON payloads are
-/// indistinguishable across the migration. Nullable timestamps stay
-/// `Option<Timestamp>` rather than collapsing to a sentinel — a missing
-/// `completed_at` and a "completed at the epoch" must be distinguishable.
+/// A task row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct WorkItem {
-    pub id: WorkItemId,
-    /// `None` when the item is on the project-wide backlog.
+pub struct Task {
+    pub id: TaskId,
+    /// `None` when the task is on the project-wide backlog.
     pub thread_id: Option<ThreadId>,
-    pub parent_id: Option<WorkItemId>,
-    pub kind: WorkItemKind,
+    pub parent_id: Option<TaskId>,
     pub title: String,
     pub description: String,
     pub acceptance_criteria: Option<String>,
-    pub status: WorkItemStatus,
-    pub priority: WorkItemPriority,
+    pub status: TaskStatus,
+    pub priority: TaskPriority,
     pub sort_index: i64,
-    pub created_by: WorkItemActorKind,
+    pub created_by: TaskActorKind,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub completed_at: Option<Timestamp>,
     pub deleted_at: Option<Timestamp>,
     pub note_count: i64,
-    /// Legacy rows have `None`; v29+ rows are always populated.
-    pub author: Option<WorkItemAuthor>,
+    pub author: Option<TaskAuthor>,
     /// Free-text grooming bucket used by the Backlog page's group-by.
     pub category: Option<String>,
     /// Comma-separated tags used by the Backlog page filter chips.
@@ -111,12 +86,12 @@ pub struct WorkItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct WorkItemLink {
-    pub id: String,
+pub struct TaskLink {
+    pub id: TaskLinkId,
     pub thread_id: ThreadId,
-    pub from_item_id: WorkItemId,
-    pub to_item_id: WorkItemId,
-    pub link_type: WorkItemLinkType,
+    pub from_item_id: TaskId,
+    pub to_item_id: TaskId,
+    pub link_type: TaskLinkType,
     pub created_at: Timestamp,
 }
 
@@ -129,30 +104,30 @@ pub mod limits {
     pub const NOTE_MAX_LEN: usize = 20_000;
 }
 
-/// Sentinel scope used for the project-wide backlog (work items not
-/// attached to any thread). Matches the TS `BACKLOG_SCOPE` constant.
+/// Sentinel scope used for the project-wide backlog (tasks not
+/// attached to any thread).
 pub const BACKLOG_SCOPE: &str = "__backlog__";
 
-/// A note attached to either a work item or a thread (mutually
-/// exclusive — enforced at the DB CHECK constraint).
+/// A note attached to either a task or a thread (mutually exclusive —
+/// enforced at the DB CHECK constraint).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct WorkNote {
     pub id: crate::ids::NoteId,
-    pub work_item_id: Option<WorkItemId>,
+    pub task_id: Option<TaskId>,
     pub thread_id: Option<ThreadId>,
     pub body: String,
     pub author: String,
     pub created_at: Timestamp,
 }
 
-/// Audit-log entry for state changes on a work item.
+/// Audit-log entry for state changes on a task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct WorkItemEvent {
+pub struct TaskEvent {
     pub id: String,
     pub thread_id: ThreadId,
-    pub item_id: Option<WorkItemId>,
+    pub item_id: Option<TaskId>,
     pub event_type: String,
-    pub actor_kind: WorkItemActorKind,
+    pub actor_kind: TaskActorKind,
     pub actor_id: String,
     pub payload_json: String,
     pub created_at: Timestamp,
@@ -164,55 +139,54 @@ mod tests {
 
     #[test]
     fn enum_round_trips_as_snake_case() {
-        let ip = WorkItemStatus::InProgress;
+        let ip = TaskStatus::InProgress;
         let json = serde_json::to_string(&ip).unwrap();
         assert_eq!(json, "\"in_progress\"");
-        let back: WorkItemStatus = serde_json::from_str(&json).unwrap();
+        let back: TaskStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(ip, back);
     }
 
     #[test]
     fn link_type_uses_snake_case_in_json() {
-        let lt = WorkItemLinkType::DiscoveredFrom;
+        let lt = TaskLinkType::DiscoveredFrom;
         let json = serde_json::to_string(&lt).unwrap();
         assert_eq!(json, "\"discovered_from\"");
     }
 
     #[test]
-    fn work_item_round_trips() {
+    fn task_round_trips() {
         let now = Timestamp::from_unix_ms(1_700_000_000_000);
-        let item = WorkItem {
-            id: WorkItemId::from("wi-1"),
+        let item = Task {
+            id: TaskId(1),
             thread_id: Some(ThreadId::from("b-1")),
             parent_id: None,
-            kind: WorkItemKind::Task,
             title: "ship it".into(),
             description: String::new(),
             acceptance_criteria: None,
-            status: WorkItemStatus::Ready,
-            priority: WorkItemPriority::Medium,
+            status: TaskStatus::Ready,
+            priority: TaskPriority::Medium,
             sort_index: 0,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         };
 
         let json = serde_json::to_string(&item).unwrap();
-        let back: WorkItem = serde_json::from_str(&json).unwrap();
+        let back: Task = serde_json::from_str(&json).unwrap();
         assert_eq!(item, back);
     }
 
     #[test]
-    fn backlog_item_has_no_thread() {
-        let item: WorkItem = serde_json::from_str(
+    fn backlog_task_has_no_thread() {
+        let item: Task = serde_json::from_str(
             r#"{
-                "id":"wi-x","thread_id":null,"parent_id":null,"kind":"task",
+                "id":7,"thread_id":null,"parent_id":null,
                 "title":"t","description":"","acceptance_criteria":null,
                 "status":"ready","priority":"medium","sort_index":0,
                 "created_by":"user",

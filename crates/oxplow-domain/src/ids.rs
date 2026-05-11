@@ -51,11 +51,65 @@ macro_rules! id_type {
 
 id_type!(StreamId, "s");
 id_type!(ThreadId, "b"); // "b" matches existing TS convention (b-...)
-id_type!(WorkItemId, "wi");
 id_type!(NoteId, "n");
 id_type!(AgentTurnId, "at");
 id_type!(HookEventId, "he");
 id_type!(EffortId, "ef");
+
+/// Task identifier — plain SQLite autoincrement integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+pub struct TaskId(pub i64);
+
+impl TaskId {
+    pub fn value(self) -> i64 {
+        self.0
+    }
+
+    /// Parse from a string (used by the polymorphic TEXT id column in
+    /// `page_ref`). Returns `None` if the input isn't all ASCII digits.
+    pub fn try_from_str(s: &str) -> Option<Self> {
+        if s.is_empty() || !s.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        s.parse::<i64>().ok().map(TaskId)
+    }
+}
+
+impl fmt::Display for TaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<i64> for TaskId {
+    fn from(v: i64) -> Self {
+        Self(v)
+    }
+}
+
+/// Task-link identifier — plain SQLite autoincrement integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+pub struct TaskLinkId(pub i64);
+
+impl TaskLinkId {
+    pub fn value(self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for TaskLinkId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<i64> for TaskLinkId {
+    fn from(v: i64) -> Self {
+        Self(v)
+    }
+}
 
 /// Classification of an opaque id string by its `<prefix>-` segment.
 ///
@@ -66,7 +120,6 @@ id_type!(EffortId, "ef");
 pub enum IdKind {
     Stream,
     Thread,
-    WorkItem,
     Note,
     AgentTurn,
     HookEvent,
@@ -77,8 +130,6 @@ pub enum IdKind {
     PageVisit,
     /// Recognised usage-event id (`ue-…`).
     UsageEvent,
-    /// Recognised work-item-link id (`wil-…`).
-    WorkItemLink,
     /// Recognised background-task id (`bg-…`).
     BackgroundTask,
     /// Has a `<word>-` shape but no known prefix.
@@ -93,7 +144,6 @@ impl IdKind {
         match self {
             IdKind::Stream => "stream id (s-…)",
             IdKind::Thread => "thread id (b-…)",
-            IdKind::WorkItem => "work-item id (wi-…)",
             IdKind::Note => "note id (n-…)",
             IdKind::AgentTurn => "agent-turn id (at-…)",
             IdKind::HookEvent => "hook-event id (he-…)",
@@ -101,7 +151,6 @@ impl IdKind {
             IdKind::Followup => "follow-up id (fu-…)",
             IdKind::PageVisit => "page-visit id (pv-…)",
             IdKind::UsageEvent => "usage-event id (ue-…)",
-            IdKind::WorkItemLink => "work-item-link id (wil-…)",
             IdKind::BackgroundTask => "background-task id (bg-…)",
             IdKind::UnknownPrefix(_) => "id with an unrecognised prefix",
             IdKind::Unrecognised => "value with no `<prefix>-…` shape",
@@ -117,7 +166,6 @@ pub fn classify_id(value: &str) -> IdKind {
     match prefix {
         "s" => IdKind::Stream,
         "b" => IdKind::Thread,
-        "wi" => IdKind::WorkItem,
         "n" => IdKind::Note,
         "at" => IdKind::AgentTurn,
         "he" => IdKind::HookEvent,
@@ -125,12 +173,7 @@ pub fn classify_id(value: &str) -> IdKind {
         "fu" => IdKind::Followup,
         "pv" => IdKind::PageVisit,
         "ue" => IdKind::UsageEvent,
-        "wil" => IdKind::WorkItemLink,
         "bg" => IdKind::BackgroundTask,
-        // We deliberately leak the &str here only when we already
-        // know it's a short prefix segment from the input. Since
-        // `UnknownPrefix` is `&'static str`, we can't actually return
-        // the borrowed slice — fall through to a generic marker.
         _ => IdKind::UnknownPrefix(""),
     }
 }
@@ -150,7 +193,6 @@ mod tests {
     fn ids_have_prefix() {
         assert!(StreamId::new().as_str().starts_with("s-"));
         assert!(ThreadId::new().as_str().starts_with("b-"));
-        assert!(WorkItemId::new().as_str().starts_with("wi-"));
     }
 
     #[test]
@@ -169,10 +211,26 @@ mod tests {
     }
 
     #[test]
+    fn task_id_serializes_as_integer() {
+        let id = TaskId(42);
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "42");
+        let back: TaskId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
+    }
+
+    #[test]
+    fn task_id_try_from_str() {
+        assert_eq!(TaskId::try_from_str("42"), Some(TaskId(42)));
+        assert_eq!(TaskId::try_from_str(""), None);
+        assert_eq!(TaskId::try_from_str("4a"), None);
+        assert_eq!(TaskId::try_from_str("-1"), None);
+    }
+
+    #[test]
     fn classify_recognises_canonical_prefixes() {
         assert_eq!(classify_id("s-abc"), IdKind::Stream);
         assert_eq!(classify_id("b-abc"), IdKind::Thread);
-        assert_eq!(classify_id("wi-abc"), IdKind::WorkItem);
         assert_eq!(classify_id("n-abc"), IdKind::Note);
         assert_eq!(classify_id("at-abc"), IdKind::AgentTurn);
         assert_eq!(classify_id("he-abc"), IdKind::HookEvent);
@@ -180,7 +238,6 @@ mod tests {
         assert_eq!(classify_id("fu-abc"), IdKind::Followup);
         assert_eq!(classify_id("pv-abc"), IdKind::PageVisit);
         assert_eq!(classify_id("ue-abc"), IdKind::UsageEvent);
-        assert_eq!(classify_id("wil-abc"), IdKind::WorkItemLink);
         assert_eq!(classify_id("bg-abc"), IdKind::BackgroundTask);
     }
 
@@ -199,6 +256,5 @@ mod tests {
     fn label_mentions_prefix_form() {
         assert!(IdKind::Stream.label().contains("s-"));
         assert!(IdKind::Thread.label().contains("b-"));
-        assert!(IdKind::WorkItem.label().contains("wi-"));
     }
 }

@@ -1,9 +1,9 @@
 //! Pure cross-kind reference extractor.
 //!
-//! Given a free-text body (wiki page, work-item description, commit
+//! Given a free-text body (wiki page, task description, commit
 //! message, work-note, …) extracts the references it makes to other
-//! pages: file paths, directory paths, wiki slugs, work-item ids
-//! (`wi-…`), finding ids (`finding:…`), and git commit shas.
+//! pages: file paths, directory paths, wiki slugs, task ids
+//! (`task:<n>`), finding ids (`finding:…`), and git commit shas.
 //!
 //! Lives in `oxplow-domain` because it has zero IO and no async — it
 //! takes a `&str` and returns plain data. Every writer that mirrors
@@ -15,14 +15,14 @@
 //!    - `dir:<path>` → directory ref
 //!    - `git:<sha>` → commit ref (also `[[<sha>]]` if 7-40 hex)
 //!    - `finding:<id>` → finding ref
-//!    - `wi-<id>` → work-item ref
+//!    - `task:<digits>` → task ref
 //!    - `path/with/slash.ext[@version][:line]` → file ref
 //!    - `bare-slug` (kebab-case, no slash, no extension) → wiki slug
 //!
 //!    Custom display text after `|` is stripped (`[[a/b.ts|label]]`).
 //!
 //! 2. **Inline mentions** — fallback for free-text:
-//!    - bare `wi-<uuid>` work-item ids
+//!    - bare `task:<digits>` task ids
 //!    - bare `finding:<id>` (with the prefix to disambiguate from words)
 //!    - bare file-shaped paths (slash + 1–6 char extension)
 //!
@@ -60,7 +60,7 @@ pub struct ExtractedRefs {
     pub files_detail: Vec<FileRefDetail>,
     pub dirs: Vec<String>,
     pub wikis: Vec<String>,
-    pub work_items: Vec<String>,
+    pub tasks: Vec<i64>,
     pub findings: Vec<String>,
     pub commits: Vec<String>,
 }
@@ -73,7 +73,7 @@ pub fn extract(body: &str) -> ExtractedRefs {
     let mut files: BTreeSet<String> = BTreeSet::new();
     let mut dirs: BTreeSet<String> = BTreeSet::new();
     let mut wikis: BTreeSet<String> = BTreeSet::new();
-    let mut work_items: BTreeSet<String> = BTreeSet::new();
+    let mut tasks: BTreeSet<i64> = BTreeSet::new();
     let mut findings: BTreeSet<String> = BTreeSet::new();
     let mut commits: BTreeSet<String> = BTreeSet::new();
     let mut files_detail: Vec<FileRefDetail> = Vec::new();
@@ -105,9 +105,11 @@ pub fn extract(body: &str) -> ExtractedRefs {
             }
             continue;
         }
-        // wi-<id>
-        if looks_like_work_item(interior) {
-            work_items.insert(interior.to_string());
+        // task:<digits>
+        if let Some(rest) = strip_prefix_ci(interior, "task:") {
+            if let Some(id) = parse_task_id(rest) {
+                tasks.insert(id);
+            }
             continue;
         }
         // path/file.ext[@version][:line]
@@ -150,8 +152,8 @@ pub fn extract(body: &str) -> ExtractedRefs {
             }
         }
     }
-    for wi in find_inline_work_items(&stripped) {
-        work_items.insert(wi);
+    for id in find_inline_tasks(&stripped) {
+        tasks.insert(id);
     }
     for f in find_inline_findings(&stripped) {
         findings.insert(f);
@@ -162,7 +164,7 @@ pub fn extract(body: &str) -> ExtractedRefs {
         files_detail,
         dirs: dirs.into_iter().collect(),
         wikis: wikis.into_iter().collect(),
-        work_items: work_items.into_iter().collect(),
+        tasks: tasks.into_iter().collect(),
         findings: findings.into_iter().collect(),
         commits: commits.into_iter().collect(),
     }
@@ -277,9 +279,6 @@ fn looks_like_slug(s: &str) -> bool {
     if matches!(s.len(), 7..=40) && s.chars().all(|c| c.is_ascii_hexdigit()) {
         return false;
     }
-    if looks_like_work_item(s) {
-        return false;
-    }
     s.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
@@ -288,12 +287,12 @@ fn looks_like_commit_sha(s: &str) -> bool {
     matches!(s.len(), 7..=40) && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn looks_like_work_item(s: &str) -> bool {
-    s.len() > 3
-        && s.starts_with("wi-")
-        && s[3..]
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+fn parse_task_id(s: &str) -> Option<i64> {
+    let t = s.trim();
+    if t.is_empty() || !t.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    t.parse::<i64>().ok()
 }
 
 fn find_wikilinks(body: &str) -> Vec<&str> {
@@ -402,32 +401,32 @@ fn find_inline_paths(body: &str) -> Vec<String> {
     out
 }
 
-fn find_inline_work_items(body: &str) -> Vec<String> {
+fn find_inline_tasks(body: &str) -> Vec<i64> {
     let mut out = Vec::new();
+    let prefix = b"task:";
     let bytes = body.as_bytes();
     let mut i = 0;
-    while i + 3 < bytes.len() {
+    while i + prefix.len() < bytes.len() {
         if (i == 0 || !is_id_boundary_char(bytes[i - 1]))
-            && bytes[i] == b'w'
-            && bytes[i + 1] == b'i'
-            && bytes[i + 2] == b'-'
+            && bytes[i..i + prefix.len()].eq_ignore_ascii_case(prefix)
         {
-            let start = i;
-            i += 3;
-            while i < bytes.len() {
-                let c = bytes[i];
-                if c.is_ascii_alphanumeric() || c == b'-' {
-                    i += 1;
-                } else {
-                    break;
-                }
+            let start = i + prefix.len();
+            let mut end = start;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
             }
-            if i - start > 3 {
-                if let Ok(s) = std::str::from_utf8(&bytes[start..i]) {
-                    out.push(s.to_string());
+            // The character after the digits must not extend an id-ish
+            // token (e.g. `task:42abc` is not a valid task ref).
+            let next_extends = end < bytes.len() && is_id_boundary_char(bytes[end]);
+            if end > start && !next_extends {
+                if let Ok(s) = std::str::from_utf8(&bytes[start..end]) {
+                    if let Ok(n) = s.parse::<i64>() {
+                        out.push(n);
+                    }
                 }
+                i = end;
+                continue;
             }
-            continue;
         }
         i += 1;
     }
@@ -490,12 +489,12 @@ mod tests {
     }
 
     #[test]
-    fn wikilink_dir_and_slug_and_wi_and_finding_and_commit() {
-        let body = "[[dir:src/components]] and [[architecture]] and [[wi-019abc-def]] and [[finding:fnd-1]] and [[git:abcdef0]]";
+    fn wikilink_dir_and_slug_and_task_and_finding_and_commit() {
+        let body = "[[dir:src/components]] and [[architecture]] and [[task:42]] and [[finding:fnd-1]] and [[git:abcdef0]]";
         let r = extract(body);
         assert_eq!(r.dirs, vec!["src/components"]);
         assert_eq!(r.wikis, vec!["architecture"]);
-        assert_eq!(r.work_items, vec!["wi-019abc-def"]);
+        assert_eq!(r.tasks, vec![42]);
         assert_eq!(r.findings, vec!["fnd-1"]);
         assert_eq!(r.commits, vec!["abcdef0"]);
     }
@@ -520,10 +519,28 @@ mod tests {
     }
 
     #[test]
-    fn inline_work_item_and_finding_mention() {
-        let r = extract("blocked by wi-019abc-9999 see finding:fnd-2");
-        assert_eq!(r.work_items, vec!["wi-019abc-9999"]);
+    fn inline_task_and_finding_mention() {
+        let r = extract("blocked by task:42 see finding:fnd-2");
+        assert_eq!(r.tasks, vec![42]);
         assert_eq!(r.findings, vec!["fnd-2"]);
+    }
+
+    #[test]
+    fn inline_task_rejects_non_digits() {
+        let r = extract("task:foo and task:42abc");
+        assert!(r.tasks.is_empty());
+    }
+
+    #[test]
+    fn inline_task_with_trailing_punctuation() {
+        let r = extract("task:42 fixes issue. also task:7, see");
+        assert_eq!(r.tasks, vec![7, 42]);
+    }
+
+    #[test]
+    fn wikilink_task_rejects_non_digits() {
+        let r = extract("[[task:notanumber]] [[task:42abc]]");
+        assert!(r.tasks.is_empty());
     }
 
     #[test]
@@ -540,9 +557,9 @@ mod tests {
     }
 
     #[test]
-    fn slug_does_not_capture_wi_form() {
-        let r = extract("[[wi-019abc-1]]");
+    fn wikilink_task_form_does_not_become_slug() {
+        let r = extract("[[task:7]]");
         assert!(r.wikis.is_empty());
-        assert_eq!(r.work_items, vec!["wi-019abc-1"]);
+        assert_eq!(r.tasks, vec![7]);
     }
 }

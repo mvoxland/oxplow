@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ids::{AgentTurnId, HookEventId, StreamId, ThreadId, WorkItemId};
+use crate::ids::{AgentTurnId, HookEventId, StreamId, TaskId, ThreadId};
 use crate::time::Timestamp;
 
 /// Discriminant for hook events. Matches the kinds Claude Code emits
@@ -66,7 +66,7 @@ pub struct AgentStatus {
 pub struct AgentTurn {
     pub id: AgentTurnId,
     pub thread_id: ThreadId,
-    pub work_item_id: Option<WorkItemId>,
+    pub task_id: Option<TaskId>,
     pub prompt: String,
     pub answer: Option<String>,
     pub session_id: Option<String>,

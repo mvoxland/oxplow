@@ -10,10 +10,10 @@
 use async_trait::async_trait;
 
 use crate::hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
-use crate::ids::{AgentTurnId, NoteId, StreamId, ThreadId, WorkItemId};
+use crate::ids::{AgentTurnId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
+use crate::task::{Task, TaskEvent, TaskLink, TaskLinkType, WorkNote};
 use crate::thread::Thread;
-use crate::work_item::{WorkItem, WorkItemEvent, WorkItemLink, WorkItemLinkType, WorkNote};
 use crate::DomainError;
 
 #[async_trait]
@@ -55,19 +55,22 @@ pub trait ThreadStore: Send + Sync {
 }
 
 #[async_trait]
-pub trait WorkItemStore: Send + Sync {
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkItem>, DomainError>;
-    async fn list_backlog(&self) -> Result<Vec<WorkItem>, DomainError>;
-    async fn get(&self, id: &WorkItemId) -> Result<Option<WorkItem>, DomainError>;
-    async fn upsert(&self, item: &WorkItem) -> Result<(), DomainError>;
-    async fn soft_delete(&self, id: &WorkItemId) -> Result<(), DomainError>;
+pub trait TaskStore: Send + Sync {
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
+    async fn list_backlog(&self) -> Result<Vec<Task>, DomainError>;
+    async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError>;
+    /// Insert a new task; assigns and returns the autoincrement id.
+    async fn insert(&self, item: &Task) -> Result<TaskId, DomainError>;
+    /// Update an existing task by id.
+    async fn update(&self, item: &Task) -> Result<(), DomainError>;
+    async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError>;
 }
 
 #[async_trait]
 pub trait WorkNoteStore: Send + Sync {
     async fn add_for_item(
         &self,
-        item: &WorkItemId,
+        item: TaskId,
         body: &str,
         author: &str,
     ) -> Result<WorkNote, DomainError>;
@@ -77,7 +80,7 @@ pub trait WorkNoteStore: Send + Sync {
         body: &str,
         author: &str,
     ) -> Result<WorkNote, DomainError>;
-    async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkNote>, DomainError>;
+    async fn list_for_item(&self, item: TaskId) -> Result<Vec<WorkNote>, DomainError>;
     async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkNote>, DomainError>;
     /// Replace the body of an existing note. Used by
     /// `oxplow__record_query_finding` to fill in a note that was
@@ -87,24 +90,24 @@ pub trait WorkNoteStore: Send + Sync {
 }
 
 #[async_trait]
-pub trait WorkItemLinkStore: Send + Sync {
+pub trait TaskLinkStore: Send + Sync {
     async fn create(
         &self,
         thread: &ThreadId,
-        from: &WorkItemId,
-        to: &WorkItemId,
-        link_type: WorkItemLinkType,
-    ) -> Result<WorkItemLink, DomainError>;
-    async fn list_outgoing(&self, item: &WorkItemId) -> Result<Vec<WorkItemLink>, DomainError>;
-    async fn list_incoming(&self, item: &WorkItemId) -> Result<Vec<WorkItemLink>, DomainError>;
-    async fn delete(&self, id: &str) -> Result<(), DomainError>;
+        from: TaskId,
+        to: TaskId,
+        link_type: TaskLinkType,
+    ) -> Result<TaskLink, DomainError>;
+    async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
+    async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
+    async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError>;
 }
 
 #[async_trait]
-pub trait WorkItemEventStore: Send + Sync {
-    async fn append(&self, event: &WorkItemEvent) -> Result<(), DomainError>;
-    async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkItemEvent>, DomainError>;
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkItemEvent>, DomainError>;
+pub trait TaskEventStore: Send + Sync {
+    async fn append(&self, event: &TaskEvent) -> Result<(), DomainError>;
+    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEvent>, DomainError>;
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskEvent>, DomainError>;
 }
 
 #[async_trait]
