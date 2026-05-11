@@ -863,6 +863,7 @@ impl OxplowMcp {
         if !touched.is_empty() && matches!(item.status, TaskStatus::Done | TaskStatus::Blocked) {
             let thread_for_effort = thread.or_else(|| item.thread_id.clone());
             if let Some(tid) = thread_for_effort {
+                let worktree = worktree_for_thread(&self.services, &tid).await;
                 if let Err(err) = self
                     .services
                     .tasks
@@ -873,6 +874,7 @@ impl OxplowMcp {
                         &touched,
                         None,
                         &[],
+                        worktree.as_deref(),
                     )
                     .await
                 {
@@ -943,6 +945,7 @@ impl OxplowMcp {
         let touched = p.touched_files.unwrap_or_default();
         if !touched.is_empty() && matches!(updated.status, TaskStatus::Done | TaskStatus::Blocked) {
             if let Some(tid) = updated.thread_id.clone() {
+                let worktree = worktree_for_thread(&self.services, &tid).await;
                 if let Err(err) = self
                     .services
                     .tasks
@@ -953,6 +956,7 @@ impl OxplowMcp {
                         &touched,
                         None,
                         &[],
+                        worktree.as_deref(),
                     )
                     .await
                 {
@@ -1015,6 +1019,7 @@ impl OxplowMcp {
             } else {
                 None
             };
+            let worktree = worktree_for_thread(&self.services, &tid).await;
             if let Err(err) = self
                 .services
                 .tasks
@@ -1025,6 +1030,7 @@ impl OxplowMcp {
                     &touched,
                     summary,
                     &impacts,
+                    worktree.as_deref(),
                 )
                 .await
             {
@@ -1566,6 +1572,24 @@ fn parse_priority(s: &str) -> Result<oxplow_domain::TaskPriority, McpError> {
 /// Resolve the per-(stream, language) LspProxy. Helper sitting
 /// outside the `#[tool_router]` impl so the macro doesn't try to
 /// route it as a tool.
+/// Look up the worktree path for a thread by walking
+/// thread → stream. Returns `None` when either lookup fails so
+/// `record_effort` falls back to the safe default (every touched
+/// file → `Updated`). Used to plumb the worktree into
+/// `record_effort` so it can stat each touched file and detect
+/// deletions.
+async fn worktree_for_thread(
+    services: &Services,
+    thread_id: &oxplow_domain::ThreadId,
+) -> Option<std::path::PathBuf> {
+    let thread = services.thread_store.get(thread_id).await.ok().flatten()?;
+    let streams = services.streams.list_streams().await.ok()?;
+    streams
+        .into_iter()
+        .find(|s| s.id == thread.stream_id)
+        .map(|s| std::path::PathBuf::from(s.worktree_path))
+}
+
 async fn resolve_lsp_proxy(
     services: &Services,
     stream_id: &str,

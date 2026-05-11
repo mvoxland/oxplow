@@ -11,6 +11,7 @@
 //! independent of the tauri-specta layering and lets the MCP surface
 //! reuse the same service without paying for renderer notifications.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -235,6 +236,19 @@ impl TaskService {
     /// Open + record + close an effort for `item` against `thread`.
     /// Declared `impacts` are persisted before finish so the
     /// page_ref projection runs once with the full payload.
+    ///
+    /// `worktree_root`, when supplied, lets the store classify each
+    /// touched file as `Deleted` (file no longer on disk) vs.
+    /// `Updated` (file still present). Without a baseline snapshot
+    /// "Created" can't be distinguished from "Updated" by stat
+    /// alone, so callers needing that signal should declare it via
+    /// `impacts` (`{kind:"file", action:"created"}`). Pass `None`
+    /// from tests / callers that don't have a worktree handle — the
+    /// store falls back to `Updated` for every path, matching the
+    /// pre-change behavior.
+    // Each parameter is doing distinct semantic work — bundling
+    // into a struct would hide that without buying anything.
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_effort(
         &self,
         effort_store: &SqliteTaskEffortStore,
@@ -243,15 +257,15 @@ impl TaskService {
         touched_files: &[String],
         summary: Option<String>,
         impacts: &[TaskImpact],
+        worktree_root: Option<&Path>,
     ) -> Result<(), TaskServiceError> {
         let effort = effort_store.start(item, thread, None).await?;
         for path in touched_files {
             if path.is_empty() {
                 continue;
             }
-            effort_store
-                .record_file(&effort.id, path, EffortFileChange::Updated)
-                .await?;
+            let change = classify_change(worktree_root, path);
+            effort_store.record_file(&effort.id, path, change).await?;
         }
         if !impacts.is_empty() {
             effort_store.set_impacts(&effort.id, impacts).await?;
@@ -342,6 +356,29 @@ impl TaskService {
     }
 }
 
+/// Classify how a path changed during an effort by stat-ing the
+/// worktree. Without a baseline snapshot we can't reliably tell
+/// "created" apart from "updated" (the agent might have edited a
+/// pre-existing file too), so this returns:
+///
+///  - `Deleted` if the file is missing on disk now
+///  - `Updated` if the file is present (the dominant case)
+///
+/// Agents that want explicit "created" attribution should declare
+/// it via the `impacts` parameter on `complete_task`. Returns
+/// `Updated` when `worktree_root` is `None` so test fixtures that
+/// don't carry a real worktree keep their old behavior.
+fn classify_change(worktree_root: Option<&Path>, path: &str) -> EffortFileChange {
+    let Some(root) = worktree_root else {
+        return EffortFileChange::Updated;
+    };
+    let resolved = root.join(path);
+    match std::fs::symlink_metadata(&resolved) {
+        Ok(_) => EffortFileChange::Updated,
+        Err(_) => EffortFileChange::Deleted,
+    }
+}
+
 /// The bucketed view the Backlog page renders.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct BacklogState {
@@ -380,6 +417,55 @@ mod tests {
     use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
+
+    #[test]
+    fn classify_change_defaults_to_updated_without_worktree() {
+        // No worktree → caller (test or a path that hasn't plumbed
+        // the root yet) gets the same behavior as before the
+        // detection landed.
+        assert_eq!(
+            classify_change(None, "src/anything.rs"),
+            EffortFileChange::Updated
+        );
+    }
+
+    #[test]
+    fn classify_change_detects_deletion() {
+        let tmp = tempfile::tempdir().unwrap();
+        // File doesn't exist → Deleted.
+        assert_eq!(
+            classify_change(Some(tmp.path()), "missing.rs"),
+            EffortFileChange::Deleted
+        );
+        // File exists → Updated (we can't tell created from
+        // modified without a baseline snapshot).
+        let real = tmp.path().join("real.rs");
+        std::fs::write(&real, "fn main() {}").unwrap();
+        assert_eq!(
+            classify_change(Some(tmp.path()), "real.rs"),
+            EffortFileChange::Updated
+        );
+    }
+
+    #[test]
+    fn classify_change_treats_symlink_as_present() {
+        // Even a broken symlink reports via symlink_metadata, so the
+        // path is "present" from the agent's point of view —
+        // resolving the link is a deletion concern.
+        let tmp = tempfile::tempdir().unwrap();
+        let link = tmp.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("nowhere", &link).unwrap();
+        #[cfg(not(unix))]
+        {
+            let _ = link;
+            return;
+        }
+        assert_eq!(
+            classify_change(Some(tmp.path()), "link"),
+            EffortFileChange::Updated
+        );
+    }
 
     async fn fixture() -> (TaskService, ThreadId) {
         let db = Database::in_memory();
