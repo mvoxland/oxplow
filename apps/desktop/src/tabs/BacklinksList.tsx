@@ -83,14 +83,14 @@ export function tabRefToContextRef(ref: TabRef): ContextRef | null {
     }
     return null;
   }
-  if (ref.kind === "work-item") {
+  if (ref.kind === "task") {
     const payload = ref.payload as { itemId?: unknown } | null;
     if (payload && typeof payload.itemId === "string") {
       // Backlinks don't carry the title/status of the target — use a
       // placeholder that the agent can resolve via the work-item id.
       // formatContextMention reads `title` / `status`; passing the id
       // as the title keeps the inserted snippet readable.
-      return { kind: "work-item", itemId: payload.itemId, title: payload.itemId, status: "" };
+      return { kind: "task", itemId: payload.itemId, title: payload.itemId, status: "" };
     }
     return null;
   }

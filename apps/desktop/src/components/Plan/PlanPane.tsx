@@ -5,9 +5,9 @@ import type {
   BacklogState,
   Thread,
   ThreadWorkState,
-  WorkItem,
-  WorkItemPriority,
-  WorkItemStatus,
+  Task,
+  TaskPriority,
+  TaskStatus,
 } from "../../api.js";
 import {
   removeFollowup,
@@ -21,8 +21,8 @@ import { runWithError } from "../../ui-error.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { formatContextMention } from "../../agent-context-ref.js";
 import { SelectionActionBar } from "./SelectionActionBar.js";
-import { SectionHeaderMenu, WorkGroupList } from "./WorkGroupList.js";
-import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
+import { SectionHeaderMenu, TaskGroupList } from "./TaskGroupList.js";
+import type { TaskDetailChanges } from "./TaskDetail.js";
 import {
   applyStatusFilter,
   buildBacklogGroups,
@@ -35,7 +35,7 @@ import {
 } from "./plan-utils.js";
 
 const STATUS_RANK: Record<string, number> = { inProgress: 0, ready: 1, blocked: 2, done: 3 };
-function statusOrderRank(status: WorkItemStatus): number {
+function statusOrderRank(status: TaskStatus): number {
   return STATUS_RANK[classifyWorkItem(status)] ?? 0;
 }
 
@@ -59,10 +59,10 @@ interface Props {
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
   agentStatus?: AgentStatus;
   backlog: BacklogState | null;
-  onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
+  onUpdateWorkItem(itemId: string, changes: TaskDetailChanges): Promise<void>;
   onDeleteWorkItem(itemId: string): Promise<void>;
   onReorderWorkItems(orderedItemIds: string[]): Promise<void>;
-  onUpdateBacklogItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
+  onUpdateBacklogItem(itemId: string, changes: TaskDetailChanges): Promise<void>;
   onDeleteBacklogItem(itemId: string): Promise<void>;
   onReorderBacklog(orderedItemIds: string[]): Promise<void>;
   onMoveItemToBacklog(itemId: string, fromThreadId: string): Promise<void>;
@@ -99,8 +99,8 @@ interface Props {
   /** Filter raw items by status before grouping. Done Work passes
    *  `excludeStatuses: ["archived"]`; Archived passes
    *  `onlyStatuses: ["archived"]`. */
-  onlyStatuses?: WorkItemStatus[];
-  excludeStatuses?: WorkItemStatus[];
+  onlyStatuses?: TaskStatus[];
+  excludeStatuses?: TaskStatus[];
   /** Per-section header link nodes (right-aligned, after `sectionActions`).
    *  Used by Plan Work for "View all done →" links pointing at the
    *  dedicated Done Work / Archived pages. */
@@ -121,7 +121,7 @@ interface Props {
 interface ContextMenuState {
   x: number;
   y: number;
-  item: WorkItem;
+  item: Task;
   /** Non-null when the right-clicked item belongs to a multi-selection. */
   groupIds: string[] | null;
 }
@@ -184,7 +184,7 @@ export function PlanPane({
 
   // Flat top-to-bottom list of work-item ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
-  // sync with the section split in WorkGroupList (In progress → To do →
+  // sync with the section split in TaskGroupList (In progress → To do →
   // Blocked → Done).
   const navigableIds = useMemo(() => {
     const ids: string[] = [];
@@ -261,7 +261,7 @@ export function PlanPane({
   };
 
 
-  const selectedItem: WorkItem | null = useMemo(() => {
+  const selectedItem: Task | null = useMemo(() => {
     if (!selectedId) return null;
     for (const group of groups) {
       const hit = group.items.find((item) => item.id === selectedId);
@@ -370,10 +370,10 @@ export function PlanPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registerOpenCreate]);
 
-  const openEditModal = (item: WorkItem) => {
+  const openEditModal = (item: Task) => {
     // Row clicks (and Enter on the keyboard-selected row) open the
     // canonical Task page (WorkItemPage) which renders a readable view
-    // with inline editing via WorkItemDetail.
+    // with inline editing via TaskDetail.
     setSelectedId(item.id);
     onOpenWorkItemPage?.(item.id);
   };
@@ -455,7 +455,7 @@ export function PlanPane({
           ]);
           const markedItems = [...markedIds]
             .map((id) => allItems.find((item) => item.id === id))
-            .filter((item): item is WorkItem => item !== undefined);
+            .filter((item): item is Task => item !== undefined);
           if (markedItems.length === 0) return null;
           return (
             <SelectionActionBar
@@ -490,7 +490,7 @@ export function PlanPane({
                 // space-separated chain of bracketed work-item refs.
                 const text = markedItems
                   .map((item) => formatContextMention({
-                    kind: "work-item",
+                    kind: "task",
                     itemId: item.id,
                     title: item.title,
                     status: item.status,
@@ -549,7 +549,7 @@ export function PlanPane({
               }
             }
             return (
-              <WorkGroupList
+              <TaskGroupList
                 key={group.epic?.id ?? "__root__"}
                 group={group}
                 scopeThreadId={currentScopeThreadId}
@@ -640,9 +640,9 @@ export function PlanPane({
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
                   const text = ids
                     .map((id) => allWi.find((i) => i.id === id))
-                    .filter((item): item is WorkItem => item !== undefined)
+                    .filter((item): item is Task => item !== undefined)
                     .map((item) => formatContextMention({
-                      kind: "work-item",
+                      kind: "task",
                       itemId: item.id,
                       title: item.title,
                       status: item.status,
@@ -676,7 +676,7 @@ export function PlanPane({
                 onAddToAgent: (item) => {
                   setContextMenu(null);
                   insertIntoAgent(formatContextMention({
-                    kind: "work-item",
+                    kind: "task",
                     itemId: item.id,
                     title: item.title,
                     status: item.status,
@@ -697,9 +697,9 @@ export function PlanPane({
               ? [kbPicker.itemId, ...kbPicker.extraIds]
               : [kbPicker.itemId];
             if (kbPicker.kind === "status") {
-              for (const id of allIds) void activeUpdate(id, { status: value as WorkItemStatus });
+              for (const id of allIds) void activeUpdate(id, { status: value as TaskStatus });
             } else {
-              for (const id of allIds) void activeUpdate(id, { priority: value as WorkItemPriority });
+              for (const id of allIds) void activeUpdate(id, { priority: value as TaskPriority });
             }
             setKbPicker(null);
             paneRef.current?.focus();
@@ -711,10 +711,10 @@ export function PlanPane({
   );
 }
 
-const KB_STATUS_OPTIONS: WorkItemStatus[] = [
+const KB_STATUS_OPTIONS: TaskStatus[] = [
   "blocked", "ready", "done", "archived", "canceled",
 ];
-const KB_PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
+const KB_PRIORITY_OPTIONS: TaskPriority[] = ["urgent", "high", "medium", "low"];
 
 /**
  * Small centered picker opened by the keyboard shortcuts `S` / `P` when a
@@ -729,7 +729,7 @@ function KeyboardValuePicker({
   onClose,
 }: {
   kind: "status" | "priority";
-  item: WorkItem;
+  item: Task;
   onPick(value: string): void;
   onClose(): void;
 }) {
@@ -786,7 +786,7 @@ function KeyboardValuePicker({
                   color: active ? "#fff" : "var(--fg)",
                 }}
               >
-                {kind === "status" ? statusLabel(option as WorkItemStatus) : option}
+                {kind === "status" ? statusLabel(option as TaskStatus) : option}
                 {option === current ? <span style={{ marginLeft: 8, opacity: 0.7 }}>· current</span> : null}
               </div>
             );
@@ -818,13 +818,13 @@ const kbPickerStyle: CSSProperties = {
 
 
 function buildWorkItemMenu(
-  item: WorkItem,
+  item: Task,
   actions: {
-    onDelete: (item: WorkItem) => void;
-    onRename: (item: WorkItem) => void;
-    onChangeStatus: (item: WorkItem) => void;
-    onChangePriority: (item: WorkItem) => void;
-    onAddToAgent: (item: WorkItem) => void;
+    onDelete: (item: Task) => void;
+    onRename: (item: Task) => void;
+    onChangeStatus: (item: Task) => void;
+    onChangePriority: (item: Task) => void;
+    onAddToAgent: (item: Task) => void;
   },
 ): MenuItem[] {
   const locked = item.status === "in_progress";
@@ -863,12 +863,12 @@ function buildWorkItemMenu(
 }
 
 function buildGroupMenu(
-  item: WorkItem,
+  item: Task,
   groupIds: string[],
   actions: {
-    onChangeStatus: (item: WorkItem, ids: string[]) => void;
-    onChangePriority: (item: WorkItem, ids: string[]) => void;
-    onDelete: (item: WorkItem, ids: string[]) => void;
+    onChangeStatus: (item: Task, ids: string[]) => void;
+    onChangePriority: (item: Task, ids: string[]) => void;
+    onDelete: (item: Task, ids: string[]) => void;
     onAddToAgent: (ids: string[]) => void;
   },
 ): MenuItem[] {

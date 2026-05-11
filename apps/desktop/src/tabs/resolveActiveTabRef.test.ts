@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentRef, fileRef, wikiPageRef, workItemRef } from "./pageRefs.js";
+import { agentRef, fileRef, wikiPageRef, taskRef } from "./pageRefs.js";
 import { resolveActiveTabRef } from "./resolveActiveTabRef.js";
 
 describe("resolveActiveTabRef", () => {
@@ -9,7 +9,7 @@ describe("resolveActiveTabRef", () => {
 
   test("matching pageTab id returns that ref", () => {
     const note = wikiPageRef("data-model");
-    const work = workItemRef("wi-1");
+    const work = taskRef("wi-1");
     const got = resolveActiveTabRef(note.id, [work, note], []);
     expect(got).toBe(note);
   });

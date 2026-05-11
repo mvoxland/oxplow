@@ -1,8 +1,8 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BacklogState, FinishedEntry, ThreadWorkState, WorkItem } from "../../api.js";
+import type { BacklogState, FinishedEntry, ThreadWorkState, Task } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, workItemRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, taskRef } from "../../tabs/pageRefs.js";
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
@@ -314,7 +314,7 @@ function SearchTrigger({ onOpenSearch }: { onOpenSearch?: () => void }) {
   );
 }
 
-function statusIcon(status: WorkItem["status"]): string {
+function statusIcon(status: Task["status"]): string {
   switch (status) {
     case "done": return "✓";
     case "in_progress": return "◐";
@@ -326,7 +326,7 @@ function statusIcon(status: WorkItem["status"]): string {
   }
 }
 
-function statusIconColor(status: WorkItem["status"]): string {
+function statusIconColor(status: Task["status"]): string {
   switch (status) {
     case "done": return "var(--diff-add-fg, #2ea043)";
     case "in_progress": return "var(--accent-fg, #58a6ff)";
@@ -341,8 +341,8 @@ function ActiveItemSection({
   epicContext,
   onOpenPage,
 }: {
-  item: WorkItem | null;
-  epicContext: { epic: WorkItem; children: WorkItem[] } | null;
+  item: Task | null;
+  epicContext: { epic: Task; children: Task[] } | null;
   onOpenPage(ref: TabRef): void;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -385,10 +385,10 @@ function ActiveItemSection({
           <button
             type="button"
             data-testid="rail-active-epic-row"
-            onClick={() => onOpenPage(workItemRef(epic.id))}
+            onClick={() => onOpenPage(taskRef(epic.id))}
             draggable
             onDragStart={(ev) => setContextRefDrag(ev, {
-              kind: "work-item",
+              kind: "task",
               itemId: epic.id,
               title: epic.title,
               status: epic.status,
@@ -427,10 +427,10 @@ function ActiveItemSection({
                   key={child.id}
                   type="button"
                   data-testid={`rail-active-epic-child-${child.id}`}
-                  onClick={() => onOpenPage(workItemRef(child.id))}
+                  onClick={() => onOpenPage(taskRef(child.id))}
                   draggable
                   onDragStart={(ev) => setContextRefDrag(ev, {
-                    kind: "work-item",
+                    kind: "task",
                     itemId: child.id,
                     title: child.title,
                     status: child.status,
@@ -473,10 +473,10 @@ function ActiveItemSection({
       <button
         type="button"
         data-testid="rail-active-item"
-        onClick={() => onOpenPage(workItemRef(item.id))}
+        onClick={() => onOpenPage(taskRef(item.id))}
         draggable
         onDragStart={(ev) => setContextRefDrag(ev, {
-          kind: "work-item",
+          kind: "task",
           itemId: item.id,
           title: item.title,
           status: item.status,
@@ -696,7 +696,7 @@ function UpNextSection({
   items,
   onOpenPage,
 }: {
-  items: WorkItem[];
+  items: Task[];
   onOpenPage(ref: TabRef): void;
 }) {
   return (
@@ -709,10 +709,10 @@ function UpNextSection({
             type="button"
             data-testid={`rail-up-next-item-${item.id}`}
             title={item.title}
-            onClick={() => onOpenPage(workItemRef(item.id))}
+            onClick={() => onOpenPage(taskRef(item.id))}
             draggable
             onDragStart={(ev) => setContextRefDrag(ev, {
-              kind: "work-item",
+              kind: "task",
               itemId: item.id,
               title: item.title,
               status: item.status,
@@ -897,12 +897,12 @@ function FinishedSection({
       </div>
       <div data-testid="rail-finished" style={{ paddingBottom: 8 }}>
         {entries.map((e) => {
-          const ref = e.kind === "work-item" ? workItemRef(e.itemId) : wikiPageRef(e.slug);
+          const ref = e.kind === "task" ? taskRef(e.itemId) : wikiPageRef(e.slug);
           return (
             <button
-              key={`${e.kind}:${e.kind === "work-item" ? e.itemId : e.slug}`}
+              key={`${e.kind}:${e.kind === "task" ? e.itemId : e.slug}`}
               type="button"
-              data-testid={`rail-finished-${e.kind === "work-item" ? e.itemId : e.slug}`}
+              data-testid={`rail-finished-${e.kind === "task" ? e.itemId : e.slug}`}
               title={e.title}
               onClick={() => onOpenPage(ref)}
               style={rowHoverStyle()}

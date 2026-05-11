@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import type { ThreadWorkState, WorkItem } from "../../api.js";
+import type { ThreadWorkState, Task } from "../../api.js";
 import { computeActiveEpicContext, computeActiveItem, computePagesDirectory, computeUpNext, type RecentFileEntry, sortRecentFiles } from "./sections.js";
 import { gitDashboardRef, uncommittedChangesRef } from "../../tabs/pageRefs.js";
 
-function makeItem(partial: Partial<WorkItem> & { id: string; status: WorkItem["status"] }): WorkItem {
-  const base: WorkItem = {
+function makeItem(partial: Partial<Task> & { id: string; status: Task["status"] }): Task {
+  const base: Task = {
     id: partial.id,
     thread_id: "t-1",
     parent_id: null,
@@ -27,7 +27,7 @@ function makeItem(partial: Partial<WorkItem> & { id: string; status: WorkItem["s
   return { ...base, ...partial };
 }
 
-const baseState = (items: WorkItem[]): ThreadWorkState => ({
+const baseState = (items: Task[]): ThreadWorkState => ({
   threadId: "t-1",
   waiting: items.filter((i) => i.status === "ready"),
   inProgress: items.filter((i) => i.status === "in_progress"),

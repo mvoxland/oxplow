@@ -9,18 +9,18 @@ import {
   listSnapshots,
   restoreFileFromSnapshot,
   subscribeSnapshotEvents,
-  updateWorkItem,
+  updateTask,
   type FileSnapshot,
   type SnapshotSummary,
   type Stream,
-  type WorkItemStatus,
-  type WorkItemPriority,
+  type TaskStatus,
+  type TaskPriority,
 } from "../../api.js";
 import { logUi } from "../../logger.js";
 import { recordOpError } from "../opErrorsStore.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { InlineConfirm } from "../InlineConfirm.js";
-import { InlineStatusPicker } from "../Plan/WorkGroupList.js";
+import { InlineStatusPicker } from "../Plan/TaskGroupList.js";
 
 interface Props {
   stream: Stream | null;
@@ -35,7 +35,7 @@ interface Props {
 export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequestEditWorkItem }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [effortsBySnapshot, setEffortsBySnapshot] = useState<
-    Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>
+    Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>
   >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -176,11 +176,11 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
   const handleChangeStatus = async (
     workItemId: string,
     threadId: string,
-    status: WorkItemStatus,
+    status: TaskStatus,
   ) => {
     if (!stream || !threadId) return;
     try {
-      await updateWorkItem(stream.id, threadId, workItemId, { status });
+      await updateTask(stream.id, threadId, workItemId, { status });
       // Optimistic local update; the snapshot-event subscription refreshes.
       setEffortsBySnapshot((prev) => {
         const next: typeof prev = {};
@@ -291,7 +291,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
     effortId: string | null;
     workItemId: string | null;
     threadId: string | null;
-    status: WorkItemStatus | null;
+    status: TaskStatus | null;
     isExternal: boolean;
   };
   const rows: Row[] = [];
@@ -488,10 +488,10 @@ function SnapshotRow({
   flashing: boolean;
   compareBase: boolean;
   onClick(): void;
-  status: WorkItemStatus | null;
+  status: TaskStatus | null;
   workItemId: string | null;
   isExternal: boolean;
-  onChangeStatus?(nextStatus: WorkItemStatus): void;
+  onChangeStatus?(nextStatus: TaskStatus): void;
   onDoubleClick?(): void;
   rowRef?(node: HTMLDivElement | null): void;
 }) {

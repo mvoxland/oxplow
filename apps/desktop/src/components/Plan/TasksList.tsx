@@ -49,7 +49,7 @@ export function TasksList(props: Omit<PlanPaneProps, "hideAuto" | "onlyStatuses"
       {/* Tasks-page-only spacing overrides. Promotes the section
           headers from sidebar-density (11px uppercase) to wiki-page
           headings, and gives rows real breathing room. Scoped to
-          [data-tasks-roomy] so the same WorkGroupList component still
+          [data-tasks-roomy] so the same TaskGroupList component still
           renders compactly on Plan Work / Done Work / Archived. */}
       <style>{`
         [data-tasks-roomy] [data-testid^="plan-section-header-"] {

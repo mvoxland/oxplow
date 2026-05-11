@@ -15,7 +15,7 @@ import {
   WORK_ITEM_DRAG_MIME_VALUE,
   decodeWorkItemDragRefs,
   dragHasContextRef,
-  dragHasWorkItemRefs,
+  dragHasTaskRefs,
   readContextRef,
 } from "../agent-context-dnd.js";
 import { formatContextMention } from "../agent-context-ref.js";
@@ -212,7 +212,7 @@ export function TerminalPane({
     // single-row drag) or a multi-id work-item DnD payload (Plan pane
     // marked-set drag). Both end up inserted as @-mentions / bracketed
     // refs through the same `term.paste` pipeline.
-    if (!dragHasContextRef(e) && !dragHasWorkItemRefs(e)) return;
+    if (!dragHasContextRef(e) && !dragHasTaskRefs(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     if (!dragHovering) setDragHovering(true);
@@ -233,7 +233,7 @@ export function TerminalPane({
     // Multi-id work-item payload first — when present, iterate every id
     // and paste a space-separated chain of context mentions. This is the
     // path for "drag a marked Plan-pane row into the agent" (one or many).
-    if (dragHasWorkItemRefs(e)) {
+    if (dragHasTaskRefs(e)) {
       const raw = e.dataTransfer.getData(WORK_ITEM_DRAG_MIME_VALUE);
       const refs = decodeWorkItemDragRefs(raw);
       if (refs.length > 0) {

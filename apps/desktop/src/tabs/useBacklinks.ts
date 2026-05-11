@@ -6,7 +6,7 @@ import {
   findingRef,
   gitCommitRef,
   wikiPageRef,
-  workItemRef,
+  taskRef,
 } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
@@ -92,7 +92,7 @@ function canonicalIdForTarget(ref: TabRef): string | null {
       const p = ref.payload as { slug?: string } | null;
       return p?.slug ?? null;
     }
-    case "work-item": {
+    case "task": {
       const p = ref.payload as { itemId?: string } | null;
       return p?.itemId ?? null;
     }
@@ -145,8 +145,8 @@ function refFor(kind: string, id: string): TabRef | null {
   switch (kind) {
     case "wiki":
       return wikiPageRef(id);
-    case "work-item":
-      return workItemRef(id);
+    case "task":
+      return taskRef(id);
     case "file":
       return fileRef(id);
     case "directory":
@@ -173,7 +173,7 @@ function humanRefType(refType: string): string {
       return "wiki link";
     case "wikilink":
       return "wiki link";
-    case "wi_body_mention":
+    case "task_body_mention":
       return "mention";
     case "finding_mention":
       return "mention";

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { ThreadWorkState, WorkItem } from "../../api.js";
+import type { ThreadWorkState, Task } from "../../api.js";
 
 const paneStyle: CSSProperties = {
   flex: "0 0 280px",
@@ -33,7 +33,7 @@ const numberStyle: CSSProperties = {
  *
  * Intentionally does not render an editable row detail today —
  * editing happens through the existing modal path (PlanPane's
- * WorkItemDetail). The summary view fills the space so the page
+ * TaskDetail). The summary view fills the space so the page
  * feels informative when nothing is selected, which is the most
  * common state on a quiet thread.
  */
@@ -100,12 +100,12 @@ export function TaskDetailPane({
   );
 }
 
-function pickOldestBlocked(blocked: WorkItem[]): WorkItem | null {
+function pickOldestBlocked(blocked: Task[]): Task | null {
   if (blocked.length === 0) return null;
   return blocked.reduce((best, cur) => (cur.updated_at < best.updated_at ? cur : best));
 }
 
-function pickRecentlyClosed(done: WorkItem[], limit: number): WorkItem[] {
+function pickRecentlyClosed(done: Task[], limit: number): Task[] {
   return [...done]
     .sort((a, b) => (b.completed_at ?? b.updated_at).localeCompare(a.completed_at ?? a.updated_at))
     .slice(0, limit);

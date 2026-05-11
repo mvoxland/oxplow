@@ -196,7 +196,7 @@ export function parseGitRefTarget(target: string): string | null {
 
 /**
  * Classify a markdown link href. Shared by WikiPageTab (wiki navigation) and
- * WorkItemDetail (work-item modal markdown rendering). Pure — easy to test.
+ * TaskDetail (work-item modal markdown rendering). Pure — easy to test.
  */
 export function parseMarkdownLink(rawHref: string): ParsedLink {
   if (!rawHref) return { kind: "empty" };

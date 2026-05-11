@@ -1,4 +1,4 @@
-import type { ThreadWorkState, WorkItem } from "../../api.js";
+import type { ThreadWorkState, Task } from "../../api.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import {
   archivedRef,
@@ -73,7 +73,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
  * The store's `inProgress` bucket holds `in_progress` items. The rail's
  * "Active item" means *what the agent is doing right now*.
  */
-export function computeActiveItem(state: ThreadWorkState | null): WorkItem | null {
+export function computeActiveItem(state: ThreadWorkState | null): Task | null {
   if (!state) return null;
   const candidates = state.inProgress.filter(
     (item) => item.kind !== "epic" && item.status === "in_progress",
@@ -91,8 +91,8 @@ export function computeActiveItem(state: ThreadWorkState | null): WorkItem | nul
  */
 export function computeActiveEpicContext(
   state: ThreadWorkState | null,
-  active: WorkItem | null,
-): { epic: WorkItem; children: WorkItem[] } | null {
+  active: Task | null,
+): { epic: Task; children: Task[] } | null {
   if (!state || !active || !active.parent_id) return null;
   const pool = state.items.length > 0 ? state.items : [...state.epics, ...state.inProgress, ...state.waiting, ...state.done];
   const epic = pool.find((i) => i.id === active.parent_id && i.kind === "epic");
@@ -107,7 +107,7 @@ export function computeActiveEpicContext(
  * Return the next-up `ready` items, sorted by sort_index ascending,
  * truncated to `limit`. The "Ready" rail section uses this.
  */
-export function computeUpNext(state: ThreadWorkState | null, limit = 5): WorkItem[] {
+export function computeUpNext(state: ThreadWorkState | null, limit = 5): Task[] {
   if (!state) return [];
   const ready = state.items.filter((item) => item.status === "ready" && item.kind !== "epic");
   ready.sort((a, b) => a.sort_index - b.sort_index);

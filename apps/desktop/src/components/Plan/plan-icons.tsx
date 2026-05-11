@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { WorkItemPriority } from "../../api.js";
+import type { TaskPriority } from "../../api.js";
 
 /**
  * Three-bar priority glyph mirroring Linear's scannable column. Urgent /
@@ -12,7 +12,7 @@ import type { WorkItemPriority } from "../../api.js";
  *   medium: ▬··  one bar filled, --priority-medium
  *   low:    ···  three empty bars, --priority-low
  */
-export function PriorityIcon({ priority, size = 10 }: { priority: WorkItemPriority; size?: number }) {
+export function PriorityIcon({ priority, size = 10 }: { priority: TaskPriority; size?: number }) {
   const filled = priority === "urgent" ? 3 : priority === "high" ? 2 : priority === "medium" ? 1 : 0;
   const color = priorityColorVar(priority);
   const barWidth = Math.max(2, Math.round(size * 0.2));
@@ -46,7 +46,7 @@ export function PriorityIcon({ priority, size = 10 }: { priority: WorkItemPriori
   );
 }
 
-function priorityColorVar(priority: WorkItemPriority): string {
+function priorityColorVar(priority: TaskPriority): string {
   switch (priority) {
     case "urgent": return "var(--priority-urgent)";
     case "high": return "var(--priority-high)";

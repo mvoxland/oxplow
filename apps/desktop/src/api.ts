@@ -253,12 +253,11 @@ export interface ThreadState {
 // excluded soft-deleted rows in their list queries). New code can
 // read `deleted_at` directly when needed.
 import type {
-  WorkItem,
-  WorkItemKind,
-  WorkItemStatus,
-  WorkItemPriority,
+  Task,
+  TaskStatus,
+  TaskPriority,
 } from "./tauri-bridge/index.js";
-export type { WorkItem, WorkItemKind, WorkItemStatus, WorkItemPriority };
+export type { Task, TaskStatus, TaskPriority };
 
 export interface WorkNote {
   id: string;
@@ -268,8 +267,8 @@ export interface WorkNote {
   created_at: string;
 }
 
-import type { WorkItemEvent } from "./tauri-bridge/index.js";
-export type { WorkItemEvent };
+import type { TaskEvent } from "./tauri-bridge/index.js";
+export type { TaskEvent };
 
 export type SnapshotSource =
   | "task-start"
@@ -318,7 +317,7 @@ export interface SnapshotDiffResult {
   afterState: SnapshotDiffSide;
 }
 
-export interface WorkItemEffort {
+export interface TaskEffort {
   id: string;
   work_item_id: string;
   started_at: string;
@@ -329,7 +328,7 @@ export interface WorkItemEffort {
 }
 
 export interface EffortDetail {
-  effort: WorkItemEffort;
+  effort: TaskEffort;
   start_snapshot: FileSnapshot | null;
   end_snapshot: FileSnapshot | null;
   changed_paths: string[];
@@ -699,68 +698,67 @@ export async function getThreadWorkState(_streamId: string, threadId: string): P
   return unwrap(await commands.getThreadWorkState(threadId)) as unknown as ThreadWorkState;
 }
 
-export async function createWorkItem(
+export async function createTask(
   streamId: string,
   threadId: string,
   input: {
-    kind: WorkItemKind;
     title: string;
     description?: string;
     acceptanceCriteria?: string | null;
-    parentId?: string | null;
-    status?: WorkItemStatus;
-    priority?: WorkItemPriority;
+    parentId?: number | null;
+    status?: TaskStatus;
+    priority?: TaskPriority;
   },
 ): Promise<ThreadWorkState> {
-  unwrap(await commands.createWorkItem({ threadId, input: input as never }));
+  unwrap(await commands.createTask({ threadId, input: input as never }));
   return getThreadWorkState(streamId, threadId);
 }
 
-export async function updateWorkItem(
+export async function updateTask(
   streamId: string,
   threadId: string,
-  itemId: string,
+  itemId: number,
   changes: {
     title?: string;
     description?: string;
     acceptanceCriteria?: string | null;
-    parentId?: string | null;
-    status?: WorkItemStatus;
-    priority?: WorkItemPriority;
+    parentId?: number | null;
+    status?: TaskStatus;
+    priority?: TaskPriority;
     category?: string | null;
     tags?: string | null;
   },
 ): Promise<ThreadWorkState> {
-  unwrap(await commands.updateWorkItem({ id: itemId, changes: changes as never }));
+  unwrap(await commands.updateTask({ id: itemId, changes: changes as never }));
   return getThreadWorkState(streamId, threadId);
 }
 
-export async function deleteWorkItem(
+export async function deleteTask(
   streamId: string,
   threadId: string,
-  itemId: string,
+  itemId: number,
 ): Promise<ThreadWorkState> {
-  unwrap(await commands.deleteWorkItem(itemId));
+  unwrap(await commands.deleteTask(itemId));
   return getThreadWorkState(streamId, threadId);
 }
 
-export async function reorderWorkItems(
+export async function reorderTasks(
   streamId: string,
   threadId: string,
-  orderedItemIds: string[],
+  orderedItemIds: number[],
 ): Promise<ThreadWorkState> {
-  unwrap(await commands.reorderWorkItems({ threadId, order: orderedItemIds }));
+  unwrap(await commands.reorderTasks({ threadId, order: orderedItemIds }));
   return getThreadWorkState(streamId, threadId);
 }
 
-export async function moveWorkItemToThread(
+export async function moveTaskToThread(
   streamId: string,
   fromThreadId: string,
-  itemId: string,
+  itemId: number,
   toThreadId: string,
   _toStreamId?: string,
 ): Promise<{ from: ThreadWorkState; to: ThreadWorkState }> {
-  unwrap(await commands.moveWorkItem({ id: itemId, threadId: toThreadId }));
+  unwrap(await commands.moveTask({ id: itemId, threadId: toThreadId }));
   const [from, to] = await Promise.all([
     getThreadWorkState(streamId, fromThreadId),
     getThreadWorkState(streamId, toThreadId),
@@ -773,51 +771,50 @@ export async function getBacklogState(): Promise<BacklogState> {
 }
 
 export async function createBacklogItem(input: {
-  kind: WorkItemKind;
   title: string;
   description?: string;
   acceptanceCriteria?: string | null;
-  status?: WorkItemStatus;
-  priority?: WorkItemPriority;
+  status?: TaskStatus;
+  priority?: TaskPriority;
   category?: string | null;
   tags?: string | null;
 }): Promise<BacklogState> {
-  unwrap(await commands.createWorkItem({ threadId: null, input: input as never }));
+  unwrap(await commands.createTask({ threadId: null, input: input as never }));
   return getBacklogState();
 }
 
 export async function updateBacklogItem(
-  itemId: string,
+  itemId: number,
   changes: {
     title?: string;
     description?: string;
     acceptanceCriteria?: string | null;
-    status?: WorkItemStatus;
-    priority?: WorkItemPriority;
+    status?: TaskStatus;
+    priority?: TaskPriority;
     category?: string | null;
     tags?: string | null;
   },
 ): Promise<BacklogState> {
-  unwrap(await commands.updateWorkItem({ id: itemId, changes: changes as never }));
+  unwrap(await commands.updateTask({ id: itemId, changes: changes as never }));
   return getBacklogState();
 }
 
-export async function deleteBacklogItem(itemId: string): Promise<BacklogState> {
-  unwrap(await commands.deleteWorkItem(itemId));
+export async function deleteBacklogItem(itemId: number): Promise<BacklogState> {
+  unwrap(await commands.deleteTask(itemId));
   return getBacklogState();
 }
 
-export async function reorderBacklog(orderedItemIds: string[]): Promise<BacklogState> {
-  unwrap(await commands.reorderWorkItems({ threadId: null, order: orderedItemIds }));
+export async function reorderBacklog(orderedItemIds: number[]): Promise<BacklogState> {
+  unwrap(await commands.reorderTasks({ threadId: null, order: orderedItemIds }));
   return getBacklogState();
 }
 
-export async function moveWorkItemToBacklog(
+export async function moveTaskToBacklog(
   streamId: string,
   fromThreadId: string,
-  itemId: string,
+  itemId: number,
 ): Promise<{ from: ThreadWorkState; backlog: BacklogState }> {
-  unwrap(await commands.moveWorkItem({ id: itemId, threadId: null }));
+  unwrap(await commands.moveTask({ id: itemId, threadId: null }));
   const [from, backlog] = await Promise.all([
     getThreadWorkState(streamId, fromThreadId),
     getBacklogState(),
@@ -827,10 +824,10 @@ export async function moveWorkItemToBacklog(
 
 export async function moveBacklogItemToThread(
   streamId: string,
-  itemId: string,
+  itemId: number,
   toThreadId: string,
 ): Promise<{ backlog: BacklogState; to: ThreadWorkState }> {
-  unwrap(await commands.moveWorkItem({ id: itemId, threadId: toThreadId }));
+  unwrap(await commands.moveTask({ id: itemId, threadId: toThreadId }));
   const [backlog, to] = await Promise.all([
     getBacklogState(),
     getThreadWorkState(streamId, toThreadId),
@@ -1200,28 +1197,28 @@ export function subscribeCodeQualityEvents(
   });
 }
 
-export async function getWorkItem(id: string): Promise<WorkItem | null> {
-  return unwrap(await commands.getWorkItem(id)) as unknown as WorkItem | null;
+export async function getTask(id: string): Promise<Task | null> {
+  return unwrap(await commands.getTask(id)) as unknown as Task | null;
 }
 
-export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
+export async function getTaskSummaries(ids: string[]): Promise<Array<{
   id: string;
   title: string;
-  status: import("./api-types.js").WorkItemStatus;
+  status: import("./api-types.js").TaskStatus;
   thread_id: string | null;
 }>> {
   if (ids.length === 0) return [];
   const items = await Promise.all(
     ids.map(async (id) => {
       try {
-        return unwrap(await commands.getWorkItem(id)) as unknown as WorkItem | null;
+        return unwrap(await commands.getTask(id)) as unknown as Task | null;
       } catch {
         return null;
       }
     }),
   );
   return items
-    .filter((x): x is WorkItem => x !== null)
+    .filter((x): x is Task => x !== null)
     .map((w) => ({
       id: w.id,
       title: w.title,
@@ -1353,14 +1350,14 @@ export async function listAllRefs(_streamId: string): Promise<import("./api-type
   >;
 }
 
-export async function listWorkItemEvents(
+export async function listTaskEvents(
   _streamId: string,
   _threadId: string,
   itemId?: string,
-): Promise<WorkItemEvent[]> {
+): Promise<TaskEvent[]> {
   return unwrap(
-    await commands.listWorkItemEvents(itemId ?? null, null),
-  ) as unknown as WorkItemEvent[];
+    await commands.listTaskEvents(itemId ?? null, null),
+  ) as unknown as TaskEvent[];
 }
 
 export async function getBranchChanges(
@@ -1398,9 +1395,9 @@ export async function readFileAtRef(
   return { content };
 }
 
-export async function listWorkItemEfforts(itemId: string): Promise<EffortDetail[]> {
-  // The Tauri command returns flat `WorkItemEffort` rows. Consumers
-  // (WorkItemPage activity timeline, useBacklinks, WorkItemDetail)
+export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
+  // The Tauri command returns flat `TaskEffort` rows. Consumers
+  // (WorkItemPage activity timeline, useBacklinks, TaskDetail)
   // expect the richer `EffortDetail` shape with snapshots + changed
   // paths + counts. Wrap each row defensively so a missing detail
   // doesn't crash the page (the previous lying cast caused
@@ -1408,7 +1405,7 @@ export async function listWorkItemEfforts(itemId: string): Promise<EffortDetail[
   // when the renderer reached for `.effort` on a flat row). Snapshots
   // and file lists default to empty until a backend command exists to
   // populate them.
-  const rows = unwrap(await commands.listWorkItemEfforts(itemId)) as unknown as WorkItemEffort[];
+  const rows = unwrap(await commands.listTaskEfforts(itemId)) as unknown as TaskEffort[];
   return rows.map((effort) => ({
     effort,
     start_snapshot: null,
@@ -1454,7 +1451,7 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
 
 export async function listEffortsEndingAtSnapshots(
   snapshotIds: string[],
-): Promise<Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: WorkItemStatus; priority: WorkItemPriority }>>> {
+): Promise<Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>> {
   return unwrap(
     await commands.listEffortsEndingAtSnapshots(snapshotIds.map(Number)),
   ) as unknown as Record<
@@ -1464,8 +1461,8 @@ export async function listEffortsEndingAtSnapshots(
       workItemId: string;
       threadId: string;
       title: string;
-      status: WorkItemStatus;
-      priority: WorkItemPriority;
+      status: TaskStatus;
+      priority: TaskPriority;
     }>
   >;
 }
@@ -1696,7 +1693,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
 }
 
 export type FinishedEntry =
-  | { kind: "work-item"; itemId: string; title: string; t: string }
+  | { kind: "task"; itemId: string; title: string; t: string }
   | { kind: "wiki"; slug: string; title: string; t: string };
 
 export async function listRecentlyFinished(threadId: string | null, limit: number): Promise<FinishedEntry[]> {
@@ -1895,7 +1892,7 @@ export function subscribeBacklogEvents(onEvent: (event: BacklogChangeEvent) => v
   });
 }
 
-export function subscribeWorkItemEvents(
+export function subscribeTaskEvents(
   _streamId: string | "all",
   onEvent: (event: WorkItemChangeEvent) => void,
 ): () => void {

@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import { parseMarkdownLink, preprocessWikilinks } from "./MarkdownView.js";
 
-// parseMarkdownLink is shared by WikiPageTab and WorkItemDetail. WikiPageTab needs
+// parseMarkdownLink is shared by WikiPageTab and TaskDetail. WikiPageTab needs
 // to distinguish wiki-internal links (`./foo`, `bar.md`) from external
 // (`https://…`) and anchor (`#section`) links so it can route plain
-// clicks back through the wiki navigation history. WorkItemDetail just
+// clicks back through the wiki navigation history. TaskDetail just
 // needs to know "is this an external link" so it can route to the OS
 // browser; internal slug semantics don't apply there but the same parser
 // works.

@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import type { EffortDetail, Stream, Thread, ThreadWorkState, WorkItem, WorkItemPriority, WorkItemStatus } from "../api.js";
+import type { EffortDetail, Stream, Thread, ThreadWorkState, Task, TaskPriority, TaskStatus } from "../api.js";
 import {
-  getWorkItem,
-  listWorkItemEfforts,
+  getTask,
+  listTaskEfforts,
   moveBacklogItemToThread,
-  moveWorkItemToBacklog,
+  moveTaskToBacklog,
   subscribeOxplowEvents,
-  updateWorkItem,
+  updateTask,
 } from "../api.js";
 import { miniButtonStyle } from "../components/Plan/plan-utils.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, workItemRef } from "../tabs/pageRefs.js";
-import { ActivityTimeline, WorkItemDetail } from "../components/Plan/WorkItemDetail.js";
+import { gitCommitRef, taskRef } from "../tabs/pageRefs.js";
+import { ActivityTimeline, TaskDetail } from "../components/Plan/TaskDetail.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { SnapshotDetailSlideover } from "../components/Snapshots/SnapshotDetailSlideover.js";
@@ -23,7 +23,7 @@ export interface WorkItemPageProps {
   thread: Thread | null;
   itemId: string;
   /** Live snapshot of all work items in the current thread (used to find this one). */
-  items: WorkItem[];
+  items: Task[];
   threadWork: ThreadWorkState | null;
   onOpenPage(ref: TabRef): void;
   onOpenFile?(path: string): void;
@@ -57,9 +57,9 @@ export function WorkItemPage({
   // Fallback for items not in the current thread's loaded buckets — backlog
   // rows and items owned by another thread won't appear in `items`. Fetch
   // the row directly so the page renders the full editor regardless.
-  const [fetchedItem, setFetchedItem] = useState<WorkItem | null>(null);
+  const [fetchedItem, setFetchedItem] = useState<Task | null>(null);
   const item = items.find((i) => i.id === itemId) ?? fetchedItem;
-  const refForGraph = workItemRef(itemId);
+  const refForGraph = taskRef(itemId);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
   const [efforts, setEfforts] = useState<EffortDetail[]>([]);
@@ -121,13 +121,13 @@ export function WorkItemPage({
   useEffect(() => {
     let cancelled = false;
     const refetch = () => {
-      void getWorkItem(itemId).then((row) => {
+      void getTask(itemId).then((row) => {
         if (!cancelled) setFetchedItem(row);
       });
     };
     if (!inThreadItems) refetch();
     const unsub = subscribeOxplowEvents((event) => {
-      if (event.type !== "work-item.changed") return;
+      if (event.type !== "task.changed") return;
       const targetId = (event as unknown as { itemId?: string }).itemId;
       if (targetId !== itemId) return;
       refetch();
@@ -141,14 +141,14 @@ export function WorkItemPage({
   useEffect(() => {
     if (!item) return;
     let cancelled = false;
-    void listWorkItemEfforts(item.id).then((rows) => {
+    void listTaskEfforts(item.id).then((rows) => {
       if (!cancelled) setEfforts(rows);
     });
     const unsub = subscribeOxplowEvents((event) => {
-      if (event.type !== "work-item.changed") return;
+      if (event.type !== "task.changed") return;
       const targetId = (event as unknown as { itemId?: string }).itemId;
       if (targetId !== item.id) return;
-      void listWorkItemEfforts(item.id).then((rows) => {
+      void listTaskEfforts(item.id).then((rows) => {
         if (!cancelled) setEfforts(rows);
       });
     });
@@ -160,10 +160,10 @@ export function WorkItemPage({
 
   const handleUpdate = async (
     targetId: string,
-    changes: { title?: string; description?: string; acceptanceCriteria?: string | null; status?: WorkItemStatus; priority?: WorkItemPriority },
+    changes: { title?: string; description?: string; acceptanceCriteria?: string | null; status?: TaskStatus; priority?: TaskPriority },
   ) => {
     if (!stream || !thread) return;
-    await updateWorkItem(stream.id, thread.id, targetId, changes);
+    await updateTask(stream.id, thread.id, targetId, changes);
   };
 
   // Backlog ↔ thread scope toggle. The button label/handler depend on the
@@ -186,7 +186,7 @@ export function WorkItemPage({
       return {
         label: "Send to backlog",
         run: async () => {
-          await moveWorkItemToBacklog(stream.id, thread.id, item.id);
+          await moveTaskToBacklog(stream.id, thread.id, item.id);
         },
       };
     }
@@ -203,7 +203,7 @@ export function WorkItemPage({
       snapshotSource={slideoverSnapshot?.source ?? ""}
       workItemId={slideoverSnapshot?.workItemId ?? null}
       onOpenDiff={onOpenDiff}
-      onOpenWorkItem={(targetId) => onOpenPage(workItemRef(targetId))}
+      onOpenWorkItem={(targetId) => onOpenPage(taskRef(targetId))}
     />
   );
 
@@ -226,7 +226,7 @@ export function WorkItemPage({
   return (
     <Page testId="page-work-item" title={item.title} kind="work item" chips={chips} backlinks={backlinks} outbound={outbound}>
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-        <WorkItemDetail
+        <TaskDetail
           item={item}
           onUpdateWorkItem={handleUpdate}
           onRequestDelete={() => {}}

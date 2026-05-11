@@ -82,8 +82,8 @@ export function wikiPageRef(slug: string): TabRef {
   return { id: `wiki:${slug}`, kind: "wiki", payload: { slug } };
 }
 
-export function workItemRef(itemId: string): TabRef {
-  return { id: `wi:${itemId}`, kind: "work-item", payload: { itemId } };
+export function taskRef(itemId: string): TabRef {
+  return { id: `wi:${itemId}`, kind: "task", payload: { itemId } };
 }
 
 export function findingRef(findingId: string): TabRef {
@@ -212,13 +212,13 @@ export function newStreamRef(): TabRef {
   return { id: "new-stream", kind: "new-stream", payload: null };
 }
 
-export function newWorkItemRef(payload: NewWorkItemPayload = {}): TabRef {
+export function newTaskRef(payload: NewWorkItemPayload = {}): TabRef {
   // Use a stable id so re-opening the page reuses the existing tab
   // rather than stacking duplicates. "Save and Another" relies on the
   // form re-mounting in place; the page reads its initial values on
   // mount, so callers wanting different defaults should `closeTab`
   // before opening with new payload.
-  return { id: "new-work-item", kind: "new-work-item", payload };
+  return { id: "new-task", kind: "new-task", payload };
 }
 
 export function streamSettingsRef(streamId: string): TabRef {

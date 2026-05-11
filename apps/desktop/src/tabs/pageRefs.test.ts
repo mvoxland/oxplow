@@ -7,9 +7,9 @@ import {
   findingRef,
   hookEventsRef,
   indexRef,
-  newWorkItemRef,
+  newTaskRef,
   wikiPageRef,
-  workItemRef,
+  taskRef,
 } from "./pageRefs.js";
 
 describe("pageRefs", () => {
@@ -38,9 +38,9 @@ describe("pageRefs", () => {
     expect(a.id).not.toBe(b.id);
   });
 
-  test("wikiPageRef and workItemRef encode their identifiers", () => {
+  test("wikiPageRef and taskRef encode their identifiers", () => {
     expect(wikiPageRef("how-x-works").id).toBe("wiki:how-x-works");
-    expect(workItemRef("wi-123").id).toBe("wi:wi-123");
+    expect(taskRef("wi-123").id).toBe("wi:wi-123");
   });
 
   test("findingRef encodes the finding id", () => {
@@ -64,8 +64,8 @@ describe("pageRefs", () => {
     expect(ref.kind).toBe("hook-events");
   });
 
-  test("newWorkItemRef has stable create id", () => {
-    expect(newWorkItemRef().id).toBe("new-work-item");
-    expect(newWorkItemRef({ parentId: "wi-1" }).id).toBe("new-work-item");
+  test("newTaskRef has stable create id", () => {
+    expect(newTaskRef().id).toBe("new-task");
+    expect(newTaskRef({ parentId: "wi-1" }).id).toBe("new-task");
   });
 });

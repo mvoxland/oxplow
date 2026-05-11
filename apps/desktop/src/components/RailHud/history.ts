@@ -5,7 +5,7 @@
 export const NON_TRACKED_KINDS: ReadonlySet<string> = new Set([
   "agent",
   "new-stream",
-  "new-work-item",
+  "new-task",
 ]);
 
 /** Kinds excluded from the rail History display (still recorded for analytics).

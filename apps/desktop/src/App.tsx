@@ -1,21 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import {
-  createWorkItem,
+  createTask,
   closeThread,
   createThread,
-  deleteWorkItem,
+  deleteTask,
   getThreadWorkState,
   getThreadState,
   createWorkspaceDirectory,
   listAgentStatuses,
-  reorderWorkItems,
-  moveWorkItemToThread,
+  reorderTasks,
+  moveTaskToThread,
   getBacklogState,
   updateBacklogItem,
   deleteBacklogItem,
   reorderBacklog,
-  moveWorkItemToBacklog,
+  moveTaskToBacklog,
   moveBacklogItemToThread,
   subscribeBacklogEvents,
   subscribeAgentStatus,
@@ -33,7 +33,7 @@ import {
   renameStream,
   subscribeOxplowEvents,
   subscribeWikiPageEvents,
-  subscribeWorkItemEvents,
+  subscribeTaskEvents,
   subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
   listRecentlyFinished,
@@ -51,7 +51,7 @@ import {
   reorderThreads,
   reorderStreams,
   switchStream,
-  updateWorkItem,
+  updateTask,
   writeWorkspaceFile,
   type BacklogState,
   type ThreadWorkState,
@@ -113,17 +113,17 @@ import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
-import { WorkItemPage } from "./pages/WorkItemPage.js";
+import { WorkItemPage } from "./pages/TaskPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
 import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
-import { NewWorkItemPage } from "./pages/NewWorkItemPage.js";
+import { NewWorkItemPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
-import { closedThreadsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newWorkItemRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newTaskRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -926,7 +926,7 @@ export function App() {
     }
   }
 
-  async function handleCreateWorkItem(input: {
+  async function handleCreateTask(input: {
     kind: "epic" | "task" | "subtask" | "bug" | "note";
     title: string;
     description?: string;
@@ -937,7 +937,7 @@ export function App() {
   }) {
     if (!stream || !selectedThread) return;
     try {
-      const next = await createWorkItem(stream.id, selectedThread.id, input);
+      const next = await createTask(stream.id, selectedThread.id, input);
       setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       setError(null);
     } catch (e) {
@@ -959,7 +959,7 @@ export function App() {
   ) {
     if (!stream || !selectedThread) return;
     try {
-      const next = await updateWorkItem(stream.id, selectedThread.id, itemId, changes);
+      const next = await updateTask(stream.id, selectedThread.id, itemId, changes);
       setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       setError(null);
     } catch (e) {
@@ -971,7 +971,7 @@ export function App() {
   async function handleDeleteWorkItem(itemId: string) {
     if (!stream || !selectedThread) return;
     try {
-      const next = await deleteWorkItem(stream.id, selectedThread.id, itemId);
+      const next = await deleteTask(stream.id, selectedThread.id, itemId);
       setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       setError(null);
     } catch (e) {
@@ -983,7 +983,7 @@ export function App() {
   async function handleReorderWorkItems(orderedItemIds: string[]) {
     if (!stream || !selectedThread) return;
     try {
-      const next = await reorderWorkItems(stream.id, selectedThread.id, orderedItemIds);
+      const next = await reorderTasks(stream.id, selectedThread.id, orderedItemIds);
       setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
       setError(null);
     } catch (e) {
@@ -995,7 +995,7 @@ export function App() {
   async function handleMoveWorkItemToThread(itemId: string, fromThreadId: string, toThreadId: string) {
     if (!stream || fromThreadId === toThreadId) return;
     try {
-      const { from, to } = await moveWorkItemToThread(stream.id, fromThreadId, itemId, toThreadId);
+      const { from, to } = await moveTaskToThread(stream.id, fromThreadId, itemId, toThreadId);
       setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from, [toThreadId]: to }));
       setError(null);
     } catch (e) {
@@ -1007,7 +1007,7 @@ export function App() {
   async function handleMoveItemToBacklog(itemId: string, fromThreadId: string) {
     if (!stream) return;
     try {
-      const { from, backlog } = await moveWorkItemToBacklog(stream.id, fromThreadId, itemId);
+      const { from, backlog } = await moveTaskToBacklog(stream.id, fromThreadId, itemId);
       setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from }));
       setBacklogState(backlog);
       setError(null);
@@ -1127,7 +1127,7 @@ export function App() {
     const toThreadId = streamActiveThreadIds[targetStreamId];
     if (!toThreadId || toThreadId === fromThreadId) return;
     try {
-      const { from, to } = await moveWorkItemToThread(stream.id, fromThreadId, itemId, toThreadId, targetStreamId);
+      const { from, to } = await moveTaskToThread(stream.id, fromThreadId, itemId, toThreadId, targetStreamId);
       setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from, [toThreadId]: to }));
       setError(null);
     } catch (e) {
@@ -1317,7 +1317,7 @@ export function App() {
   }, [threadStates]);
 
   useEffect(() => {
-    const unsubscribe = subscribeWorkItemEvents("all", (event) => {
+    const unsubscribe = subscribeTaskEvents("all", (event) => {
       void getThreadWorkState(event.streamId, event.threadId)
         .then((workState) => {
           setThreadWorkStates((prev) => ({ ...prev, [event.threadId]: workState }));
@@ -1605,7 +1605,7 @@ export function App() {
       // handleOpenPage is declared further down; forward through the ref
       // so the menu/keyboard handler routes to a NewWorkItemPage tab
       // (replaces the legacy openCreateModal-via-PlanPane path).
-      handleOpenPageRef.current?.(newWorkItemRef());
+      handleOpenPageRef.current?.(newTaskRef());
     },
     newStream() {
       handleOpenPageRef.current?.(newStreamRef());
@@ -1846,12 +1846,12 @@ export function App() {
     handleOpenPage(gitCommitRef(sha));
   };
 
-  const handleRequestEditWorkItem = (itemId: string) => {
+  const handleRequestEditTask = (itemId: string) => {
     const token = Date.now();
     handleOpenPage(indexRef("tasks"));
     setPlanEditRequest({ itemId, token });
     void recordUsage({
-      kind: "work-item",
+      kind: "task",
       key: itemId,
       event: "open",
       streamId: stream?.id ?? null,
@@ -2000,7 +2000,7 @@ export function App() {
         .catch(() => { /* ignore — empty list keeps the section hidden */ });
     };
     refresh();
-    const offWork = subscribeWorkItemEvents("all", () => refresh());
+    const offWork = subscribeTaskEvents("all", () => refresh());
     const offNotes = subscribeWikiPageEvents(() => refresh());
     return () => {
       cancelled = true;
@@ -2040,7 +2040,7 @@ export function App() {
       }
       case "wiki":
       case "directory":
-      case "work-item":
+      case "task":
       case "finding":
       case "dashboard":
       case "settings":
@@ -2061,7 +2061,7 @@ export function App() {
       case "stream-settings":
       case "thread-settings":
       case "new-stream":
-      case "new-work-item":
+      case "new-task":
       case "closed-threads":
       case "external-url":
       case "op-error": {
@@ -2608,7 +2608,7 @@ export function App() {
               openFileOrder={currentSession.openOrder}
               openFiles={currentSession.files}
               onRevealCommit={handleRevealCommit}
-              onRevealWorkItem={handleRequestEditWorkItem}
+              onRevealWorkItem={handleRequestEditTask}
               onCompareWithClipboard={handleCompareWithClipboard}
             />
           ) : null,
@@ -2637,7 +2637,7 @@ export function App() {
               stream={stream}
               onOpenDiff={navOpenDiff}
               revealSnapshotId={snapshotsReveal}
-              onRequestEditWorkItem={handleRequestEditWorkItem}
+              onRequestEditWorkItem={handleRequestEditTask}
             />
           ),
         });
@@ -2780,8 +2780,8 @@ export function App() {
           editRequest: planEditRequest,
           registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
           onOpenNewWorkItemPage: (payload: { parentId?: string | null }) =>
-            navOpen(newWorkItemRef(payload)),
-          onOpenWorkItemPage: (itemId: string) => navOpen(workItemRef(itemId)),
+            navOpen(newTaskRef(payload)),
+          onOpenWorkItemPage: (itemId: string) => navOpen(taskRef(itemId)),
         };
         const labelByKind: Record<string, string> = {
           "tasks": "Tasks",
@@ -2891,7 +2891,7 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "work-item") {
+      } else if (ref.kind === "task") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
         // ThreadWorkState splits items by status (Ready→items, InProgress→inProgress,
         // Done/Canceled/Archived→done, Blocked→waiting, Epics→epics). Merge them all
@@ -2999,7 +2999,7 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "new-work-item") {
+      } else if (ref.kind === "new-task") {
         const payload = (ref.payload as {
           parentId?: string | null;
           initialCategory?: string | null;
@@ -3019,7 +3019,7 @@ export function App() {
               epics={selectedThreadWork?.epics ?? []}
               onClose={() => closePageTab(ref.id)}
               onSubmit={async (input) => {
-                await handleCreateWorkItem({
+                await handleCreateTask({
                   kind: input.kind,
                   title: input.title,
                   description: input.description,

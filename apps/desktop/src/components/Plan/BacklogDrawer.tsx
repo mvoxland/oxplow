@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { BacklogState, WorkItem } from "../../api.js";
+import type { BacklogState, Task } from "../../api.js";
 import { runWithError } from "../../ui-error.js";
 
 const headerStyle: React.CSSProperties = {
@@ -66,7 +66,7 @@ export function BacklogDrawer({
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem("tasks-backlog-drawer-open") === "1";
   });
-  const candidates: WorkItem[] = backlog?.waiting ?? [];
+  const candidates: Task[] = backlog?.waiting ?? [];
   const count = candidates.length;
   const toggle = () => {
     setOpen((prev) => {

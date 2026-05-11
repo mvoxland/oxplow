@@ -1,22 +1,22 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import type {
-  WorkItem,
-  WorkItemKind,
-  WorkItemPriority,
-  WorkItemStatus,
+  Task,
+  TaskKind,
+  TaskPriority,
+  TaskStatus,
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 
 // Edit flow now lives on WorkItemPage (the canonical Task page); this
 // form is create-only.
 
-const KIND_OPTIONS: WorkItemKind[] = ["task", "epic", "subtask", "bug", "note"];
-const PRIORITY_OPTIONS: WorkItemPriority[] = ["low", "medium", "high", "urgent"];
-const STATUS_OPTIONS: Array<Extract<WorkItemStatus, "ready" | "blocked">> = ["ready", "blocked"];
+const KIND_OPTIONS: TaskKind[] = ["task", "epic", "subtask", "bug", "note"];
+const PRIORITY_OPTIONS: TaskPriority[] = ["low", "medium", "high", "urgent"];
+const STATUS_OPTIONS: Array<Extract<TaskStatus, "ready" | "blocked">> = ["ready", "blocked"];
 
 /**
- * Defaults negotiation between the original `newWorkItemRef` payload
+ * Defaults negotiation between the original `newTaskRef` payload
  * (the form's "open with these defaults" hint) and the values the user
  * last submitted via "Save and Another". The latter wins when present
  * so a flow like "file 5 bugs at urgent priority" only requires
@@ -47,18 +47,18 @@ export interface NewWorkItemPageProps {
     initialPriority?: string | null;
   };
   /** All epics in the current thread, for the optional parent dropdown. */
-  epics?: WorkItem[];
+  epics?: Task[];
   /** Closes the page (caller closes the tab). */
   onClose?(): void;
   /** Submit the form. The page resets in-place when `andAnother` is true. */
   onSubmit(input: {
-    kind: WorkItemKind;
+    kind: TaskKind;
     title: string;
     description?: string;
     acceptanceCriteria?: string | null;
     parentId?: string | null;
-    status?: WorkItemStatus;
-    priority?: WorkItemPriority;
+    status?: TaskStatus;
+    priority?: TaskPriority;
   }): Promise<void>;
 }
 
@@ -76,8 +76,8 @@ export function NewWorkItemPage({
   onClose,
   onSubmit,
 }: NewWorkItemPageProps) {
-  const [lastKind, setLastKind] = useState<WorkItemKind | null>(null);
-  const [lastPriority, setLastPriority] = useState<WorkItemPriority | null>(null);
+  const [lastKind, setLastKind] = useState<TaskKind | null>(null);
+  const [lastPriority, setLastPriority] = useState<TaskPriority | null>(null);
   const [lastParentId, setLastParentId] = useState<string | null>(null);
 
   const resolved = resolveSaveAndAnotherDefaults({
@@ -88,8 +88,8 @@ export function NewWorkItemPage({
     lastPriority,
   });
 
-  const [kind, setKind] = useState<WorkItemKind>(coerceKind(resolved.initialCategory));
-  const [priority, setPriority] = useState<WorkItemPriority>(coercePriority(resolved.initialPriority));
+  const [kind, setKind] = useState<TaskKind>(coerceKind(resolved.initialCategory));
+  const [priority, setPriority] = useState<TaskPriority>(coercePriority(resolved.initialPriority));
   const [status, setStatus] = useState<"ready" | "blocked">("ready");
   const [parentId, setParentId] = useState<string | null>(resolved.parentId);
   const [title, setTitle] = useState("");
@@ -290,13 +290,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function coerceKind(input: string | null | undefined): WorkItemKind {
-  if (input && (KIND_OPTIONS as string[]).includes(input)) return input as WorkItemKind;
+function coerceKind(input: string | null | undefined): TaskKind {
+  if (input && (KIND_OPTIONS as string[]).includes(input)) return input as TaskKind;
   return "task";
 }
 
-function coercePriority(input: string | null | undefined): WorkItemPriority {
-  if (input && (PRIORITY_OPTIONS as string[]).includes(input)) return input as WorkItemPriority;
+function coercePriority(input: string | null | undefined): TaskPriority {
+  if (input && (PRIORITY_OPTIONS as string[]).includes(input)) return input as TaskPriority;
   return "medium";
 }
 

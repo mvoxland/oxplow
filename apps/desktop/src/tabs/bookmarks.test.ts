@@ -13,7 +13,7 @@ function memStorage() {
 }
 
 const REF_A: TabRef = { id: "git-dashboard", kind: "git-dashboard", payload: null };
-const REF_B: TabRef = { id: "wi:wi-7", kind: "work-item", payload: { itemId: "wi-7" } };
+const REF_B: TabRef = { id: "wi:wi-7", kind: "task", payload: { itemId: "wi-7" } };
 
 describe("bookmarks store", () => {
   test("starts empty", () => {

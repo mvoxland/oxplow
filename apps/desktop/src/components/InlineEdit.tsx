@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
  * Click the displayed value to swap to an input; Enter commits via
  * `onCommit`; Escape reverts; blur commits unless Escape was pressed
  * (the cancel-latch must be a ref because React state updates are
- * async and the blur fires synchronously). See WorkItemDetail's
+ * async and the blur fires synchronously). See TaskDetail's
  * EditableField for the older inline-only version of this pattern.
  *
  * Variants:

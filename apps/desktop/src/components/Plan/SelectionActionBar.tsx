@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { WorkItem } from "../../api.js";
+import type { Task } from "../../api.js";
 import { miniButtonStyle } from "./plan-utils.js";
 
 /**
@@ -25,7 +25,7 @@ export function summarizeSelection(markedCount: number): string {
 
 export interface SelectionActionBarProps {
   /** Marked work items (the ones the bar's actions apply to). */
-  items: WorkItem[];
+  items: Task[];
   onClear(): void;
   onChangeStatus(): void;
   onChangePriority(): void;

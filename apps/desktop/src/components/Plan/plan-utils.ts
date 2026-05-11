@@ -3,9 +3,9 @@ import { useState } from "react";
 import type {
   BacklogState,
   ThreadWorkState,
-  WorkItem,
-  WorkItemPriority,
-  WorkItemStatus,
+  Task,
+  TaskPriority,
+  TaskStatus,
 } from "../../api.js";
 
 // Keys for collapsible sections in the Plan pane. Extends
@@ -16,7 +16,7 @@ export type PlanSectionKey = WorkItemSectionKind | "recentAnswers";
 
 /**
  * Hook: manages a Set of collapsed section keys, persisted to
- * localStorage under `oxplow.plan.collapsed`. Shared by WorkGroupList
+ * localStorage under `oxplow.plan.collapsed`. Shared by TaskGroupList
  * (for work-item sections) and RecentAnswersList (for its own pseudo-
  * section) so every collapsible section in the Plan pane uses one
  * source of truth.
@@ -47,9 +47,9 @@ export function useCollapsedSections(): {
 }
 
 export interface WorkItemGroup {
-  epic: WorkItem | null;
-  items: WorkItem[];
-  epicChildren: Map<string, WorkItem[]>;
+  epic: Task | null;
+  items: Task[];
+  epicChildren: Map<number, Task[]>;
 }
 
 export type WorkItemSectionKind = "inProgress" | "ready" | "blocked" | "done";
@@ -57,7 +57,7 @@ export type WorkItemSectionKind = "inProgress" | "ready" | "blocked" | "done";
 export interface WorkItemSection {
   kind: WorkItemSectionKind;
   label: string;
-  items: WorkItem[];
+  items: Task[];
 }
 
 // Fixed top-to-bottom order and labels. Always iterated in this order by the
@@ -69,7 +69,7 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "done", label: "Done" },
 ];
 
-export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
+export function classifyWorkItem(status: TaskStatus): WorkItemSectionKind {
   switch (status) {
     case "in_progress": return "inProgress";
     case "ready": return "ready";
@@ -98,7 +98,7 @@ export function classifyWorkItem(status: WorkItemStatus): WorkItemSectionKind {
  * Edge cases: an epic with no children falls back to its own literal
  * status; an empty epic that's `ready` goes to Ready, etc.
  */
-export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSectionKind {
+export function classifyEpic(epic: Task, children: Task[]): WorkItemSectionKind {
   if (children.length === 0) return classifyWorkItem(epic.status);
   let anyBlocked = false;
   let anyInProgress = false;
@@ -123,7 +123,7 @@ export function classifyEpic(epic: WorkItem, children: WorkItem[]): WorkItemSect
 // Default landing status when a work item is dragged *into* a section. Returns
 // null for inProgress: the agent owns that status, and in-progress items are
 // drag-locked anyway, so we don't let users promote items into it by drop.
-export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStatus | null {
+export function sectionDefaultStatus(section: WorkItemSectionKind): TaskStatus | null {
   switch (section) {
     case "inProgress": return null;
     case "ready": return "ready";
@@ -139,17 +139,18 @@ export function sectionDefaultStatus(section: WorkItemSectionKind): WorkItemStat
  * children the renderer will display.
  */
 export function classifyRow(
-  item: WorkItem,
-  epicChildrenMap: Map<string, WorkItem[]>,
+  item: Task,
+  epicChildrenMap: Map<number, Task[]>,
 ): WorkItemSectionKind {
-  if (item.kind === "epic") {
-    return classifyEpic(item, epicChildrenMap.get(item.id) ?? []);
+  const children = epicChildrenMap.get(item.id);
+  if (children && children.length > 0) {
+    return classifyEpic(item, children);
   }
   return classifyWorkItem(item.status);
 }
 
-export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
-  const buckets: Record<WorkItemSectionKind, WorkItem[]> = {
+export function splitIntoSections(items: Task[]): WorkItemSection[] {
+  const buckets: Record<WorkItemSectionKind, Task[]> = {
     inProgress: [], ready: [], blocked: [], done: [],
   };
   for (const item of items) buckets[classifyWorkItem(item.status)].push(item);
@@ -178,15 +179,15 @@ export function splitIntoSections(items: WorkItem[]): WorkItemSection[] {
  * list of ids in **persistence** order. Rows outside descending runs are
  * kept in place; descending runs are reversed in situ.
  */
-const DESCENDING_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+const DESCENDING_STATUSES: ReadonlySet<TaskStatus> = new Set([
   "done",
   "canceled",
   "archived",
 ]);
 
 export function finalizeReorderIds(
-  rows: ReadonlyArray<{ id: string; status: WorkItemStatus }>,
-): string[] {
+  rows: ReadonlyArray<{ id: number; status: TaskStatus }>,
+): number[] {
   const ids = rows.map((row) => row.id);
   let runStart = -1;
   const flipRun = (end: number) => {
@@ -217,7 +218,7 @@ export function finalizeReorderIds(
 export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] {
   // Always yield exactly one root group, even when the backlog is empty or
   // `state` is still loading — the Plan pane renders the section chrome
-  // (Ready / Done / etc. + the "⋯ New task" menu) through WorkGroupList,
+  // (Ready / Done / etc. + the "⋯ New task" menu) through TaskGroupList,
   // which only runs when a group exists. Without a group the empty backlog
   // would fall back to a blank "Backlog is empty." label with no way to
   // create the first task.
@@ -243,8 +244,8 @@ export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] 
  */
 export function filterAutoAuthored(groups: WorkItemGroup[]): WorkItemGroup[] {
   return groups.map((group) => {
-    const items = group.items.filter((item) => item.kind === "epic" || item.created_by !== "agent");
-    const epicChildren = new Map<string, WorkItem[]>();
+    const items = group.items.filter((item) => item.created_by !== "agent");
+    const epicChildren = new Map<number, Task[]>();
     for (const [epicId, children] of group.epicChildren.entries()) {
       epicChildren.set(epicId, children.filter((child) => child.created_by !== "agent"));
     }
@@ -262,19 +263,18 @@ export function filterAutoAuthored(groups: WorkItemGroup[]): WorkItemGroup[] {
  */
 export function applyStatusFilter(
   groups: WorkItemGroup[],
-  opts: { only?: WorkItemStatus[]; exclude?: WorkItemStatus[] },
+  opts: { only?: TaskStatus[]; exclude?: TaskStatus[] },
 ): WorkItemGroup[] {
   const onlySet = opts.only ? new Set(opts.only) : null;
   const excludeSet = opts.exclude ? new Set(opts.exclude) : null;
-  const keep = (item: WorkItem) => {
-    if (item.kind === "epic") return true;
-    if (onlySet && !onlySet.has(item.status)) return false;
+  const keep = (item: Task) => {
+        if (onlySet && !onlySet.has(item.status)) return false;
     if (excludeSet && excludeSet.has(item.status)) return false;
     return true;
   };
   return groups.map((group) => {
     const items = group.items.filter(keep);
-    const epicChildren = new Map<string, WorkItem[]>();
+    const epicChildren = new Map<number, Task[]>();
     for (const [epicId, children] of group.epicChildren.entries()) {
       epicChildren.set(epicId, children.filter(keep));
     }
@@ -297,17 +297,16 @@ export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[]
     ...(threadWork.done ?? []),
   ];
 
-  const epicChildrenMap = new Map<string, WorkItem[]>();
-  const epicIdSet = new Set(threadWork.epics.map((e) => e.id));
+  const epicChildrenMap = new Map<number, Task[]>();
+  const epicIdSet = new Set<number>(threadWork.epics.map((e) => e.id));
 
   for (const epic of threadWork.epics) {
     epicChildrenMap.set(epic.id, []);
   }
 
-  const rootItems: WorkItem[] = [];
+  const rootItems: Task[] = [];
   for (const item of all) {
-    if (item.kind === "epic") continue;
-    if (item.parent_id && epicIdSet.has(item.parent_id)) {
+        if (item.parent_id && epicIdSet.has(item.parent_id)) {
       epicChildrenMap.get(item.parent_id)!.push(item);
       // Children render exclusively inside the epic pane; the epic
       // itself moves between sections as a block based on its rollup
@@ -322,7 +321,7 @@ export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[]
     children.sort((a, b) => a.sort_index - b.sort_index);
   }
 
-  const epicsAndRoots: WorkItem[] = [
+  const epicsAndRoots: Task[] = [
     ...threadWork.epics,
     ...rootItems,
   ].sort((a, b) => a.sort_index - b.sort_index);
@@ -333,7 +332,7 @@ export function buildGroups(threadWork: ThreadWorkState | null): WorkItemGroup[]
 // User-facing label for a status. The raw id ("in_progress") still flows
 // through the wire and the `value` on <select> options, but every label
 // the user sees goes through this helper so tweaks land in one place.
-export function statusLabel(status: WorkItemStatus): string {
+export function statusLabel(status: TaskStatus): string {
   switch (status) {
     case "ready": return "Ready";
     case "in_progress": return "In Progress";
@@ -344,7 +343,7 @@ export function statusLabel(status: WorkItemStatus): string {
   }
 }
 
-export function statusIcon(status: WorkItemStatus): string {
+export function statusIcon(status: TaskStatus): string {
   switch (status) {
     case "ready": return "○";
     case "in_progress": return "◐";
@@ -355,7 +354,7 @@ export function statusIcon(status: WorkItemStatus): string {
   }
 }
 
-export function priorityIcon(priority: WorkItemPriority): string {
+export function priorityIcon(priority: TaskPriority): string {
   // Retained for non-visual callers (tooltips, MCP descriptions). The Plan
   // pane now renders <PriorityIcon /> (plan-icons.tsx) instead of a glyph.
   switch (priority) {
@@ -371,7 +370,7 @@ export function priorityIcon(priority: WorkItemPriority): string {
  * (context menus, etc.). The Plan pane now prefers <PriorityIcon /> so the
  * three bars render at a fixed pixel width — see plan-icons.tsx.
  */
-export function priorityStyle(priority: WorkItemPriority): CSSProperties {
+export function priorityStyle(priority: TaskPriority): CSSProperties {
   switch (priority) {
     case "urgent": return { color: "var(--priority-urgent)", fontWeight: 700 };
     case "high": return { color: "var(--priority-high)" };
@@ -410,7 +409,7 @@ export const sectionHeaderStyle: CSSProperties = {
 };
 
 // Action-button style shared by every section header. Promoted from
-// WorkGroupList's previous private `miniDoneHeaderButtonStyle` so every
+// TaskGroupList's previous private `miniDoneHeaderButtonStyle` so every
 // section's action buttons read as one family. Compact enough for icon-
 // only buttons without crowding the section header.
 export const sectionActionButtonStyle: CSSProperties = {

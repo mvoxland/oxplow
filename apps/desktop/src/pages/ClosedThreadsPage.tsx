@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
-import type { Stream, Thread, WorkItem } from "../tauri-bridge/index.js";
+import type { Stream, Thread, Task } from "../tauri-bridge/index.js";
 import {
   getThreadWorkState,
   listClosedThreads,
@@ -15,7 +15,7 @@ export interface ClosedThreadsPageProps {
 
 interface RowState {
   thread: Thread;
-  items: WorkItem[];
+  items: Task[];
   loading: boolean;
 }
 
@@ -105,7 +105,7 @@ function ClosedThreadRow({
   onReopen,
 }: {
   thread: Thread;
-  items: WorkItem[];
+  items: Task[];
   onReopen(): void;
 }) {
   const grouped = groupByStatus(items);
@@ -173,8 +173,8 @@ function ClosedThreadRow({
   );
 }
 
-function groupByStatus(items: WorkItem[]): Record<string, WorkItem[]> {
-  const out: Record<string, WorkItem[]> = {};
+function groupByStatus(items: Task[]): Record<string, Task[]> {
+  const out: Record<string, Task[]> = {};
   for (const item of items) {
     (out[item.status] ??= []).push(item);
   }

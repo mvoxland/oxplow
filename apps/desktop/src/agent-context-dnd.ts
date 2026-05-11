@@ -22,7 +22,7 @@ export const CONTEXT_REF_MIME = "application/x-oxplow-context-ref";
  * tree. The actual MIME string MUST match `WORK_ITEM_DRAG_MIME` —
  * tests guard against drift.
  */
-export const WORK_ITEM_DRAG_MIME_VALUE = "application/x-oxplow-work-item";
+export const WORK_ITEM_DRAG_MIME_VALUE = "application/x-oxplow-task";
 
 export function setContextRefDrag(e: AnyDragEvent, ref: ContextRef): void {
   const dt = e.dataTransfer;
@@ -34,7 +34,7 @@ export function setContextRefDrag(e: AnyDragEvent, ref: ContextRef): void {
     ? `@${ref.path}`
     : ref.kind === "wiki"
       ? `@.oxplow/wiki/${ref.slug}.md`
-      : `[oxplow work-item ${ref.itemId}]`;
+      : `[oxplow task ${ref.itemId}]`;
   dt.setData("text/plain", fallback);
   dt.effectAllowed = "copy";
 }
@@ -62,11 +62,11 @@ export function readContextRef(e: AnyDragEvent): ContextRef | null {
     if (!parsed || typeof parsed !== "object") return null;
     if (parsed.kind === "file" && typeof parsed.path === "string") return { kind: "file", path: parsed.path };
     if (parsed.kind === "wiki" && typeof parsed.slug === "string") return { kind: "wiki", slug: parsed.slug };
-    if (parsed.kind === "work-item"
+    if (parsed.kind === "task"
       && typeof parsed.itemId === "string"
       && typeof parsed.title === "string"
       && typeof parsed.status === "string") {
-      return { kind: "work-item", itemId: parsed.itemId, title: parsed.title, status: parsed.status };
+      return { kind: "task", itemId: parsed.itemId, title: parsed.title, status: parsed.status };
     }
     return null;
   } catch {
@@ -88,7 +88,7 @@ export function dragHasContextRef(e: AnyDragEvent): boolean {
  * "drag a marked work-item row onto the agent" gesture — each id
  * resolves to a `work-item` context ref.
  */
-export function dragHasWorkItemRefs(e: AnyDragEvent): boolean {
+export function dragHasTaskRefs(e: AnyDragEvent): boolean {
   return Array.from(e.dataTransfer?.types ?? []).includes(WORK_ITEM_DRAG_MIME_VALUE);
 }
 
@@ -100,7 +100,7 @@ export function dragHasWorkItemRefs(e: AnyDragEvent): boolean {
  *
  * Pure — exported for tests.
  */
-export function decodeWorkItemDragPayload(raw: string | null | undefined): string[] {
+export function decodeTaskDragPayload(raw: string | null | undefined): string[] {
   if (!raw) return [];
   let parsed: { itemId?: unknown; itemIds?: unknown };
   try {
@@ -149,7 +149,7 @@ export function decodeWorkItemDragRefs(raw: string | null | undefined): ContextR
     if (typeof e.id !== "string" || e.id.length === 0) continue;
     if (typeof e.title !== "string") continue;
     if (typeof e.status !== "string") continue;
-    out.push({ kind: "work-item", itemId: e.id, title: e.title, status: e.status });
+    out.push({ kind: "task", itemId: e.id, title: e.title, status: e.status });
   }
   return out;
 }
@@ -170,7 +170,7 @@ export function resolveWorkItemContextRefs(
   for (const id of ids) {
     const hit = lookup(id);
     if (!hit) continue;
-    out.push({ kind: "work-item", itemId: id, title: hit.title, status: hit.status });
+    out.push({ kind: "task", itemId: id, title: hit.title, status: hit.status });
   }
   return out;
 }

@@ -9,7 +9,7 @@
 
 // (No bridge imports — the api-types module is self-contained for typecheck.)
 
-// ---- Stream / Thread / WorkItem (kept inline for type compatibility
+// ---- Stream / Thread / Task (kept inline for type compatibility
 // with the api.ts; new code should reach for the bridge's
 // types instead — they have the same names but with snake-cased fields
 // matching the Rust shape).
@@ -26,20 +26,20 @@ export interface ThreadState {
   threads: import("./tauri-bridge/index.js").Thread[];
 }
 
-export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-export type WorkItemStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
-export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
+export type TaskKind = "epic" | "task" | "subtask" | "bug" | "note";
+export type TaskStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
-export interface WorkItem {
+export interface Task {
   id: string;
   thread_id: string | null;
   parent_id: string | null;
-  kind: WorkItemKind;
+  kind: TaskKind;
   title: string;
   description: string;
   acceptance_criteria: string | null;
-  status: WorkItemStatus;
-  priority: WorkItemPriority;
+  status: TaskStatus;
+  priority: TaskPriority;
   sort_index: number;
   created_by: "user" | "agent" | "system";
   created_at: string;
@@ -60,7 +60,7 @@ export interface WorkNote {
   created_at: string;
 }
 
-export interface WorkItemEvent {
+export interface TaskEvent {
   id: string;
   thread_id: string;
   item_id: string | null;
@@ -93,7 +93,7 @@ export interface SnapshotDiffResult {
 
 // ---- Backlog / efforts ----
 
-export interface WorkItemEffort {
+export interface TaskEffort {
   id: string;
   workItemId: string;
   startedAt: string;
@@ -101,7 +101,7 @@ export interface WorkItemEffort {
 }
 
 export interface EffortDetail {
-  effort: WorkItemEffort;
+  effort: TaskEffort;
   files: { path: string; changeKind: string }[];
 }
 
@@ -113,13 +113,13 @@ export interface ThreadFollowup {
 }
 
 export interface ThreadWorkState {
-  workItems: WorkItem[];
-  effortsInFlight: WorkItemEffort[];
+  workItems: Task[];
+  effortsInFlight: TaskEffort[];
   followups: ThreadFollowup[];
 }
 
 export interface BacklogState {
-  items: WorkItem[];
+  items: Task[];
 }
 
 // ---- Branches & git ----

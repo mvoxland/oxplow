@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { BacklogState, WorkItem, WorkItemStatus } from "../../api.js";
+import type { BacklogState, Task, TaskStatus } from "../../api.js";
 import {
   applyStatusFilter,
   buildBacklogGroups,
@@ -13,7 +13,7 @@ import {
   splitIntoSections,
 } from "./plan-utils.js";
 
-function item(id: string, status: WorkItemStatus, sort_index: number): WorkItem {
+function item(id: string, status: TaskStatus, sort_index: number): Task {
   return {
     id,
     thread_id: "b1",
@@ -91,7 +91,7 @@ test("finalizeReorderIds is a no-op when there are no descending rows", () => {
   expect(finalizeReorderIds(visualRows)).toEqual(["a", "b"]);
 });
 
-test("finalizeReorderIds reverses the Done/canceled/archived run too — matches WorkGroupList's descending Done render", () => {
+test("finalizeReorderIds reverses the Done/canceled/archived run too — matches TaskGroupList's descending Done render", () => {
   // Done renders descending visually (newest-done on top); sort_index stays
   // ascending. finalizeReorderIds must flip a multi-item Done run the same
   // way it flips humanCheck so reorderItems' "sort_index = position" rule
@@ -110,7 +110,7 @@ test("buildBacklogGroups returns a single empty group for an empty backlog so se
   // The backlog pane should look like a regular Work pane — section headers
   // + the To-Do "⋯ New task" menu must be visible even when the backlog is
   // empty so the user can seed the first task. That only happens if
-  // buildBacklogGroups yields at least one group for WorkGroupList to render.
+  // buildBacklogGroups yields at least one group for TaskGroupList to render.
   const state: BacklogState = { items: [], waiting: [], in_progress: [], done: [] };
   const groups = buildBacklogGroups(state);
   expect(groups).toHaveLength(1);
@@ -127,7 +127,7 @@ test("buildBacklogGroups still returns an empty group when state is null", () =>
   expect(groups[0]?.items).toEqual([]);
 });
 
-function epicItem(id: string, sort_index: number, status: WorkItemStatus = "ready"): WorkItem {
+function epicItem(id: string, sort_index: number, status: TaskStatus = "ready"): Task {
   return { ...item(id, status, sort_index), kind: "epic" };
 }
 
@@ -185,7 +185,7 @@ test("classifyEpic: empty epic falls back to its literal status", () => {
 test("classifyRow uses epic rollup for epics, literal status for non-epics", () => {
   const epic = epicItem("e1", 0);
   const child = item("c1", "in_progress", 1);
-  const map = new Map<string, WorkItem[]>([[epic.id, [item("c2", "blocked", 2)]]]);
+  const map = new Map<string, Task[]>([[epic.id, [item("c2", "blocked", 2)]]]);
   expect(classifyRow(epic, map)).toBe("blocked");
   expect(classifyRow(child, map)).toBe("inProgress");
 });
@@ -216,8 +216,8 @@ test("filterAutoAuthored drops agent-authored rows but keeps user-authored ones"
       { ...item("u1", "ready", 0), created_by: "user" },
       { ...item("a1", "ready", 1), created_by: "agent" },
       { ...item("u2", "in_progress", 2), created_by: "user" },
-    ] as WorkItem[],
-    epicChildren: new Map<string, WorkItem[]>(),
+    ] as Task[],
+    epicChildren: new Map<string, Task[]>(),
   }];
   const filtered = filterAutoAuthored(groups);
   expect(filtered[0]!.items.map((i) => i.id)).toEqual(["u1", "u2"]);
@@ -227,13 +227,13 @@ test("filterAutoAuthored keeps epic rows even if agent-authored, and filters the
   const epic = { ...item("e1", "ready", 0), kind: "epic" as const, created_by: "agent" };
   const groups = [{
     epic: null,
-    items: [epic] as WorkItem[],
-    epicChildren: new Map<string, WorkItem[]>([[
+    items: [epic] as Task[],
+    epicChildren: new Map<string, Task[]>([[
       "e1",
       [
         { ...item("u-child", "ready", 1), created_by: "user" },
         { ...item("a-child", "ready", 2), created_by: "agent" },
-      ] as WorkItem[],
+      ] as Task[],
     ]]),
   }];
   const filtered = filterAutoAuthored(groups);
@@ -248,8 +248,8 @@ test("applyStatusFilter exclude drops matching items", () => {
       item("a", "ready", 0),
       item("b", "archived", 1),
       item("c", "done", 2),
-    ] as WorkItem[],
-    epicChildren: new Map<string, WorkItem[]>(),
+    ] as Task[],
+    epicChildren: new Map<string, Task[]>(),
   }];
   const filtered = applyStatusFilter(groups, { exclude: ["archived"] });
   expect(filtered[0]!.items.map((i) => i.id)).toEqual(["a", "c"]);
@@ -262,8 +262,8 @@ test("applyStatusFilter only keeps matching items", () => {
       item("a", "ready", 0),
       item("b", "archived", 1),
       item("c", "done", 2),
-    ] as WorkItem[],
-    epicChildren: new Map<string, WorkItem[]>(),
+    ] as Task[],
+    epicChildren: new Map<string, Task[]>(),
   }];
   const filtered = applyStatusFilter(groups, { only: ["archived"] });
   expect(filtered[0]!.items.map((i) => i.id)).toEqual(["b"]);
@@ -273,10 +273,10 @@ test("applyStatusFilter keeps epic rows even when status would exclude them, and
   const epic = { ...item("e1", "ready", 0), kind: "epic" as const };
   const groups = [{
     epic: null,
-    items: [epic] as WorkItem[],
-    epicChildren: new Map<string, WorkItem[]>([[
+    items: [epic] as Task[],
+    epicChildren: new Map<string, Task[]>([[
       "e1",
-      [item("c1", "ready", 1), item("c2", "archived", 2)] as WorkItem[],
+      [item("c1", "ready", 1), item("c2", "archived", 2)] as Task[],
     ]]),
   }];
   const filtered = applyStatusFilter(groups, { only: ["ready"] });

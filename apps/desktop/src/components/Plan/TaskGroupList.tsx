@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { AgentStatus, ThreadFollowup, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
+import type { AgentStatus, ThreadFollowup, Task, TaskPriority, TaskStatus } from "../../api.js";
 import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
 import {
   classifyRow,
@@ -16,7 +16,7 @@ import {
   type WorkItemSectionKind,
 } from "./plan-utils.js";
 import { PriorityIcon } from "./plan-icons.js";
-import type { WorkItemDetailChanges } from "./WorkItemDetail.js";
+import type { TaskDetailChanges } from "./TaskDetail.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 
@@ -34,7 +34,7 @@ import type { MenuItem } from "../../menu.js";
  * sections stay hidden until a drag is active, at which point they appear
  * as drop targets.
  */
-export type QueueRow = { kind: "work"; id: string; sortIndex: number; item: WorkItem };
+export type QueueRow = { kind: "work"; id: string; sortIndex: number; item: Task };
 
 interface SectionBucket {
   kind: WorkItemSectionKind;
@@ -49,7 +49,7 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
   { kind: "done", label: "Done" },
 ];
 
-export function WorkGroupList({
+export function TaskGroupList({
   group,
   scopeThreadId,
   onUpdateWorkItem,
@@ -77,10 +77,10 @@ export function WorkGroupList({
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
-  onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
+  onUpdateWorkItem: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
   onReorderWorkItems: (orderedItemIds: string[]) => Promise<void>;
   onReorderMixed?(entries: Array<{ id: string }>): void;
-  onOpenMenu(rect: DOMRect, item: WorkItem): void;
+  onOpenMenu(rect: DOMRect, item: Task): void;
   /** Per-section action buttons (right-aligned in each section header).
    *  The PlanPane builds this map and threads it in — add new per-section
    *  commands here rather than in the header rendering. Done's built-in
@@ -89,8 +89,8 @@ export function WorkGroupList({
   selectedId?: string | null;
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
-  onRequestEdit?(item: WorkItem): void;
-  epicChildrenMap: Map<string, WorkItem[]>;
+  onRequestEdit?(item: Task): void;
+  epicChildrenMap: Map<string, Task[]>;
   onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
   onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
@@ -194,7 +194,7 @@ export function WorkGroupList({
   // The agent terminal reads this slice to add each marked row as a
   // context ref without needing its own work-item lookup.
   const allWorkItemsById = useMemo(() => {
-    const map = new Map<string, WorkItem>();
+    const map = new Map<string, Task>();
     for (const item of group.items) map.set(item.id, item);
     for (const children of epicChildrenMap.values()) {
       for (const child of children) map.set(child.id, child);
@@ -242,7 +242,7 @@ export function WorkGroupList({
     // would still look like its old section to the run detector, which
     // miscomputes the descending-run flips (regression when dragging out of
     // Done back to Ready).
-    const statusOverrides = new Map<string, WorkItemStatus>();
+    const statusOverrides = new Map<string, TaskStatus>();
     // Cross-section drop — change status to match the target section.
     // When it's a multi-drag, apply the status change to every marked item.
     if (dragged.kind === "work" && target.kind === "work") {
@@ -396,7 +396,7 @@ export function WorkGroupList({
         // row the user actually grabbed.
         const items = ids
           .map((id) => allWorkItemsById.get(id) ?? (id === row.item.id ? row.item : null))
-          .filter((item): item is WorkItem => item !== null)
+          .filter((item): item is Task => item !== null)
           .map((item) => ({ id: item.id, title: item.title, status: item.status }));
         event.dataTransfer.setData(
           WORK_ITEM_DRAG_MIME,
@@ -793,10 +793,10 @@ export function SectionHeaderMenu({ items, testId }: { items: MenuItem[]; testId
   );
 }
 
-const STATUS_OPTIONS: WorkItemStatus[] = [
+const STATUS_OPTIONS: TaskStatus[] = [
   "blocked", "ready", "in_progress", "done", "archived", "canceled",
 ];
-const PRIORITY_OPTIONS: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
+const PRIORITY_OPTIONS: TaskPriority[] = ["urgent", "high", "medium", "low"];
 
 function EpicInlineRow({
   rowKey, item, isExpanded, onToggleExpand,
@@ -805,7 +805,7 @@ function EpicInlineRow({
   onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: {
   rowKey: string;
-  item: WorkItem;
+  item: Task;
   isExpanded: boolean;
   onToggleExpand(): void;
   isSelected: boolean;
@@ -815,9 +815,9 @@ function EpicInlineRow({
   scopeThreadId: string | null;
   lockInProgress?: boolean;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
-  onRequestEdit?(item: WorkItem): void;
-  onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
-  onOpenMenu(rect: DOMRect, item: WorkItem): void;
+  onRequestEdit?(item: Task): void;
+  onUpdateWorkItem: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  onOpenMenu(rect: DOMRect, item: Task): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
   onDragOver(event: React.DragEvent): void;
@@ -895,13 +895,13 @@ function EpicChildrenPane({
   selectedId, markedIds, onSelect, onAddChildTask,
 }: {
   epicId: string;
-  children: WorkItem[];
+  children: Task[];
   onReorderWorkItems(ids: string[]): Promise<void>;
   onReparentWorkItem(itemId: string, newParentId: string | null): Promise<void>;
-  onUpdateWorkItem(itemId: string, changes: WorkItemDetailChanges): Promise<void>;
-  onOpenMenu(rect: DOMRect, item: WorkItem): void;
+  onUpdateWorkItem(itemId: string, changes: TaskDetailChanges): Promise<void>;
+  onOpenMenu(rect: DOMRect, item: Task): void;
   scopeThreadId: string | null;
-  onRequestEdit?(item: WorkItem): void;
+  onRequestEdit?(item: Task): void;
   selectedId?: string | null;
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
@@ -975,7 +975,7 @@ function EpicChildrenPane({
               // titles we can find here. Unresolved ids drop through.
               const items = ids
                 .map((id) => children.find((c) => c.id === id) ?? (id === child.id ? child : null))
-                .filter((item): item is WorkItem => item !== null)
+                .filter((item): item is Task => item !== null)
                 .map((item) => ({ id: item.id, title: item.title, status: item.status }));
               event.dataTransfer.setData(
                 WORK_ITEM_DRAG_MIME,
@@ -1034,7 +1034,7 @@ function EpicChildrenPane({
  * One collapsed work-item row with inline editing. Title click swaps to an
  * input; status icon and priority marker each open a transparent <select>
  * overlay that commits on change. Clicking anywhere else on the row toggles
- * the expanded WorkItemDetail (for description + acceptance + delete).
+ * the expanded TaskDetail (for description + acceptance + delete).
  *
  * Drag-reorder and right-click-to-delete still hang off the outer row div;
  * the inline controls stopPropagation so they don't bubble to the row's
@@ -1060,7 +1060,7 @@ function InlineItemRow({
   onDrop,
 }: {
   rowKey: string;
-  item: WorkItem;
+  item: Task;
   isSelected: boolean;
   isMarked: boolean;
   isOver: boolean;
@@ -1068,9 +1068,9 @@ function InlineItemRow({
   scopeThreadId: string | null;
   lockInProgress?: boolean;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
-  onRequestEdit?(item: WorkItem): void;
-  onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
-  onOpenMenu(rect: DOMRect, item: WorkItem): void;
+  onRequestEdit?(item: Task): void;
+  onUpdateWorkItem: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  onOpenMenu(rect: DOMRect, item: Task): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
   onDragOver(event: React.DragEvent): void;
@@ -1176,8 +1176,8 @@ export function InlineStatusPicker({
   onChange,
   locked,
 }: {
-  status: WorkItemStatus;
-  onChange(next: WorkItemStatus): void;
+  status: TaskStatus;
+  onChange(next: TaskStatus): void;
   locked?: boolean;
 }) {
   return (
@@ -1190,7 +1190,7 @@ export function InlineStatusPicker({
       {!locked ? (
         <select
           value={status}
-          onChange={(event) => onChange(event.target.value as WorkItemStatus)}
+          onChange={(event) => onChange(event.target.value as TaskStatus)}
           onClick={(event) => event.stopPropagation()}
           style={{
             position: "absolute",
@@ -1215,8 +1215,8 @@ function InlinePriorityPicker({
   priority,
   onChange,
 }: {
-  priority: WorkItemPriority;
-  onChange(next: WorkItemPriority): void;
+  priority: TaskPriority;
+  onChange(next: TaskPriority): void;
 }) {
   return (
     <span
@@ -1227,7 +1227,7 @@ function InlinePriorityPicker({
       <PriorityIcon priority={priority} />
       <select
         value={priority}
-        onChange={(event) => onChange(event.target.value as WorkItemPriority)}
+        onChange={(event) => onChange(event.target.value as TaskPriority)}
         onClick={(event) => event.stopPropagation()}
         style={{
           position: "absolute",
@@ -1252,15 +1252,15 @@ function StaleEpicChildrenBanner({
   staleChildren,
   onCascade,
 }: {
-  epic: WorkItem;
-  staleChildren: WorkItem[];
-  onCascade: (targetStatus: WorkItemStatus) => void;
+  epic: Task;
+  staleChildren: Task[];
+  onCascade: (targetStatus: TaskStatus) => void;
 }) {
   // The classifyEpic rollup will pull this epic back into Ready because
   // its children are still ready/in_progress, so the rail counts will
   // misrepresent the closed state. Surface a one-click cascade fix that
   // mirrors the server-side cascade guard the MCP tools enforce.
-  const targetStatus: WorkItemStatus = epic.status === "blocked" ? "blocked" : "done";
+  const targetStatus: TaskStatus = epic.status === "blocked" ? "blocked" : "done";
   const n = staleChildren.length;
   const noun = n === 1 ? "child" : "children";
   const label = `Close ${n} ${noun} as ${statusLabel(targetStatus)}`;

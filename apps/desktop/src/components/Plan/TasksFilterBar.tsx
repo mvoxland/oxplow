@@ -1,11 +1,11 @@
 import type { CSSProperties } from "react";
-import type { WorkItemPriority, WorkItemStatus } from "../../api.js";
+import type { TaskPriority, TaskStatus } from "../../api.js";
 
 export interface TasksFilters {
-  priorities: ReadonlySet<WorkItemPriority>;
+  priorities: ReadonlySet<TaskPriority>;
 }
 
-const PRIORITIES: WorkItemPriority[] = ["urgent", "high", "medium", "low"];
+const PRIORITIES: TaskPriority[] = ["urgent", "high", "medium", "low"];
 
 const barStyle: CSSProperties = {
   display: "flex",
@@ -50,7 +50,7 @@ export function TasksFilterBar({
   filters: TasksFilters;
   onChange(next: TasksFilters): void;
 }) {
-  const togglePriority = (p: WorkItemPriority) => {
+  const togglePriority = (p: TaskPriority) => {
     const next = new Set(filters.priorities);
     if (next.has(p)) next.delete(p); else next.add(p);
     onChange({ ...filters, priorities: next });
@@ -86,7 +86,7 @@ export function loadTasksFilters(): TasksFilters {
     if (!raw) return DEFAULT_TASKS_FILTERS;
     const parsed = JSON.parse(raw) as { priorities?: string[] };
     return {
-      priorities: new Set((parsed.priorities ?? []) as WorkItemPriority[]),
+      priorities: new Set((parsed.priorities ?? []) as TaskPriority[]),
     };
   } catch {
     return DEFAULT_TASKS_FILTERS;
@@ -102,7 +102,7 @@ export function saveTasksFilters(filters: TasksFilters): void {
   } catch { /* ignore quota */ }
 }
 
-export function applyTasksFilters<T extends { priority: WorkItemPriority; status: WorkItemStatus }>(
+export function applyTasksFilters<T extends { priority: TaskPriority; status: TaskStatus }>(
   items: T[],
   filters: TasksFilters,
 ): T[] {

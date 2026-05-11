@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapshot, Stream, ThreadWorkState, TopVisitedRowApi, WikiPageSummary, WorkItem } from "../api.js";
+import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapshot, Stream, ThreadWorkState, TopVisitedRowApi, WikiPageSummary, Task } from "../api.js";
 import {
   countPageVisitsByDay,
   listCodeQualityFindings,
@@ -11,7 +11,7 @@ import {
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { findingRef, indexRef, wikiPageRef, workItemRef } from "../tabs/pageRefs.js";
+import { findingRef, indexRef, wikiPageRef, taskRef } from "../tabs/pageRefs.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
 
 export type DashboardVariant = "planning" | "review" | "quality" | "visits";
@@ -214,7 +214,7 @@ function PlanningSections({
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  const ready: WorkItem[] = threadWork?.waiting ?? [];
+  const ready: Task[] = threadWork?.waiting ?? [];
   const backlogItems = backlog?.items ?? [];
   const notes = useRecentNotes(stream);
 
@@ -224,17 +224,17 @@ function PlanningSections({
         {ready.length === 0 ? <EmptyHint>Nothing ready.</EmptyHint> : null}
         {(() => {
           const list = ready.slice(0, 10);
-          const siblingEntries = list.map((it) => ({ ref: workItemRef(it.id), label: it.title }));
+          const siblingEntries = list.map((it) => ({ ref: taskRef(it.id), label: it.title }));
           return list.map((item, i) => (
             <RowButton
               key={item.id}
               testId={`dashboard-planning-ready-${item.id}`}
               label={item.title}
               subtitle={item.priority}
-              navRef={workItemRef(item.id)}
+              navRef={taskRef(item.id)}
               siblings={{ entries: siblingEntries, index: i, title: "Ready in This Thread" }}
               onNavigate={(ref) => onOpenPage(ref)}
-              onClick={() => onOpenPage(workItemRef(item.id))}
+              onClick={() => onOpenPage(taskRef(item.id))}
             />
           ));
         })()}
@@ -243,16 +243,16 @@ function PlanningSections({
         {backlogItems.length === 0 ? <EmptyHint>Backlog is empty.</EmptyHint> : null}
         {(() => {
           const list = backlogItems.slice(0, 10);
-          const siblingEntries = list.map((it) => ({ ref: workItemRef(it.id), label: it.title }));
+          const siblingEntries = list.map((it) => ({ ref: taskRef(it.id), label: it.title }));
           return list.map((item, i) => (
             <RowButton
               key={item.id}
               label={item.title}
               subtitle={item.priority}
-              navRef={workItemRef(item.id)}
+              navRef={taskRef(item.id)}
               siblings={{ entries: siblingEntries, index: i, title: "Backlog" }}
               onNavigate={(ref) => onOpenPage(ref)}
-              onClick={() => onOpenPage(workItemRef(item.id))}
+              onClick={() => onOpenPage(taskRef(item.id))}
             />
           ));
         })()}

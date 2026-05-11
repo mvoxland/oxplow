@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import type { EffortDetail, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
+import type { EffortDetail, Task, TaskPriority, TaskStatus } from "../../api.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { deleteButtonStyle, inputStyle, miniButtonStyle } from "./plan-utils.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
@@ -27,25 +27,25 @@ export function buildActivityTimeline(efforts: EffortDetail[]): ActivityRow[] {
   return rows;
 }
 
-export interface WorkItemDetailChanges {
+export interface TaskDetailChanges {
   title?: string;
   description?: string;
   acceptanceCriteria?: string | null;
   parentId?: string | null;
-  status?: WorkItemStatus;
-  priority?: WorkItemPriority;
+  status?: TaskStatus;
+  priority?: TaskPriority;
   /** Backlog grooming bucket. Pass `null` to clear, omit to keep. */
   category?: string | null;
   /** Backlog grooming tags (comma-separated; normalized server-side). */
   tags?: string | null;
 }
 
-const STATUS_OPTIONS_BASE: WorkItemStatus[] = [
+const STATUS_OPTIONS_BASE: TaskStatus[] = [
   "blocked", "ready", "done", "archived", "canceled",
 ];
-const PRIORITY_OPTIONS: WorkItemPriority[] = ["low", "medium", "high", "urgent"];
+const PRIORITY_OPTIONS: TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-function statusOptionsFor(current: WorkItemStatus): WorkItemStatus[] {
+function statusOptionsFor(current: TaskStatus): TaskStatus[] {
   return current === "in_progress" ? [...STATUS_OPTIONS_BASE, "in_progress"] : STATUS_OPTIONS_BASE;
 }
 
@@ -54,14 +54,14 @@ function statusOptionsFor(current: WorkItemStatus): WorkItemStatus[] {
  * acceptance, status + priority pickers, delete button. Each field commits
  * on blur or Enter; Escape reverts.
  */
-export function WorkItemDetail({
+export function TaskDetail({
   item,
   onUpdateWorkItem,
   onRequestDelete,
   headerActions,
 }: {
-  item: WorkItem;
-  onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
+  item: Task;
+  onUpdateWorkItem: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
   onRequestDelete(): void;
   /** Optional buttons rendered before Delete in the header row. */
   headerActions?: ReactNode;
@@ -77,13 +77,13 @@ export function WorkItemDetail({
         <InlineSelect
           value={item.status}
           options={statusOptionsFor(item.status)}
-          onChange={(value) => void onUpdateWorkItem(item.id, { status: value as WorkItemStatus })}
+          onChange={(value) => void onUpdateWorkItem(item.id, { status: value as TaskStatus })}
         />
         <span style={{ color: "var(--muted)" }}>·</span>
         <InlineSelect
           value={item.priority}
           options={PRIORITY_OPTIONS}
-          onChange={(value) => void onUpdateWorkItem(item.id, { priority: value as WorkItemPriority })}
+          onChange={(value) => void onUpdateWorkItem(item.id, { priority: value as TaskPriority })}
           suffix=" priority"
         />
         <span style={{ color: "var(--muted)" }}>·</span>

@@ -13,7 +13,7 @@
 export type ContextRef =
   | { kind: "file"; path: string }
   | { kind: "wiki"; slug: string }
-  | { kind: "work-item"; itemId: string; title: string; status: string };
+  | { kind: "task"; itemId: string; title: string; status: string };
 
 export function formatContextMention(ref: ContextRef): string {
   if (ref.kind === "file") {
@@ -26,5 +26,5 @@ export function formatContextMention(ref: ContextRef): string {
   // collapse internal whitespace so the inserted snippet stays on one
   // line. Don't escape quotes — the agent reads it as plain text.
   const cleanTitle = ref.title.replace(/\s+/g, " ").trim();
-  return `[oxplow work-item ${ref.itemId}: "${cleanTitle}" (${ref.status})] `;
+  return `[oxplow task ${ref.itemId}: "${cleanTitle}" (${ref.status})] `;
 }

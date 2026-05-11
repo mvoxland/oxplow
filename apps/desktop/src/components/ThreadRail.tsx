@@ -29,7 +29,7 @@ interface Props {
   createRequest?: number;
 }
 
-export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-work-item";
+export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-task";
 export const THREAD_DRAG_MIME = "application/x-oxplow-thread";
 
 export function ThreadRail({

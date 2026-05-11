@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { EffortDetail } from "../../api.js";
-import { buildActivityTimeline } from "./WorkItemDetail.js";
+import { buildActivityTimeline } from "./TaskDetail.js";
 
 function effort(
   id: string,
