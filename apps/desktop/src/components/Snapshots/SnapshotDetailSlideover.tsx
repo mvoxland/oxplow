@@ -50,14 +50,14 @@ export interface SnapshotDetailSlideoverProps {
   /** Forwarded to the file rows. */
   onOpenDiff?(spec: DiffSpec): void;
   /** Optional: open the work item that wrote this snapshot. */
-  workItemId?: string | null;
-  onOpenWorkItem?(itemId: number): void;
+  workItemId?: number | null;
+  onOpenTask?(itemId: number): void;
 }
 
 /**
  * Right-edge Slideover wrapper around the snapshot detail body. Used
  * for cross-page opens (e.g. a Backlinks entry that targets a snapshot
- * from the WorkItemPage) — the docked SnapshotsPanel keeps its inline
+ * from the TaskPage) — the docked SnapshotsPanel keeps its inline
  * detail layout because the panel already has the horizontal real
  * estate. This component owns its own data fetch so callers only need
  * to pass the snapshot id.
@@ -71,7 +71,7 @@ export function SnapshotDetailSlideover({
   snapshotSource = "",
   onOpenDiff,
   workItemId = null,
-  onOpenWorkItem,
+  onOpenTask,
 }: SnapshotDetailSlideoverProps) {
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -150,7 +150,7 @@ export function SnapshotDetailSlideover({
         <SnapshotDetailBody
           summary={summary}
           workItemId={workItemId}
-          onOpenWorkItem={onOpenWorkItem}
+          onOpenTask={onOpenTask}
           onOpenFileDiff={handleOpenFileDiff}
           onRestore={(path) => { void handleRestore(path); }}
         />
@@ -162,13 +162,13 @@ export function SnapshotDetailSlideover({
 function SnapshotDetailBody({
   summary,
   workItemId,
-  onOpenWorkItem,
+  onOpenTask,
   onOpenFileDiff,
   onRestore,
 }: {
   summary: SnapshotSummary;
-  workItemId: string | null;
-  onOpenWorkItem?(itemId: number): void;
+  workItemId: number | null;
+  onOpenTask?(itemId: number): void;
   onOpenFileDiff(path: string): void;
   onRestore(path: string): void;
 }) {
@@ -176,11 +176,11 @@ function SnapshotDetailBody({
   const { counts } = summary;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
-      {workItemId && onOpenWorkItem ? (
+      {workItemId && onOpenTask ? (
         <div>
           <button
             type="button"
-            onClick={() => onOpenWorkItem(workItemId)}
+            onClick={() => onOpenTask(workItemId)}
             style={openTaskButtonStyle}
             data-testid="snapshot-slideover-open-task"
           >

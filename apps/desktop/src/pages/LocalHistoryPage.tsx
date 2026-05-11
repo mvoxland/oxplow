@@ -7,7 +7,7 @@ export interface LocalHistoryPageProps {
   stream: Stream | null;
   onOpenDiff?(spec: DiffSpec): void;
   revealSnapshotId?: { snapshotId: string; token: number } | null;
-  onRequestEditWorkItem?(itemId: number): void;
+  onRequestEditTask?(itemId: number): void;
 }
 
 /**
@@ -15,7 +15,7 @@ export interface LocalHistoryPageProps {
  * its current UI; this exists so the rail HUD can route to "Local
  * history" as a full-area tab. Density / web-style polish lands later.
  */
-export function LocalHistoryPage({ stream, onOpenDiff, revealSnapshotId, onRequestEditWorkItem }: LocalHistoryPageProps) {
+export function LocalHistoryPage({ stream, onOpenDiff, revealSnapshotId, onRequestEditTask }: LocalHistoryPageProps) {
   return (
     <Page testId="page-local-history" title="Local History">
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -23,7 +23,7 @@ export function LocalHistoryPage({ stream, onOpenDiff, revealSnapshotId, onReque
           stream={stream}
           onOpenDiff={onOpenDiff}
           revealSnapshotId={revealSnapshotId}
-          onRequestEditWorkItem={onRequestEditWorkItem}
+          onRequestEditTask={onRequestEditTask}
         />
       </div>
     </Page>

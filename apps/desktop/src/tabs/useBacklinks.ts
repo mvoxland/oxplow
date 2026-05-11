@@ -145,8 +145,10 @@ function refFor(kind: string, id: string): TabRef | null {
   switch (kind) {
     case "wiki":
       return wikiPageRef(id);
-    case "task":
-      return taskRef(id);
+    case "task": {
+      const n = Number(id);
+      return Number.isFinite(n) ? taskRef(n) : null;
+    }
     case "file":
       return fileRef(id);
     case "directory":

@@ -18,7 +18,7 @@ import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { SnapshotDetailSlideover } from "../components/Snapshots/SnapshotDetailSlideover.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
-export interface WorkItemPageProps {
+export interface TaskPageProps {
   stream: Stream | null;
   thread: Thread | null;
   itemId: number;
@@ -43,7 +43,7 @@ export interface WorkItemPageProps {
  * (e.g. it lives in another thread), the page renders just the title
  * row and a hint to open it from its owning thread.
  */
-export function WorkItemPage({
+export function TaskPage({
   stream,
   thread,
   itemId,
@@ -53,7 +53,7 @@ export function WorkItemPage({
   onOpenFile,
   onShowInHistory,
   onOpenDiff,
-}: WorkItemPageProps) {
+}: TaskPageProps) {
   // Fallback for items not in the current thread's loaded buckets — backlog
   // rows and items owned by another thread won't appear in `items`. Fetch
   // the row directly so the page renders the full editor regardless.
@@ -69,7 +69,7 @@ export function WorkItemPage({
     snapshotId: string;
     label: string | null;
     source: string;
-    workItemId: string | null;
+    workItemId: number | null;
   } | null>(null);
   // Synthesize snapshot backlinks from this item's efforts. Each completed
   // effort's `end_snapshot_id` becomes a clickable row that opens the
@@ -128,7 +128,7 @@ export function WorkItemPage({
     if (!inThreadItems) refetch();
     const unsub = subscribeOxplowEvents((event) => {
       if (event.type !== "task.changed") return;
-      const targetId = (event as unknown as { itemId?: string }).itemId;
+      const targetId = (event as unknown as { itemId?: number }).itemId;
       if (targetId !== itemId) return;
       refetch();
     });
@@ -146,7 +146,7 @@ export function WorkItemPage({
     });
     const unsub = subscribeOxplowEvents((event) => {
       if (event.type !== "task.changed") return;
-      const targetId = (event as unknown as { itemId?: string }).itemId;
+      const targetId = (event as unknown as { itemId?: number }).itemId;
       if (targetId !== item.id) return;
       void listTaskEfforts(item.id).then((rows) => {
         if (!cancelled) setEfforts(rows);
@@ -159,7 +159,7 @@ export function WorkItemPage({
   }, [item?.id]);
 
   const handleUpdate = async (
-    targetId: string,
+    targetId: number,
     changes: { title?: string; description?: string; acceptanceCriteria?: string | null; status?: TaskStatus; priority?: TaskPriority },
   ) => {
     if (!stream || !thread) return;
@@ -203,13 +203,13 @@ export function WorkItemPage({
       snapshotSource={slideoverSnapshot?.source ?? ""}
       workItemId={slideoverSnapshot?.workItemId ?? null}
       onOpenDiff={onOpenDiff}
-      onOpenWorkItem={(targetId) => onOpenPage(taskRef(targetId))}
+      onOpenTask={(targetId) => onOpenPage(taskRef(targetId))}
     />
   );
 
   if (!item) {
     return (
-      <Page testId="page-work-item" title={itemId} kind="work item" backlinks={backlinks} outbound={outbound}>
+      <Page testId="page-work-item" title={`task:${itemId}`} kind="work item" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
           Loading work item…
         </div>
@@ -228,7 +228,7 @@ export function WorkItemPage({
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
         <TaskDetail
           item={item}
-          onUpdateWorkItem={handleUpdate}
+          onUpdateTask={handleUpdate}
           onRequestDelete={() => {}}
           headerActions={
             scopeAction ? (

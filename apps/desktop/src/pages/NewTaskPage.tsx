@@ -1,16 +1,15 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
-import type {
-  Task,
-  TaskKind,
-  TaskPriority,
-  TaskStatus,
-} from "../api.js";
+import type { Task, TaskPriority, TaskStatus } from "../api.js";
 import { Page } from "../tabs/Page.js";
 
-// Edit flow now lives on WorkItemPage (the canonical Task page); this
+// Edit flow now lives on TaskPage (the canonical Task page); this
 // form is create-only.
 
+// Local-only categorization choice for the form UI. The DB no longer
+// stores a `kind` discriminator, but the picker still helps the user
+// frame what they're filing; we collapse the choice into the title.
+type TaskKind = "task" | "epic" | "subtask" | "bug" | "note";
 const KIND_OPTIONS: TaskKind[] = ["task", "epic", "subtask", "bug", "note"];
 const PRIORITY_OPTIONS: TaskPriority[] = ["low", "medium", "high", "urgent"];
 const STATUS_OPTIONS: Array<Extract<TaskStatus, "ready" | "blocked">> = ["ready", "blocked"];
@@ -39,7 +38,7 @@ export function resolveSaveAndAnotherDefaults(input: {
   };
 }
 
-export interface NewWorkItemPageProps {
+export interface NewTaskPageProps {
   /** Defaults from the page-ref payload (incl. parentId for + Task on epic). */
   defaults?: {
     parentId?: number | null;
@@ -52,7 +51,6 @@ export interface NewWorkItemPageProps {
   onClose?(): void;
   /** Submit the form. The page resets in-place when `andAnother` is true. */
   onSubmit(input: {
-    kind: TaskKind;
     title: string;
     description?: string;
     acceptanceCriteria?: string | null;
@@ -70,15 +68,15 @@ export interface NewWorkItemPageProps {
  * also preserved so multiple subtasks can be filed under the same
  * epic in sequence.
  */
-export function NewWorkItemPage({
+export function NewTaskPage({
   defaults = {},
   epics = [],
   onClose,
   onSubmit,
-}: NewWorkItemPageProps) {
+}: NewTaskPageProps) {
   const [lastKind, setLastKind] = useState<TaskKind | null>(null);
   const [lastPriority, setLastPriority] = useState<TaskPriority | null>(null);
-  const [lastParentId, setLastParentId] = useState<string | null>(null);
+  const [lastParentId, setLastParentId] = useState<number | null>(null);
 
   const resolved = resolveSaveAndAnotherDefaults({
     parentId: lastParentId ?? defaults.parentId,
@@ -91,7 +89,7 @@ export function NewWorkItemPage({
   const [kind, setKind] = useState<TaskKind>(coerceKind(resolved.initialCategory));
   const [priority, setPriority] = useState<TaskPriority>(coercePriority(resolved.initialPriority));
   const [status, setStatus] = useState<"ready" | "blocked">("ready");
-  const [parentId, setParentId] = useState<string | null>(resolved.parentId);
+  const [parentId, setParentId] = useState<number | null>(resolved.parentId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [acceptance, setAcceptance] = useState("");
@@ -111,7 +109,6 @@ export function NewWorkItemPage({
     setError(null);
     try {
       await onSubmit({
-        kind,
         title: title.trim(),
         description: description.trim() ? description : undefined,
         acceptanceCriteria: acceptance.trim() ? acceptance : null,
@@ -238,7 +235,7 @@ export function NewWorkItemPage({
               <select
                 data-testid="work-item-parent"
                 value={parentId ?? ""}
-                onChange={(e) => setParentId(e.target.value || null)}
+                onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
                 style={inputStyle}
               >
                 <option value="">(none)</option>

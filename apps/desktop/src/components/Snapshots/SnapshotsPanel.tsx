@@ -29,13 +29,13 @@ interface Props {
    *  the token to request a new selection even if the id repeats. */
   revealSnapshotId?: { snapshotId: string; token: number } | null;
   /** Open the given work item in the edit modal (switching tool windows). */
-  onRequestEditWorkItem?(itemId: number): void;
+  onRequestEditTask?(itemId: number): void;
 }
 
-export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequestEditWorkItem }: Props) {
+export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequestEditTask }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [effortsBySnapshot, setEffortsBySnapshot] = useState<
-    Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>
+    Record<string, Array<{ effortId: string; workItemId: number; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>
   >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,7 +174,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
   }, [dragging]);
 
   const handleChangeStatus = async (
-    workItemId: string,
+    workItemId: number,
     threadId: string,
     status: TaskStatus,
   ) => {
@@ -289,7 +289,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
     snap: FileSnapshot;
     label: string;
     effortId: string | null;
-    workItemId: string | null;
+    workItemId: number | null;
     threadId: string | null;
     status: TaskStatus | null;
     isExternal: boolean;
@@ -395,8 +395,8 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
                         : undefined
                     }
                     onDoubleClick={
-                      row.workItemId && onRequestEditWorkItem
-                        ? () => onRequestEditWorkItem(row.workItemId!)
+                      row.workItemId && onRequestEditTask
+                        ? () => onRequestEditTask(row.workItemId!)
                         : undefined
                     }
                   />
@@ -423,7 +423,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
                 ? (effortsBySnapshot[selectedId] ?? []).find((e) => e.effortId === selectedEffortId)?.workItemId ?? null
                 : null
             }
-            onOpenWorkItem={onRequestEditWorkItem}
+            onOpenTask={onRequestEditTask}
           />
         </div>
       </div>
@@ -489,7 +489,7 @@ function SnapshotRow({
   compareBase: boolean;
   onClick(): void;
   status: TaskStatus | null;
-  workItemId: string | null;
+  workItemId: number | null;
   isExternal: boolean;
   onChangeStatus?(nextStatus: TaskStatus): void;
   onDoubleClick?(): void;
@@ -593,14 +593,14 @@ function DetailPane({
   onOpenFileDiff,
   onRestore,
   workItemId,
-  onOpenWorkItem,
+  onOpenTask,
 }: {
   summary: SnapshotSummary | null;
   loading: boolean;
   onOpenFileDiff(path: string): void;
   onRestore(path: string): void;
-  workItemId: string | null;
-  onOpenWorkItem?(itemId: number): void;
+  workItemId: number | null;
+  onOpenTask?(itemId: number): void;
 }) {
   if (loading && !summary) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>Loading…</div>;
@@ -612,11 +612,11 @@ function DetailPane({
   const { counts } = summary;
   return (
     <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 10, fontSize: 12, overflow: "auto", height: "100%" }}>
-      {workItemId && onOpenWorkItem ? (
+      {workItemId && onOpenTask ? (
         <div>
           <button
             type="button"
-            onClick={() => onOpenWorkItem(workItemId)}
+            onClick={() => onOpenTask(workItemId)}
             style={openTaskButtonStyle}
             title="Open this task in the edit modal"
           >

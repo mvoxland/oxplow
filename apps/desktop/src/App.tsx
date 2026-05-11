@@ -113,14 +113,14 @@ import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
-import { WorkItemPage } from "./pages/TaskPage.js";
+import { TaskPage } from "./pages/TaskPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
 import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
 import { NewStreamPage } from "./pages/NewStreamPage.js";
-import { NewWorkItemPage } from "./pages/NewTaskPage.js";
+import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
 import { closedThreadsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newTaskRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
@@ -967,7 +967,7 @@ export function App() {
     }
   }
 
-  async function handleDeleteWorkItem(itemId: number) {
+  async function handleDeleteTask(itemId: number) {
     if (!stream || !selectedThread) return;
     try {
       const next = await deleteTask(stream.id, selectedThread.id, itemId);
@@ -979,7 +979,7 @@ export function App() {
     }
   }
 
-  async function handleReorderWorkItems(orderedItemIds: number[]) {
+  async function handleReorderTasks(orderedItemIds: number[]) {
     if (!stream || !selectedThread) return;
     try {
       const next = await reorderTasks(stream.id, selectedThread.id, orderedItemIds);
@@ -991,7 +991,7 @@ export function App() {
     }
   }
 
-  async function handleMoveWorkItemToThread(itemId: number, fromThreadId: string, toThreadId: string) {
+  async function handleMoveTaskToThread(itemId: number, fromThreadId: string, toThreadId: string) {
     if (!stream || fromThreadId === toThreadId) return;
     try {
       const { from, to } = await moveTaskToThread(stream.id, fromThreadId, itemId, toThreadId);
@@ -1602,7 +1602,7 @@ export function App() {
     },
     newWorkItem() {
       // handleOpenPage is declared further down; forward through the ref
-      // so the menu/keyboard handler routes to a NewWorkItemPage tab
+      // so the menu/keyboard handler routes to a NewTaskPage tab
       // (replaces the legacy openCreateModal-via-PlanPane path).
       handleOpenPageRef.current?.(newTaskRef());
     },
@@ -2636,7 +2636,7 @@ export function App() {
               stream={stream}
               onOpenDiff={navOpenDiff}
               revealSnapshotId={snapshotsReveal}
-              onRequestEditWorkItem={handleRequestEditTask}
+              onRequestEditTask={handleRequestEditTask}
             />
           ),
         });
@@ -2769,18 +2769,18 @@ export function App() {
           threadWork: selectedThreadWork,
           agentStatus: agentThreadStatus,
           backlog: backlogState,
-          onUpdateWorkItem: handleUpdateTask,
-          onDeleteWorkItem: handleDeleteWorkItem,
-          onReorderWorkItems: handleReorderWorkItems,
+          onUpdateTask: handleUpdateTask,
+          onDeleteTask: handleDeleteTask,
+          onReorderTasks: handleReorderTasks,
           onUpdateBacklogItem: handleUpdateBacklogItem,
           onDeleteBacklogItem: handleDeleteBacklogItem,
           onReorderBacklog: handleReorderBacklog,
           onMoveItemToBacklog: handleMoveItemToBacklog,
           editRequest: planEditRequest,
           registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
-          onOpenNewWorkItemPage: (payload: { parentId?: number | null }) =>
+          onOpenNewTaskPage: (payload: { parentId?: number | null }) =>
             navOpen(newTaskRef(payload)),
-          onOpenWorkItemPage: (itemId: number) => navOpen(taskRef(itemId)),
+          onOpenTaskPage: (itemId: number) => navOpen(taskRef(itemId)),
         };
         const labelByKind: Record<string, string> = {
           "tasks": "Tasks",
@@ -2891,10 +2891,10 @@ export function App() {
           ),
         });
       } else if (ref.kind === "task") {
-        const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
+        const itemId = (ref.payload as { itemId?: number } | null)?.itemId ?? 0;
         // ThreadWorkState splits items by status (Ready→items, InProgress→inProgress,
         // Done/Canceled/Archived→done, Blocked→waiting, Epics→epics). Merge them all
-        // for the lookup so WorkItemPage can resolve any item on this thread, not
+        // for the lookup so TaskPage can resolve any item on this thread, not
         // just Ready ones — otherwise clicking a done/in-progress item renders the
         // misleading "not loaded in the current thread" fallback.
         const items = selectedThreadWork
@@ -2909,10 +2909,10 @@ export function App() {
         const matching = items.find((i) => i.id === itemId);
         tabs.push({
           id: ref.id,
-          label: matching ? matching.title : itemId,
+          label: matching ? matching.title : `task:${itemId}`,
           closable: true,
           render: () => (
-            <WorkItemPage
+            <TaskPage
               stream={stream}
               thread={selectedThread}
               itemId={itemId}
@@ -3009,7 +3009,7 @@ export function App() {
           label: "New task",
           closable: true,
           render: () => (
-            <NewWorkItemPage
+            <NewTaskPage
               defaults={{
                 parentId: payload.parentId ?? null,
                 initialCategory: payload.initialCategory ?? null,
@@ -3019,7 +3019,6 @@ export function App() {
               onClose={() => closePageTab(ref.id)}
               onSubmit={async (input) => {
                 await handleCreateTask({
-                  kind: input.kind,
                   title: input.title,
                   description: input.description,
                   acceptanceCriteria: input.acceptanceCriteria ?? null,

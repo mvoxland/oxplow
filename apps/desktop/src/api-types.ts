@@ -95,7 +95,7 @@ export interface SnapshotDiffResult {
 
 export interface TaskEffort {
   id: string;
-  workItemId: string;
+  workItemId: number;
   startedAt: string;
   endedAt: string | null;
 }

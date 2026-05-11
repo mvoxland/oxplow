@@ -212,9 +212,9 @@ export function TasksPage({
     ? {
         ...rest,
         threadWork: effectiveThreadWork,
-        onUpdateWorkItem: NOOP_ASYNC as typeof rest.onUpdateWorkItem,
-        onDeleteWorkItem: NOOP_ASYNC as typeof rest.onDeleteWorkItem,
-        onReorderWorkItems: NOOP_ASYNC as typeof rest.onReorderWorkItems,
+        onUpdateTask: NOOP_ASYNC as typeof rest.onUpdateTask,
+        onDeleteTask: NOOP_ASYNC as typeof rest.onDeleteTask,
+        onReorderTasks: NOOP_ASYNC as typeof rest.onReorderTasks,
         onMoveItemToBacklog: NOOP_ASYNC as typeof rest.onMoveItemToBacklog,
       }
     : { ...rest, threadWork: effectiveThreadWork };

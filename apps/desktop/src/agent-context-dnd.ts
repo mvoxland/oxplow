@@ -146,10 +146,11 @@ export function decodeWorkItemDragRefs(raw: string | null | undefined): ContextR
   for (const entry of parsed.items) {
     if (!entry || typeof entry !== "object") continue;
     const e = entry as { id?: unknown; title?: unknown; status?: unknown };
-    if (typeof e.id !== "string" || e.id.length === 0) continue;
+    const n = typeof e.id === "number" ? e.id : Number(e.id);
+    if (!Number.isFinite(n) || n <= 0) continue;
     if (typeof e.title !== "string") continue;
     if (typeof e.status !== "string") continue;
-    out.push({ kind: "task", itemId: e.id, title: e.title, status: e.status });
+    out.push({ kind: "task", itemId: n, title: e.title, status: e.status });
   }
   return out;
 }
@@ -163,8 +164,8 @@ export function decodeWorkItemDragRefs(raw: string | null | undefined): ContextR
  * Pure — exported for tests.
  */
 export function resolveWorkItemContextRefs(
-  ids: string[],
-  lookup: (id: string) => { title: string; status: string } | null,
+  ids: number[],
+  lookup: (id: number) => { title: string; status: string } | null,
 ): ContextRef[] {
   const out: ContextRef[] = [];
   for (const id of ids) {

@@ -312,8 +312,8 @@ function ThreadChip({
     setDragOver(false);
     try {
       const payload = JSON.parse(raw) as {
-        itemId?: string;
-        itemIds?: string[];
+        itemId?: number;
+        itemIds?: number[];
         fromThreadId?: string | null;
       };
       const fromThreadId = payload.fromThreadId ?? null;

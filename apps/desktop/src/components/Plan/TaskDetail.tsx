@@ -56,12 +56,12 @@ function statusOptionsFor(current: TaskStatus): TaskStatus[] {
  */
 export function TaskDetail({
   item,
-  onUpdateWorkItem,
+  onUpdateTask,
   onRequestDelete,
   headerActions,
 }: {
   item: Task;
-  onUpdateWorkItem: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onRequestDelete(): void;
   /** Optional buttons rendered before Delete in the header row. */
   headerActions?: ReactNode;
@@ -72,18 +72,18 @@ export function TaskDetail({
       onClick={(event) => event.stopPropagation()}
     >
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11 }}>
-        <span style={{ color: "var(--muted)" }}>{item.kind}</span>
+        <span style={{ color: "var(--muted)" }}>task</span>
         <span style={{ color: "var(--muted)" }}>·</span>
         <InlineSelect
           value={item.status}
           options={statusOptionsFor(item.status)}
-          onChange={(value) => void onUpdateWorkItem(item.id, { status: value as TaskStatus })}
+          onChange={(value) => void onUpdateTask(item.id, { status: value as TaskStatus })}
         />
         <span style={{ color: "var(--muted)" }}>·</span>
         <InlineSelect
           value={item.priority}
           options={PRIORITY_OPTIONS}
-          onChange={(value) => void onUpdateWorkItem(item.id, { priority: value as TaskPriority })}
+          onChange={(value) => void onUpdateTask(item.id, { priority: value as TaskPriority })}
           suffix=" priority"
         />
         <span style={{ color: "var(--muted)" }}>·</span>
@@ -101,7 +101,7 @@ export function TaskDetail({
         onCommit={(value) => {
           const trimmed = value.trim();
           if (!trimmed || trimmed === item.title) return;
-          void onUpdateWorkItem(item.id, { title: trimmed });
+          void onUpdateTask(item.id, { title: trimmed });
         }}
       />
       <EditableField
@@ -113,7 +113,7 @@ export function TaskDetail({
         renderMarkdown
         onCommit={(value) => {
           if (value === item.description) return;
-          void onUpdateWorkItem(item.id, { description: value });
+          void onUpdateTask(item.id, { description: value });
         }}
       />
       <EditableField
@@ -126,7 +126,7 @@ export function TaskDetail({
         onCommit={(value) => {
           const next = value.length === 0 ? null : value;
           if (next === item.acceptance_criteria) return;
-          void onUpdateWorkItem(item.id, { acceptanceCriteria: next });
+          void onUpdateTask(item.id, { acceptanceCriteria: next });
         }}
       />
       <EditableField
@@ -139,7 +139,7 @@ export function TaskDetail({
           const trimmed = value.trim();
           const next = trimmed.length === 0 ? null : trimmed;
           if (next === (item.category ?? null)) return;
-          void onUpdateWorkItem(item.id, { category: next });
+          void onUpdateTask(item.id, { category: next });
         }}
       />
       <EditableField
@@ -152,7 +152,7 @@ export function TaskDetail({
           const trimmed = value.trim();
           const next = trimmed.length === 0 ? null : trimmed;
           if (next === (item.tags ?? null)) return;
-          void onUpdateWorkItem(item.id, { tags: next });
+          void onUpdateTask(item.id, { tags: next });
         }}
       />
     </div>

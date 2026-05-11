@@ -52,8 +52,8 @@ const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
 export function TaskGroupList({
   group,
   scopeThreadId,
-  onUpdateWorkItem,
-  onReorderWorkItems,
+  onUpdateTask,
+  onReorderTasks,
   onReorderMixed,
   onOpenMenu,
   sectionActions,
@@ -62,7 +62,7 @@ export function TaskGroupList({
   onSelect,
   onRequestEdit,
   epicChildrenMap,
-  onReparentWorkItem,
+  onReparentTask,
   onAddChildTask,
   isActive,
   agentStatus,
@@ -77,22 +77,22 @@ export function TaskGroupList({
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
-  onUpdateWorkItem: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
-  onReorderWorkItems: (orderedItemIds: number[]) => Promise<void>;
-  onReorderMixed?(entries: Array<{ id: string }>): void;
+  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onReorderTasks: (orderedItemIds: number[]) => Promise<void>;
+  onReorderMixed?(entries: Array<{ id: number }>): void;
   onOpenMenu(rect: DOMRect, item: Task): void;
   /** Per-section action buttons (right-aligned in each section header).
    *  The PlanPane builds this map and threads it in — add new per-section
    *  commands here rather than in the header rendering. Done's built-in
    *  archive controls render alongside whatever's passed for `done`. */
   sectionActions?: Partial<Record<WorkItemSectionKind, React.ReactNode>>;
-  selectedId?: string | null;
-  markedIds?: ReadonlySet<string>;
-  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  selectedId?: number | null;
+  markedIds?: ReadonlySet<number>;
+  onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
   epicChildrenMap: Map<number, Task[]>;
-  onReparentWorkItem: (itemId: number, newParentId: string | null) => Promise<void>;
-  onAddChildTask?: (epicId: string) => void;
+  onReparentTask: (itemId: number, newParentId: number | null) => Promise<void>;
+  onAddChildTask?: (epicId: number) => void;
   isActive?: boolean;
   /** Live agent state for this thread, used to drive the In Progress
    *  empty-state placeholder ("Thinking..." with a braille spinner when
@@ -137,7 +137,7 @@ export function TaskGroupList({
   // done-section header carries a "Show archived (N)" toggle and an
   // "Archive all" action.
   const [showArchived, setShowArchived] = useState(false);
-  const [expandedEpicIds, setExpandedEpicIds] = useState<Set<string>>(() => new Set());
+  const [expandedEpicIds, setExpandedEpicIds] = useState<Set<number>>(() => new Set());
 
   const { sections, allRows } = useMemo(() => {
     const work: QueueRow[] = group.items.map((item) => ({
@@ -202,11 +202,11 @@ export function TaskGroupList({
     return map;
   }, [group.items, epicChildrenMap]);
 
-  const keyFor = (row: { kind: string; id: string }) => `${row.kind}:${row.id}`;
+  const keyFor = (row: { kind: string; id: number }) => `${row.kind}:${row.id}`;
 
   // Look up the dragged work item (if any) so cross-section drops can route
-  // through onUpdateWorkItem. Commit/wait rows don't have a status to change.
-  const draggedWorkItem = (() => {
+  // through onUpdateTask. Commit/wait rows don't have a status to change.
+  const draggedTask = (() => {
     if (!draggingKey) return null;
     const row = allRows.find((r) => keyFor(r) === draggingKey);
     return row && row.kind === "work" ? row.item : null;
@@ -259,12 +259,12 @@ export function TaskGroupList({
             for (const id of markedIds) {
               const row = allRows.find((r) => r.kind === "work" && r.id === id);
               if (row && row.kind === "work" && !(group.epicChildren.get(row.item.id) ?? []).length && row.item.status !== nextStatus) {
-                void onUpdateWorkItem(id, { status: nextStatus });
+                void onUpdateTask(id, { status: nextStatus });
                 statusOverrides.set(id, nextStatus);
               }
             }
           } else if (nextStatus !== dragged.item.status) {
-            void onUpdateWorkItem(dragged.item.id, { status: nextStatus });
+            void onUpdateTask(dragged.item.id, { status: nextStatus });
             statusOverrides.set(dragged.item.id, nextStatus);
           }
         }
@@ -332,20 +332,20 @@ export function TaskGroupList({
     if (onReorderMixed) {
       onReorderMixed(persistedWorkIds.map((id) => ({ id })));
     } else {
-      void onReorderWorkItems(persistedWorkIds);
+      void onReorderTasks(persistedWorkIds);
     }
   };
 
   const handleDropOnSection = (section: WorkItemSectionKind) => {
-    if (!draggedWorkItem) { resetDrag(); return; }
+    if (!draggedTask) { resetDrag(); return; }
     const nextStatus = sectionDefaultStatus(section);
     resetDrag();
     if (!nextStatus) return;
     // Epics never carry a literal status — their section is computed
     // from children. Section drops on an epic are no-ops.
-    if (draggedWorkItem.kind === "epic") return;
-    if (classifyRow(draggedWorkItem, epicChildrenMap) === section) return;
-    const isMultiDrag = markedIds && markedIds.has(draggedWorkItem.id) && markedIds.size > 1;
+    if ((epicChildrenMap.get(draggedTask.id) ?? []).length > 0) return;
+    if (classifyRow(draggedTask, epicChildrenMap) === section) return;
+    const isMultiDrag = markedIds && markedIds.has(draggedTask.id) && markedIds.size > 1;
     if (isMultiDrag && markedIds) {
       for (const id of markedIds) {
         const row = allRows.find((r) => r.kind === "work" && r.id === id);
@@ -354,11 +354,11 @@ export function TaskGroupList({
           !(group.epicChildren.get(row.item.id) ?? []).length &&
           classifyRow(row.item, epicChildrenMap) !== section
         ) {
-          void onUpdateWorkItem(id, { status: nextStatus });
+          void onUpdateTask(id, { status: nextStatus });
         }
       }
     } else {
-      void onUpdateWorkItem(draggedWorkItem.id, { status: nextStatus });
+      void onUpdateTask(draggedTask.id, { status: nextStatus });
     }
   };
 
@@ -385,7 +385,7 @@ export function TaskGroupList({
         // so the drag actually starts. Reorder + cross-section drop
         // logic still runs as before once `dragging` state lands.
         event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", row.item.id);
+        event.dataTransfer.setData("text/plain", String(row.item.id));
         const ids = isMarked && markedIds && markedIds.size > 1
           ? [...markedIds]
           : [row.item.id];
@@ -423,10 +423,10 @@ export function TaskGroupList({
         const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
         if (!raw) return;
         try {
-          const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; parentEpicId?: string };
+          const payload = JSON.parse(raw) as { itemId?: number; itemIds?: number[]; parentEpicId?: number };
           if (payload.parentEpicId) {
             const ids = payload.itemIds?.length ? payload.itemIds : payload.itemId ? [payload.itemId] : [];
-            for (const id of ids) void onReparentWorkItem(id, null);
+            for (const id of ids) void onReparentTask(id, null);
           }
         } catch { /* ignore */ }
       },
@@ -465,7 +465,7 @@ export function TaskGroupList({
             lockInProgress={lockInProgress}
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
-            onUpdateWorkItem={onUpdateWorkItem}
+            onUpdateTask={onUpdateTask}
             onOpenMenu={onOpenMenu}
             {...sharedDragHandlers}
           />
@@ -475,7 +475,7 @@ export function TaskGroupList({
               staleChildren={staleChildren}
               onCascade={(targetStatus) => {
                 for (const child of staleChildren) {
-                  void onUpdateWorkItem(child.id, { status: targetStatus });
+                  void onUpdateTask(child.id, { status: targetStatus });
                 }
               }}
             />
@@ -484,9 +484,9 @@ export function TaskGroupList({
             <EpicChildrenPane
               epicId={row.item.id}
               children={children}
-              onReorderWorkItems={onReorderWorkItems}
-              onReparentWorkItem={onReparentWorkItem}
-              onUpdateWorkItem={onUpdateWorkItem}
+              onReorderTasks={onReorderTasks}
+              onReparentTask={onReparentTask}
+              onUpdateTask={onUpdateTask}
               onOpenMenu={onOpenMenu}
               scopeThreadId={scopeThreadId}
               onRequestEdit={onRequestEdit}
@@ -512,7 +512,7 @@ export function TaskGroupList({
         lockInProgress={lockInProgress}
         onRequestEdit={onRequestEdit}
         onSelect={onSelect}
-        onUpdateWorkItem={onUpdateWorkItem}
+        onUpdateTask={onUpdateTask}
         onOpenMenu={onOpenMenu}
         {...sharedDragHandlers}
       />
@@ -527,13 +527,13 @@ export function TaskGroupList({
       {sections.map((section, index) => {
         const empty = section.rows.length === 0;
         const alwaysShow = section.kind === "ready" || section.kind === "done" || section.kind === "inProgress" || section.kind === "blocked";
-        if (empty && !alwaysShow && !draggedWorkItem) {
+        if (empty && !alwaysShow && !draggedTask) {
           return null;
         }
-        const canDrop = !!draggedWorkItem
+        const canDrop = !!draggedTask
           && section.kind !== "inProgress"
-          && draggedWorkItem.kind !== "epic"
-          && classifyRow(draggedWorkItem, epicChildrenMap) !== section.kind;
+          && !(epicChildrenMap.get(draggedTask.id) ?? []).length
+          && classifyRow(draggedTask, epicChildrenMap) !== section.kind;
         const isOverSection = canDrop && overSection === section.kind;
         const headerDropHandlers = canDrop
           ? {
@@ -600,7 +600,7 @@ export function TaskGroupList({
                         for (const row of visibleDoneRows) {
                           if (row.kind !== "work") continue;
                           if (row.item.status === "archived") continue;
-                          void onUpdateWorkItem(row.item.id, { status: "archived" });
+                          void onUpdateTask(row.item.id, { status: "archived" });
                         }
                       }}
                     />
@@ -620,7 +620,7 @@ export function TaskGroupList({
                     ))
                   : null}
                 {!isCollapsed ? renderedRows.map(renderRow) : null}
-                {(isDone ? renderedRows.length === 0 : empty) && !draggedWorkItem ? (
+                {(isDone ? renderedRows.length === 0 : empty) && !draggedTask ? (
                   <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
                     {section.kind === "inProgress"
                       ? (isActive !== false && agentStatus === "working"
@@ -801,7 +801,7 @@ const PRIORITY_OPTIONS: TaskPriority[] = ["urgent", "high", "medium", "low"];
 function EpicInlineRow({
   rowKey, item, isExpanded, onToggleExpand,
   isSelected, isMarked, isOver, isDragging,
-  scopeThreadId, lockInProgress, onSelect, onRequestEdit, onUpdateWorkItem, onOpenMenu,
+  scopeThreadId, lockInProgress, onSelect, onRequestEdit, onUpdateTask, onOpenMenu,
   onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: {
   rowKey: string;
@@ -814,9 +814,9 @@ function EpicInlineRow({
   isDragging: boolean;
   scopeThreadId: string | null;
   lockInProgress?: boolean;
-  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
-  onUpdateWorkItem: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
@@ -854,7 +854,7 @@ function EpicInlineRow({
       data-key={rowKey}
       data-testid={`work-item-row-${item.id}`}
     >
-      <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }} locked={locked} />
+      <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateTask(item.id, { status }); }} locked={locked} />
       <span
         onClick={(event) => { event.stopPropagation(); onToggleExpand(); }}
         style={{ flexShrink: 0, width: 12, textAlign: "center", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}
@@ -865,7 +865,7 @@ function EpicInlineRow({
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
         {item.title}
       </span>
-      <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }} />
+      <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateTask(item.id, { priority }); }} />
       <button
         type="button"
         aria-label="More actions"
@@ -890,22 +890,22 @@ function EpicInlineRow({
 }
 
 function EpicChildrenPane({
-  epicId, children, onReorderWorkItems, onReparentWorkItem,
-  onUpdateWorkItem, onOpenMenu, scopeThreadId, onRequestEdit,
+  epicId, children, onReorderTasks, onReparentTask,
+  onUpdateTask, onOpenMenu, scopeThreadId, onRequestEdit,
   selectedId, markedIds, onSelect, onAddChildTask,
 }: {
-  epicId: string;
+  epicId: number;
   children: Task[];
-  onReorderWorkItems(ids: string[]): Promise<void>;
-  onReparentWorkItem(itemId: number, newParentId: string | null): Promise<void>;
-  onUpdateWorkItem(itemId: number, changes: TaskDetailChanges): Promise<void>;
+  onReorderTasks(ids: number[]): Promise<void>;
+  onReparentTask(itemId: number, newParentId: number | null): Promise<void>;
+  onUpdateTask(itemId: number, changes: TaskDetailChanges): Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   scopeThreadId: string | null;
   onRequestEdit?(item: Task): void;
-  selectedId?: string | null;
-  markedIds?: ReadonlySet<string>;
-  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
-  onAddChildTask?: (epicId: string) => void;
+  selectedId?: number | null;
+  markedIds?: ReadonlySet<number>;
+  onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onAddChildTask?: (epicId: number) => void;
 }) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -913,15 +913,17 @@ function EpicChildrenPane({
   const resetDrag = () => { setDraggingKey(null); setOverKey(null); };
 
   const handleDropOnChild = (targetId: string) => {
-    if (!draggingKey || draggingKey === targetId) { resetDrag(); return; }
-    const from = children.findIndex((c) => c.id === draggingKey);
-    const to = children.findIndex((c) => c.id === targetId);
+    if (draggingKey === null || draggingKey === targetId) { resetDrag(); return; }
+    const targetNum = Number(targetId);
+    const dragNum = Number(draggingKey);
+    const from = children.findIndex((c) => c.id === dragNum);
+    const to = children.findIndex((c) => c.id === targetNum);
     if (from < 0 || to < 0) { resetDrag(); return; }
     const next = children.slice();
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved!);
     resetDrag();
-    void onReorderWorkItems(next.map((c) => c.id));
+    void onReorderTasks(next.map((c) => c.id));
   };
 
   const handleExternalDrop = (event: React.DragEvent) => {
@@ -930,11 +932,11 @@ function EpicChildrenPane({
     const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
     if (!raw) return;
     try {
-      const payload = JSON.parse(raw) as { itemId?: string; itemIds?: string[]; fromThreadId?: string | null };
-      const ids = payload.itemIds && payload.itemIds.length > 0 ? payload.itemIds : payload.itemId ? [payload.itemId] : [];
+      const payload = JSON.parse(raw) as { itemId?: number; itemIds?: number[]; fromThreadId?: string | null };
+      const ids = payload.itemIds && payload.itemIds.length > 0 ? payload.itemIds : payload.itemId !== undefined ? [payload.itemId] : [];
       for (const id of ids) {
         if (!children.some((c) => c.id === id)) {
-          void onReparentWorkItem(id, epicId);
+          void onReparentTask(id, epicId);
         }
       }
     } catch { /* ignore */ }
@@ -943,7 +945,7 @@ function EpicChildrenPane({
   return (
     <div style={{ marginLeft: 20, borderLeft: "2px solid var(--border)", paddingLeft: 4 }}>
       {children.map((child) => {
-        const key = child.id;
+        const key = String(child.id);
         const isOver = overKey === key && draggingKey !== key;
         const isDragging = draggingKey === key;
         const isMarked = markedIds?.has(child.id) ?? false;
@@ -959,14 +961,14 @@ function EpicChildrenPane({
             scopeThreadId={scopeThreadId}
             onSelect={onSelect}
             onRequestEdit={onRequestEdit}
-            onUpdateWorkItem={onUpdateWorkItem}
+            onUpdateTask={onUpdateTask}
             onOpenMenu={onOpenMenu}
             onDragStart={(event) => {
               // Same drag-cancel workaround as the parent pane's rows —
               // populate dataTransfer first, defer state mutation that
               // would re-render the dragged row in-tick.
               event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", child.id);
+              event.dataTransfer.setData("text/plain", String(child.id));
               const ids = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [child.id];
               // Only resolve the items we can see locally — this pane
               // only carries the epic's children. The parent group's
@@ -1051,7 +1053,7 @@ function InlineItemRow({
   lockInProgress,
   onSelect,
   onRequestEdit,
-  onUpdateWorkItem,
+  onUpdateTask,
   onOpenMenu,
   onDragStart,
   onDragEnd,
@@ -1067,9 +1069,9 @@ function InlineItemRow({
   isDragging: boolean;
   scopeThreadId: string | null;
   lockInProgress?: boolean;
-  onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
+  onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
-  onUpdateWorkItem: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
@@ -1130,7 +1132,7 @@ function InlineItemRow({
     >
       <InlineStatusPicker
         status={item.status}
-        onChange={(status) => { void onUpdateWorkItem(item.id, { status }); }}
+        onChange={(status) => { void onUpdateTask(item.id, { status }); }}
         locked={locked}
       />
       <span
@@ -1146,7 +1148,7 @@ function InlineItemRow({
       </span>
       <InlinePriorityPicker
         priority={item.priority}
-        onChange={(priority) => { void onUpdateWorkItem(item.id, { priority }); }}
+        onChange={(priority) => { void onUpdateTask(item.id, { priority }); }}
       />
       <button
         type="button"

@@ -59,9 +59,9 @@ interface Props {
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
   agentStatus?: AgentStatus;
   backlog: BacklogState | null;
-  onUpdateWorkItem(itemId: number, changes: TaskDetailChanges): Promise<void>;
-  onDeleteWorkItem(itemId: number): Promise<void>;
-  onReorderWorkItems(orderedItemIds: number[]): Promise<void>;
+  onUpdateTask(itemId: number, changes: TaskDetailChanges): Promise<void>;
+  onDeleteTask(itemId: number): Promise<void>;
+  onReorderTasks(orderedItemIds: number[]): Promise<void>;
   onUpdateBacklogItem(itemId: number, changes: TaskDetailChanges): Promise<void>;
   onDeleteBacklogItem(itemId: number): Promise<void>;
   onReorderBacklog(orderedItemIds: number[]): Promise<void>;
@@ -74,13 +74,13 @@ interface Props {
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
   registerOpenCreate?(fn: () => void): void;
-  /** Route the "new task" / "+ Task on epic" buttons to a NewWorkItemPage
+  /** Route the "new task" / "+ Task on epic" buttons to a NewTaskPage
    *  tab. When omitted, the legacy modal path stays in place (used by
    *  tests and standalone usages). */
-  onOpenNewWorkItemPage?(payload: { parentId?: number | null }): void;
-  /** Route a row click / Enter to the read+edit WorkItemPage tab for that
+  onOpenNewTaskPage?(payload: { parentId?: number | null }): void;
+  /** Route a row click / Enter to the read+edit TaskPage tab for that
    *  item. When omitted, row clicks still select but no page opens. */
-  onOpenWorkItemPage?(itemId: number): void;
+  onOpenTaskPage?(itemId: number): void;
   /** When true, agent-authored work items are filtered out of the visible
    *  groups. Mirrors the legacy `plan-toggle-hide-auto` toggle from the
    *  pre-IA-redesign Plan pane. Epics are always kept so their children
@@ -123,7 +123,7 @@ interface ContextMenuState {
   y: number;
   item: Task;
   /** Non-null when the right-clicked item belongs to a multi-selection. */
-  groupIds: string[] | null;
+  groupIds: number[] | null;
 }
 
 export function PlanPane({
@@ -132,9 +132,9 @@ export function PlanPane({
   threadWork,
   agentStatus,
   backlog,
-  onUpdateWorkItem,
-  onDeleteWorkItem,
-  onReorderWorkItems,
+  onUpdateTask,
+  onDeleteTask,
+  onReorderTasks,
   onUpdateBacklogItem,
   onDeleteBacklogItem,
   onReorderBacklog,
@@ -142,8 +142,8 @@ export function PlanPane({
   openNewRequest,
   editRequest,
   registerOpenCreate,
-  onOpenNewWorkItemPage,
-  onOpenWorkItemPage,
+  onOpenNewTaskPage,
+  onOpenTaskPage,
   hideAuto = false,
   visibleSections,
   sectionItemLimit,
@@ -167,8 +167,8 @@ export function PlanPane({
   // drag starts on any of the effectiveMarkedIds, the drag payload carries the
   // whole set so drop targets (ThreadRail, backlog chip, stream chip) can move
   // them all in one gesture. Plain click clears marks.
-  const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
-  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: number; extraIds?: string[] } | null>(null);
+  const [markedIds, setMarkedIds] = useState<Set<number>>(() => new Set());
+  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: number; extraIds?: number[] } | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const threadId = thread?.id ?? null;
@@ -187,7 +187,7 @@ export function PlanPane({
   // sync with the section split in TaskGroupList (In progress → To do →
   // Blocked → Done).
   const navigableIds = useMemo(() => {
-    const ids: string[] = [];
+    const ids: number[] = [];
     for (const group of groups) {
       const sorted = group.items.slice().sort((a, b) => {
         const byStatus = statusOrderRank(a.status) - statusOrderRank(b.status);
@@ -218,7 +218,7 @@ export function PlanPane({
       if (prev.size === 0) return prev;
       const live = new Set(navigableIds);
       let changed = false;
-      const next = new Set<string>();
+      const next = new Set<number>();
       for (const id of prev) {
         if (live.has(id)) next.add(id);
         else changed = true;
@@ -227,7 +227,7 @@ export function PlanPane({
     });
   }, [navigableIds]);
 
-  const handleSelect = (id: string, modifiers?: { toggle?: boolean; range?: boolean }) => {
+  const handleSelect = (id: number, modifiers?: { toggle?: boolean; range?: boolean }) => {
     const toggle = modifiers?.toggle ?? false;
     const range = modifiers?.range ?? false;
     if (toggle) {
@@ -249,7 +249,7 @@ export function PlanPane({
       const toIdx = navigableIds.indexOf(id);
       if (fromIdx >= 0 && toIdx >= 0) {
         const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
-        const next = new Set<string>();
+        const next = new Set<number>();
         for (let i = lo; i <= hi; i++) next.add(navigableIds[i]!);
         setMarkedIds(next);
         return;
@@ -274,9 +274,9 @@ export function PlanPane({
     return null;
   }, [groups, selectedId]);
 
-  const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateWorkItem;
-  const activeDelete = mode === "backlog" ? onDeleteBacklogItem : onDeleteWorkItem;
-  const activeReorder = mode === "backlog" ? onReorderBacklog : onReorderWorkItems;
+  const activeUpdate = mode === "backlog" ? onUpdateBacklogItem : onUpdateTask;
+  const activeDelete = mode === "backlog" ? onDeleteBacklogItem : onDeleteTask;
+  const activeReorder = mode === "backlog" ? onReorderBacklog : onReorderTasks;
   const currentScopeThreadId = mode === "backlog" ? null : thread?.id ?? null;
 
   useEffect(() => {
@@ -349,9 +349,9 @@ export function PlanPane({
 
   const openCreateModal = (parentId: number | null = null) => {
     // The legacy inline NewWorkItemModal was retired by the IA redesign;
-    // creation always routes through a full-tab NewWorkItemPage now. Tests
-    // / standalone harnesses must wire `onOpenNewWorkItemPage`.
-    onOpenNewWorkItemPage?.({ parentId });
+    // creation always routes through a full-tab NewTaskPage now. Tests
+    // / standalone harnesses must wire `onOpenNewTaskPage`.
+    onOpenNewTaskPage?.({ parentId });
   };
 
   // Register the imperative opener with the parent so menu-click
@@ -372,10 +372,10 @@ export function PlanPane({
 
   const openEditModal = (item: Task) => {
     // Row clicks (and Enter on the keyboard-selected row) open the
-    // canonical Task page (WorkItemPage) which renders a readable view
+    // canonical Task page (TaskPage) which renders a readable view
     // with inline editing via TaskDetail.
     setSelectedId(item.id);
-    onOpenWorkItemPage?.(item.id);
+    onOpenTaskPage?.(item.id);
   };
 
   useEffect(() => {
@@ -417,8 +417,8 @@ export function PlanPane({
     event.preventDefault();
     try {
       const payload = JSON.parse(raw) as {
-        itemId?: string;
-        itemIds?: string[];
+        itemId?: number;
+        itemIds?: number[];
         fromThreadId?: string | null;
       };
       const fromThreadId = payload.fromThreadId;
@@ -553,8 +553,8 @@ export function PlanPane({
                 key={group.epic?.id ?? "__root__"}
                 group={group}
                 scopeThreadId={currentScopeThreadId}
-                onUpdateWorkItem={activeUpdate}
-                onReorderWorkItems={activeReorder}
+                onUpdateTask={activeUpdate}
+                onReorderTasks={activeReorder}
                 onReorderMixed={isRootThread && streamId && threadId
                   ? (entries) => runWithError("Reorder queue", reorderThreadQueue(streamId, threadId, entries))
                   : undefined}
@@ -570,7 +570,7 @@ export function PlanPane({
                 onSelect={handleSelect}
                 onRequestEdit={openEditModal}
                 epicChildrenMap={group.epicChildren}
-                onReparentWorkItem={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
+                onReparentTask={(itemId, newParentId) => activeUpdate(itemId, { parentId: newParentId })}
                 onAddChildTask={(epicId) => openCreateModal(epicId)}
                 isActive={isActive}
                 agentStatus={agentStatus}
@@ -864,12 +864,12 @@ function buildWorkItemMenu(
 
 function buildGroupMenu(
   item: Task,
-  groupIds: string[],
+  groupIds: number[],
   actions: {
-    onChangeStatus: (item: Task, ids: string[]) => void;
-    onChangePriority: (item: Task, ids: string[]) => void;
-    onDelete: (item: Task, ids: string[]) => void;
-    onAddToAgent: (ids: string[]) => void;
+    onChangeStatus: (item: Task, ids: number[]) => void;
+    onChangePriority: (item: Task, ids: number[]) => void;
+    onDelete: (item: Task, ids: number[]) => void;
+    onAddToAgent: (ids: number[]) => void;
   },
 ): MenuItem[] {
   const locked = item.status === "in_progress";

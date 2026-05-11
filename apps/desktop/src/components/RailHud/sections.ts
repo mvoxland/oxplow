@@ -76,7 +76,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
 export function computeActiveItem(state: ThreadWorkState | null): Task | null {
   if (!state) return null;
   const candidates = state.inProgress.filter(
-    (item) => item.kind !== "epic" && item.status === "in_progress",
+    (item) => item.status === "in_progress",
   );
   if (candidates.length === 0) return null;
   return candidates.reduce((best, current) =>
@@ -95,7 +95,7 @@ export function computeActiveEpicContext(
 ): { epic: Task; children: Task[] } | null {
   if (!state || !active || !active.parent_id) return null;
   const pool = state.items.length > 0 ? state.items : [...state.epics, ...state.inProgress, ...state.waiting, ...state.done];
-  const epic = pool.find((i) => i.id === active.parent_id && i.kind === "epic");
+  const epic = pool.find((i) => i.id === active.parent_id);
   if (!epic) return null;
   const children = pool
     .filter((i) => i.parent_id === epic.id && i.status !== "archived")
@@ -109,7 +109,7 @@ export function computeActiveEpicContext(
  */
 export function computeUpNext(state: ThreadWorkState | null, limit = 5): Task[] {
   if (!state) return [];
-  const ready = state.items.filter((item) => item.status === "ready" && item.kind !== "epic");
+  const ready = state.items.filter((item) => item.status === "ready");
   ready.sort((a, b) => a.sort_index - b.sort_index);
   return ready.slice(0, limit);
 }

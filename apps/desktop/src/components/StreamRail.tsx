@@ -197,8 +197,8 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                   setDragOverStreamId(null);
                   try {
                     const payload = JSON.parse(raw) as {
-                      itemId?: string;
-                      itemIds?: string[];
+                      itemId?: number;
+                      itemIds?: number[];
                       fromThreadId?: string | null;
                     };
                     const ids = payload.itemIds && payload.itemIds.length > 0

@@ -1015,7 +1015,7 @@ export interface LocalBlameEntry {
   source: string;
   git: import("./tauri-bridge/index.js").BlameLine | null;
   workItem?: {
-    id: string;
+    id: number;
     title: string;
     endedAt: string;
   };
@@ -1068,7 +1068,7 @@ export async function searchWikiPages(
 
 export async function recordUsage(input: {
   kind: string;
-  key: string;
+  key: string | number;
   event?: string;
   streamId?: string | null;
   threadId?: string | null;
@@ -1197,12 +1197,12 @@ export function subscribeCodeQualityEvents(
   });
 }
 
-export async function getTask(id: string): Promise<Task | null> {
+export async function getTask(id: number): Promise<Task | null> {
   return unwrap(await commands.getTask(id)) as unknown as Task | null;
 }
 
-export async function getTaskSummaries(ids: string[]): Promise<Array<{
-  id: string;
+export async function getTaskSummaries(ids: number[]): Promise<Array<{
+  id: number;
   title: string;
   status: import("./api-types.js").TaskStatus;
   thread_id: string | null;
@@ -1251,12 +1251,12 @@ export function subscribeUsageEvents(
 export async function reorderThreadQueue(
   streamId: string,
   _threadId: string,
-  entries: Array<{ id: string }>,
+  entries: Array<{ id: string | number }>,
 ): Promise<void> {
   unwrap(
     await commands.reorderThreadQueue({
       streamId,
-      order: entries.map((e) => e.id),
+      order: entries.map((e) => String(e.id)),
     }),
   );
 }
@@ -1353,7 +1353,7 @@ export async function listAllRefs(_streamId: string): Promise<import("./api-type
 export async function listTaskEvents(
   _streamId: string,
   _threadId: string,
-  itemId?: string,
+  itemId?: number,
 ): Promise<TaskEvent[]> {
   return unwrap(
     await commands.listTaskEvents(itemId ?? null, null),
@@ -1397,7 +1397,7 @@ export async function readFileAtRef(
 
 export async function listTaskEfforts(itemId: number): Promise<EffortDetail[]> {
   // The Tauri command returns flat `TaskEffort` rows. Consumers
-  // (WorkItemPage activity timeline, useBacklinks, TaskDetail)
+  // (TaskPage activity timeline, useBacklinks, TaskDetail)
   // expect the richer `EffortDetail` shape with snapshots + changed
   // paths + counts. Wrap each row defensively so a missing detail
   // doesn't crash the page (the previous lying cast caused
@@ -1451,14 +1451,14 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
 
 export async function listEffortsEndingAtSnapshots(
   snapshotIds: string[],
-): Promise<Record<string, Array<{ effortId: string; workItemId: string; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>> {
+): Promise<Record<string, Array<{ effortId: string; workItemId: number; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>> {
   return unwrap(
     await commands.listEffortsEndingAtSnapshots(snapshotIds.map(Number)),
   ) as unknown as Record<
     string,
     Array<{
       effortId: string;
-      workItemId: string;
+      workItemId: number;
       threadId: string;
       title: string;
       status: TaskStatus;

@@ -24,7 +24,7 @@ export interface SnapshotBacklinkEntry {
   /** Optional pre-known free-form label for the header. */
   snapshotLabel?: string | null;
   /** Optional related work-item id (for the "Open task" affordance in the slideover). */
-  workItemId?: string | null;
+  workItemId?: number | null;
   subtitle?: string;
 }
 
@@ -53,7 +53,7 @@ export interface BacklinksListProps {
   onOpenPage(ref: TabRef): void;
   /** Required when `snapshotEntries` is provided. Receives the snapshot
    *  id + a small descriptor so the host can route into a slideover. */
-  onOpenSnapshot?(payload: { snapshotId: string; label?: string | null; source?: string; workItemId?: string | null }): void;
+  onOpenSnapshot?(payload: { snapshotId: string; label?: string | null; source?: string; workItemId?: number | null }): void;
   /** Required when `commitEntries` is provided. */
   onOpenCommit?(payload: { sha: string; subject?: string }): void;
 }
@@ -85,12 +85,8 @@ export function tabRefToContextRef(ref: TabRef): ContextRef | null {
   }
   if (ref.kind === "task") {
     const payload = ref.payload as { itemId?: unknown } | null;
-    if (payload && typeof payload.itemId === "string") {
-      // Backlinks don't carry the title/status of the target — use a
-      // placeholder that the agent can resolve via the work-item id.
-      // formatContextMention reads `title` / `status`; passing the id
-      // as the title keeps the inserted snippet readable.
-      return { kind: "task", itemId: payload.itemId, title: payload.itemId, status: "" };
+    if (payload && typeof payload.itemId === "number") {
+      return { kind: "task", itemId: payload.itemId, title: String(payload.itemId), status: "" };
     }
     return null;
   }
