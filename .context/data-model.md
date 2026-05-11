@@ -190,8 +190,13 @@ the canonical record of what shipped on a task, so a parallel
 per-item note table for the same purpose was duplicative. The
 `add_work_note` MCP tool, the `add_work_note` / `list_work_notes`
 IPC commands, and the task modal's "Notes" timeline section
-were removed alongside this. Pre-existing item-scoped rows stay in
-the table but no surface reads or writes them.
+were removed alongside this. `complete_task` previously still
+shadow-wrote the summary into `task_note` to get its body
+projected into `page_ref`; that orphan write was removed once
+the effort store learned to project `task_effort.summary`
+directly (see the `summary_*` ref_types in the `page_ref` section
+below). Pre-existing item-scoped rows stay in the table but no
+surface reads or writes them.
 
 Thread-scoped rows (`thread_id` set, `task_id` NULL) are the
 landing spot for `oxplow__delegate_query` Explore-subagent findings.
@@ -463,7 +468,7 @@ Writers (one per source kind / slice):
 | `wiki_pages.rs` (`oxplow-app`) | `wiki:<slug>` | full source — uses `replace_source` |
 | `task_store::upsert` | `task:<id>` body slice | `task_body_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
 | `work_satellite::SqliteTaskLinkStore` create/delete | `task:<id>` link slice | `task_link:blocks` / `relates_to` / … |
-| `effort_store::record_file` | `task:<id>` touched slice | `touched_file` |
+| `effort_store::record_file` + `effort_store::finish` | `task:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_task_mention`, `summary_finding_mention`, `summary_commit_mention` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
 | `commit_indexer.rs` (`oxplow-app`) | `git-commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
 
@@ -480,10 +485,16 @@ which decorate each row with a best-effort `source_label` from
 the source store) and as MCP tools of the same names.
 
 Boot-time backfill: `oxplow_app::page_ref_backfill::run(...)` re-
-projects every existing task body, link, effort, and finding
-into the table on app start, idempotently. Wiki bodies and recent
-commits are covered by their own initial-scan paths and don't
-need separate backfill.
+projects every existing task body, link, effort (touched files +
+summary refs), and finding into the table on app start,
+idempotently. Wiki bodies and recent commits are covered by their
+own initial-scan paths and don't need separate backfill.
+
+The effort slice has two contributors that run independently —
+`record_file` re-projects after each touched-file write, and
+`finish` re-projects after `summary` lands — but they share the
+same `effort_ref_types()` set, so each call replaces the full
+union and the other contributor's rows survive.
 
 ### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_store.rs`)
 

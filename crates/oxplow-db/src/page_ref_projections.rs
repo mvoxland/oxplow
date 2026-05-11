@@ -37,6 +37,18 @@ pub const RT_BODY_COMMIT: &str = "commit_mention";
 pub const RT_TOUCHED_FILE: &str = "touched_file";
 pub const RT_FINDING_PATH: &str = "finding_path";
 
+// Ref-types written by the effort store from union of all
+// `task_effort.summary` bodies for a task. Distinct from
+// `task_body_*` so the body slice (task_store) and the summary
+// slice (effort_store) can coexist under the same `(task, id)`
+// source without clobbering each other.
+pub const RT_SUMMARY_FILE: &str = "summary_file_ref";
+pub const RT_SUMMARY_DIR: &str = "summary_dir_ref";
+pub const RT_SUMMARY_WIKILINK: &str = "summary_wikilink";
+pub const RT_SUMMARY_TASK: &str = "summary_task_mention";
+pub const RT_SUMMARY_FINDING: &str = "summary_finding_mention";
+pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
+
 /// Ref-types written by the task store from a body (title +
 /// description + AC). Used by the slice-replace call so other
 /// writers' rows for the same `task:<id>` source survive.
@@ -67,9 +79,19 @@ pub fn task_link_ref_types() -> Vec<String> {
     .collect()
 }
 
-/// Effort-touched-file slice owned by the effort store.
+/// Slice owned by the effort store: the union of touched-file
+/// edges across every effort on a task, plus the projection of
+/// every `task_effort.summary` body parsed for refs.
 pub fn effort_ref_types() -> Vec<String> {
-    vec![RT_TOUCHED_FILE.to_string()]
+    vec![
+        RT_TOUCHED_FILE.to_string(),
+        RT_SUMMARY_FILE.to_string(),
+        RT_SUMMARY_DIR.to_string(),
+        RT_SUMMARY_WIKILINK.to_string(),
+        RT_SUMMARY_TASK.to_string(),
+        RT_SUMMARY_FINDING.to_string(),
+        RT_SUMMARY_COMMIT.to_string(),
+    ]
 }
 
 /// Edges contributed by a wiki page body. Owned by `wiki_pages` sync.
@@ -274,6 +296,80 @@ pub fn effort_touched_file_edges(task_id: &str, paths: &[String]) -> Vec<PageRef
         .collect()
 }
 
+/// Edges contributed by the union of every `task_effort.summary`
+/// body for one task. Parsed via the shared ref extractor, so
+/// wikilinks (`[[some-slug]]`), file/dir refs, task/finding/commit
+/// mentions all flow through as outbound edges from `(task, id)`.
+/// Owned slice = the `summary_*` ref_types above (paired with
+/// `RT_TOUCHED_FILE` under `effort_ref_types()`).
+pub fn effort_summary_edges(task_id: &str, summaries: &[String]) -> Vec<PageRefEdge> {
+    if summaries.is_empty() {
+        return Vec::new();
+    }
+    let combined = summaries.join("\n\n");
+    let refs = extract(&combined);
+    let mut out = Vec::new();
+    for fd in refs.files_detail {
+        out.push(PageRefEdge::new(
+            KIND_TASK,
+            task_id,
+            KIND_FILE,
+            fd.path,
+            RT_SUMMARY_FILE,
+        ));
+    }
+    for d in refs.dirs {
+        out.push(PageRefEdge::new(
+            KIND_TASK,
+            task_id,
+            KIND_DIRECTORY,
+            d,
+            RT_SUMMARY_DIR,
+        ));
+    }
+    for w in refs.wikis {
+        out.push(PageRefEdge::new(
+            KIND_TASK,
+            task_id,
+            KIND_WIKI,
+            w,
+            RT_SUMMARY_WIKILINK,
+        ));
+    }
+    let self_id: Option<i64> = task_id.parse().ok();
+    for t in refs.tasks {
+        if Some(t) == self_id {
+            continue;
+        }
+        out.push(PageRefEdge::new(
+            KIND_TASK,
+            task_id,
+            KIND_TASK,
+            t.to_string(),
+            RT_SUMMARY_TASK,
+        ));
+    }
+    for f in refs.findings {
+        out.push(PageRefEdge::new(
+            KIND_TASK,
+            task_id,
+            KIND_FINDING,
+            f,
+            RT_SUMMARY_FINDING,
+        ));
+    }
+    for c in refs.commits {
+        out.push(PageRefEdge::new(
+            KIND_TASK,
+            task_id,
+            KIND_GIT_COMMIT,
+            c,
+            RT_SUMMARY_COMMIT,
+        ));
+    }
+    out
+}
+
 fn link_type_str(t: TaskLinkType) -> &'static str {
     match t {
         TaskLinkType::Blocks => "blocks",
@@ -382,6 +478,57 @@ mod tests {
         assert_eq!(edges.len(), 2);
         assert_eq!(edges[0].source_id, "7");
         assert_eq!(edges[0].ref_type, "touched_file");
+    }
+
+    #[test]
+    fn effort_summary_edges_extract_all_kinds() {
+        let summaries = vec![
+            "Filed [[url-schemes]] with refs to [[src/foo.rs]]".to_string(),
+            "Resolved task:99 and finding:fnd-2; see [[git:abcdef0]] and [[dir:src/x]]".to_string(),
+        ];
+        let edges = effort_summary_edges("7", &summaries);
+        let by_kind: std::collections::BTreeMap<_, Vec<_>> =
+            edges
+                .iter()
+                .fold(std::collections::BTreeMap::new(), |mut m, e| {
+                    m.entry(e.target_kind.as_str())
+                        .or_default()
+                        .push((e.target_id.as_str(), e.ref_type.as_str()));
+                    m
+                });
+        assert!(by_kind.get("wiki").is_some_and(|v| v
+            .iter()
+            .any(|(id, rt)| *id == "url-schemes" && *rt == "summary_wikilink")));
+        assert!(by_kind.get("file").is_some_and(|v| v
+            .iter()
+            .any(|(id, rt)| *id == "src/foo.rs" && *rt == "summary_file_ref")));
+        assert!(by_kind.get("task").is_some_and(|v| v
+            .iter()
+            .any(|(id, rt)| *id == "99" && *rt == "summary_task_mention")));
+        assert!(by_kind.get("finding").is_some_and(|v| v
+            .iter()
+            .any(|(id, rt)| *id == "fnd-2" && *rt == "summary_finding_mention")));
+        assert!(by_kind.get("git-commit").is_some_and(|v| !v.is_empty()));
+        assert!(by_kind.get("directory").is_some_and(|v| v
+            .iter()
+            .any(|(id, rt)| *id == "src/x" && *rt == "summary_dir_ref")));
+    }
+
+    #[test]
+    fn effort_summary_edges_filter_self_task() {
+        let summaries = vec!["wraps up task:7 itself and references task:9".into()];
+        let edges = effort_summary_edges("7", &summaries);
+        let task_ids: Vec<_> = edges
+            .iter()
+            .filter(|e| e.target_kind == "task")
+            .map(|e| e.target_id.as_str())
+            .collect();
+        assert_eq!(task_ids, vec!["9"]);
+    }
+
+    #[test]
+    fn effort_summary_edges_empty_input_yields_no_edges() {
+        assert!(effort_summary_edges("7", &[]).is_empty());
     }
 
     #[test]

@@ -945,12 +945,7 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         let id = parse_task_id("complete_task", "id", &p.id)?;
-        let author = p.author.unwrap_or_else(|| "agent".to_string());
-        self.services
-            .work_note_store
-            .add_for_item(id, &p.summary, &author)
-            .await
-            .map_err(internal)?;
+        let _ = p.author; // legacy field — kept on the wire, no longer attributed
         let item = self
             .services
             .tasks
@@ -965,22 +960,27 @@ impl OxplowMcp {
             .map_err(|e| internal(e.to_string()))?;
 
         let touched = p.touched_files.unwrap_or_default();
-        if !touched.is_empty() {
-            if let Some(tid) = item.thread_id.clone() {
-                if let Err(err) = self
-                    .services
-                    .tasks
-                    .record_effort(
-                        &self.services.effort_store,
-                        item.id,
-                        &tid,
-                        &touched,
-                        Some(p.summary.clone()),
-                    )
-                    .await
-                {
-                    tracing::warn!(?err, "complete_task: effort record failed");
-                }
+        let summary_has_body = !p.summary.trim().is_empty();
+        if (summary_has_body || !touched.is_empty()) && item.thread_id.is_some() {
+            let tid = item.thread_id.clone().unwrap();
+            let summary = if summary_has_body {
+                Some(p.summary.clone())
+            } else {
+                None
+            };
+            if let Err(err) = self
+                .services
+                .tasks
+                .record_effort(
+                    &self.services.effort_store,
+                    item.id,
+                    &tid,
+                    &touched,
+                    summary,
+                )
+                .await
+            {
+                tracing::warn!(?err, "complete_task: effort record failed");
             }
         }
         self.emit_tasks_changed(item.thread_id.clone());

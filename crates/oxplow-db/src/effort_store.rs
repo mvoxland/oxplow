@@ -15,7 +15,9 @@ use specta::Type;
 use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId, Timestamp};
 
 use crate::database::Database;
-use crate::page_ref_projections::{effort_ref_types, effort_touched_file_edges, KIND_TASK};
+use crate::page_ref_projections::{
+    effort_ref_types, effort_summary_edges, effort_touched_file_edges, KIND_TASK,
+};
 use crate::page_ref_store::SqlitePageRefStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -153,35 +155,48 @@ impl SqliteTaskEffortStore {
         self
     }
 
-    /// Re-emit the `touched_file` slice for `task_id` from the union
-    /// of all efforts attached to it.
-    async fn project_touched_files(&self, task_id: TaskId) -> Result<(), DomainError> {
+    /// Re-emit the full effort-owned slice for `task_id` — the
+    /// union of touched-file edges and the parsed wikilink/file/
+    /// dir/task/finding/commit refs pulled from every effort's
+    /// `summary` body. Replaces under `effort_ref_types()` so the
+    /// task-body slice (owned by `task_store`) is unaffected.
+    async fn project_effort_slice(&self, task_id: TaskId) -> Result<(), DomainError> {
         let Some(refs) = &self.page_refs else {
             return Ok(());
         };
         let db = self.db.clone();
-        let paths: Vec<String> = tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT DISTINCT f.path FROM task_effort_file f
+        let (paths, summaries): (Vec<String>, Vec<String>) =
+            tokio::task::spawn_blocking(move || {
+                db.with_conn(|conn| {
+                    let mut path_stmt = conn.prepare(
+                        "SELECT DISTINCT f.path FROM task_effort_file f
                        JOIN task_effort e ON e.id = f.effort_id
                       WHERE e.task_id = ?1
                       ORDER BY f.path",
-                )?;
-                let rows = stmt.query_map(params![task_id.value()], |r| r.get::<_, String>(0))?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
+                    )?;
+                    let paths: Vec<String> = path_stmt
+                        .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    let mut sum_stmt = conn.prepare(
+                        "SELECT summary FROM task_effort
+                      WHERE task_id = ?1
+                        AND summary IS NOT NULL
+                        AND summary <> ''
+                      ORDER BY started_at",
+                    )?;
+                    let summaries: Vec<String> = sum_stmt
+                        .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    Ok((paths, summaries))
+                })
             })
-        })
-        .await
-        .unwrap()?;
-        let edges = effort_touched_file_edges(&task_id.to_string(), &paths);
-        refs.replace_source_for_ref_types(
-            KIND_TASK,
-            &task_id.to_string(),
-            effort_ref_types(),
-            edges,
-        )
-        .await
+            .await
+            .unwrap()?;
+        let id_str = task_id.to_string();
+        let mut edges = effort_touched_file_edges(&id_str, &paths);
+        edges.extend(effort_summary_edges(&id_str, &summaries));
+        refs.replace_source_for_ref_types(KIND_TASK, &id_str, effort_ref_types(), edges)
+            .await
     }
 
     async fn task_for_effort(&self, effort_id: &EffortId) -> Result<Option<TaskId>, DomainError> {
@@ -252,7 +267,11 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         summary: Option<String>,
     ) -> Result<(), DomainError> {
         let db = self.db.clone();
-        let id = id.clone();
+        let id_for_sql = id.clone();
+        let summary_has_body = summary
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
         let now = ts_to_string(Timestamp::now());
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
@@ -260,13 +279,19 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     "UPDATE task_effort
                      SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
                      WHERE id = ?1 AND ended_at IS NULL",
-                    params![id.as_str(), now, end_snapshot_id, summary],
+                    params![id_for_sql.as_str(), now, end_snapshot_id, summary],
                 )?;
                 Ok(())
             })
         })
         .await
-        .unwrap()
+        .unwrap()?;
+        if summary_has_body && self.page_refs.is_some() {
+            if let Some(tid) = self.task_for_effort(id).await? {
+                self.project_effort_slice(tid).await?;
+            }
+        }
+        Ok(())
     }
 
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEffort>, DomainError> {
@@ -342,7 +367,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         .unwrap()?;
         if self.page_refs.is_some() {
             if let Some(tid) = self.task_for_effort(id).await? {
-                self.project_touched_files(tid).await?;
+                self.project_effort_slice(tid).await?;
             }
         }
         Ok(())
@@ -393,6 +418,11 @@ mod tests {
     };
 
     async fn fixture() -> (SqliteTaskEffortStore, TaskId, ThreadId) {
+        let (store, _db, tid, thread) = fixture_with_db().await;
+        (store, tid, thread)
+    }
+
+    async fn fixture_with_db() -> (SqliteTaskEffortStore, Database, TaskId, ThreadId) {
         let db = Database::in_memory();
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
@@ -453,7 +483,7 @@ mod tests {
             })
             .await
             .unwrap();
-        (SqliteTaskEffortStore::new(db), tid, t.id)
+        (SqliteTaskEffortStore::new(db.clone()), db, tid, t.id)
     }
 
     #[tokio::test]
@@ -485,6 +515,84 @@ mod tests {
             .unwrap();
         let files = store.list_files(&eff.id).await.unwrap();
         assert_eq!(files.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn finish_projects_summary_refs_into_page_ref() {
+        use crate::page_ref_store::SqlitePageRefStore;
+        let (_, db, tid, t) = fixture_with_db().await;
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        let store = SqliteTaskEffortStore::new(db).with_page_refs(page_refs.clone());
+        let eff = store.start(tid, &t, None).await.unwrap();
+        store
+            .finish(
+                &eff.id,
+                None,
+                Some("Filed [[url-schemes]] referencing [[src/foo.rs]] and task:99".into()),
+            )
+            .await
+            .unwrap();
+
+        let wiki_back = page_refs
+            .list_backlinks("wiki", "url-schemes", None)
+            .await
+            .unwrap();
+        assert!(
+            wiki_back.iter().any(|e| e.source_kind == "task"
+                && e.source_id == tid.to_string()
+                && e.ref_type == "summary_wikilink"),
+            "wiki backlink missing; got {wiki_back:?}"
+        );
+
+        let file_back = page_refs
+            .list_backlinks("file", "src/foo.rs", None)
+            .await
+            .unwrap();
+        assert!(
+            file_back
+                .iter()
+                .any(|e| e.ref_type == "summary_file_ref" && e.source_id == tid.to_string()),
+            "file backlink missing; got {file_back:?}"
+        );
+
+        let task_back = page_refs.list_backlinks("task", "99", None).await.unwrap();
+        assert!(
+            task_back
+                .iter()
+                .any(|e| e.ref_type == "summary_task_mention" && e.source_id == tid.to_string()),
+            "task backlink missing; got {task_back:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_file_keeps_summary_slice_alive() {
+        // Regression: when a later effort records a touched file via
+        // `record_file`, the projection helper re-runs and must still
+        // include summary edges from earlier-finished efforts.
+        use crate::page_ref_store::SqlitePageRefStore;
+        let (_, db, tid, t) = fixture_with_db().await;
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        let store = SqliteTaskEffortStore::new(db).with_page_refs(page_refs.clone());
+        let first = store.start(tid, &t, None).await.unwrap();
+        store
+            .finish(&first.id, None, Some("Filed [[url-schemes]]".into()))
+            .await
+            .unwrap();
+
+        let second = store.start(tid, &t, None).await.unwrap();
+        store
+            .record_file(&second.id, "src/bar.rs", EffortFileChange::Updated)
+            .await
+            .unwrap();
+
+        let wiki_back = page_refs
+            .list_backlinks("wiki", "url-schemes", None)
+            .await
+            .unwrap();
+        assert!(
+            wiki_back.iter().any(|e| e.source_id == tid.to_string()),
+            "summary slice was clobbered by record_file: {wiki_back:?}"
+        );
     }
 
     #[tokio::test]

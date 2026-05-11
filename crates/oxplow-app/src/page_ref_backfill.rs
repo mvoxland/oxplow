@@ -20,8 +20,9 @@
 use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{
-    effort_ref_types, effort_touched_file_edges, finding_edges, link_edge, note_edges,
-    task_body_ref_types, task_edges, task_link_ref_types, KIND_FINDING, KIND_TASK, KIND_TASK_NOTE,
+    effort_ref_types, effort_summary_edges, effort_touched_file_edges, finding_edges, link_edge,
+    note_edges, task_body_ref_types, task_edges, task_link_ref_types, KIND_FINDING, KIND_TASK,
+    KIND_TASK_NOTE,
 };
 use oxplow_db::TaskEffortStore as _;
 use oxplow_db::{
@@ -65,10 +66,17 @@ pub async fn run(
                 continue;
             }
             counts.tasks += 1;
-            // Touched-file union pulled from the effort store.
+            // Effort-owned slice = touched-file union ∪ parsed
+            // refs from every summary body.
             let mut paths: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            let mut summaries: Vec<String> = Vec::new();
             if let Ok(item_efforts) = efforts.list_for_item(item.id).await {
                 for ef in item_efforts {
+                    if let Some(s) = &ef.summary {
+                        if !s.trim().is_empty() {
+                            summaries.push(s.clone());
+                        }
+                    }
                     if let Ok(rows) = efforts.list_files(&ef.id).await {
                         for r in rows {
                             paths.insert(r.path);
@@ -77,11 +85,13 @@ pub async fn run(
                 }
             }
             let path_vec: Vec<String> = paths.into_iter().collect();
-            let edges = effort_touched_file_edges(&id_str, &path_vec);
+            let mut edges = effort_touched_file_edges(&id_str, &path_vec);
+            edges.extend(effort_summary_edges(&id_str, &summaries));
+            let had_payload = !path_vec.is_empty() || !summaries.is_empty();
             let _ = page_refs
                 .replace_source_for_ref_types(KIND_TASK, &id_str, effort_ref_types(), edges)
                 .await;
-            if !path_vec.is_empty() {
+            if had_payload {
                 counts.efforts += 1;
             }
         }
