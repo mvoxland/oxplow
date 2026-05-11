@@ -244,7 +244,8 @@ export function buildBacklogGroups(state: BacklogState | null): WorkItemGroup[] 
  */
 export function filterAutoAuthored(groups: WorkItemGroup[]): WorkItemGroup[] {
   return groups.map((group) => {
-    const items = group.items.filter((item) => item.created_by !== "agent");
+    const isParent = (id: number) => (group.epicChildren.get(id)?.length ?? 0) > 0;
+    const items = group.items.filter((item) => isParent(item.id) || item.created_by !== "agent");
     const epicChildren = new Map<number, Task[]>();
     for (const [epicId, children] of group.epicChildren.entries()) {
       epicChildren.set(epicId, children.filter((child) => child.created_by !== "agent"));

@@ -34,7 +34,7 @@ import type { MenuItem } from "../../menu.js";
  * sections stay hidden until a drag is active, at which point they appear
  * as drop targets.
  */
-export type QueueRow = { kind: "work"; id: string; sortIndex: number; item: Task };
+export type QueueRow = { kind: "work"; id: number; sortIndex: number; item: Task };
 
 interface SectionBucket {
   kind: WorkItemSectionKind;
@@ -90,7 +90,7 @@ export function TaskGroupList({
   markedIds?: ReadonlySet<string>;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
-  epicChildrenMap: Map<string, Task[]>;
+  epicChildrenMap: Map<number, Task[]>;
   onReparentWorkItem: (itemId: number, newParentId: string | null) => Promise<void>;
   onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
@@ -194,7 +194,7 @@ export function TaskGroupList({
   // The agent terminal reads this slice to add each marked row as a
   // context ref without needing its own work-item lookup.
   const allWorkItemsById = useMemo(() => {
-    const map = new Map<string, Task>();
+    const map = new Map<number, Task>();
     for (const item of group.items) map.set(item.id, item);
     for (const children of epicChildrenMap.values()) {
       for (const child of children) map.set(child.id, child);
@@ -242,7 +242,7 @@ export function TaskGroupList({
     // would still look like its old section to the run detector, which
     // miscomputes the descending-run flips (regression when dragging out of
     // Done back to Ready).
-    const statusOverrides = new Map<string, TaskStatus>();
+    const statusOverrides = new Map<number, TaskStatus>();
     // Cross-section drop — change status to match the target section.
     // When it's a multi-drag, apply the status change to every marked item.
     if (dragged.kind === "work" && target.kind === "work") {
@@ -252,13 +252,13 @@ export function TaskGroupList({
       // is computed from children. Don't try to mutate an epic's status
       // when it crosses a section boundary; the rollup will follow once
       // its children change.
-      if (fromSection !== toSection && dragged.item.kind !== "epic") {
+      if (fromSection !== toSection && !(group.epicChildren.get(dragged.item.id) ?? []).length) {
         const nextStatus = sectionDefaultStatus(toSection);
         if (nextStatus) {
           if (isMultiDrag && markedIds) {
             for (const id of markedIds) {
               const row = allRows.find((r) => r.kind === "work" && r.id === id);
-              if (row && row.kind === "work" && row.item.kind !== "epic" && row.item.status !== nextStatus) {
+              if (row && row.kind === "work" && !(group.epicChildren.get(row.item.id) ?? []).length && row.item.status !== nextStatus) {
                 void onUpdateWorkItem(id, { status: nextStatus });
                 statusOverrides.set(id, nextStatus);
               }
@@ -351,7 +351,7 @@ export function TaskGroupList({
         const row = allRows.find((r) => r.kind === "work" && r.id === id);
         if (
           row && row.kind === "work" &&
-          row.item.kind !== "epic" &&
+          !(group.epicChildren.get(row.item.id) ?? []).length &&
           classifyRow(row.item, epicChildrenMap) !== section
         ) {
           void onUpdateWorkItem(id, { status: nextStatus });
@@ -431,7 +431,7 @@ export function TaskGroupList({
         } catch { /* ignore */ }
       },
     };
-    if (row.item.kind === "epic") {
+    if ((group.epicChildren.get(row.item.id) ?? []).length > 0) {
       const isExpanded = expandedEpicIds.has(row.item.id);
       const children = epicChildrenMap.get(row.item.id) ?? [];
       // Surface stale-epic-children: when the epic is closed but

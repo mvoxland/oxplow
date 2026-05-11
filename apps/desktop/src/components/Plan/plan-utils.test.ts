@@ -13,12 +13,11 @@ import {
   splitIntoSections,
 } from "./plan-utils.js";
 
-function item(id: string, status: TaskStatus, sort_index: number): Task {
+function item(id: number, status: TaskStatus, sort_index: number): Task {
   return {
     id,
     thread_id: "b1",
     parent_id: null,
-    kind: "task",
     title: id,
     description: "",
     acceptance_criteria: null,
@@ -135,9 +134,9 @@ test("classifyEpic: any blocked child → blocked", () => {
   const epic = epicItem("e1", 0);
   expect(
     classifyEpic(epic, [
-      item("c1", "in_progress", 1),
-      item("c2", "blocked", 2),
-      item("c3", "done", 3),
+      item(101, "in_progress", 1),
+      item(102, "blocked", 2),
+      item(103, "done", 3),
     ]),
   ).toBe("blocked");
 });
@@ -145,18 +144,18 @@ test("classifyEpic: any blocked child → blocked", () => {
 test("classifyEpic: all children terminal → done", () => {
   const epic = epicItem("e1", 0);
   expect(classifyEpic(epic, [
-    item("c1", "done", 1),
-    item("c2", "canceled", 2),
-    item("c3", "archived", 3),
+    item(101, "done", 1),
+    item(102, "canceled", 2),
+    item(103, "archived", 3),
   ])).toBe("done");
 });
 
 test("classifyEpic: in_progress child → inProgress", () => {
   const epic = epicItem("e1", 0);
   expect(classifyEpic(epic, [
-    item("c1", "ready", 1),
-    item("c2", "in_progress", 2),
-    item("c3", "ready", 3),
+    item(101, "ready", 1),
+    item(102, "in_progress", 2),
+    item(103, "ready", 3),
   ])).toBe("inProgress");
 });
 
@@ -164,16 +163,16 @@ test("classifyEpic: mixed done + non-blocked unfinished → inProgress", () => {
   const epic = epicItem("e1", 0);
   // Phase 1 done, Phase 2 ready: epic stays in_progress, not done.
   expect(classifyEpic(epic, [
-    item("c1", "done", 1),
-    item("c2", "ready", 2),
+    item(101, "done", 1),
+    item(102, "ready", 2),
   ])).toBe("inProgress");
 });
 
 test("classifyEpic: all children ready → ready", () => {
   const epic = epicItem("e1", 0);
   expect(classifyEpic(epic, [
-    item("c1", "ready", 1),
-    item("c2", "ready", 2),
+    item(101, "ready", 1),
+    item(102, "ready", 2),
   ])).toBe("ready");
 });
 
@@ -184,8 +183,8 @@ test("classifyEpic: empty epic falls back to its literal status", () => {
 
 test("classifyRow uses epic rollup for epics, literal status for non-epics", () => {
   const epic = epicItem("e1", 0);
-  const child = item("c1", "in_progress", 1);
-  const map = new Map<string, Task[]>([[epic.id, [item("c2", "blocked", 2)]]]);
+  const child = item(101, "in_progress", 1);
+  const map = new Map<string, Task[]>([[epic.id, [item(102, "blocked", 2)]]]);
   expect(classifyRow(epic, map)).toBe("blocked");
   expect(classifyRow(child, map)).toBe("inProgress");
 });
@@ -194,8 +193,8 @@ test("buildGroups groups epic children under their parent without lifting in_pro
   // Epics now move between sections as a block — children no longer
   // surface separately at the top level.
   const epic = epicItem("e1", 0);
-  const c1 = { ...item("c1", "in_progress", 1), parent_id: epic.id };
-  const c2 = { ...item("c2", "ready", 2), parent_id: epic.id };
+  const c1 = { ...item(101, "in_progress", 1), parent_id: epic.id };
+  const c2 = { ...item(102, "ready", 2), parent_id: epic.id };
   const groups = buildGroups({
     epics: [epic],
     waiting: [c2],
@@ -213,9 +212,9 @@ test("filterAutoAuthored drops agent-authored rows but keeps user-authored ones"
   const groups = [{
     epic: null,
     items: [
-      { ...item("u1", "ready", 0), created_by: "user" },
-      { ...item("a1", "ready", 1), created_by: "agent" },
-      { ...item("u2", "in_progress", 2), created_by: "user" },
+      { ...item(201, "ready", 0), created_by: "user" },
+      { ...item(301, "ready", 1), created_by: "agent" },
+      { ...item(202, "in_progress", 2), created_by: "user" },
     ] as Task[],
     epicChildren: new Map<string, Task[]>(),
   }];
@@ -224,15 +223,15 @@ test("filterAutoAuthored drops agent-authored rows but keeps user-authored ones"
 });
 
 test("filterAutoAuthored keeps epic rows even if agent-authored, and filters their children", () => {
-  const epic = { ...item("e1", "ready", 0), kind: "epic" as const, created_by: "agent" };
+  const epic = { ...item(1, "ready", 0), kind: "epic" as const, created_by: "agent" };
   const groups = [{
     epic: null,
     items: [epic] as Task[],
     epicChildren: new Map<string, Task[]>([[
       "e1",
       [
-        { ...item("u-child", "ready", 1), created_by: "user" },
-        { ...item("a-child", "ready", 2), created_by: "agent" },
+        { ...item(401, "ready", 1), created_by: "user" },
+        { ...item(402, "ready", 2), created_by: "agent" },
       ] as Task[],
     ]]),
   }];
@@ -245,9 +244,9 @@ test("applyStatusFilter exclude drops matching items", () => {
   const groups = [{
     epic: null,
     items: [
-      item("a", "ready", 0),
-      item("b", "archived", 1),
-      item("c", "done", 2),
+      item(501, "ready", 0),
+      item(502, "archived", 1),
+      item(503, "done", 2),
     ] as Task[],
     epicChildren: new Map<string, Task[]>(),
   }];
@@ -259,9 +258,9 @@ test("applyStatusFilter only keeps matching items", () => {
   const groups = [{
     epic: null,
     items: [
-      item("a", "ready", 0),
-      item("b", "archived", 1),
-      item("c", "done", 2),
+      item(501, "ready", 0),
+      item(502, "archived", 1),
+      item(503, "done", 2),
     ] as Task[],
     epicChildren: new Map<string, Task[]>(),
   }];
@@ -270,13 +269,13 @@ test("applyStatusFilter only keeps matching items", () => {
 });
 
 test("applyStatusFilter keeps epic rows even when status would exclude them, and filters their children", () => {
-  const epic = { ...item("e1", "ready", 0), kind: "epic" as const };
+  const epic = { ...item(1, "ready", 0), kind: "epic" as const };
   const groups = [{
     epic: null,
     items: [epic] as Task[],
     epicChildren: new Map<string, Task[]>([[
       "e1",
-      [item("c1", "ready", 1), item("c2", "archived", 2)] as Task[],
+      [item(101, "ready", 1), item(102, "archived", 2)] as Task[],
     ]]),
   }];
   const filtered = applyStatusFilter(groups, { only: ["ready"] });

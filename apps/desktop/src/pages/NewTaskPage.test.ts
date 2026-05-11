@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveSaveAndAnotherDefaults } from "./NewWorkItemPage.js";
+import { resolveSaveAndAnotherDefaults } from "./NewTaskPage.js";
 
 describe("resolveSaveAndAnotherDefaults", () => {
   test("returns the same parent/category/priority that the caller supplied", () => {
