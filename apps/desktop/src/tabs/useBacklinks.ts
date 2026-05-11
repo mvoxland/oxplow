@@ -35,7 +35,10 @@ export function useBacklinks(target: TabRef): BacklinkEntry[] {
     void listBacklinks(target.kind, targetId, null)
       .then((edges) => {
         if (cancelled) return;
-        setEntries(edges.map(edgeToInboundEntry).filter((e): e is BacklinkEntry => e !== null));
+        const mapped = edges
+          .map(edgeToInboundEntry)
+          .filter((e): e is BacklinkEntry => e !== null);
+        setEntries(dedupeEntriesByTarget(mapped));
       })
       .catch(() => {
         if (!cancelled) setEntries([]);
@@ -65,9 +68,10 @@ export function usePageOutbound(source: TabRef): BacklinkEntry[] {
     void listPageOutbound(source.kind, sourceId, null)
       .then((edges) => {
         if (cancelled) return;
-        setEntries(
-          edges.map(edgeToOutboundEntry).filter((e): e is BacklinkEntry => e !== null),
-        );
+        const mapped = edges
+          .map(edgeToOutboundEntry)
+          .filter((e): e is BacklinkEntry => e !== null);
+        setEntries(dedupeEntriesByTarget(mapped));
       })
       .catch(() => {
         if (!cancelled) setEntries([]);
@@ -126,7 +130,7 @@ function edgeToInboundEntry(edge: BacklinkEdge): BacklinkEntry | null {
   const ref = refFor(edge.source_kind, edge.source_id);
   if (!ref) return null;
   const label = edge.source_label ?? edge.source_id;
-  const subtitle = humanRefType(edge.ref_type);
+  const subtitle = humanRefType(edge.ref_type, edge.source_extra);
   return { ref, label, subtitle };
 }
 
@@ -135,8 +139,79 @@ function edgeToOutboundEntry(edge: BacklinkEdge): BacklinkEntry | null {
   const ref = refFor(edge.target_kind, edge.target_id);
   if (!ref) return null;
   const label = edge.source_label ?? edge.target_id;
-  const subtitle = humanRefType(edge.ref_type);
+  const subtitle = humanRefType(edge.ref_type, edge.source_extra);
   return { ref, label, subtitle };
+}
+
+/**
+ * Collapse rows whose `ref` resolves to the same logical page.
+ * Two cases that need this today:
+ *
+ *  1. A wiki page is referenced both as `wiki:<slug>` (via
+ *     `summary_wikilink` / `impact`) and as `file:.oxplow/wiki/<slug>.md`
+ *     (via `touched_file`). Same underlying entity, three rows.
+ *  2. Multiple ref_types pointing at the same target (e.g. an
+ *     impact edge AND a summary_wikilink edge to the same slug).
+ *
+ * Strategy: bucket by canonical key, prefer the wiki ref over the
+ * file ref when both exist, prefer a non-fallback label, and merge
+ * each contributor's subtitle into a `·`-separated chip line. Order
+ * within the input is preserved across the first appearance of each
+ * key.
+ */
+export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[] {
+  const buckets = new Map<string, BacklinkEntry[]>();
+  const order: string[] = [];
+  for (const e of entries) {
+    const key = canonicalEntryKey(e.ref);
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+      order.push(key);
+    }
+    buckets.get(key)!.push(e);
+  }
+  return order.map((key) => {
+    const group = buckets.get(key)!;
+    if (group.length === 1) return group[0];
+    // Pick the "best" base entry: wiki kind wins over file when the
+    // file is the on-disk shadow of the same wiki page.
+    const wikiMember = group.find((g) => g.ref.kind === "wiki");
+    const base = wikiMember ?? group[0];
+    // Combine subtitles, dropping empties and duplicates while
+    // preserving first-seen order.
+    const seen = new Set<string>();
+    const subs: string[] = [];
+    for (const g of group) {
+      const s = g.subtitle?.trim();
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      subs.push(s);
+    }
+    return {
+      ref: base.ref,
+      label: base.label,
+      subtitle: subs.length > 0 ? subs.join(" · ") : undefined,
+    };
+  });
+}
+
+/**
+ * Identity key for dedup. Same key ⇒ same logical page.
+ *
+ * `file:.oxplow/wiki/<slug>.md` is treated as `wiki:<slug>` so the
+ * on-disk shadow of a wiki page doesn't render as a sibling row to
+ * the wiki tab itself.
+ */
+function canonicalEntryKey(ref: TabRef): string {
+  if (ref.kind === "file") {
+    const path = (ref.payload as { path?: string } | null)?.path;
+    if (path) {
+      const m = /^\.oxplow\/wiki\/(.+)\.md$/.exec(path);
+      if (m) return `wiki:${m[1]}`;
+    }
+  }
+  const id = canonicalIdForTarget(ref) ?? ref.id;
+  return `${ref.kind}:${id}`;
 }
 
 /**
@@ -166,8 +241,13 @@ function refFor(kind: string, id: string): TabRef | null {
   }
 }
 
-/** Short label for the relationship type, used as the row's subtitle. */
-function humanRefType(refType: string): string {
+/**
+ * Short label for the relationship type, used as the row's
+ * subtitle. For `impact` edges the `source_extra` JSON carries the
+ * declared action verb (`{"action":"created"}`) — surface it as
+ * `"impact (created)"` so the user can tell what kind of impact.
+ */
+function humanRefType(refType: string, sourceExtra: string | null): string {
   if (refType.startsWith("task_link:")) {
     const sub = refType.slice("task_link:".length);
     return sub.replace(/_/g, " ");
@@ -179,17 +259,45 @@ function humanRefType(refType: string): string {
       return "wiki link";
     case "wikilink":
       return "wiki link";
+    case "summary_wikilink":
+      return "wiki link";
+    case "summary_file_ref":
+      return "wiki link";
+    case "summary_dir_ref":
+      return "wiki link";
     case "task_body_mention":
+      return "mention";
+    case "summary_task_mention":
       return "mention";
     case "finding_mention":
       return "mention";
+    case "summary_finding_mention":
+      return "mention";
     case "commit_mention":
+      return "mention";
+    case "summary_commit_mention":
       return "mention";
     case "touched_file":
       return "touched";
     case "finding_path":
       return "found in";
+    case "impact": {
+      const action = parseImpactAction(sourceExtra);
+      return action ? `impact (${action})` : "impact";
+    }
     default:
       return refType;
+  }
+}
+
+function parseImpactAction(sourceExtra: string | null): string | null {
+  if (!sourceExtra) return null;
+  try {
+    const parsed = JSON.parse(sourceExtra) as { action?: unknown };
+    return typeof parsed.action === "string" && parsed.action.length > 0
+      ? parsed.action
+      : null;
+  } catch {
+    return null;
   }
 }

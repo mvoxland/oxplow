@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { canonicalIdForTarget } from "./useBacklinks.js";
+import { canonicalIdForTarget, dedupeEntriesByTarget } from "./useBacklinks.js";
+import type { BacklinkEntry } from "./backlinkTypes.js";
 import {
   directoryRef,
   fileRef,
@@ -43,5 +44,61 @@ describe("canonicalIdForTarget", () => {
 
   test("untracked kinds return null", () => {
     expect(canonicalIdForTarget({ id: "settings", kind: "settings", payload: null })).toBeNull();
+  });
+});
+
+describe("dedupeEntriesByTarget", () => {
+  test("collapses wiki + on-disk file shadow into a single wiki row", () => {
+    const entries: BacklinkEntry[] = [
+      { ref: fileRef(".oxplow/wiki/local-snapshots.md"), label: ".oxplow/wiki/local-snapshots.md", subtitle: "touched" },
+      { ref: wikiPageRef("local-snapshots"), label: "Local Snapshots", subtitle: "impact (created)" },
+      { ref: wikiPageRef("local-snapshots"), label: "Local Snapshots", subtitle: "wiki link" },
+    ];
+    const out = dedupeEntriesByTarget(entries);
+    expect(out).toHaveLength(1);
+    expect(out[0].ref.kind).toBe("wiki");
+    expect(out[0].label).toBe("Local Snapshots");
+    // Subtitles merged in first-seen order, deduped.
+    expect(out[0].subtitle).toBe("touched · impact (created) · wiki link");
+  });
+
+  test("preserves rows that point at different targets", () => {
+    const entries: BacklinkEntry[] = [
+      { ref: wikiPageRef("a"), label: "A", subtitle: "wiki link" },
+      { ref: wikiPageRef("b"), label: "B", subtitle: "wiki link" },
+      { ref: fileRef("src/x.ts"), label: "src/x.ts", subtitle: "touched" },
+    ];
+    const out = dedupeEntriesByTarget(entries);
+    expect(out).toHaveLength(3);
+  });
+
+  test("collapses two ref_types pointing at the same wiki page", () => {
+    const entries: BacklinkEntry[] = [
+      { ref: wikiPageRef("url-schemes"), label: "URL Schemes", subtitle: "impact (created)" },
+      { ref: wikiPageRef("url-schemes"), label: "URL Schemes", subtitle: "wiki link" },
+    ];
+    const out = dedupeEntriesByTarget(entries);
+    expect(out).toHaveLength(1);
+    expect(out[0].subtitle).toBe("impact (created) · wiki link");
+  });
+
+  test("file path that doesn't look like a wiki shadow stays a file row", () => {
+    const entries: BacklinkEntry[] = [
+      { ref: fileRef("src/foo.rs"), label: "src/foo.rs", subtitle: "touched" },
+      { ref: fileRef("src/foo.rs"), label: "src/foo.rs", subtitle: "wiki link" },
+    ];
+    const out = dedupeEntriesByTarget(entries);
+    expect(out).toHaveLength(1);
+    expect(out[0].ref.kind).toBe("file");
+    expect(out[0].subtitle).toBe("touched · wiki link");
+  });
+
+  test("drops blank subtitles cleanly", () => {
+    const entries: BacklinkEntry[] = [
+      { ref: wikiPageRef("a"), label: "A", subtitle: "" },
+      { ref: wikiPageRef("a"), label: "A", subtitle: "wiki link" },
+    ];
+    const out = dedupeEntriesByTarget(entries);
+    expect(out[0].subtitle).toBe("wiki link");
   });
 });
