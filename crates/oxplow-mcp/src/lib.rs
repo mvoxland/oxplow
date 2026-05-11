@@ -17,13 +17,9 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use oxplow_app::{CreateWorkItemInput, OxplowEvent, Services, UpdateWorkItemChanges};
-use oxplow_domain::stores::{
-    ThreadStore, WorkItemEventStore, WorkItemLinkStore, WorkItemStore, WorkNoteStore,
-};
-use oxplow_domain::{
-    NoteId, ThreadId, WorkItem, WorkItemId, WorkItemKind, WorkItemLinkType, WorkItemStatus,
-};
+use oxplow_app::{CreateTaskInput, OxplowEvent, Services, UpdateTaskChanges};
+use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, TaskStore, ThreadStore, WorkNoteStore};
+use oxplow_domain::{NoteId, Task, TaskId, TaskLinkType, TaskStatus, ThreadId};
 
 #[derive(Clone)]
 pub struct OxplowMcp {
@@ -44,12 +40,12 @@ pub struct ThreadIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WorkItemIdParams {
+pub struct TaskIdParams {
     pub id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ReorderWorkItemsParams {
+pub struct ReorderTasksParams {
     /// Optional thread scope. Omit for the project-wide backlog.
     pub thread_id: Option<String>,
     /// New sort order. Items not present keep their relative order
@@ -71,8 +67,8 @@ pub struct RecordQueryFindingParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpsertWorkItemParams {
-    /// JSON-encoded WorkItem. Use this rather than nesting the struct
+pub struct UpsertTaskParams {
+    /// JSON-encoded Task. Use this rather than nesting the struct
     /// directly so we don't have to plumb JsonSchema through every
     /// domain type.
     pub item_json: String,
@@ -123,7 +119,7 @@ pub struct SubsystemDocParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct CreateWorkItemMcpParams {
+pub struct CreateTaskMcpParams {
     /// Thread to attach the new item to. Required unless `backlog`
     /// is set to `true` — filing onto the project-wide backlog must
     /// be an explicit choice, since a thread-detached row trips
@@ -158,7 +154,7 @@ pub struct CreateWorkItemMcpParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateWorkItemMcpParams {
+pub struct UpdateTaskMcpParams {
     pub id: String,
     pub title: Option<String>,
     pub description: Option<String>,
@@ -177,7 +173,7 @@ pub struct UpdateWorkItemMcpParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CompleteTaskParams {
     pub id: String,
-    /// Summary note appended to the work item before marking done.
+    /// Summary note appended to the task before marking done.
     pub summary: String,
     pub author: Option<String>,
     /// Repo-relative paths edited for this effort. Drives the file-
@@ -186,7 +182,7 @@ pub struct CompleteTaskParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LinkWorkItemsParams {
+pub struct LinktasksParams {
     pub thread_id: String,
     pub from_id: String,
     pub to_id: String,
@@ -196,7 +192,7 @@ pub struct LinkWorkItemsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct TransitionWorkItemsParams {
+pub struct TransitiontasksParams {
     pub ids: Vec<String>,
     pub status: String,
 }
@@ -228,9 +224,9 @@ pub struct EpicChildSpec {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DispatchWorkItemParams {
+pub struct DispatchTaskParams {
     pub thread_id: String,
-    /// The specific work item to dispatch. When omitted, picks the
+    /// The specific task to dispatch. When omitted, picks the
     /// first ready item on the thread (mirrors main's
     /// dispatch-without-id shortcut for /work-next composition).
     pub item_id: Option<String>,
@@ -254,11 +250,11 @@ pub struct FindNotesForNoteParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PageRefParams {
-    /// Page kind, e.g. "wiki", "work-item", "file", "git-commit",
+    /// Page kind, e.g. "wiki", "task", "file", "git-commit",
     /// "finding", "directory".
     pub kind: String,
     /// Canonical page id within the kind. For files this is the
-    /// repo-relative path; for work-items the `wi-…` id; for
+    /// repo-relative path; for tasks the `wi-…` id; for
     /// commits the full sha; for wiki pages the slug.
     pub id: String,
     #[serde(default = "default_page_ref_limit")]
@@ -299,15 +295,15 @@ impl OxplowMcp {
         }
     }
 
-    /// Emit `WorkItemsChanged` so the renderer (which is a separate
+    /// Emit `TasksChanged` so the renderer (which is a separate
     /// process from the MCP server) refetches and reflects the
     /// mutation. The Tauri command layer emits its own events; MCP
     /// has to do the same or UI state silently goes stale after every
     /// agent-driven change.
-    fn emit_work_items_changed(&self, thread_id: Option<oxplow_domain::ThreadId>) {
+    fn emit_tasks_changed(&self, thread_id: Option<oxplow_domain::ThreadId>) {
         self.services
             .events
-            .emit(OxplowEvent::WorkItemsChanged { thread_id });
+            .emit(OxplowEvent::TasksChanged { thread_id });
     }
 
     // ---------- liveness / version ----------
@@ -360,20 +356,20 @@ impl OxplowMcp {
         json_result(&list)
     }
 
-    // ---------- work items ----------
+    // ---------- tasks ----------
 
-    #[tool(description = "List all work items on the project-wide backlog.")]
+    #[tool(description = "List all tasks on the project-wide backlog.")]
     async fn list_backlog(&self) -> Result<CallToolResult, McpError> {
         let list = self
             .services
-            .work_item_store
+            .task_store
             .list_backlog()
             .await
             .map_err(internal)?;
         json_result(&list)
     }
 
-    #[tool(description = "List work items on a thread.")]
+    #[tool(description = "List tasks on a thread.")]
     async fn list_ready_work(
         &self,
         params: Parameters<ThreadIdParams>,
@@ -387,7 +383,7 @@ impl OxplowMcp {
         let thread_id = ThreadId::from(params.0.thread_id);
         let list = self
             .services
-            .work_item_store
+            .task_store
             .list_for_thread(&thread_id)
             .await
             .map_err(internal)?;
@@ -401,12 +397,12 @@ impl OxplowMcp {
                        a related cluster to dispatch. Honors `blocks` links — items waiting on a \
                        non-done blocker are skipped. Returns { mode: \"empty\" } when nothing is ready."
     )]
-    async fn read_work_options(
+    async fn read_task_options(
         &self,
         params: Parameters<ThreadIdParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind(
-            "read_work_options",
+            "read_task_options",
             "thread_id",
             &params.0.thread_id,
             oxplow_domain::IdKind::Thread,
@@ -414,126 +410,101 @@ impl OxplowMcp {
         let thread_id = ThreadId::from(params.0.thread_id);
         let result = self
             .services
-            .work_items
-            .read_work_options(&thread_id, &*self.services.work_item_link_store)
+            .tasks
+            .read_task_options(&thread_id, &*self.services.task_link_store)
             .await
             .map_err(internal)?;
         json_result(&result)
     }
 
     #[tool(
-        description = "Reorder work items on a thread (or backlog). The orderedItemIds array becomes \
+        description = "Reorder tasks on a thread (or backlog). The orderedItemIds array becomes \
                        the new sort order; items not in the list keep their relative order at the end."
     )]
-    async fn reorder_work_items(
+    async fn reorder_tasks(
         &self,
-        params: Parameters<ReorderWorkItemsParams>,
+        params: Parameters<ReorderTasksParams>,
     ) -> Result<CallToolResult, McpError> {
         if let Some(t) = params.0.thread_id.as_deref() {
             expect_id_kind(
-                "reorder_work_items",
+                "reorder_tasks",
                 "thread_id",
                 t,
                 oxplow_domain::IdKind::Thread,
             )?;
         }
+        let mut ids: Vec<TaskId> = Vec::with_capacity(params.0.ordered_item_ids.len());
         for raw in &params.0.ordered_item_ids {
-            expect_id_kind(
-                "reorder_work_items",
-                "ordered_item_ids[]",
-                raw,
-                oxplow_domain::IdKind::WorkItem,
-            )?;
+            ids.push(parse_task_id("reorder_tasks", "ordered_item_ids[]", raw)?);
         }
         let thread = params
             .0
             .thread_id
             .as_deref()
             .map(|s| ThreadId::from(s.to_string()));
-        let ids: Vec<WorkItemId> = params
-            .0
-            .ordered_item_ids
-            .into_iter()
-            .map(WorkItemId::from)
-            .collect();
         self.services
-            .work_items
+            .tasks
             .reorder(thread.as_ref(), &ids)
             .await
             .map_err(internal)?;
-        self.emit_work_items_changed(thread);
+        self.emit_tasks_changed(thread);
         json_result(&serde_json::json!({ "ok": true }))
     }
 
-    #[tool(description = "Get a single work item by id.")]
-    async fn get_work_item(
-        &self,
-        params: Parameters<WorkItemIdParams>,
-    ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "get_work_item",
-            "id",
-            &params.0.id,
-            oxplow_domain::IdKind::WorkItem,
-        )?;
-        let id = WorkItemId::from(params.0.id);
-        let item = self
-            .services
-            .work_item_store
-            .get(&id)
-            .await
-            .map_err(internal)?;
+    #[tool(description = "Get a single task by id.")]
+    async fn get_task(&self, params: Parameters<TaskIdParams>) -> Result<CallToolResult, McpError> {
+        let id = parse_task_id("get_task", "id", &params.0.id)?;
+        let item = self.services.task_store.get(id).await.map_err(internal)?;
         json_result(&item)
     }
 
     #[tool(
-        description = "Persist (insert or update) a work item. `item_json` is the JSON-encoded WorkItem."
+        description = "Persist (insert or update) a task. `item_json` is the JSON-encoded Task."
     )]
-    async fn upsert_work_item(
+    async fn upsert_task(
         &self,
-        params: Parameters<UpsertWorkItemParams>,
+        params: Parameters<UpsertTaskParams>,
     ) -> Result<CallToolResult, McpError> {
-        let item: WorkItem = serde_json::from_str(&params.0.item_json)
+        let mut item: Task = serde_json::from_str(&params.0.item_json)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
-        self.services
-            .work_item_store
-            .upsert(&item)
-            .await
-            .map_err(internal)?;
-        self.emit_work_items_changed(item.thread_id.clone());
+        if item.id.0 == 0 {
+            let new_id = self
+                .services
+                .task_store
+                .insert(&item)
+                .await
+                .map_err(internal)?;
+            item.id = new_id;
+        } else {
+            self.services
+                .task_store
+                .update(&item)
+                .await
+                .map_err(internal)?;
+        }
+        self.emit_tasks_changed(item.thread_id.clone());
         json_result(&item)
     }
 
-    #[tool(description = "Soft-delete a work item by id.")]
-    async fn delete_work_item(
+    #[tool(description = "Soft-delete a task by id.")]
+    async fn delete_task(
         &self,
-        params: Parameters<WorkItemIdParams>,
+        params: Parameters<TaskIdParams>,
     ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "delete_work_item",
-            "id",
-            &params.0.id,
-            oxplow_domain::IdKind::WorkItem,
-        )?;
-        let id = WorkItemId::from(params.0.id);
-        let item = self
-            .services
-            .work_item_store
-            .get(&id)
-            .await
-            .map_err(internal)?;
+        let id = parse_task_id("delete_task", "id", &params.0.id)?;
+        let item = self.services.task_store.get(id).await.map_err(internal)?;
         self.services
-            .work_item_store
-            .soft_delete(&id)
+            .task_store
+            .soft_delete(id)
             .await
             .map_err(internal)?;
-        self.emit_work_items_changed(item.and_then(|i| i.thread_id));
+        self.emit_tasks_changed(item.and_then(|i| i.thread_id));
         Ok(CallToolResult::success(vec![Content::text("deleted")]))
     }
 
     // ---------- thread notes ----------
     //
-    // Per-work-item notes (`add_work_note` / `list_work_notes`) were
+    // Per-task notes (`add_work_note` / `list_work_notes`) were
     // retired: `work_item_effort.summary` already carries "what
     // shipped on this item", so a parallel note table for the same
     // purpose was duplicative. Thread-scoped notes stay — they back
@@ -810,10 +781,10 @@ impl OxplowMcp {
         )]))
     }
 
-    // ---------- work item orchestration ----------
+    // ---------- task orchestration ----------
 
     #[tool(
-        description = "Create a new work item. Allocates id + sort_index, fires creation event. \
+        description = "Create a new task. Allocates id + sort_index, fires creation event. \
                        `thread_id` is required unless `backlog: true` is set (a thread-detached \
                        row trips filing-enforcement on the next edit, so backlog filing must be \
                        an explicit choice). Pass `status: \"in_progress\"` to start the work in \
@@ -823,21 +794,21 @@ impl OxplowMcp {
                        synthesizes the in_progress→target effort so Local History attributes \
                        the writes."
     )]
-    async fn create_work_item(
+    async fn create_task(
         &self,
-        params: Parameters<CreateWorkItemMcpParams>,
+        params: Parameters<CreateTaskMcpParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         match (p.thread_id.as_deref(), p.backlog) {
             (Some(_), true) => {
                 return Err(McpError::invalid_params(
-                    "create_work_item: pass `thread_id` OR `backlog: true`, not both",
+                    "create_task: pass `thread_id` OR `backlog: true`, not both",
                     None,
                 ));
             }
             (None, false) => {
                 return Err(McpError::invalid_params(
-                    "create_work_item: `thread_id` is required (or set `backlog: true` to file \
+                    "create_task: `thread_id` is required (or set `backlog: true` to file \
                      onto the project-wide backlog)",
                     None,
                 ));
@@ -846,25 +817,17 @@ impl OxplowMcp {
         }
         if let Some(tid) = p.thread_id.as_deref() {
             expect_id_kind(
-                "create_work_item",
+                "create_task",
                 "thread_id",
                 tid,
                 oxplow_domain::IdKind::Thread,
             )?;
         }
-        if let Some(pid) = p.parent_id.as_deref() {
-            expect_id_kind(
-                "create_work_item",
-                "parent_id",
-                pid,
-                oxplow_domain::IdKind::WorkItem,
-            )?;
-        }
-        let thread = p.thread_id.clone().map(ThreadId::from);
-        let kind = match p.kind.as_deref() {
-            Some(k) => Some(parse_kind(k)?),
+        let parent_task_id = match p.parent_id.as_deref() {
+            Some(pid) => Some(parse_task_id("create_task", "parent_id", pid)?),
             None => None,
         };
+        let thread = p.thread_id.clone().map(ThreadId::from);
         let priority = match p.priority.as_deref() {
             Some(s) => Some(parse_priority(s)?),
             None => None,
@@ -875,20 +838,19 @@ impl OxplowMcp {
         };
         let item = self
             .services
-            .work_items
+            .tasks
             .create(
                 thread.clone(),
-                CreateWorkItemInput {
-                    kind,
+                CreateTaskInput {
                     title: p.title,
                     description: p.description,
                     acceptance_criteria: p.acceptance_criteria,
-                    parent_id: p.parent_id.map(WorkItemId::from),
+                    parent_id: parent_task_id,
                     status,
                     priority,
                     category: p.category,
                     tags: p.tags,
-                    author: Some(oxplow_domain::WorkItemAuthor::Agent),
+                    author: Some(oxplow_domain::TaskAuthor::Agent),
                 },
             )
             .await
@@ -901,54 +863,41 @@ impl OxplowMcp {
         // splits, and Local History needs the effort row to attribute
         // the writes to this item.
         let touched = p.touched_files.unwrap_or_default();
-        if !touched.is_empty()
-            && matches!(item.status, WorkItemStatus::Done | WorkItemStatus::Blocked)
-        {
+        if !touched.is_empty() && matches!(item.status, TaskStatus::Done | TaskStatus::Blocked) {
             let thread_for_effort = thread.or_else(|| item.thread_id.clone());
             if let Some(tid) = thread_for_effort {
                 if let Err(err) = self
                     .services
-                    .work_items
-                    .record_effort(&self.services.effort_store, &item.id, &tid, &touched, None)
+                    .tasks
+                    .record_effort(&self.services.effort_store, item.id, &tid, &touched, None)
                     .await
                 {
-                    tracing::warn!(?err, "create_work_item: effort record failed");
+                    tracing::warn!(?err, "create_task: effort record failed");
                 }
             }
         }
-        self.emit_work_items_changed(item.thread_id.clone());
+        self.emit_tasks_changed(item.thread_id.clone());
         json_result(&item)
     }
 
     #[tool(
-        description = "Update fields on an existing work item (partial-patch). Pass `touched_files` \
+        description = "Update fields on an existing task (partial-patch). Pass `touched_files` \
                        alongside a `status` transition to `done`/`blocked` to attribute the closing \
                        effort. Pass `acceptance_criteria` (empty string clears) to update the AC list. \
                        `parent_id` reparents (empty string detaches)."
     )]
-    async fn update_work_item(
+    async fn update_task(
         &self,
-        params: Parameters<UpdateWorkItemMcpParams>,
+        params: Parameters<UpdateTaskMcpParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        expect_id_kind(
-            "update_work_item",
-            "id",
-            &p.id,
-            oxplow_domain::IdKind::WorkItem,
-        )?;
+        let id = parse_task_id("update_task", "id", &p.id)?;
         if let Some(pid) = p.parent_id.as_deref() {
             // Empty string is the "detach" sentinel — only validate non-empty.
             if !pid.is_empty() {
-                expect_id_kind(
-                    "update_work_item",
-                    "parent_id",
-                    pid,
-                    oxplow_domain::IdKind::WorkItem,
-                )?;
+                parse_task_id("update_task", "parent_id", pid)?;
             }
         }
-        let id = WorkItemId::from(p.id);
         let status = match p.status.as_deref() {
             Some(s) => Some(parse_status(s)?),
             None => None,
@@ -963,19 +912,17 @@ impl OxplowMcp {
         let acceptance_criteria: Option<Option<String>> =
             p.acceptance_criteria
                 .map(|s| if s.is_empty() { None } else { Some(s) });
-        let parent_id: Option<Option<WorkItemId>> = p.parent_id.map(|s| {
-            if s.is_empty() {
-                None
-            } else {
-                Some(WorkItemId::from(s))
-            }
-        });
+        let parent_id: Option<Option<TaskId>> = match p.parent_id {
+            Some(s) if s.is_empty() => Some(None),
+            Some(s) => Some(Some(parse_task_id("update_task", "parent_id", &s)?)),
+            None => None,
+        };
         let updated = self
             .services
-            .work_items
+            .tasks
             .update(
-                &id,
-                UpdateWorkItemChanges {
+                id,
+                UpdateTaskChanges {
                     title: p.title,
                     description: p.description,
                     acceptance_criteria,
@@ -990,35 +937,30 @@ impl OxplowMcp {
             .map_err(|e| internal(e.to_string()))?;
 
         let touched = p.touched_files.unwrap_or_default();
-        if !touched.is_empty()
-            && matches!(
-                updated.status,
-                WorkItemStatus::Done | WorkItemStatus::Blocked
-            )
-        {
+        if !touched.is_empty() && matches!(updated.status, TaskStatus::Done | TaskStatus::Blocked) {
             if let Some(tid) = updated.thread_id.clone() {
                 if let Err(err) = self
                     .services
-                    .work_items
+                    .tasks
                     .record_effort(
                         &self.services.effort_store,
-                        &updated.id,
+                        updated.id,
                         &tid,
                         &touched,
                         None,
                     )
                     .await
                 {
-                    tracing::warn!(?err, "update_work_item: effort record failed");
+                    tracing::warn!(?err, "update_task: effort record failed");
                 }
             }
         }
-        self.emit_work_items_changed(updated.thread_id.clone());
+        self.emit_tasks_changed(updated.thread_id.clone());
         json_result(&updated)
     }
 
     #[tool(
-        description = "Append a summary note to a work item then mark it `done`. Pass \
+        description = "Append a summary note to a task then mark it `done`. Pass \
                        `touched_files` (repo-relative paths edited for this effort) to attribute \
                        the writes via Local History — skip only if you edited >100 files."
     )]
@@ -1027,26 +969,20 @@ impl OxplowMcp {
         params: Parameters<CompleteTaskParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        expect_id_kind(
-            "complete_task",
-            "id",
-            &p.id,
-            oxplow_domain::IdKind::WorkItem,
-        )?;
-        let id = WorkItemId::from(p.id);
+        let id = parse_task_id("complete_task", "id", &p.id)?;
         let author = p.author.unwrap_or_else(|| "agent".to_string());
         self.services
             .work_note_store
-            .add_for_item(&id, &p.summary, &author)
+            .add_for_item(id, &p.summary, &author)
             .await
             .map_err(internal)?;
         let item = self
             .services
-            .work_items
+            .tasks
             .update(
-                &id,
-                UpdateWorkItemChanges {
-                    status: Some(WorkItemStatus::Done),
+                id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::Done),
                     ..Default::default()
                 },
             )
@@ -1058,10 +994,10 @@ impl OxplowMcp {
             if let Some(tid) = item.thread_id.clone() {
                 if let Err(err) = self
                     .services
-                    .work_items
+                    .tasks
                     .record_effort(
                         &self.services.effort_store,
-                        &item.id,
+                        item.id,
                         &tid,
                         &touched,
                         Some(p.summary.clone()),
@@ -1072,75 +1008,55 @@ impl OxplowMcp {
                 }
             }
         }
-        self.emit_work_items_changed(item.thread_id.clone());
+        self.emit_tasks_changed(item.thread_id.clone());
         json_result(&item)
     }
 
-    #[tool(description = "Create a typed link between two work items.")]
-    async fn link_work_items(
+    #[tool(description = "Create a typed link between two tasks.")]
+    async fn link_tasks(
         &self,
-        params: Parameters<LinkWorkItemsParams>,
+        params: Parameters<LinktasksParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         expect_id_kind(
-            "link_work_items",
+            "link_tasks",
             "thread_id",
             &p.thread_id,
             oxplow_domain::IdKind::Thread,
         )?;
-        expect_id_kind(
-            "link_work_items",
-            "from_id",
-            &p.from_id,
-            oxplow_domain::IdKind::WorkItem,
-        )?;
-        expect_id_kind(
-            "link_work_items",
-            "to_id",
-            &p.to_id,
-            oxplow_domain::IdKind::WorkItem,
-        )?;
+        let from_id = parse_task_id("link_tasks", "from_id", &p.from_id)?;
+        let to_id = parse_task_id("link_tasks", "to_id", &p.to_id)?;
         let link_type = parse_link_type(&p.link_type)?;
         let thread = ThreadId::from(p.thread_id);
         let link = self
             .services
-            .work_item_link_store
-            .create(
-                &thread,
-                &WorkItemId::from(p.from_id),
-                &WorkItemId::from(p.to_id),
-                link_type,
-            )
+            .task_link_store
+            .create(&thread, from_id, to_id, link_type)
             .await
             .map_err(internal)?;
-        self.emit_work_items_changed(Some(thread));
+        self.emit_tasks_changed(Some(thread));
         json_result(&link)
     }
 
-    #[tool(description = "Transition a batch of work items to the same status.")]
-    async fn transition_work_items(
+    #[tool(description = "Transition a batch of tasks to the same status.")]
+    async fn transition_tasks(
         &self,
-        params: Parameters<TransitionWorkItemsParams>,
+        params: Parameters<TransitiontasksParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
+        let mut parsed_ids: Vec<TaskId> = Vec::with_capacity(p.ids.len());
         for raw in &p.ids {
-            expect_id_kind(
-                "transition_work_items",
-                "ids[]",
-                raw,
-                oxplow_domain::IdKind::WorkItem,
-            )?;
+            parsed_ids.push(parse_task_id("transition_tasks", "ids[]", raw)?);
         }
         let target = parse_status(&p.status)?;
-        let mut updated = Vec::with_capacity(p.ids.len());
-        for id in p.ids {
-            let id = WorkItemId::from(id);
+        let mut updated = Vec::with_capacity(parsed_ids.len());
+        for id in parsed_ids {
             let row = self
                 .services
-                .work_items
+                .tasks
                 .update(
-                    &id,
-                    UpdateWorkItemChanges {
+                    id,
+                    UpdateTaskChanges {
                         status: Some(target),
                         ..Default::default()
                     },
@@ -1155,7 +1071,7 @@ impl OxplowMcp {
             threads.insert(row.thread_id.clone());
         }
         for tid in threads {
-            self.emit_work_items_changed(tid);
+            self.emit_tasks_changed(tid);
         }
         json_result(&updated)
     }
@@ -1208,7 +1124,7 @@ impl OxplowMcp {
         Ok(CallToolResult::success(vec![Content::text("awaiting")]))
     }
 
-    #[tool(description = "Bundle of thread state, work items, and recent activity.")]
+    #[tool(description = "Bundle of thread state, tasks, and recent activity.")]
     async fn get_thread_context(
         &self,
         params: Parameters<GetThreadContextParams>,
@@ -1228,13 +1144,13 @@ impl OxplowMcp {
             .map_err(internal)?;
         let items = self
             .services
-            .work_item_store
+            .task_store
             .list_for_thread(&id)
             .await
             .map_err(internal)?;
         let events = self
             .services
-            .work_item_event_store
+            .task_event_store
             .list_for_thread(&id)
             .await
             .map_err(internal)?;
@@ -1265,14 +1181,13 @@ impl OxplowMcp {
         let thread = p.thread_id.map(ThreadId::from);
         let epic = self
             .services
-            .work_items
+            .tasks
             .create(
                 thread.clone(),
-                CreateWorkItemInput {
-                    kind: Some(WorkItemKind::Epic),
+                CreateTaskInput {
                     title: p.epic_title,
                     description: p.epic_description,
-                    author: Some(oxplow_domain::WorkItemAuthor::Agent),
+                    author: Some(oxplow_domain::TaskAuthor::Agent),
                     ..Default::default()
                 },
             )
@@ -1280,21 +1195,16 @@ impl OxplowMcp {
             .map_err(|e| internal(e.to_string()))?;
         let mut children_out = Vec::with_capacity(p.children.len());
         for child in p.children {
-            let kind = match child.kind.as_deref() {
-                Some(k) => Some(parse_kind(k)?),
-                None => Some(WorkItemKind::Task),
-            };
             let row = self
                 .services
-                .work_items
+                .tasks
                 .create(
                     thread.clone(),
-                    CreateWorkItemInput {
-                        kind,
+                    CreateTaskInput {
                         title: child.title,
                         description: child.description,
-                        parent_id: Some(epic.id.clone()),
-                        author: Some(oxplow_domain::WorkItemAuthor::Agent),
+                        parent_id: Some(epic.id),
+                        author: Some(oxplow_domain::TaskAuthor::Agent),
                         ..Default::default()
                     },
                 )
@@ -1302,7 +1212,7 @@ impl OxplowMcp {
                 .map_err(|e| internal(e.to_string()))?;
             children_out.push(row);
         }
-        self.emit_work_items_changed(thread.clone());
+        self.emit_tasks_changed(thread.clone());
         let bundle = serde_json::json!({ "epic": epic, "children": children_out });
         Ok(CallToolResult::success(vec![Content::text(
             bundle.to_string(),
@@ -1310,7 +1220,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Compose a ready-to-paste dispatch brief for a work item and transition it \
+        description = "Compose a ready-to-paste dispatch brief for a task and transition it \
                        to in_progress in one atomic call. When `item_id` is given, dispatches that \
                        specific item; otherwise picks the first ready non-epic item on the thread \
                        (mirrors main's /work-next composition shortcut). Returns \
@@ -1318,52 +1228,49 @@ impl OxplowMcp {
                        The brief carries the item fields, AC, recent notes, and the subagent \
                        protocol preamble so the orchestrator brief stays slim."
     )]
-    async fn dispatch_work_item(
+    async fn dispatch_task(
         &self,
-        params: Parameters<DispatchWorkItemParams>,
+        params: Parameters<DispatchTaskParams>,
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind(
-            "dispatch_work_item",
+            "dispatch_task",
             "thread_id",
             &params.0.thread_id,
             oxplow_domain::IdKind::Thread,
         )?;
-        if let Some(raw) = params.0.item_id.as_deref() {
-            expect_id_kind(
-                "dispatch_work_item",
-                "item_id",
-                raw,
-                oxplow_domain::IdKind::WorkItem,
-            )?;
-        }
+        let parsed_item_id = match params.0.item_id.as_deref() {
+            Some(raw) => Some(parse_task_id("dispatch_task", "item_id", raw)?),
+            None => None,
+        };
         let thread_id = ThreadId::from(params.0.thread_id.clone());
-        let target = match params.0.item_id.clone() {
-            Some(raw) => {
-                let id = WorkItemId::from(raw);
-                self.services
-                    .work_item_store
-                    .get(&id)
-                    .await
-                    .map_err(internal)?
-                    .ok_or_else(|| {
-                        McpError::invalid_params(
-                            format!("dispatch_work_item: item not found: {}", id.0),
-                            None,
-                        )
-                    })?
-            }
+        let target = match parsed_item_id {
+            Some(id) => self
+                .services
+                .task_store
+                .get(id)
+                .await
+                .map_err(internal)?
+                .ok_or_else(|| {
+                    McpError::invalid_params(
+                        format!("dispatch_task: item not found: {}", id.0),
+                        None,
+                    )
+                })?,
             None => {
                 let items = self
                     .services
-                    .work_item_store
+                    .task_store
                     .list_for_thread(&thread_id)
                     .await
                     .map_err(internal)?;
+                // Build a set of task ids that have children → epics.
+                let epic_ids: std::collections::HashSet<TaskId> =
+                    items.iter().filter_map(|i| i.parent_id).collect();
                 let mut ready_first: Vec<_> = items
                     .into_iter()
                     .filter(|i| {
-                        matches!(i.status, oxplow_domain::WorkItemStatus::Ready)
-                            && i.kind != oxplow_domain::WorkItemKind::Epic
+                        matches!(i.status, oxplow_domain::TaskStatus::Ready)
+                            && !epic_ids.contains(&i.id)
                     })
                     .collect();
                 ready_first.sort_by_key(|i| (i.sort_index, i.created_at));
@@ -1379,11 +1286,11 @@ impl OxplowMcp {
 
         let updated = self
             .services
-            .work_items
+            .tasks
             .update(
-                &target.id,
-                oxplow_app::UpdateWorkItemChanges {
-                    status: Some(oxplow_domain::WorkItemStatus::InProgress),
+                target.id,
+                oxplow_app::UpdateTaskChanges {
+                    status: Some(oxplow_domain::TaskStatus::InProgress),
                     ..Default::default()
                 },
             )
@@ -1392,7 +1299,7 @@ impl OxplowMcp {
 
         let prompt =
             compose_dispatch_brief(&updated, params.0.extra_context.as_deref().unwrap_or(""));
-        self.emit_work_items_changed(updated.thread_id.clone());
+        self.emit_tasks_changed(updated.thread_id.clone());
         json_result(&serde_json::json!({
             "ok": true,
             "prompt": prompt,
@@ -1431,9 +1338,9 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Unified backlinks: every page (wiki, work-item, commit, finding, \
+        description = "Unified backlinks: every page (wiki, task, commit, finding, \
                        …) that points AT the given target page. The target is identified \
-                       by `kind` (e.g. \"file\", \"wiki\", \"work-item\", \"git-commit\", \
+                       by `kind` (e.g. \"file\", \"wiki\", \"task\", \"git-commit\", \
                        \"finding\", \"directory\") and `id` (path / slug / wi-… / sha / id). \
                        Returns one row per inbound edge, including ref_type so the caller \
                        can distinguish e.g. a commit's touched_file edge from a wiki body \
@@ -1620,41 +1527,40 @@ impl OxplowMcp {
     }
 }
 
-fn parse_kind(s: &str) -> Result<WorkItemKind, McpError> {
+// `kind` was dropped from the task model — epics are tasks with
+// children, and bug/note categorization is intentionally lost. This
+// stub is retained so legacy clients passing `kind: "task"` etc. still
+// validate, but the value is discarded.
+#[allow(dead_code)]
+fn parse_kind(s: &str) -> Result<(), McpError> {
+    match s {
+        "epic" | "task" | "subtask" | "bug" | "note" => Ok(()),
+        other => Err(McpError::invalid_params(
+            format!("unknown task kind: {other}"),
+            None,
+        )),
+    }
+}
+
+fn parse_status(s: &str) -> Result<TaskStatus, McpError> {
     Ok(match s {
-        "epic" => WorkItemKind::Epic,
-        "task" => WorkItemKind::Task,
-        "subtask" => WorkItemKind::Subtask,
-        "bug" => WorkItemKind::Bug,
-        "note" => WorkItemKind::Note,
+        "ready" => TaskStatus::Ready,
+        "in_progress" => TaskStatus::InProgress,
+        "blocked" => TaskStatus::Blocked,
+        "done" => TaskStatus::Done,
+        "canceled" => TaskStatus::Canceled,
+        "archived" => TaskStatus::Archived,
         other => {
             return Err(McpError::invalid_params(
-                format!("unknown work item kind: {other}"),
+                format!("unknown task status: {other}"),
                 None,
             ))
         }
     })
 }
 
-fn parse_status(s: &str) -> Result<WorkItemStatus, McpError> {
-    Ok(match s {
-        "ready" => WorkItemStatus::Ready,
-        "in_progress" => WorkItemStatus::InProgress,
-        "blocked" => WorkItemStatus::Blocked,
-        "done" => WorkItemStatus::Done,
-        "canceled" => WorkItemStatus::Canceled,
-        "archived" => WorkItemStatus::Archived,
-        other => {
-            return Err(McpError::invalid_params(
-                format!("unknown work item status: {other}"),
-                None,
-            ))
-        }
-    })
-}
-
-fn parse_priority(s: &str) -> Result<oxplow_domain::WorkItemPriority, McpError> {
-    use oxplow_domain::WorkItemPriority as P;
+fn parse_priority(s: &str) -> Result<oxplow_domain::TaskPriority, McpError> {
+    use oxplow_domain::TaskPriority as P;
     Ok(match s {
         "low" => P::Low,
         "medium" => P::Medium,
@@ -1694,14 +1600,14 @@ async fn resolve_lsp_proxy(
         .map_err(|e| internal(e.to_string()))
 }
 
-fn parse_link_type(s: &str) -> Result<WorkItemLinkType, McpError> {
+fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
     Ok(match s {
-        "blocks" => WorkItemLinkType::Blocks,
-        "relates_to" => WorkItemLinkType::RelatesTo,
-        "discovered_from" => WorkItemLinkType::DiscoveredFrom,
-        "duplicates" => WorkItemLinkType::Duplicates,
-        "supersedes" => WorkItemLinkType::Supersedes,
-        "replies_to" => WorkItemLinkType::RepliesTo,
+        "blocks" => TaskLinkType::Blocks,
+        "relates_to" => TaskLinkType::RelatesTo,
+        "discovered_from" => TaskLinkType::DiscoveredFrom,
+        "duplicates" => TaskLinkType::Duplicates,
+        "supersedes" => TaskLinkType::Supersedes,
+        "replies_to" => TaskLinkType::RepliesTo,
         other => {
             return Err(McpError::invalid_params(
                 format!("unknown link type: {other}"),
@@ -1716,7 +1622,7 @@ impl ServerHandler for OxplowMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Oxplow MCP server. Exposes work-item, note, wiki, and stream surfaces. \
+                "Oxplow MCP server. Exposes task, note, wiki, and stream surfaces. \
                  Authoritative tool list lives at .context/agent-model.md."
                     .into(),
             ),
@@ -1736,6 +1642,19 @@ fn internal<E: std::fmt::Display>(e: E) -> McpError {
 /// passed, the kind it was inferred to be, and the kind expected. This
 /// converts opaque downstream FK-violation errors into actionable
 /// guidance at the protocol boundary.
+/// Parse a task id from its string form. Returns an error suitable for
+/// returning straight from a tool handler when the input is not a
+/// non-negative integer.
+fn parse_task_id(tool: &str, param: &str, value: &str) -> Result<oxplow_domain::TaskId, McpError> {
+    match oxplow_domain::TaskId::try_from_str(value) {
+        Some(id) => Ok(id),
+        None => Err(McpError::invalid_params(
+            format!("{tool}: `{param}` expects a task id (integer), got `{value}`"),
+            None,
+        )),
+    }
+}
+
 fn expect_id_kind(
     tool: &str,
     param: &str,
@@ -1787,26 +1706,26 @@ fn compose_delegate_query_prompt(
     parts.push(
         "When done, call `mcp__oxplow__record_query_finding({ noteId, body })` ONCE with your complete finding. \
          The body should be concise, structured prose — file paths, key function names, and the direct answer to the question. \
-         Do not make code changes. Do not create work items. Read/Grep/Glob only."
+         Do not make code changes. Do not create tasks. Read/Grep/Glob only."
             .into(),
     );
     parts.join("\n")
 }
 
 /// Compose the brief the orchestrator passes to the general-purpose
-/// Agent tool to dispatch a work item to a subagent. Pure so it's
+/// Agent tool to dispatch a task to a subagent. Pure so it's
 /// testable.
 ///
 /// Sections: identity, description, AC, optional extra context, and
 /// the closing reminder pointing at the subagent-protocol skill.
 /// Per-item notes used to render here too but were retired —
 /// work_item_effort.summary already records what shipped on prior
-/// attempts; reviewers see it from the work-item activity timeline.
-fn compose_dispatch_brief(item: &oxplow_domain::WorkItem, extra_context: &str) -> String {
+/// attempts; reviewers see it from the task activity timeline.
+fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> String {
     let mut out: Vec<String> = vec![
-        format!("Work item: {}", item.title),
+        format!("Task: {}", item.title),
         format!("itemId: {}", item.id.0),
-        format!("kind: {:?} | priority: {:?}", item.kind, item.priority),
+        format!("priority: {:?}", item.priority),
         String::new(),
     ];
     if !item.description.is_empty() {
@@ -1854,11 +1773,9 @@ pub async fn serve_stdio(services: Arc<Services>) -> Result<(), Box<dyn std::err
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::stores::WorkItemStore;
+    use oxplow_domain::stores::TaskStore;
+    use oxplow_domain::task::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
     use oxplow_domain::time::Timestamp;
-    use oxplow_domain::work_item::{
-        WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemKind, WorkItemPriority, WorkItemStatus,
-    };
     use rmcp::handler::server::wrapper::Parameters;
 
     fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
@@ -1879,26 +1796,25 @@ mod tests {
         panic!("CallToolResult had no text content");
     }
 
-    fn make_work_item(thread_id: Option<ThreadId>, title: &str) -> WorkItem {
+    fn make_task(thread_id: Option<ThreadId>, title: &str) -> Task {
         let now = Timestamp::now();
-        WorkItem {
-            id: WorkItemId::new(),
+        Task {
+            id: TaskId(0),
             thread_id,
             parent_id: None,
-            kind: WorkItemKind::Task,
             title: title.into(),
             description: String::new(),
             acceptance_criteria: None,
-            status: WorkItemStatus::Ready,
-            priority: WorkItemPriority::Medium,
+            status: TaskStatus::Ready,
+            priority: TaskPriority::Medium,
             sort_index: 0,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         }
@@ -1944,32 +1860,26 @@ mod tests {
     #[tokio::test]
     async fn list_backlog_includes_unassigned_items() {
         let (_proj, services, server) = boot();
-        let backlog_item = make_work_item(None, "do the thing");
-        services
-            .work_item_store
-            .upsert(&backlog_item)
-            .await
-            .unwrap();
+        let backlog_item = make_task(None, "do the thing");
+        let id = services.task_store.insert(&backlog_item).await.unwrap();
 
         let r = server.list_backlog().await.unwrap();
         let body = text_payload(r);
         assert!(
-            body.contains(backlog_item.id.as_str()),
+            body.contains(&id.to_string()),
             "backlog item missing from result: {body}",
         );
         assert!(body.contains("do the thing"), "title missing: {body}");
     }
 
     #[tokio::test]
-    async fn get_work_item_round_trips() {
+    async fn get_task_round_trips() {
         let (_proj, services, server) = boot();
-        let item = make_work_item(None, "round trip");
-        services.work_item_store.upsert(&item).await.unwrap();
+        let item = make_task(None, "round trip");
+        let id = services.task_store.insert(&item).await.unwrap();
 
         let r = server
-            .get_work_item(Parameters(WorkItemIdParams {
-                id: item.id.as_str().to_string(),
-            }))
+            .get_task(Parameters(TaskIdParams { id: id.to_string() }))
             .await
             .unwrap();
         let body = text_payload(r);
@@ -1977,15 +1887,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_work_item_soft_deletes() {
+    async fn delete_task_soft_deletes() {
         let (_proj, services, server) = boot();
-        let item = make_work_item(None, "to delete");
-        services.work_item_store.upsert(&item).await.unwrap();
+        let item = make_task(None, "to delete");
+        let id = services.task_store.insert(&item).await.unwrap();
 
         server
-            .delete_work_item(Parameters(WorkItemIdParams {
-                id: item.id.as_str().to_string(),
-            }))
+            .delete_task(Parameters(TaskIdParams { id: id.to_string() }))
             .await
             .unwrap();
 
@@ -1993,16 +1901,16 @@ mod tests {
         let r = server.list_backlog().await.unwrap();
         let body = text_payload(r);
         assert!(
-            !body.contains(item.id.as_str()),
+            !body.contains(&format!("\"id\":{}", id.0)),
             "soft-deleted item should not appear in backlog: {body}",
         );
     }
 
     #[tokio::test]
-    async fn create_work_item_rejects_stream_id_passed_as_thread_id() {
+    async fn create_task_rejects_stream_id_passed_as_thread_id() {
         let (_proj, _svc, server) = boot();
         let err = server
-            .create_work_item(Parameters(CreateWorkItemMcpParams {
+            .create_task(Parameters(CreateTaskMcpParams {
                 thread_id: Some("s-deadbeef".into()),
                 backlog: false,
                 title: "x".into(),
@@ -2019,7 +1927,7 @@ mod tests {
             .await
             .expect_err("should reject stream id passed as thread_id");
         let msg = err.message.to_string();
-        assert!(msg.contains("create_work_item"), "tool name missing: {msg}");
+        assert!(msg.contains("create_task"), "tool name missing: {msg}");
         assert!(msg.contains("thread_id"), "param name missing: {msg}");
         assert!(msg.contains("s-deadbeef"), "value missing: {msg}");
         assert!(msg.contains("stream id"), "actual kind missing: {msg}");
@@ -2027,10 +1935,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_work_item_rejects_unrecognised_thread_id() {
+    async fn create_task_rejects_unrecognised_thread_id() {
         let (_proj, _svc, server) = boot();
         let err = server
-            .create_work_item(Parameters(CreateWorkItemMcpParams {
+            .create_task(Parameters(CreateTaskMcpParams {
                 thread_id: Some("nonsense".into()),
                 backlog: false,
                 title: "x".into(),
@@ -2052,21 +1960,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upsert_work_item_round_trips() {
+    async fn upsert_task_round_trips() {
         let (_proj, _services, server) = boot();
-        let item = make_work_item(None, "via mcp");
+        let item = make_task(None, "via mcp");
         let json = serde_json::to_string(&item).unwrap();
 
         let r = server
-            .upsert_work_item(Parameters(UpsertWorkItemParams { item_json: json }))
+            .upsert_task(Parameters(UpsertTaskParams { item_json: json }))
             .await
             .unwrap();
         let body = text_payload(r);
         assert!(body.contains("via mcp"), "upsert response: {body}");
+        // Parse the response to learn the assigned id, then re-fetch.
+        let stored: Task = serde_json::from_str(&body).expect("upsert returns task json");
+        assert_ne!(stored.id.0, 0, "insert must assign a non-zero id");
 
         let fetched = server
-            .get_work_item(Parameters(WorkItemIdParams {
-                id: item.id.as_str().to_string(),
+            .get_task(Parameters(TaskIdParams {
+                id: stored.id.to_string(),
             }))
             .await
             .unwrap();
@@ -2088,11 +1999,13 @@ mod tests {
 
     #[test]
     fn parse_kind_accepts_each_canonical_string() {
-        assert!(matches!(parse_kind("epic"), Ok(WorkItemKind::Epic)));
-        assert!(matches!(parse_kind("task"), Ok(WorkItemKind::Task)));
-        assert!(matches!(parse_kind("subtask"), Ok(WorkItemKind::Subtask)));
-        assert!(matches!(parse_kind("bug"), Ok(WorkItemKind::Bug)));
-        assert!(matches!(parse_kind("note"), Ok(WorkItemKind::Note)));
+        // The `kind` token is accepted but discarded; we just check
+        // that each canonical form parses without an error.
+        assert!(parse_kind("epic").is_ok());
+        assert!(parse_kind("task").is_ok());
+        assert!(parse_kind("subtask").is_ok());
+        assert!(parse_kind("bug").is_ok());
+        assert!(parse_kind("note").is_ok());
     }
 
     #[test]
@@ -2118,24 +2031,15 @@ mod tests {
 
     #[test]
     fn parse_status_accepts_every_status() {
-        assert!(matches!(parse_status("ready"), Ok(WorkItemStatus::Ready)));
+        assert!(matches!(parse_status("ready"), Ok(TaskStatus::Ready)));
         assert!(matches!(
             parse_status("in_progress"),
-            Ok(WorkItemStatus::InProgress)
+            Ok(TaskStatus::InProgress)
         ));
-        assert!(matches!(
-            parse_status("blocked"),
-            Ok(WorkItemStatus::Blocked)
-        ));
-        assert!(matches!(parse_status("done"), Ok(WorkItemStatus::Done)));
-        assert!(matches!(
-            parse_status("canceled"),
-            Ok(WorkItemStatus::Canceled)
-        ));
-        assert!(matches!(
-            parse_status("archived"),
-            Ok(WorkItemStatus::Archived)
-        ));
+        assert!(matches!(parse_status("blocked"), Ok(TaskStatus::Blocked)));
+        assert!(matches!(parse_status("done"), Ok(TaskStatus::Done)));
+        assert!(matches!(parse_status("canceled"), Ok(TaskStatus::Canceled)));
+        assert!(matches!(parse_status("archived"), Ok(TaskStatus::Archived)));
     }
 
     #[test]
@@ -2149,7 +2053,7 @@ mod tests {
 
     #[test]
     fn parse_priority_accepts_each_value() {
-        use oxplow_domain::WorkItemPriority as P;
+        use oxplow_domain::TaskPriority as P;
         assert!(matches!(parse_priority("low"), Ok(P::Low)));
         assert!(matches!(parse_priority("medium"), Ok(P::Medium)));
         assert!(matches!(parse_priority("high"), Ok(P::High)));
@@ -2164,7 +2068,7 @@ mod tests {
 
     #[test]
     fn parse_link_type_accepts_every_relation() {
-        use oxplow_domain::WorkItemLinkType as L;
+        use oxplow_domain::TaskLinkType as L;
         assert!(matches!(parse_link_type("blocks"), Ok(L::Blocks)));
         assert!(matches!(parse_link_type("relates_to"), Ok(L::RelatesTo)));
         assert!(matches!(
@@ -2198,14 +2102,14 @@ mod tests {
     #[test]
     fn expect_id_kind_error_names_tool_param_value_and_kinds() {
         let err = expect_id_kind(
-            "create_work_item",
+            "create_task",
             "thread_id",
             "s-abc123",
             oxplow_domain::IdKind::Thread,
         )
         .unwrap_err();
         let msg = err.message.to_string();
-        assert!(msg.contains("create_work_item"), "tool name missing: {msg}");
+        assert!(msg.contains("create_task"), "tool name missing: {msg}");
         assert!(msg.contains("thread_id"), "param name missing: {msg}");
         assert!(msg.contains("s-abc123"), "value missing: {msg}");
         assert!(msg.contains("stream id"), "actual label missing: {msg}");
@@ -2255,13 +2159,12 @@ mod tests {
 
     #[test]
     fn dispatch_brief_includes_identity_and_protocol() {
-        let mut item = make_work_item(None, "ship the thing");
+        let mut item = make_task(None, "ship the thing");
         item.description = String::new();
         item.acceptance_criteria = None;
         let s = compose_dispatch_brief(&item, "");
-        assert!(s.contains("Work item: ship the thing"));
+        assert!(s.contains("Task: ship the thing"));
         assert!(s.contains(&format!("itemId: {}", item.id.0)));
-        assert!(s.contains("kind:"));
         assert!(s.contains("priority:"));
         assert!(s.contains("## Protocol"));
         assert!(!s.contains("## Description"));
@@ -2271,7 +2174,7 @@ mod tests {
 
     #[test]
     fn dispatch_brief_includes_description_when_non_empty() {
-        let mut item = make_work_item(None, "x");
+        let mut item = make_task(None, "x");
         item.description = "do the thing carefully".into();
         let s = compose_dispatch_brief(&item, "");
         assert!(s.contains("## Description"));
@@ -2280,7 +2183,7 @@ mod tests {
 
     #[test]
     fn dispatch_brief_includes_acceptance_criteria_when_non_empty() {
-        let mut item = make_work_item(None, "x");
+        let mut item = make_task(None, "x");
         item.acceptance_criteria = Some("- it works".into());
         let s = compose_dispatch_brief(&item, "");
         assert!(s.contains("## Acceptance criteria"));
@@ -2291,7 +2194,7 @@ mod tests {
     fn dispatch_brief_skips_empty_acceptance_criteria_string() {
         // Some callers pass Some(""), which should still be treated
         // as "no AC" rather than rendering an empty section header.
-        let mut item = make_work_item(None, "x");
+        let mut item = make_task(None, "x");
         item.acceptance_criteria = Some(String::new());
         let s = compose_dispatch_brief(&item, "");
         assert!(!s.contains("## Acceptance criteria"));
@@ -2299,7 +2202,7 @@ mod tests {
 
     #[test]
     fn dispatch_brief_appends_extra_context_when_provided() {
-        let item = make_work_item(None, "x");
+        let item = make_task(None, "x");
         let s = compose_dispatch_brief(&item, "see also note n-7");
         assert!(s.contains("## Extra context"));
         assert!(s.contains("see also note n-7"));

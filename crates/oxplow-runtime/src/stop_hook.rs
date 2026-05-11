@@ -17,12 +17,12 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{Thread, ThreadStatus, WorkItem, WorkItemKind, WorkItemStatus};
+use oxplow_domain::{Task, TaskStatus, Thread, ThreadStatus};
 
 #[derive(Debug, Clone, Default)]
 pub struct ThreadSnapshot<'a> {
     pub thread: Option<&'a Thread>,
-    pub work_items: &'a [WorkItem],
+    pub tasks: &'a [Task],
     /// Signature of the in_progress set the runtime last emitted an
     /// audit directive for on this thread.
     pub last_in_progress_audit_signature: Option<&'a str>,
@@ -63,21 +63,18 @@ pub struct StopHookOutcome {
     pub side_effects: Vec<StopHookSideEffect>,
 }
 
-/// Optional builders that turn a list of items into the human-readable
-/// reason text. Each is `Option` so callers can opt out of a branch
-/// (the older runtime tests used this for selective coverage).
 #[derive(Default)]
 #[allow(clippy::type_complexity)]
 pub struct DirectiveBuilders<'a> {
-    pub build_in_progress_audit_reason: Option<&'a dyn Fn(&[WorkItem]) -> String>,
+    pub build_in_progress_audit_reason: Option<&'a dyn Fn(&[Task]) -> String>,
     pub build_filed_but_didnt_ship_reason: Option<&'a dyn Fn() -> String>,
     pub build_stale_epic_children_reason: Option<&'a dyn Fn(&[StaleEpicPair]) -> String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StaleEpicPair {
-    pub epic: WorkItem,
-    pub stale_children: Vec<WorkItem>,
+    pub epic: Task,
+    pub stale_children: Vec<Task>,
 }
 
 pub fn decide_stop_directive(
@@ -86,17 +83,14 @@ pub fn decide_stop_directive(
 ) -> StopHookOutcome {
     let mut outcome = StopHookOutcome::default();
 
-    // 1. Awaiting-user gate.
     if snapshot.awaiting_user {
         return outcome;
     }
 
-    // 2. Q&A turn — explicitly false means no qualifying activity.
     if snapshot.turn_had_activity == Some(false) {
         return outcome;
     }
 
-    // Need an active (writer) thread for the rest to apply.
     let Some(thread) = snapshot.thread else {
         return outcome;
     };
@@ -104,18 +98,16 @@ pub fn decide_stop_directive(
         return outcome;
     }
 
-    // 3. Subagent-in-flight carve-out.
     if snapshot.subagent_in_flight {
         return outcome;
     }
 
-    let in_progress: Vec<&WorkItem> = snapshot
-        .work_items
+    let in_progress: Vec<&Task> = snapshot
+        .tasks
         .iter()
-        .filter(|item| item.status == WorkItemStatus::InProgress)
+        .filter(|item| item.status == TaskStatus::InProgress)
         .collect();
 
-    // 4. Filed-but-didn't-ship advisory.
     if snapshot.turn_filed_ready_item
         && !snapshot.turn_had_writes
         && in_progress.is_empty()
@@ -130,8 +122,7 @@ pub fn decide_stop_directive(
         }
     }
 
-    // 5. Stale-epic-children advisory.
-    let stale = find_stale_epic_children_pairs(snapshot.work_items);
+    let stale = find_stale_epic_children_pairs(snapshot.tasks);
     if !stale.is_empty() {
         if let Some(build) = builders.build_stale_epic_children_reason {
             outcome.directive = Some(StopDirective::block(build(&stale)));
@@ -139,14 +130,11 @@ pub fn decide_stop_directive(
         }
     }
 
-    // 6. In-progress audit branch.
     if !in_progress.is_empty() {
         if let Some(build) = builders.build_in_progress_audit_reason {
-            let in_progress_owned: Vec<WorkItem> =
-                in_progress.iter().map(|i| (*i).clone()).collect();
+            let in_progress_owned: Vec<Task> = in_progress.iter().map(|i| (*i).clone()).collect();
             let signature = compute_audit_signature(&in_progress_owned);
             if snapshot.last_in_progress_audit_signature == Some(signature.as_str()) {
-                // Nothing changed; suppress.
                 return outcome;
             }
             outcome.directive = Some(StopDirective::block(build(&in_progress_owned)));
@@ -157,30 +145,22 @@ pub fn decide_stop_directive(
         }
     }
 
-    // 7. Allow stop.
     outcome
 }
 
-/// Find epics in `done`/`blocked` whose children are still
-/// `ready`/`in_progress`. Pure helper exposed because the UI surfaces
-/// the same data in banners.
-pub fn find_stale_epic_children_pairs(items: &[WorkItem]) -> Vec<StaleEpicPair> {
+/// An "epic" is any task that has children. Find epics in
+/// `done`/`blocked` whose children are still `ready`/`in_progress`.
+pub fn find_stale_epic_children_pairs(items: &[Task]) -> Vec<StaleEpicPair> {
     let mut pairs = Vec::new();
     for epic in items {
-        if epic.kind != WorkItemKind::Epic {
+        if !matches!(epic.status, TaskStatus::Done | TaskStatus::Blocked) {
             continue;
         }
-        if !matches!(epic.status, WorkItemStatus::Done | WorkItemStatus::Blocked) {
-            continue;
-        }
-        let stale_children: Vec<WorkItem> = items
+        let stale_children: Vec<Task> = items
             .iter()
             .filter(|child| {
-                child.parent_id.as_ref() == Some(&epic.id)
-                    && matches!(
-                        child.status,
-                        WorkItemStatus::Ready | WorkItemStatus::InProgress
-                    )
+                child.parent_id == Some(epic.id)
+                    && matches!(child.status, TaskStatus::Ready | TaskStatus::InProgress)
             })
             .cloned()
             .collect();
@@ -196,7 +176,7 @@ pub fn find_stale_epic_children_pairs(items: &[WorkItem]) -> Vec<StaleEpicPair> 
 
 /// Per-thread fingerprint of the in_progress set used to detect
 /// "nothing changed since last audit fire" and skip a duplicate.
-pub fn compute_audit_signature(items: &[WorkItem]) -> String {
+pub fn compute_audit_signature(items: &[Task]) -> String {
     let mut entries: Vec<String> = items
         .iter()
         .map(|item| {
@@ -215,8 +195,7 @@ pub fn compute_audit_signature(items: &[WorkItem]) -> String {
 mod tests {
     use super::*;
     use oxplow_domain::{
-        StreamId, ThreadId, Timestamp, WorkItemActorKind, WorkItemAuthor, WorkItemId,
-        WorkItemPriority,
+        StreamId, TaskActorKind, TaskAuthor, TaskId, TaskPriority, ThreadId, Timestamp,
     };
 
     fn now() -> Timestamp {
@@ -242,30 +221,24 @@ mod tests {
         }
     }
 
-    fn item(
-        id: &str,
-        kind: WorkItemKind,
-        status: WorkItemStatus,
-        parent: Option<&str>,
-    ) -> WorkItem {
-        WorkItem {
-            id: WorkItemId::from(id),
+    fn item(id: i64, status: TaskStatus, parent: Option<i64>) -> Task {
+        Task {
+            id: TaskId(id),
             thread_id: None,
-            parent_id: parent.map(WorkItemId::from),
-            kind,
-            title: id.into(),
+            parent_id: parent.map(TaskId),
+            title: format!("t{id}"),
             description: String::new(),
             acceptance_criteria: None,
             status,
-            priority: WorkItemPriority::Medium,
+            priority: TaskPriority::Medium,
             sort_index: 0,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now(),
             updated_at: now(),
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         }
@@ -310,19 +283,14 @@ mod tests {
     #[test]
     fn subagent_in_flight_suppresses_audit() {
         let t = active_thread();
-        let items = vec![item(
-            "wi-1",
-            WorkItemKind::Task,
-            WorkItemStatus::InProgress,
-            None,
-        )];
+        let items = vec![item(1, TaskStatus::InProgress, None)];
         let snap = ThreadSnapshot {
             thread: Some(&t),
-            work_items: &items,
+            tasks: &items,
             subagent_in_flight: true,
             ..Default::default()
         };
-        let build_audit = |_: &[WorkItem]| "audit".to_string();
+        let build_audit = |_: &[Task]| "audit".to_string();
         let builders = DirectiveBuilders {
             build_in_progress_audit_reason: Some(&build_audit),
             ..Default::default()
@@ -334,18 +302,13 @@ mod tests {
     #[test]
     fn in_progress_items_trigger_audit() {
         let t = active_thread();
-        let items = vec![item(
-            "wi-1",
-            WorkItemKind::Task,
-            WorkItemStatus::InProgress,
-            None,
-        )];
+        let items = vec![item(1, TaskStatus::InProgress, None)];
         let snap = ThreadSnapshot {
             thread: Some(&t),
-            work_items: &items,
+            tasks: &items,
             ..Default::default()
         };
-        let build_audit = |items: &[WorkItem]| format!("audit {} items", items.len());
+        let build_audit = |items: &[Task]| format!("audit {} items", items.len());
         let builders = DirectiveBuilders {
             build_in_progress_audit_reason: Some(&build_audit),
             ..Default::default()
@@ -362,20 +325,15 @@ mod tests {
     #[test]
     fn audit_signature_dedup() {
         let t = active_thread();
-        let items = vec![item(
-            "wi-1",
-            WorkItemKind::Task,
-            WorkItemStatus::InProgress,
-            None,
-        )];
+        let items = vec![item(1, TaskStatus::InProgress, None)];
         let signature = compute_audit_signature(&items);
         let snap = ThreadSnapshot {
             thread: Some(&t),
-            work_items: &items,
+            tasks: &items,
             last_in_progress_audit_signature: Some(&signature),
             ..Default::default()
         };
-        let build_audit = |_: &[WorkItem]| "audit".to_string();
+        let build_audit = |_: &[Task]| "audit".to_string();
         let builders = DirectiveBuilders {
             build_in_progress_audit_reason: Some(&build_audit),
             ..Default::default()
@@ -433,17 +391,12 @@ mod tests {
     fn stale_epic_children_branch() {
         let t = active_thread();
         let items = vec![
-            item("e-1", WorkItemKind::Epic, WorkItemStatus::Done, None),
-            item(
-                "c-1",
-                WorkItemKind::Task,
-                WorkItemStatus::Ready,
-                Some("e-1"),
-            ),
+            item(1, TaskStatus::Done, None),
+            item(2, TaskStatus::Ready, Some(1)),
         ];
         let snap = ThreadSnapshot {
             thread: Some(&t),
-            work_items: &items,
+            tasks: &items,
             ..Default::default()
         };
         let build_stale = |pairs: &[StaleEpicPair]| {
@@ -477,28 +430,28 @@ mod tests {
     #[test]
     fn find_stale_epic_children_pairs_filters_correctly() {
         let items = vec![
-            // closed epic with stale child → flagged
-            item("e1", WorkItemKind::Epic, WorkItemStatus::Done, None),
-            item("c1", WorkItemKind::Task, WorkItemStatus::Ready, Some("e1")),
-            // closed epic with all-done children → not flagged
-            item("e2", WorkItemKind::Epic, WorkItemStatus::Done, None),
-            item("c2", WorkItemKind::Task, WorkItemStatus::Done, Some("e2")),
-            // open epic → never flagged
-            item("e3", WorkItemKind::Epic, WorkItemStatus::Ready, None),
-            item("c3", WorkItemKind::Task, WorkItemStatus::Ready, Some("e3")),
-            // non-epic with closed status → never flagged
-            item("t4", WorkItemKind::Task, WorkItemStatus::Done, None),
+            // closed parent with stale child → flagged (parent is treated as epic)
+            item(1, TaskStatus::Done, None),
+            item(2, TaskStatus::Ready, Some(1)),
+            // closed parent with all-done children → not flagged
+            item(3, TaskStatus::Done, None),
+            item(4, TaskStatus::Done, Some(3)),
+            // open parent → never flagged
+            item(5, TaskStatus::Ready, None),
+            item(6, TaskStatus::Ready, Some(5)),
+            // childless closed task → never flagged (no stale_children)
+            item(7, TaskStatus::Done, None),
         ];
         let pairs = find_stale_epic_children_pairs(&items);
         assert_eq!(pairs.len(), 1);
-        assert_eq!(pairs[0].epic.id, WorkItemId::from("e1"));
+        assert_eq!(pairs[0].epic.id, TaskId(1));
         assert_eq!(pairs[0].stale_children.len(), 1);
     }
 
     #[test]
     fn compute_audit_signature_stable_under_reordering() {
-        let a = item("wi-a", WorkItemKind::Task, WorkItemStatus::InProgress, None);
-        let b = item("wi-b", WorkItemKind::Task, WorkItemStatus::InProgress, None);
+        let a = item(10, TaskStatus::InProgress, None);
+        let b = item(20, TaskStatus::InProgress, None);
         let s1 = compute_audit_signature(&[a.clone(), b.clone()]);
         let s2 = compute_audit_signature(&[b, a]);
         assert_eq!(s1, s2);

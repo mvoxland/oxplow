@@ -115,7 +115,7 @@ mod tests {
         let turn = AgentTurn {
             id: AgentTurnId::new(),
             thread_id: t.id.clone(),
-            work_item_id: None,
+            task_id: None,
             prompt: "do".into(),
             answer: None,
             session_id: None,

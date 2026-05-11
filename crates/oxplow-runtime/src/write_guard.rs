@@ -95,7 +95,7 @@ pub fn build_write_guard_response(
                     permission_decision_reason: format!(
                         "path `{}` is inside the shared worktree and this thread is read-only — \
                          only the stream's writer thread may mutate the worktree. \
-                         Record the change as a note on the current work item via mcp__oxplow tools (or stop this turn). \
+                         Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). \
                          Promote this thread to writer from the thread rail if you need to edit.",
                         abs.display()
                     ),
@@ -110,7 +110,7 @@ pub fn build_write_guard_response(
             permission_decision: "deny",
             permission_decision_reason:
                 "This thread is read-only — only the stream's writer thread may mutate the worktree. \
-                 Record the change as a note on the current work item via mcp__oxplow tools (or stop this turn). \
+                 Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). \
                  Promote this thread to writer from the thread rail if you need to edit."
                     .into(),
         },
@@ -195,7 +195,7 @@ mod tests {
         let t = read_only_thread();
         let result = build_write_guard_response(
             Some(&t),
-            "mcp__oxplow__create_work_item",
+            "mcp__oxplow__create_task",
             WriteGuardContext::default(),
         );
         assert!(result.is_none());

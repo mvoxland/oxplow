@@ -19,7 +19,7 @@ pub const BLAME_ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 /// could match against snapshot file contents to attribute lines to
 /// efforts; the new schema only persists blob hashes (not full text)
 /// so this Rust port currently surfaces git blame + the BLAME_ZERO_SHA
-/// → "uncommitted" mapping. The work-item effort attribution arrives
+/// → "uncommitted" mapping. The task effort attribution arrives
 /// once content-addressed snapshot blob storage lands (see
 /// MIGRATION_REVIEW2 §3 / sharp edge §5).
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

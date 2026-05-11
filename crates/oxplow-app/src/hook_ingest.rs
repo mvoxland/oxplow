@@ -111,7 +111,7 @@ impl HookIngestService {
                     let turn = AgentTurn {
                         id: AgentTurnId::new(),
                         thread_id: thread.clone(),
-                        work_item_id: None,
+                        task_id: None,
                         prompt: env.prompt.unwrap_or_default(),
                         answer: None,
                         session_id: env.session_id.clone(),

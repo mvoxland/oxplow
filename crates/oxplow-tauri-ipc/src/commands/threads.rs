@@ -244,42 +244,43 @@ pub async fn get_thread_state(
 pub struct ThreadWorkState {
     #[serde(rename = "threadId")]
     pub thread_id: ThreadId,
-    pub waiting: Vec<oxplow_domain::WorkItem>,
+    pub waiting: Vec<oxplow_domain::Task>,
     #[serde(rename = "inProgress")]
-    pub in_progress: Vec<oxplow_domain::WorkItem>,
-    pub done: Vec<oxplow_domain::WorkItem>,
-    pub epics: Vec<oxplow_domain::WorkItem>,
-    pub items: Vec<oxplow_domain::WorkItem>,
+    pub in_progress: Vec<oxplow_domain::Task>,
+    pub done: Vec<oxplow_domain::Task>,
+    pub epics: Vec<oxplow_domain::Task>,
+    pub items: Vec<oxplow_domain::Task>,
     pub followups: Vec<oxplow_app::Followup>,
 }
 
-/// Bucketed work-item view for the Work panel.
+/// Bucketed task view for the Work panel.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_thread_work_state(
     state: tauri::State<'_, AppState>,
     thread_id: ThreadId,
 ) -> Result<ThreadWorkState, IpcError> {
-    use oxplow_domain::stores::WorkItemStore;
-    use oxplow_domain::{WorkItemKind, WorkItemStatus};
-    let rows = state.work_item_store.list_for_thread(&thread_id).await?;
+    use oxplow_domain::stores::TaskStore;
+    use oxplow_domain::TaskStatus;
+    let rows = state.task_store.list_for_thread(&thread_id).await?;
+    // An "epic" is any task that has at least one child within this scope.
+    let child_parents: std::collections::HashSet<oxplow_domain::TaskId> =
+        rows.iter().filter_map(|r| r.parent_id).collect();
     let mut waiting = vec![];
     let mut in_progress = vec![];
     let mut done = vec![];
     let mut epics = vec![];
     let mut items = vec![];
     for r in rows {
-        if r.kind == WorkItemKind::Epic {
+        if child_parents.contains(&r.id) {
             epics.push(r);
             continue;
         }
         match r.status {
-            WorkItemStatus::Blocked => waiting.push(r),
-            WorkItemStatus::InProgress => in_progress.push(r),
-            WorkItemStatus::Done | WorkItemStatus::Canceled | WorkItemStatus::Archived => {
-                done.push(r)
-            }
-            WorkItemStatus::Ready => items.push(r),
+            TaskStatus::Blocked => waiting.push(r),
+            TaskStatus::InProgress => in_progress.push(r),
+            TaskStatus::Done | TaskStatus::Canceled | TaskStatus::Archived => done.push(r),
+            TaskStatus::Ready => items.push(r),
         }
     }
     let followups = state.followups.list_for_thread(&thread_id);

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::sync::broadcast;
 
-use oxplow_domain::{AgentStatusState, StreamId, ThreadId, WorkItemId};
+use oxplow_domain::{AgentStatusState, StreamId, TaskId, ThreadId};
 
 /// fs-watch classification mirrored onto the wire so the renderer can
 /// distinguish create / modify / delete / rename without re-stating
@@ -73,11 +73,11 @@ pub enum OxplowEvent {
         stream_id: StreamId,
         thread_id: Option<ThreadId>,
     },
-    /// Work items on `thread_id` (or backlog if `thread_id` is None).
-    WorkItemsChanged { thread_id: Option<ThreadId> },
+    /// tasks on `thread_id` (or backlog if `thread_id` is None).
+    TasksChanged { thread_id: Option<ThreadId> },
     /// A note was added or removed against an item or thread.
     WorkNotesChanged {
-        item_id: Option<WorkItemId>,
+        item_id: Option<TaskId>,
         thread_id: Option<ThreadId>,
     },
     /// Wiki pages (creation, body update, deletion).
@@ -105,7 +105,7 @@ pub enum OxplowEvent {
     PageVisitChanged,
     /// A usage event was recorded. The renderer's filtering uses
     /// `usage_kind` to scope refetches (wiki vs editor-file vs
-    /// work-item, etc.).
+    /// task, etc.).
     UsageRecorded {
         usage_kind: String,
         key: String,

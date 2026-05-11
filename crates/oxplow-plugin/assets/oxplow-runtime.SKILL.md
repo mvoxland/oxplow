@@ -1,17 +1,17 @@
 ---
 name: oxplow-runtime
-description: Oxplow runtime — work-item filing, status transitions, and orchestrator dispatch. Loads on mcp__oxplow__create_work_item, file_epic_with_children, update_work_item, add_work_note, read_work_options, or dispatch_work_item calls, and when composing a subagent brief.
+description: Oxplow runtime — task filing, status transitions, and orchestrator dispatch. Loads on mcp__oxplow__create_task, file_epic_with_children, update_task, add_work_note, read_task_options, or dispatch_task calls, and when composing a subagent brief.
 ---
 
-# Filing oxplow work items
+# Filing oxplow tasks
 
 Active agent turns render as live rows in the Work panel passively —
-no synthesized work items. File durable work items explicitly when
+no synthesized tasks. File durable tasks explicitly when
 you want to:
 
 - Split pre-planned or multi-phase work into an epic + children
   (`file_epic_with_children`).
-- Pre-queue work the user wants done in a later turn (`create_work_item`).
+- Pre-queue work the user wants done in a later turn (`create_task`).
 - Record a follow-up you noticed but can't fix right now.
 
 ## Task vs epic
@@ -19,7 +19,7 @@ you want to:
 Pick by structure, not by whether the work was planned first. Plenty
 of plan-mode outputs describe a single task.
 
-- **`create_work_item` with `kind: "task"`** — one coherent change,
+- **`create_task` with `kind: "task"`** — one coherent change,
   even if it touches a few files. Rename, bug fix, small feature in one
   subsystem. Sequential chores (edit → typecheck → test) are still one
   task, not sub-steps.
@@ -48,10 +48,10 @@ Siblings under an epic still need to be independently reviewable:
 two things a reviewer would accept/reject separately go in two child
 tasks, not one "misc" child. Same rule as top-level items.
 
-# Work-item transitions
+# task transitions
 
 Mark an explicit item `in_progress` when you start executing it and
-`done` (via `update_work_item` or `complete_task`) when
+`done` (via `update_task` or `complete_task`) when
 you finish. Use `blocked` for items parked on user input.
 
 **Close the row in the same turn the work actually ships.** An
@@ -60,7 +60,7 @@ user. Call `complete_task` the moment the code change lands —
 don't wait for a later turn.
 
 **Pass `touchedFiles` when you close.** `complete_task`,
-`update_work_item`, and `create_work_item` all accept an optional
+`update_task`, and `create_task` all accept an optional
 `touchedFiles: string[]` of repo-relative paths you edited for this
 effort. The runtime attaches them to the closing effort so Local
 History can attribute writes to this specific item when multiple
@@ -69,7 +69,7 @@ assume-all fallback handles big change sets).
 
 For retroactive splits or "file and close in one call" rows (where
 the edits already shipped and you just want a durable row with
-attribution), pass `touchedFiles` directly into `create_work_item`
+attribution), pass `touchedFiles` directly into `create_task`
 along with `status: "done"` (or `"blocked"`) — the server
 synthesizes the `in_progress → target` transition so attribution
 lands exactly as it would for a normal close. Without
@@ -88,8 +88,8 @@ items the agent didn't touch during the turn.
 
 ## Talking about items in chat
 
-When you mention a work item to the user, refer to it by its quoted
-title (e.g. `"Fix login redirect loop"`), **never** by its `wi-…`
+When you mention a task to the user, refer to it by its quoted
+title (e.g. `"Fix login redirect loop"`), **never** by its `id`
 id. The id is an internal handle for tool calls; the user doesn't see
 it in their UI and won't know what you're pointing at. This applies
 everywhere: confirming a fix, asking whether to proceed, summarizing
@@ -103,7 +103,7 @@ same concern), **reopen the existing item** — don't file a new one.
 
 Flow:
 
-1. `update_work_item` the item back to `in_progress` (this opens a
+1. `update_task` the item back to `in_progress` (this opens a
    fresh effort; the `done → in_progress` transition is the documented
    reopen path).
 2. Do the new round of edits.
@@ -121,7 +121,7 @@ scoped to "user rejected my last attempt at this same item."
 - **Inline**: small fixes (≤20 lines, ≤2 files, no risk). Orchestrator
   edits directly.
 - **Subagent**: anything bigger or risky. Call
-  `mcp__oxplow__dispatch_work_item({threadId, itemId})` to get a ready
+  `mcp__oxplow__dispatch_task({threadId, itemId})` to get a ready
   brief; pass `prompt` to the general-purpose Agent tool. The brief
   already contains the item fields, AC, recent notes, and the
   subagent protocol preamble.

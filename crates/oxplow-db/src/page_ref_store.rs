@@ -2,8 +2,8 @@
 //!
 //! Each row is one directed edge `(source) --ref_type--> (target)`.
 //! Per-subsystem writers own their `source_kind` rows (the wiki sync
-//! owns all `wiki` rows, the work-item save path owns all
-//! `work-item` rows, …). The standard write pattern is
+//! owns all `wiki` rows, the task save path owns all
+//! `task` rows, …). The standard write pattern is
 //! [`SqlitePageRefStore::replace_source`]: delete every row whose
 //! source matches, then re-insert the new edge set in one
 //! transaction. The reader joins on `(target_kind, target_id)` for
@@ -129,8 +129,8 @@ impl SqlitePageRefStore {
     /// identified by `ref_types`: only rows whose `ref_type` matches
     /// one of the supplied values are deleted, then `edges` is
     /// inserted. Used when a single source has multiple writers
-    /// contributing different `ref_type`s — e.g. `work-item:wi-1`
-    /// gets body-mention edges from the work-item upsert, link
+    /// contributing different `ref_type`s — e.g. `task:wi-1`
+    /// gets body-mention edges from the task upsert, link
     /// edges from the link store, and touched-file edges from the
     /// effort store. Each writer passes only its own ref_types so
     /// the others' rows survive.
@@ -361,7 +361,7 @@ mod tests {
         let store = SqlitePageRefStore::new(Database::in_memory());
         let edges = vec![
             edge("wiki", "a", "file", "x.rs", "wiki_file_ref"),
-            edge("wiki", "a", "work-item", "wi-1", "wi_body_mention"),
+            edge("wiki", "a", "task", "wi-1", "task_body_mention"),
         ];
         store
             .replace_source("wiki", "a", edges.clone())

@@ -41,8 +41,8 @@ use tracing::{info, warn};
 use oxplow_app::{
     build_session_context_block_with_role, role_change_banner, HookEnvelope, RoleMode, Services,
 };
-use oxplow_domain::stores::{AgentTurnStore, StreamStore, ThreadStore, WorkItemStore};
-use oxplow_domain::{HookKind, StreamId, ThreadId, WorkItemStatus};
+use oxplow_domain::stores::{AgentTurnStore, StreamStore, TaskStore, ThreadStore};
+use oxplow_domain::{HookKind, StreamId, TaskStatus, ThreadId};
 use oxplow_runtime::filing::{build_filing_enforcement_pre_tool_deny, FilingEnforcementContext};
 use oxplow_runtime::stop_hook::{
     decide_stop_directive, DirectiveBuilders, StopHookSideEffect, ThreadSnapshot,
@@ -475,12 +475,12 @@ async fn pre_tool_check(
     }
 
     // Layer 2: filing_enforcement for the writer thread.
-    let has_in_progress_item = ctx
+    let has_in_progress_task = ctx
         .services
-        .work_item_store
+        .task_store
         .list_for_thread(thread_id)
         .await
-        .map(|items| items.iter().any(|i| i.status == WorkItemStatus::InProgress))
+        .map(|items| items.iter().any(|i| i.status == TaskStatus::InProgress))
         .unwrap_or(false);
 
     let file_path = tool_input
@@ -496,7 +496,7 @@ async fn pre_tool_check(
     if let Some(deny) = build_filing_enforcement_pre_tool_deny(FilingEnforcementContext {
         thread: Some(&thread),
         tool_name,
-        has_in_progress_item,
+        has_in_progress_task,
         file_path,
         git_operation_in_progress,
     }) {
@@ -698,9 +698,9 @@ async fn stop_directive(
         .ok()
         .flatten()?;
 
-    let work_items = ctx
+    let tasks = ctx
         .services
-        .work_item_store
+        .task_store
         .list_for_thread(thread_id)
         .await
         .ok()
@@ -722,7 +722,7 @@ async fn stop_directive(
 
     let snapshot = ThreadSnapshot {
         thread: Some(&thread),
-        work_items: &work_items,
+        tasks: &tasks,
         last_in_progress_audit_signature: last_signature.as_deref(),
         // Mined from hook_event_store between this turn's started_at
         // and now. Letting the Q&A-turn carve-out fire silences the
@@ -775,16 +775,16 @@ async fn stop_directive(
     outcome.directive.and_then(|d| serde_json::to_value(d).ok())
 }
 
-fn build_in_progress_audit_reason(items: &[oxplow_domain::WorkItem]) -> String {
+fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
     let titles: Vec<String> = items
         .iter()
-        .map(|i| format!("  • [{}] {} ({:?})", i.id.0, i.title, i.kind))
+        .map(|i| format!("  • [{}] {}", i.id.0, i.title))
         .collect();
     format!(
-        "AUDIT: this turn is closing with {} work item(s) still `in_progress`:\n{}\n\n\
+        "AUDIT: this turn is closing with {} task(s) still `in_progress`:\n{}\n\n\
          Before stopping, walk each one:\n\
          - Done? → `mcp__oxplow__complete_task` with `touchedFiles`.\n\
-         - Stale or no longer the right shape? → `mcp__oxplow__update_work_item` to ready/blocked/done.\n\
+         - Stale or no longer the right shape? → `mcp__oxplow__update_task` to ready/blocked/done.\n\
          - Waiting on the user? → `mcp__oxplow__await_user`.\n\n\
          An `in_progress` row with finished work parked in it looks stuck to the user.",
         items.len(),
@@ -793,7 +793,7 @@ fn build_in_progress_audit_reason(items: &[oxplow_domain::WorkItem]) -> String {
 }
 
 fn build_filed_but_didnt_ship_reason() -> String {
-    "FILED BUT DIDN'T SHIP: you filed a `ready` work item this turn but didn't open one as `in_progress` and didn't make any code edits. \
+    "FILED BUT DIDN'T SHIP: you filed a `ready` task this turn but didn't open one as `in_progress` and didn't make any code edits. \
      If you meant to start the work, mark one in_progress and re-issue the edit. \
      If you meant to queue it for later, reply with that intent and the next turn picks it up."
         .into()

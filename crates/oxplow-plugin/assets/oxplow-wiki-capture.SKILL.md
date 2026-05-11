@@ -67,7 +67,7 @@ it. Only create a new note if no existing note fits.
 ## Slug + title conventions
 
 - Slug: kebab-case, ≤50 chars, topic-shaped. Examples:
-  `stop-hook-pipeline`, `wiki-page-storage`, `work-item-lifecycle`.
+  `stop-hook-pipeline`, `wiki-page-storage`, `task-lifecycle`.
 - Never include dates or turn ids in the slug — one page per topic.
 - Title: `# <Title>` on the first line; human-readable.
 

@@ -956,13 +956,13 @@ mod tests {
             .await
             .unwrap();
         store
-            .record("workItem", "wi-1", None, None, None)
+            .record("task", "wi-1", None, None, None)
             .await
             .unwrap();
         let recent = store.list_recent(10, None).await.unwrap();
         assert_eq!(recent.len(), 2);
         // newest first
-        assert_eq!(recent[0].page_kind, "workItem");
+        assert_eq!(recent[0].page_kind, "task");
     }
 
     #[tokio::test]

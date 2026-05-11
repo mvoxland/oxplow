@@ -98,7 +98,7 @@ pub fn build_session_context_block_with_role(
 /// initial system prompt.
 pub fn role_change_banner(initial: RoleMode, current: RoleMode) -> String {
     match (initial, current) {
-        (RoleMode::ReadOnly, RoleMode::Writer) => "ROLE CHANGE: this thread has been promoted to writer mid-session. The NON_WRITER block in your initial system prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the worktree. File a tracked work item before editing project files (filing-enforcement applies).".to_string(),
+        (RoleMode::ReadOnly, RoleMode::Writer) => "ROLE CHANGE: this thread has been promoted to writer mid-session. The NON_WRITER block in your initial system prompt is SUPERSEDED — you may now use Write/Edit/Bash to mutate the worktree. File a tracked task before editing project files (filing-enforcement applies).".to_string(),
         (RoleMode::Writer, RoleMode::ReadOnly) => "ROLE CHANGE: this thread has been demoted to read-only mid-session. The NON_WRITER block applies now even though it wasn't in your initial system prompt — Write/Edit/Bash mutations to the worktree will be blocked. Wiki captures under .oxplow/wiki/ remain allowed.".to_string(),
         // Same-role pairs never reach this fn — caller skips.
         _ => String::new(),

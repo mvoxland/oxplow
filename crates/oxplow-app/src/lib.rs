@@ -27,11 +27,11 @@ pub mod lsp_sessions;
 pub mod page_ref_backfill;
 pub mod recovery;
 pub mod snapshot_capture;
+pub mod task_service;
 pub mod terminal_sessions;
 pub mod thread_runtime;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
-pub mod work_item_service;
 pub mod workspace_watch;
 
 pub use agent_prompt::{
@@ -43,8 +43,8 @@ pub use events::{
 };
 pub use hook_ingest::{HookEnvelope, HookIngestError, HookIngestService};
 pub use oxplow_lsp::{LspError, LspProxy};
-pub use work_item_service::{
-    BacklogState, CreateWorkItemInput, UpdateWorkItemChanges, WorkItemService, WorkItemServiceError,
+pub use task_service::{
+    BacklogState, CreateTaskInput, TaskService, TaskServiceError, UpdateTaskChanges,
 };
 
 use std::path::PathBuf;
@@ -64,10 +64,9 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqlitePageRefStore,
-    SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore, SqliteThreadStore,
-    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
-    SqliteWorkItemEffortStore, SqliteWorkItemEventStore, SqliteWorkItemLinkStore,
-    SqliteWorkItemStore, SqliteWorkNoteStore,
+    SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
+    SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskStore, SqliteThreadStore,
+    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore, SqliteWorkNoteStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -120,13 +119,13 @@ pub struct Services {
     pub layout: AppLayout,
     pub streams: StreamService,
     pub threads: ThreadService,
-    pub work_items: WorkItemService,
+    pub tasks: TaskService,
     pub stream_store: Arc<SqliteStreamStore>,
     pub thread_store: Arc<SqliteThreadStore>,
-    pub work_item_store: Arc<SqliteWorkItemStore>,
+    pub task_store: Arc<SqliteTaskStore>,
     pub work_note_store: Arc<SqliteWorkNoteStore>,
-    pub work_item_link_store: Arc<SqliteWorkItemLinkStore>,
-    pub work_item_event_store: Arc<SqliteWorkItemEventStore>,
+    pub task_link_store: Arc<SqliteTaskLinkStore>,
+    pub task_event_store: Arc<SqliteTaskEventStore>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -140,7 +139,7 @@ pub struct Services {
     /// views of this same registry — keep the concrete handle around
     /// for code that wants to bypass the trait surfaces.
     pub thread_runtime: Arc<thread_runtime::ThreadRuntimeRegistry>,
-    pub effort_store: Arc<SqliteWorkItemEffortStore>,
+    pub effort_store: Arc<SqliteTaskEffortStore>,
     pub wiki_page_thread_updates: Arc<SqliteWikiPageThreadUpdateStore>,
     /// Unified cross-page reference graph. Every writer that owns a
     /// `source_kind` slice mirrors its outbound refs into this store
@@ -187,16 +186,15 @@ impl Services {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
-        let work_item_store = Arc::new(
-            SqliteWorkItemStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
+        let task_store =
+            Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_ref_store).clone()));
         let work_note_store = Arc::new(
             SqliteWorkNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
-        let work_item_link_store = Arc::new(
-            SqliteWorkItemLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
+        let task_link_store = Arc::new(
+            SqliteTaskLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
-        let work_item_event_store = Arc::new(SqliteWorkItemEventStore::new(db.clone()));
+        let task_event_store = Arc::new(SqliteTaskEventStore::new(db.clone()));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
@@ -210,7 +208,7 @@ impl Services {
         let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(
-            SqliteWorkItemEffortStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
+            SqliteTaskEffortStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
@@ -218,7 +216,7 @@ impl Services {
         let streams =
             StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
         let threads = ThreadService::new(thread_store.clone());
-        let work_items = WorkItemService::new(work_item_store.clone());
+        let tasks = TaskService::new(task_store.clone());
         let event_bus = EventBus::new();
         let hook_ingest = HookIngestService::new(
             hook_event_store.clone(),
@@ -260,13 +258,13 @@ impl Services {
             layout,
             streams,
             threads,
-            work_items,
+            tasks,
             stream_store,
             thread_store,
-            work_item_store,
+            task_store,
             work_note_store,
-            work_item_link_store,
-            work_item_event_store,
+            task_link_store,
+            task_event_store,
             wiki_page_store,
             page_visit_store,
             usage_store,
@@ -314,16 +312,15 @@ impl Services {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
-        let work_item_store = Arc::new(
-            SqliteWorkItemStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
-        );
+        let task_store =
+            Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_ref_store).clone()));
         let work_note_store = Arc::new(
             SqliteWorkNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
-        let work_item_link_store = Arc::new(
-            SqliteWorkItemLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
+        let task_link_store = Arc::new(
+            SqliteTaskLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
-        let work_item_event_store = Arc::new(SqliteWorkItemEventStore::new(db.clone()));
+        let task_event_store = Arc::new(SqliteTaskEventStore::new(db.clone()));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
@@ -337,14 +334,14 @@ impl Services {
         let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(
-            SqliteWorkItemEffortStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
+            SqliteTaskEffortStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
         let workspace_layout = WorkspaceLayout::for_project(&project_dir);
         let streams =
             StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
         let threads = ThreadService::new(thread_store.clone());
-        let work_items = WorkItemService::new(work_item_store.clone());
+        let tasks = TaskService::new(task_store.clone());
         let event_bus = EventBus::new();
         let hook_ingest = HookIngestService::new(
             hook_event_store.clone(),
@@ -379,13 +376,13 @@ impl Services {
             layout,
             streams,
             threads,
-            work_items,
+            tasks,
             stream_store,
             thread_store,
-            work_item_store,
+            task_store,
             work_note_store,
-            work_item_link_store,
-            work_item_event_store,
+            task_link_store,
+            task_event_store,
             wiki_page_store,
             page_visit_store,
             usage_store,

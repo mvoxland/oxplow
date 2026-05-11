@@ -1,11 +1,10 @@
-//! WorkItemService — orchestration over the WorkItem store.
+//! TaskService — orchestration over the Task store.
 //!
-//! Encapsulates the create/update/reorder/move use-cases that the
-//! original `work-item-api.ts` exposed. The store itself is a thin
-//! row-CRUD layer; everything that requires composing reads and writes
-//! (e.g. computing the next sort_index, transitioning status with the
-//! associated timestamp side-effects, moving an item between thread
-//! and backlog) lives here.
+//! Encapsulates the create/update/reorder/move use-cases. The store
+//! itself is a thin row-CRUD layer; everything that requires composing
+//! reads and writes (e.g. computing the next sort_index, transitioning
+//! status with the associated timestamp side-effects, moving a task
+//! between thread and backlog) lives here.
 //!
 //! The service does not emit events itself — the Tauri command layer
 //! does, after a successful service call. That keeps `oxplow-app`
@@ -18,36 +17,36 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
-use oxplow_db::SqliteWorkItemStore;
-use oxplow_db::{EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffortStore};
-use oxplow_domain::stores::{WorkItemLinkStore, WorkItemStore};
+use oxplow_db::SqliteTaskStore;
+use oxplow_db::{EffortFileChange, SqliteTaskEffortStore, TaskEffortStore};
+use oxplow_domain::stores::{TaskLinkStore, TaskStore};
 use oxplow_domain::{
-    DomainError, ThreadId, Timestamp, WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemId,
-    WorkItemKind, WorkItemLinkType, WorkItemPriority, WorkItemStatus,
+    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskLinkType, TaskPriority, TaskStatus,
+    ThreadId, Timestamp,
 };
 
 #[derive(Debug, Error)]
-pub enum WorkItemServiceError {
-    #[error("work item not found: {0}")]
-    NotFound(WorkItemId),
+pub enum TaskServiceError {
+    #[error("task not found: {0}")]
+    NotFound(TaskId),
     #[error("storage: {0}")]
     Storage(#[from] DomainError),
 }
 
 async fn item_is_blocked(
-    id: &WorkItemId,
-    link_store: &dyn WorkItemLinkStore,
-    by_id: &std::collections::HashMap<WorkItemId, WorkItem>,
+    id: TaskId,
+    link_store: &dyn TaskLinkStore,
+    by_id: &std::collections::HashMap<TaskId, Task>,
 ) -> Result<bool, DomainError> {
     let incoming = link_store.list_incoming(id).await?;
     for link in incoming {
-        if !matches!(link.link_type, WorkItemLinkType::Blocks) {
+        if !matches!(link.link_type, TaskLinkType::Blocks) {
             continue;
         }
         if let Some(blocker) = by_id.get(&link.from_item_id) {
             if !matches!(
                 blocker.status,
-                WorkItemStatus::Done | WorkItemStatus::Canceled | WorkItemStatus::Archived
+                TaskStatus::Done | TaskStatus::Canceled | TaskStatus::Archived
             ) {
                 return Ok(true);
             }
@@ -56,7 +55,7 @@ async fn item_is_blocked(
     Ok(false)
 }
 
-/// Discriminated result for `read_work_options`. The shape mirrors
+/// Discriminated result for `read_task_options`. The shape mirrors
 /// main's TS contract so the agent-side skill text stays accurate
 /// without a translation layer.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -64,97 +63,97 @@ async fn item_is_blocked(
 #[allow(clippy::large_enum_variant)]
 pub enum ReadWorkOptionsResult {
     Empty,
-    Epic {
-        epic: WorkItem,
-        children: Vec<WorkItem>,
-    },
-    Standalone {
-        items: Vec<WorkItem>,
-    },
+    Epic { epic: Task, children: Vec<Task> },
+    Standalone { items: Vec<Task> },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
-pub struct CreateWorkItemInput {
-    pub kind: Option<WorkItemKind>,
+pub struct CreateTaskInput {
     pub title: String,
     pub description: Option<String>,
     pub acceptance_criteria: Option<String>,
-    pub parent_id: Option<WorkItemId>,
-    pub status: Option<WorkItemStatus>,
-    pub priority: Option<WorkItemPriority>,
+    pub parent_id: Option<TaskId>,
+    pub status: Option<TaskStatus>,
+    pub priority: Option<TaskPriority>,
     pub category: Option<String>,
     pub tags: Option<String>,
-    pub author: Option<WorkItemAuthor>,
+    pub author: Option<TaskAuthor>,
 }
 
-/// Partial-patch for `update_work_item`. Each `Option` follows
+/// Partial-patch for `update_task`. Each `Option` follows
 /// "missing -> keep, present -> replace" semantics. `category` and
 /// `tags` use a wrapping `Option<Option<…>>`-via-helper pattern to
 /// distinguish "keep" from "clear"; in this struct, `null` clears and
 /// missing keeps.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
-pub struct UpdateWorkItemChanges {
+pub struct UpdateTaskChanges {
     pub title: Option<String>,
     pub description: Option<String>,
     pub acceptance_criteria: Option<Option<String>>,
-    pub parent_id: Option<Option<WorkItemId>>,
-    pub status: Option<WorkItemStatus>,
-    pub priority: Option<WorkItemPriority>,
+    pub parent_id: Option<Option<TaskId>>,
+    pub status: Option<TaskStatus>,
+    pub priority: Option<TaskPriority>,
     pub category: Option<Option<String>>,
     pub tags: Option<Option<String>>,
 }
 
 #[derive(Clone)]
-pub struct WorkItemService {
-    store: Arc<SqliteWorkItemStore>,
+pub struct TaskService {
+    store: Arc<SqliteTaskStore>,
 }
 
-impl WorkItemService {
-    pub fn new(store: Arc<SqliteWorkItemStore>) -> Self {
+/// Returns true iff any item in `items` has this id as its parent_id.
+fn is_epic(item: &Task, items: &[Task]) -> bool {
+    items.iter().any(|c| c.parent_id == Some(item.id))
+}
+
+impl TaskService {
+    pub fn new(store: Arc<SqliteTaskStore>) -> Self {
         Self { store }
     }
 
-    /// Create a work item attached to `thread` (or to the backlog if
+    /// Create a task attached to `thread` (or to the backlog if
     /// `thread` is `None`). Allocates a fresh id and sort_index.
     pub async fn create(
         &self,
         thread: Option<ThreadId>,
-        input: CreateWorkItemInput,
-    ) -> Result<WorkItem, WorkItemServiceError> {
+        input: CreateTaskInput,
+    ) -> Result<Task, TaskServiceError> {
         let next_sort = self.next_sort_index(thread.as_ref()).await?;
         let now = Timestamp::now();
-        let item = WorkItem {
-            id: WorkItemId::new(),
+        let mut item = Task {
+            // id assigned by store.insert
+            id: TaskId(0),
             thread_id: thread,
             parent_id: input.parent_id,
-            kind: input.kind.unwrap_or(WorkItemKind::Task),
             title: input.title,
             description: input.description.unwrap_or_default(),
             acceptance_criteria: input.acceptance_criteria,
-            status: input.status.unwrap_or(WorkItemStatus::Ready),
-            priority: input.priority.unwrap_or(WorkItemPriority::Medium),
+            status: input.status.unwrap_or(TaskStatus::Ready),
+            priority: input.priority.unwrap_or(TaskPriority::Medium),
             sort_index: next_sort,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: input.author.or(Some(WorkItemAuthor::User)),
+            author: input.author.or(Some(TaskAuthor::User)),
             category: input.category,
             tags: input.tags,
         };
-        self.store.upsert(&item).await?;
+        let id = self.store.insert(&item).await?;
+        item.id = id;
         Ok(item)
     }
 
-    /// Apply a partial-patch to an existing work item. Returns the
+    /// Apply a partial-patch to an existing task. Returns the
     /// post-patch row.
     pub async fn update(
         &self,
-        id: &WorkItemId,
-        changes: UpdateWorkItemChanges,
-    ) -> Result<WorkItem, WorkItemServiceError> {
+        id: TaskId,
+        changes: UpdateTaskChanges,
+    ) -> Result<Task, TaskServiceError> {
         let mut item = self.load(id).await?;
         if let Some(t) = changes.title {
             item.title = t;
@@ -170,11 +169,9 @@ impl WorkItemService {
         }
         if let Some(s) = changes.status {
             // Transitioning to/from `done` flips completed_at.
-            if matches!(s, WorkItemStatus::Done) && item.status != WorkItemStatus::Done {
+            if matches!(s, TaskStatus::Done) && item.status != TaskStatus::Done {
                 item.completed_at = Some(Timestamp::now());
-            } else if matches!(item.status, WorkItemStatus::Done)
-                && !matches!(s, WorkItemStatus::Done)
-            {
+            } else if matches!(item.status, TaskStatus::Done) && !matches!(s, TaskStatus::Done) {
                 item.completed_at = None;
             }
             item.status = s;
@@ -189,7 +186,7 @@ impl WorkItemService {
             item.tags = t;
         }
         item.updated_at = Timestamp::now();
-        self.store.upsert(&item).await?;
+        self.store.update(&item).await?;
         Ok(item)
     }
 
@@ -199,59 +196,51 @@ impl WorkItemService {
     pub async fn reorder(
         &self,
         thread: Option<&ThreadId>,
-        order: &[WorkItemId],
-    ) -> Result<(), WorkItemServiceError> {
+        order: &[TaskId],
+    ) -> Result<(), TaskServiceError> {
         let now = Timestamp::now();
         for (idx, id) in order.iter().enumerate() {
-            let mut item = self.load(id).await?;
+            let mut item = self.load(*id).await?;
             // Only reorder items in the right scope.
             if item.thread_id.as_ref() != thread {
                 continue;
             }
             item.sort_index = idx as i64;
             item.updated_at = now;
-            self.store.upsert(&item).await?;
+            self.store.update(&item).await?;
         }
         Ok(())
     }
 
-    /// Move a work item to a different thread (or to the backlog with
+    /// Move a task to a different thread (or to the backlog with
     /// `dest = None`). Reallocates sort_index at the destination tail.
     pub async fn move_to(
         &self,
-        id: &WorkItemId,
+        id: TaskId,
         dest: Option<ThreadId>,
-    ) -> Result<WorkItem, WorkItemServiceError> {
+    ) -> Result<Task, TaskServiceError> {
         let mut item = self.load(id).await?;
         let next_sort = self.next_sort_index(dest.as_ref()).await?;
         item.thread_id = dest;
         item.sort_index = next_sort;
         item.updated_at = Timestamp::now();
-        self.store.upsert(&item).await?;
+        self.store.update(&item).await?;
         Ok(item)
     }
 
-    pub async fn list_for_thread(
-        &self,
-        thread: &ThreadId,
-    ) -> Result<Vec<WorkItem>, WorkItemServiceError> {
+    pub async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, TaskServiceError> {
         Ok(self.store.list_for_thread(thread).await?)
     }
 
-    /// Open + record + close an effort for `item` against `thread`,
-    /// attributing every path in `touched_files` as Updated. The
-    /// `summary` is stored on the effort row for the Local History
-    /// panel. Idempotent only at the effort-row level: each call
-    /// creates a new effort row, even for the same item — that's the
-    /// shape main expects (one effort per close + per redo).
+    /// Open + record + close an effort for `item` against `thread`.
     pub async fn record_effort(
         &self,
-        effort_store: &SqliteWorkItemEffortStore,
-        item: &WorkItemId,
+        effort_store: &SqliteTaskEffortStore,
+        item: TaskId,
         thread: &ThreadId,
         touched_files: &[String],
         summary: Option<String>,
-    ) -> Result<(), WorkItemServiceError> {
+    ) -> Result<(), TaskServiceError> {
         let effort = effort_store.start(item, thread, None).await?;
         for path in touched_files {
             if path.is_empty() {
@@ -265,39 +254,30 @@ impl WorkItemService {
         Ok(())
     }
 
-    pub async fn list_backlog(&self) -> Result<Vec<WorkItem>, WorkItemServiceError> {
+    pub async fn list_backlog(&self) -> Result<Vec<Task>, TaskServiceError> {
         Ok(self.store.list_backlog().await?)
     }
 
-    /// Return the next dispatch unit for the orchestrator. Mirrors
-    /// `readWorkOptions` from `src/persistence/work-item-store.ts`:
-    ///
-    /// 1. Filter to `ready`, sort by `sort_index` ascending.
-    /// 2. Honor `blocks` links — an item is hidden while any blocker
-    ///    isn't yet `done`/`canceled`/`archived`.
-    /// 3. If the head is an epic, recursively gather its `ready`
-    ///    descendants (also blocks-aware).
-    /// 4. Otherwise return all ready non-epic items so the caller can
-    ///    pick one.
-    pub async fn read_work_options(
+    /// Return the next dispatch unit for the orchestrator.
+    pub async fn read_task_options(
         &self,
         thread: &ThreadId,
-        link_store: &dyn WorkItemLinkStore,
-    ) -> Result<ReadWorkOptionsResult, WorkItemServiceError> {
+        link_store: &dyn TaskLinkStore,
+    ) -> Result<ReadWorkOptionsResult, TaskServiceError> {
         let all = self.store.list_for_thread(thread).await?;
-        let by_id: std::collections::HashMap<WorkItemId, WorkItem> =
-            all.iter().map(|i| (i.id.clone(), i.clone())).collect();
+        let by_id: std::collections::HashMap<TaskId, Task> =
+            all.iter().map(|i| (i.id, i.clone())).collect();
 
-        let mut ready: Vec<WorkItem> = all
+        let mut ready: Vec<Task> = all
             .iter()
-            .filter(|i| i.status == WorkItemStatus::Ready)
+            .filter(|i| i.status == TaskStatus::Ready)
             .cloned()
             .collect();
         ready.sort_by_key(|i| (i.sort_index, i.created_at));
 
-        let mut unblocked_ready: Vec<WorkItem> = Vec::new();
+        let mut unblocked_ready: Vec<Task> = Vec::new();
         for item in &ready {
-            if !item_is_blocked(&item.id, link_store, &by_id).await? {
+            if !item_is_blocked(item.id, link_store, &by_id).await? {
                 unblocked_ready.push(item.clone());
             }
         }
@@ -306,18 +286,18 @@ impl WorkItemService {
             return Ok(ReadWorkOptionsResult::Empty);
         };
 
-        if head.kind == WorkItemKind::Epic {
-            let mut children: Vec<WorkItem> = Vec::new();
-            let mut frontier = vec![head.id.clone()];
+        if is_epic(&head, &all) {
+            let mut children: Vec<Task> = Vec::new();
+            let mut frontier = vec![head.id];
             while let Some(parent_id) = frontier.pop() {
                 for it in &all {
-                    if it.parent_id.as_ref() == Some(&parent_id) {
-                        if it.status == WorkItemStatus::Ready
-                            && !item_is_blocked(&it.id, link_store, &by_id).await?
+                    if it.parent_id == Some(parent_id) {
+                        if it.status == TaskStatus::Ready
+                            && !item_is_blocked(it.id, link_store, &by_id).await?
                         {
                             children.push(it.clone());
                         }
-                        frontier.push(it.id.clone());
+                        frontier.push(it.id);
                     }
                 }
             }
@@ -328,29 +308,26 @@ impl WorkItemService {
             });
         }
 
-        let standalone: Vec<WorkItem> = unblocked_ready
+        let standalone: Vec<Task> = unblocked_ready
             .into_iter()
-            .filter(|i| i.kind != WorkItemKind::Epic)
+            .filter(|i| !is_epic(i, &all))
             .collect();
         Ok(ReadWorkOptionsResult::Standalone { items: standalone })
     }
 
-    pub async fn soft_delete(&self, id: &WorkItemId) -> Result<(), WorkItemServiceError> {
+    pub async fn soft_delete(&self, id: TaskId) -> Result<(), TaskServiceError> {
         self.store.soft_delete(id).await?;
         Ok(())
     }
 
-    async fn load(&self, id: &WorkItemId) -> Result<WorkItem, WorkItemServiceError> {
+    async fn load(&self, id: TaskId) -> Result<Task, TaskServiceError> {
         self.store
             .get(id)
             .await?
-            .ok_or_else(|| WorkItemServiceError::NotFound(id.clone()))
+            .ok_or(TaskServiceError::NotFound(id))
     }
 
-    async fn next_sort_index(
-        &self,
-        thread: Option<&ThreadId>,
-    ) -> Result<i64, WorkItemServiceError> {
+    async fn next_sort_index(&self, thread: Option<&ThreadId>) -> Result<i64, TaskServiceError> {
         let items = match thread {
             Some(t) => self.store.list_for_thread(t).await?,
             None => self.store.list_backlog().await?,
@@ -362,26 +339,24 @@ impl WorkItemService {
 /// The bucketed view the Backlog page renders.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct BacklogState {
-    pub items: Vec<WorkItem>,
-    pub waiting: Vec<WorkItem>,
-    pub in_progress: Vec<WorkItem>,
-    pub done: Vec<WorkItem>,
+    pub items: Vec<Task>,
+    pub waiting: Vec<Task>,
+    pub in_progress: Vec<Task>,
+    pub done: Vec<Task>,
 }
 
 impl BacklogState {
-    pub fn from_rows(rows: Vec<WorkItem>) -> Self {
+    pub fn from_rows(rows: Vec<Task>) -> Self {
         let mut items = Vec::new();
         let mut waiting = Vec::new();
         let mut in_progress = Vec::new();
         let mut done = Vec::new();
         for r in rows {
             match r.status {
-                WorkItemStatus::InProgress => in_progress.push(r),
-                WorkItemStatus::Done | WorkItemStatus::Canceled | WorkItemStatus::Archived => {
-                    done.push(r)
-                }
-                WorkItemStatus::Blocked => waiting.push(r),
-                WorkItemStatus::Ready => items.push(r),
+                TaskStatus::InProgress => in_progress.push(r),
+                TaskStatus::Done | TaskStatus::Canceled | TaskStatus::Archived => done.push(r),
+                TaskStatus::Blocked => waiting.push(r),
+                TaskStatus::Ready => items.push(r),
             }
         }
         Self {
@@ -400,11 +375,11 @@ mod tests {
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
 
-    async fn fixture() -> (WorkItemService, ThreadId) {
+    async fn fixture() -> (TaskService, ThreadId) {
         let db = Database::in_memory();
         let streams = SqliteStreamStore::new(db.clone());
         let threads = SqliteThreadStore::new(db.clone());
-        let store = Arc::new(SqliteWorkItemStore::new(db));
+        let store = Arc::new(SqliteTaskStore::new(db));
         let s = Stream {
             id: StreamId::from("s-1"),
             kind: StreamKind::Primary,
@@ -440,7 +415,7 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
-        (WorkItemService::new(store), t.id)
+        (TaskService::new(store), t.id)
     }
 
     #[tokio::test]
@@ -449,7 +424,7 @@ mod tests {
         let a = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
+                CreateTaskInput {
                     title: "a".into(),
                     ..Default::default()
                 },
@@ -459,7 +434,7 @@ mod tests {
         let b = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
+                CreateTaskInput {
                     title: "b".into(),
                     ..Default::default()
                 },
@@ -476,7 +451,7 @@ mod tests {
         let it = svc
             .create(
                 Some(tid),
-                CreateWorkItemInput {
+                CreateTaskInput {
                     title: "before".into(),
                     description: Some("desc".into()),
                     ..Default::default()
@@ -486,8 +461,8 @@ mod tests {
             .unwrap();
         let updated = svc
             .update(
-                &it.id,
-                UpdateWorkItemChanges {
+                it.id,
+                UpdateTaskChanges {
                     title: Some("after".into()),
                     ..Default::default()
                 },
@@ -504,7 +479,7 @@ mod tests {
         let it = svc
             .create(
                 Some(tid),
-                CreateWorkItemInput {
+                CreateTaskInput {
                     title: "x".into(),
                     ..Default::default()
                 },
@@ -514,9 +489,9 @@ mod tests {
         assert!(it.completed_at.is_none());
         let done = svc
             .update(
-                &it.id,
-                UpdateWorkItemChanges {
-                    status: Some(WorkItemStatus::Done),
+                it.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::Done),
                     ..Default::default()
                 },
             )
@@ -525,9 +500,9 @@ mod tests {
         assert!(done.completed_at.is_some());
         let reopened = svc
             .update(
-                &done.id,
-                UpdateWorkItemChanges {
-                    status: Some(WorkItemStatus::InProgress),
+                done.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::InProgress),
                     ..Default::default()
                 },
             )
@@ -542,14 +517,14 @@ mod tests {
         let it = svc
             .create(
                 Some(tid),
-                CreateWorkItemInput {
+                CreateTaskInput {
                     title: "x".into(),
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
-        let moved = svc.move_to(&it.id, None).await.unwrap();
+        let moved = svc.move_to(it.id, None).await.unwrap();
         assert!(moved.thread_id.is_none());
         let bl = svc.list_backlog().await.unwrap();
         assert_eq!(bl.len(), 1);
@@ -562,7 +537,7 @@ mod tests {
         let a = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
+                CreateTaskInput {
                     title: "a".into(),
                     ..Default::default()
                 },
@@ -572,7 +547,7 @@ mod tests {
         let b = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
+                CreateTaskInput {
                     title: "b".into(),
                     ..Default::default()
                 },
@@ -582,7 +557,7 @@ mod tests {
         let c = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
+                CreateTaskInput {
                     title: "c".into(),
                     ..Default::default()
                 },
@@ -590,43 +565,40 @@ mod tests {
             .await
             .unwrap();
         // c, a, b
-        svc.reorder(Some(&tid), &[c.id.clone(), a.id.clone(), b.id.clone()])
-            .await
-            .unwrap();
+        svc.reorder(Some(&tid), &[c.id, a.id, b.id]).await.unwrap();
         let list = svc.list_for_thread(&tid).await.unwrap();
-        let order: Vec<_> = list.iter().map(|i| i.id.clone()).collect();
+        let order: Vec<_> = list.iter().map(|i| i.id).collect();
         assert_eq!(order, vec![c.id, a.id, b.id]);
     }
 
     #[test]
     fn backlog_state_buckets_by_status() {
         let now = Timestamp::from_unix_ms(1);
-        let mk = |id: &str, status| WorkItem {
-            id: WorkItemId::from(id),
+        let mk = |id: i64, status| Task {
+            id: TaskId(id),
             thread_id: None,
             parent_id: None,
-            kind: WorkItemKind::Task,
-            title: id.into(),
+            title: id.to_string(),
             description: String::new(),
             acceptance_criteria: None,
             status,
-            priority: WorkItemPriority::Medium,
+            priority: TaskPriority::Medium,
             sort_index: 0,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         };
         let rows = vec![
-            mk("a", WorkItemStatus::Ready),
-            mk("b", WorkItemStatus::InProgress),
-            mk("c", WorkItemStatus::Done),
-            mk("d", WorkItemStatus::Blocked),
+            mk(1, TaskStatus::Ready),
+            mk(2, TaskStatus::InProgress),
+            mk(3, TaskStatus::Done),
+            mk(4, TaskStatus::Blocked),
         ];
         let st = BacklogState::from_rows(rows);
         assert_eq!(st.items.len(), 1);
@@ -637,34 +609,31 @@ mod tests {
 
     #[test]
     fn backlog_state_collapses_canceled_and_archived_into_done() {
-        // Canceled and Archived rows ride in the same bucket as Done
-        // — the Backlog page renders them under one "Done" header.
         let now = Timestamp::from_unix_ms(1);
-        let mk = |id: &str, status| WorkItem {
-            id: WorkItemId::from(id),
+        let mk = |id: i64, status| Task {
+            id: TaskId(id),
             thread_id: None,
             parent_id: None,
-            kind: WorkItemKind::Task,
-            title: id.into(),
+            title: id.to_string(),
             description: String::new(),
             acceptance_criteria: None,
             status,
-            priority: WorkItemPriority::Medium,
+            priority: TaskPriority::Medium,
             sort_index: 0,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         };
         let st = BacklogState::from_rows(vec![
-            mk("a", WorkItemStatus::Done),
-            mk("b", WorkItemStatus::Canceled),
-            mk("c", WorkItemStatus::Archived),
+            mk(1, TaskStatus::Done),
+            mk(2, TaskStatus::Canceled),
+            mk(3, TaskStatus::Archived),
         ]);
         assert_eq!(st.done.len(), 3);
         assert!(st.items.is_empty());
@@ -683,21 +652,14 @@ mod tests {
         );
     }
 
-    // ---- read_work_options edge cases ----
+    // ---- read_task_options edge cases ----
 
-    /// Build a link store backed by the same in-memory DB the
-    /// fixture's WorkItemService uses, so both surfaces see the same
-    /// rows when read_work_options walks links.
-    async fn link_store_fixture() -> (
-        WorkItemService,
-        oxplow_db::SqliteWorkItemLinkStore,
-        ThreadId,
-    ) {
+    async fn link_store_fixture() -> (TaskService, oxplow_db::SqliteTaskLinkStore, ThreadId) {
         let db = Database::in_memory();
         let streams = SqliteStreamStore::new(db.clone());
         let threads = SqliteThreadStore::new(db.clone());
-        let store = Arc::new(SqliteWorkItemStore::new(db.clone()));
-        let link_store = oxplow_db::SqliteWorkItemLinkStore::new(db.clone());
+        let store = Arc::new(SqliteTaskStore::new(db.clone()));
+        let link_store = oxplow_db::SqliteTaskLinkStore::new(db.clone());
         let s = Stream {
             id: StreamId::from("s-1"),
             kind: StreamKind::Primary,
@@ -733,18 +695,16 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
-        (WorkItemService::new(store), link_store, t.id)
+        (TaskService::new(store), link_store, t.id)
     }
 
     #[tokio::test]
     async fn read_work_options_empty_when_no_ready_items() {
         let (svc, links, tid) = link_store_fixture().await;
-        // Create one item but mark it in-progress, not ready.
         let a = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
-                    kind: Some(WorkItemKind::Task),
+                CreateTaskInput {
                     title: "in flight".into(),
                     ..Default::default()
                 },
@@ -752,15 +712,15 @@ mod tests {
             .await
             .unwrap();
         svc.update(
-            &a.id,
-            UpdateWorkItemChanges {
-                status: Some(WorkItemStatus::InProgress),
+            a.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::InProgress),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
-        let result = svc.read_work_options(&tid, &links).await.unwrap();
+        let result = svc.read_task_options(&tid, &links).await.unwrap();
         assert!(matches!(result, ReadWorkOptionsResult::Empty));
     }
 
@@ -769,15 +729,14 @@ mod tests {
         let (svc, links, tid) = link_store_fixture().await;
         svc.create(
             Some(tid.clone()),
-            CreateWorkItemInput {
-                kind: Some(WorkItemKind::Task),
+            CreateTaskInput {
                 title: "ready task".into(),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
-        let result = svc.read_work_options(&tid, &links).await.unwrap();
+        let result = svc.read_task_options(&tid, &links).await.unwrap();
         match result {
             ReadWorkOptionsResult::Standalone { items } => {
                 assert_eq!(items.len(), 1);
@@ -793,8 +752,7 @@ mod tests {
         let epic = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
-                    kind: Some(WorkItemKind::Epic),
+                CreateTaskInput {
                     title: "the epic".into(),
                     ..Default::default()
                 },
@@ -804,10 +762,9 @@ mod tests {
         let _child_a = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
-                    kind: Some(WorkItemKind::Task),
+                CreateTaskInput {
                     title: "child A".into(),
-                    parent_id: Some(epic.id.clone()),
+                    parent_id: Some(epic.id),
                     ..Default::default()
                 },
             )
@@ -816,16 +773,15 @@ mod tests {
         let _child_b = svc
             .create(
                 Some(tid.clone()),
-                CreateWorkItemInput {
-                    kind: Some(WorkItemKind::Task),
+                CreateTaskInput {
                     title: "child B".into(),
-                    parent_id: Some(epic.id.clone()),
+                    parent_id: Some(epic.id),
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
-        let result = svc.read_work_options(&tid, &links).await.unwrap();
+        let result = svc.read_task_options(&tid, &links).await.unwrap();
         match result {
             ReadWorkOptionsResult::Epic { epic: e, children } => {
                 assert_eq!(e.id, epic.id);

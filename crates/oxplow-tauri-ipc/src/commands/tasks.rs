@@ -1,0 +1,156 @@
+use serde::{Deserialize, Serialize};
+use specta::Type;
+
+use oxplow_app::{CreateTaskInput, OxplowEvent, UpdateTaskChanges};
+use oxplow_domain::stores::TaskStore;
+use oxplow_domain::{Task, TaskId, ThreadId};
+
+use crate::error::IpcError;
+use crate::state::AppState;
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_tasks_for_thread(
+    state: tauri::State<'_, AppState>,
+    thread_id: ThreadId,
+) -> Result<Vec<Task>, IpcError> {
+    Ok(state.task_store.list_for_thread(&thread_id).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_task(
+    state: tauri::State<'_, AppState>,
+    id: TaskId,
+) -> Result<Option<Task>, IpcError> {
+    Ok(state.task_store.get(id).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn upsert_task(state: tauri::State<'_, AppState>, item: Task) -> Result<Task, IpcError> {
+    let thread_id = item.thread_id.clone();
+    let result = if item.id.value() == 0 {
+        let mut new_item = item;
+        let id = state.task_store.insert(&new_item).await?;
+        new_item.id = id;
+        new_item
+    } else {
+        state.task_store.update(&item).await?;
+        item
+    };
+    state.events.emit(OxplowEvent::TasksChanged { thread_id });
+    Ok(result)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_task(state: tauri::State<'_, AppState>, id: TaskId) -> Result<(), IpcError> {
+    let thread_id = state.task_store.get(id).await?.and_then(|i| i.thread_id);
+    state.task_store.soft_delete(id).await?;
+    state.events.emit(OxplowEvent::TasksChanged { thread_id });
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct CreateTaskRequest {
+    #[serde(rename = "threadId")]
+    pub thread_id: Option<ThreadId>,
+    pub input: CreateTaskInput,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn create_task(
+    state: tauri::State<'_, AppState>,
+    req: CreateTaskRequest,
+) -> Result<Task, IpcError> {
+    let item = state.tasks.create(req.thread_id.clone(), req.input).await?;
+    state.events.emit(OxplowEvent::TasksChanged {
+        thread_id: req.thread_id,
+    });
+    Ok(item)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct UpdateTaskRequest {
+    pub id: TaskId,
+    pub changes: UpdateTaskChanges,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn update_task(
+    state: tauri::State<'_, AppState>,
+    req: UpdateTaskRequest,
+) -> Result<Task, IpcError> {
+    let item = state.tasks.update(req.id, req.changes).await?;
+    state.events.emit(OxplowEvent::TasksChanged {
+        thread_id: item.thread_id.clone(),
+    });
+    Ok(item)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ReorderTasksRequest {
+    #[serde(rename = "threadId")]
+    pub thread_id: Option<ThreadId>,
+    pub order: Vec<TaskId>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reorder_tasks(
+    state: tauri::State<'_, AppState>,
+    req: ReorderTasksRequest,
+) -> Result<(), IpcError> {
+    state
+        .tasks
+        .reorder(req.thread_id.as_ref(), &req.order)
+        .await?;
+    state.events.emit(OxplowEvent::TasksChanged {
+        thread_id: req.thread_id,
+    });
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct MoveTaskRequest {
+    pub id: TaskId,
+    /// Destination thread, or `None` to move onto the backlog.
+    #[serde(rename = "threadId")]
+    pub thread_id: Option<ThreadId>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_task_summaries(
+    state: tauri::State<'_, AppState>,
+    thread_id: Option<ThreadId>,
+) -> Result<Vec<Task>, IpcError> {
+    Ok(match thread_id {
+        Some(t) => state.task_store.list_for_thread(&t).await?,
+        None => state.task_store.list_backlog().await?,
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn move_task(
+    state: tauri::State<'_, AppState>,
+    req: MoveTaskRequest,
+) -> Result<Task, IpcError> {
+    let origin_thread_id = state
+        .task_store
+        .get(req.id)
+        .await?
+        .and_then(|i| i.thread_id);
+    let item = state.tasks.move_to(req.id, req.thread_id.clone()).await?;
+    state.events.emit(OxplowEvent::TasksChanged {
+        thread_id: origin_thread_id,
+    });
+    state.events.emit(OxplowEvent::TasksChanged {
+        thread_id: req.thread_id,
+    });
+    Ok(item)
+}

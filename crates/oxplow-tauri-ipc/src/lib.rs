@@ -58,24 +58,24 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::threads::select_thread,
         commands::threads::get_thread_state,
         commands::threads::get_thread_work_state,
-        // work items
-        commands::work_items::list_work_items_for_thread,
-        commands::work_items::get_work_item,
-        commands::work_items::upsert_work_item,
-        commands::work_items::delete_work_item,
-        commands::work_items::create_work_item,
-        commands::work_items::update_work_item,
-        commands::work_items::reorder_work_items,
-        commands::work_items::move_work_item,
-        commands::work_items::get_work_item_summaries,
+        // tasks
+        commands::tasks::list_tasks_for_thread,
+        commands::tasks::get_task,
+        commands::tasks::upsert_task,
+        commands::tasks::delete_task,
+        commands::tasks::create_task,
+        commands::tasks::update_task,
+        commands::tasks::reorder_tasks,
+        commands::tasks::move_task,
+        commands::tasks::get_task_summaries,
         // backlog
         commands::backlog::list_backlog,
         commands::backlog::get_backlog_state,
-        // notes (work item / thread)
+        // notes (task / thread)
         commands::notes::add_thread_note,
         commands::notes::list_thread_notes,
         commands::notes::delete_work_note,
-        commands::notes::list_work_item_events,
+        commands::notes::list_task_events,
         // wiki
         commands::wiki::list_wiki_pages,
         commands::wiki::get_wiki_page,
@@ -165,7 +165,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::agent_panes::ensure_agent_pane,
         commands::agent_panes::teardown_agent_panes,
         // efforts
-        commands::effort::list_work_item_efforts,
+        commands::effort::list_task_efforts,
         commands::effort::get_effort_files,
         commands::effort::list_efforts_ending_at_snapshots,
         // log

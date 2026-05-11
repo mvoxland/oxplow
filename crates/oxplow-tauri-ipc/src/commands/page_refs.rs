@@ -6,10 +6,10 @@
 //! - `list_outbound(source_kind, source_id)` — what this page points
 //!   to. Drives the new Outbound dropdown.
 //!
-//! The reader joins source labels (wiki title, work-item title,
+//! The reader joins source labels (wiki title, task title,
 //! commit subject) at read time so the renderer doesn't need to do
 //! a second round-trip per row. Labels are best-effort — when the
-//! source is gone (e.g. a deleted work item) the label is `None`
+//! source is gone (e.g. a deleted task) the label is `None`
 //! and the renderer falls back to `source_id`.
 
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ pub struct BacklinkEdge {
     pub target_id: String,
     pub ref_type: String,
     pub source_extra: Option<String>,
-    /// Human label for the source (wiki title, work-item title,
+    /// Human label for the source (wiki title, task title,
     /// commit subject, …). Falls back to `source_id` in the
     /// renderer when None.
     pub source_label: Option<String>,
@@ -119,11 +119,12 @@ async fn source_label(state: &AppState, kind: &str, id: &str) -> Option<String> 
             .ok()
             .flatten()
             .map(|p| p.title),
-        "work-item" => {
-            use oxplow_domain::stores::WorkItemStore as _;
+        "task" => {
+            use oxplow_domain::stores::TaskStore as _;
+            let tid = oxplow_domain::TaskId::try_from_str(id)?;
             state
-                .work_item_store
-                .get(&oxplow_domain::WorkItemId::from(id))
+                .task_store
+                .get(tid)
                 .await
                 .ok()
                 .flatten()

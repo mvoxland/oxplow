@@ -11,7 +11,7 @@
 mod harness;
 
 use harness::TestApp;
-use oxplow_domain::{StreamId, ThreadId, WorkItemId};
+use oxplow_domain::{StreamId, TaskId, ThreadId};
 use oxplow_tauri_ipc::commands;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -81,21 +81,20 @@ async fn list_closed_threads_empty_for_unknown_stream() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_work_item_missing_returns_none() {
+async fn get_task_missing_returns_none() {
     let app = TestApp::build();
-    let item = commands::work_items::get_work_item(app.state(), WorkItemId::from("nope"))
+    let item = commands::tasks::get_task(app.state(), TaskId(999))
         .await
         .unwrap();
     assert!(item.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_work_items_for_thread_empty() {
+async fn list_tasks_for_thread_empty() {
     let app = TestApp::build();
-    let items =
-        commands::work_items::list_work_items_for_thread(app.state(), ThreadId::from("no-such"))
-            .await
-            .unwrap();
+    let items = commands::tasks::list_tasks_for_thread(app.state(), ThreadId::from("no-such"))
+        .await
+        .unwrap();
     assert!(items.is_empty());
 }
 
@@ -306,36 +305,34 @@ async fn search_wiki_bodies_empty_for_fresh_project() {
     assert!(v.is_empty());
 }
 
-// ---- Work item commands ----
+// ---- task commands ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_work_items_for_thread_returns_empty_again() {
-    // Slightly different from the existing list_work_items_for_thread_empty
+async fn list_tasks_for_thread_returns_empty_again() {
+    // Slightly different from the existing list_tasks_for_thread_empty
     // helper — exercises the same surface with an explicit ThreadId conversion.
     let app = TestApp::build();
-    let v =
-        commands::work_items::list_work_items_for_thread(app.state(), ThreadId::from("b-empty"))
-            .await
-            .unwrap();
+    let v = commands::tasks::list_tasks_for_thread(app.state(), ThreadId::from("b-empty"))
+        .await
+        .unwrap();
     assert!(v.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_work_item_summaries_for_empty_thread() {
+async fn get_task_summaries_for_empty_thread() {
     let app = TestApp::build();
-    let v =
-        commands::work_items::get_work_item_summaries(app.state(), Some(ThreadId::from("b-empty")))
-            .await
-            .unwrap();
+    let v = commands::tasks::get_task_summaries(app.state(), Some(ThreadId::from("b-empty")))
+        .await
+        .unwrap();
     assert!(v.is_empty());
 }
 
 // ---- Effort commands ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_work_item_efforts_empty_for_unknown_item() {
+async fn list_task_efforts_empty_for_unknown_item() {
     let app = TestApp::build();
-    let v = commands::effort::list_work_item_efforts(app.state(), WorkItemId::from("wi-none"))
+    let v = commands::effort::list_task_efforts(app.state(), TaskId(999))
         .await
         .unwrap();
     assert!(v.is_empty());

@@ -71,7 +71,7 @@ pub struct ParsedRefs {
     /// commit refs). A trailing `/` on the path is tolerated and
     /// stripped.
     pub dir_refs: Vec<String>,
-    /// Slugs of other wiki pages (`work-item-lifecycle`).
+    /// Slugs of other wiki pages (`task-lifecycle`).
     pub related_notes: Vec<String>,
 }
 
@@ -222,7 +222,7 @@ pub async fn sync_from_disk(
 
 /// `sync_from_disk` plus a unified `page_ref` projection: when
 /// `page_refs` is `Some`, the wiki body's full ref set (files, dirs,
-/// related slugs, work-items, findings, commits) is mirrored as
+/// related slugs, tasks, findings, commits) is mirrored as
 /// `(wiki:<slug>) -> (target)` edges. The wiki source is single-
 /// owner, so we use the full `replace_source` (clears + inserts).
 pub async fn sync_from_disk_with_refs(
@@ -552,10 +552,10 @@ mod tests {
 
     #[test]
     fn parse_extracts_wikilink_notes() {
-        let refs = parse_refs("related: [[work-item-lifecycle]] and [[stop-hook-pipeline]]");
+        let refs = parse_refs("related: [[task-lifecycle]] and [[stop-hook-pipeline]]");
         assert_eq!(
             refs.related_notes,
-            vec!["stop-hook-pipeline", "work-item-lifecycle"]
+            vec!["stop-hook-pipeline", "task-lifecycle"]
         );
     }
 
@@ -762,7 +762,7 @@ mod tests {
 
     #[test]
     fn looks_like_slug_accepts_kebab_and_underscore() {
-        assert!(looks_like_slug("work-item-lifecycle"));
+        assert!(looks_like_slug("task-lifecycle"));
         assert!(looks_like_slug("snake_case_slug"));
         assert!(looks_like_slug("a"));
     }
@@ -918,7 +918,7 @@ mod tests {
 
     /// End-to-end: write a wiki body that mentions `wi-1` and a file,
     /// run the disk sync with the page-ref store attached, and verify
-    /// that `list_backlinks(work-item, wi-1)` and
+    /// that `list_backlinks(task, wi-1)` and
     /// `list_backlinks(file, …)` both return the wiki page as a
     /// source. This is the user-visible promise: every page kind that
     /// gets mentioned in a wiki body shows the wiki in its backlinks.
@@ -929,7 +929,7 @@ mod tests {
         std::fs::create_dir_all(wiki_pages_dir(project)).unwrap();
         std::fs::write(
             wiki_pages_dir(project).join("intro.md"),
-            "# Intro\nblocks [[wi-019abc-1]] and touches [[src/app.rs]] and finding:fnd-1\n",
+            "# Intro\nblocks [[task:1]] and touches [[src/app.rs]] and finding:fnd-1\n",
         )
         .unwrap();
 
@@ -942,10 +942,7 @@ mod tests {
             .unwrap();
 
         // wi-1 backlink picks up the wiki source.
-        let inbound_wi = page_refs
-            .list_backlinks("work-item", "wi-019abc-1", None)
-            .await
-            .unwrap();
+        let inbound_wi = page_refs.list_backlinks("task", "1", None).await.unwrap();
         assert_eq!(inbound_wi.len(), 1);
         assert_eq!(inbound_wi[0].source_kind, "wiki");
         assert_eq!(inbound_wi[0].source_id, "intro");
@@ -976,7 +973,7 @@ mod tests {
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
-        assert!(targets.contains(&("work-item", "wi-019abc-1")));
+        assert!(targets.contains(&("task", "1")));
         assert!(targets.contains(&("file", "src/app.rs")));
         assert!(targets.contains(&("finding", "fnd-1")));
     }
@@ -989,7 +986,7 @@ mod tests {
         let project = tmp.path();
         std::fs::create_dir_all(wiki_pages_dir(project)).unwrap();
         let body_path = wiki_pages_dir(project).join("intro.md");
-        std::fs::write(&body_path, "[[wi-019abc-1]] [[wi-019abc-2]]").unwrap();
+        std::fs::write(&body_path, "[[task:1]] [[task:2]]").unwrap();
 
         let db = oxplow_db::Database::in_memory();
         let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
@@ -999,20 +996,14 @@ mod tests {
             .await
             .unwrap();
         // Now drop wi-2 from the body.
-        std::fs::write(&body_path, "[[wi-019abc-1]] only").unwrap();
+        std::fs::write(&body_path, "[[task:1]] only").unwrap();
         sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
             .await
             .unwrap();
 
-        let inbound_2 = page_refs
-            .list_backlinks("work-item", "wi-019abc-2", None)
-            .await
-            .unwrap();
+        let inbound_2 = page_refs.list_backlinks("task", "2", None).await.unwrap();
         assert!(inbound_2.is_empty(), "expected no backlinks after removal");
-        let inbound_1 = page_refs
-            .list_backlinks("work-item", "wi-019abc-1", None)
-            .await
-            .unwrap();
+        let inbound_1 = page_refs.list_backlinks("task", "1", None).await.unwrap();
         assert_eq!(inbound_1.len(), 1);
     }
 }

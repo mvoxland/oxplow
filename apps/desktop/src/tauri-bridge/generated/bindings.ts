@@ -153,48 +153,46 @@ export const commands = {
 	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError>(__TAURI_INVOKE("select_thread", { req })),
 	// Aggregate "what threads exist on this stream and what's selected/active".
 	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError>(__TAURI_INVOKE("get_thread_state", { streamId })),
-	// Bucketed work-item view for the Work panel.
+	// Bucketed task view for the Work panel.
 	getThreadWorkState: (threadId: ThreadId) => typedError<ThreadWorkState, IpcError>(__TAURI_INVOKE("get_thread_work_state", { threadId })),
-	listWorkItemsForThread: (threadId: ThreadId) => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_work_items_for_thread", { threadId })),
-	getWorkItem: (id: WorkItemId) => typedError<{
-	id: WorkItemId,
-	// `None` when the item is on the project-wide backlog.
+	listTasksForThread: (threadId: ThreadId) => typedError<Task[], IpcError>(__TAURI_INVOKE("list_tasks_for_thread", { threadId })),
+	getTask: (id: TaskId) => typedError<{
+	id: TaskId,
+	// `None` when the task is on the project-wide backlog.
 	thread_id: ThreadId | null,
-	parent_id: WorkItemId | null,
-	kind: WorkItemKind,
+	parent_id: TaskId | null,
 	title: string,
 	description: string,
 	acceptance_criteria: string | null,
-	status: WorkItemStatus,
-	priority: WorkItemPriority,
+	status: TaskStatus,
+	priority: TaskPriority,
 	sort_index: number,
-	created_by: WorkItemActorKind,
+	created_by: TaskActorKind,
 	created_at: Timestamp,
 	updated_at: Timestamp,
 	completed_at: Timestamp | null,
 	deleted_at: Timestamp | null,
 	note_count: number,
-	// Legacy rows have `None`; v29+ rows are always populated.
-	author: WorkItemAuthor | null,
+	author: TaskAuthor | null,
 	// Free-text grooming bucket used by the Backlog page's group-by.
 	category: string | null,
 	// Comma-separated tags used by the Backlog page filter chips.
 	tags: string | null,
-} | null, IpcError>(__TAURI_INVOKE("get_work_item", { id })),
-	upsertWorkItem: (item: WorkItem) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_work_item", { item })),
-	deleteWorkItem: (id: WorkItemId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_item", { id })),
-	createWorkItem: (req: CreateWorkItemRequest) => typedError<WorkItem, IpcError>(__TAURI_INVOKE("create_work_item", { req })),
-	updateWorkItem: (req: UpdateWorkItemRequest) => typedError<WorkItem, IpcError>(__TAURI_INVOKE("update_work_item", { req })),
-	reorderWorkItems: (req: ReorderWorkItemsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_work_items", { req })),
-	moveWorkItem: (req: MoveWorkItemRequest) => typedError<WorkItem, IpcError>(__TAURI_INVOKE("move_work_item", { req })),
-	getWorkItemSummaries: (threadId: string | null) => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("get_work_item_summaries", { threadId })),
-	listBacklog: () => typedError<WorkItem[], IpcError>(__TAURI_INVOKE("list_backlog")),
+} | null, IpcError>(__TAURI_INVOKE("get_task", { id })),
+	upsertTask: (item: Task) => typedError<Task, IpcError>(__TAURI_INVOKE("upsert_task", { item })),
+	deleteTask: (id: TaskId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_task", { id })),
+	createTask: (req: CreateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("create_task", { req })),
+	updateTask: (req: UpdateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("update_task", { req })),
+	reorderTasks: (req: ReorderTasksRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_tasks", { req })),
+	moveTask: (req: MoveTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("move_task", { req })),
+	getTaskSummaries: (threadId: string | null) => typedError<Task[], IpcError>(__TAURI_INVOKE("get_task_summaries", { threadId })),
+	listBacklog: () => typedError<Task[], IpcError>(__TAURI_INVOKE("list_backlog")),
 	// Bucketed backlog view: ready/blocked/in_progress/done.
 	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<WorkNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	listThreadNotes: (threadId: ThreadId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
-	listWorkItemEvents: (itemId: string | null, threadId: string | null) => typedError<WorkItemEvent[], IpcError>(__TAURI_INVOKE("list_work_item_events", { itemId, threadId })),
+	listTaskEvents: (itemId: number | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
 	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
 	getWikiPage: (slug: string) => typedError<{
 	slug: string,
@@ -231,7 +229,7 @@ export const commands = {
 	listRecentlyFinished: (threadId: string | null, limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { threadId, limit })),
 	/**
 	 *  Hide the current "Finished" entries behind a cursor. Source rows
-	 *  (work items / wiki pages) are untouched; new finishes still surface
+	 *  (tasks / wiki pages) are untouched; new finishes still surface
 	 *  because their timestamp is newer than the cursor. Cursor is
 	 *  per-thread so clearing one thread's section doesn't blank another.
 	 */
@@ -240,7 +238,7 @@ export const commands = {
 	listRecentUsage: (limit: number) => typedError<UsageEvent[], IpcError>(__TAURI_INVOKE("list_recent_usage", { limit })),
 	/**
 	 *  Per-key rollup of recent usage events of a single `kind`. Returns
-	 *  the most-recently-touched keys (file paths, note slugs, work-item
+	 *  the most-recently-touched keys (file paths, note slugs, task
 	 *  ids, …) along with how many times each has been touched. Drives
 	 *  "recent files" / "recent notes" affordances in the renderer.
 	 */
@@ -393,9 +391,9 @@ export const commands = {
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
 	ensureAgentPane: (req: EnsureAgentPaneRequest) => typedError<EnsureAgentPaneResponse, IpcError>(__TAURI_INVOKE("ensure_agent_pane", { req })),
 	teardownAgentPanes: (streamId: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("teardown_agent_panes", { streamId })),
-	listWorkItemEfforts: (itemId: WorkItemId) => typedError<WorkItemEffort[], IpcError>(__TAURI_INVOKE("list_work_item_efforts", { itemId })),
+	listTaskEfforts: (itemId: TaskId) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_task_efforts", { itemId })),
 	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
-	listEffortsEndingAtSnapshots: (snapshotIds: number[]) => typedError<WorkItemEffort[], IpcError>(__TAURI_INVOKE("list_efforts_ending_at_snapshots", { snapshotIds })),
+	listEffortsEndingAtSnapshots: (snapshotIds: number[]) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_efforts_ending_at_snapshots", { snapshotIds })),
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	getCommitDetail: (streamId: string | null, sha: string) => typedError<{
 	sha: string,
@@ -562,7 +560,7 @@ export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" 
 export type AgentTurn = {
 	id: AgentTurnId,
 	thread_id: ThreadId,
-	work_item_id: WorkItemId | null,
+	task_id: TaskId | null,
 	prompt: string,
 	answer: string | null,
 	session_id: string | null,
@@ -691,7 +689,7 @@ export type BacklinkEdge = {
 	ref_type: string,
 	source_extra: string | null,
 	/**
-	 *  Human label for the source (wiki title, work-item title,
+	 *  Human label for the source (wiki title, task title,
 	 *  commit subject, …). Falls back to `source_id` in the
 	 *  renderer when None.
 	 */
@@ -700,10 +698,10 @@ export type BacklinkEdge = {
 
 // The bucketed view the Backlog page renders.
 export type BacklogState = {
-	items: WorkItem[],
-	waiting: WorkItem[],
-	in_progress: WorkItem[],
-	done: WorkItem[],
+	items: Task[],
+	waiting: Task[],
+	in_progress: Task[],
+	done: Task[],
 };
 
 export type BlameLine = {
@@ -822,28 +820,27 @@ export type CommitDetailFile = {
 	status: string,
 };
 
+export type CreateTaskInput = {
+	title: string,
+	description: string | null,
+	acceptance_criteria: string | null,
+	parent_id: TaskId | null,
+	status: TaskStatus | null,
+	priority: TaskPriority | null,
+	category: string | null,
+	tags: string | null,
+	author: TaskAuthor | null,
+};
+
+export type CreateTaskRequest = {
+	threadId: ThreadId | null,
+	input: CreateTaskInput,
+};
+
 export type CreateThreadRequest = {
 	streamId: StreamId,
 	title: string,
 	paneTarget: string | null,
-};
-
-export type CreateWorkItemInput = {
-	kind: WorkItemKind | null,
-	title: string,
-	description: string | null,
-	acceptance_criteria: string | null,
-	parent_id: WorkItemId | null,
-	status: WorkItemStatus | null,
-	priority: WorkItemPriority | null,
-	category: string | null,
-	tags: string | null,
-	author: WorkItemAuthor | null,
-};
-
-export type CreateWorkItemRequest = {
-	threadId: ThreadId | null,
-	input: CreateWorkItemInput,
 };
 
 export type CreateWorktreeRequest = {
@@ -898,12 +895,12 @@ export type FileSnapshot = {
 };
 
 /**
- *  Recently completed work items merged with recently updated wiki
+ *  Recently completed tasks merged with recently updated wiki
  *  notes, sorted by timestamp DESC. Drives the rail's "Finished"
  *  section. Items whose timestamp is `<= finished_cleared_at` are
  *  hidden until something newer lands.
  */
-export type FinishedEntry = { kind: "work-item"; itemId: string; title: string; t: Timestamp } | { kind: "wiki"; slug: string; title: string; t: Timestamp };
+export type FinishedEntry = { kind: "task"; itemId: number; title: string; t: Timestamp } | { kind: "wiki"; slug: string; title: string; t: Timestamp };
 
 export type Followup = {
 	id: string,
@@ -1060,7 +1057,7 @@ export type IpcError = {
  *  could match against snapshot file contents to attribute lines to
  *  efforts; the new schema only persists blob hashes (not full text)
  *  so this Rust port currently surfaces git blame + the BLAME_ZERO_SHA
- *  → "uncommitted" mapping. The work-item effort attribution arrives
+ *  → "uncommitted" mapping. The task effort attribution arrives
  *  once content-addressed snapshot blob storage lands (see
  *  MIGRATION_REVIEW2 §3 / sharp edge §5).
  */
@@ -1095,8 +1092,8 @@ export type MenuItemSnapshot = {
 	checked: boolean | null,
 };
 
-export type MoveWorkItemRequest = {
-	id: WorkItemId,
+export type MoveTaskRequest = {
+	id: TaskId,
 	// Destination thread, or `None` to move onto the backlog.
 	threadId: ThreadId | null,
 };
@@ -1180,14 +1177,14 @@ export type RenameThreadRequest = {
 	title: string,
 };
 
+export type ReorderTasksRequest = {
+	threadId: ThreadId | null,
+	order: TaskId[],
+};
+
 export type ReorderThreadQueueRequest = {
 	streamId: StreamId,
 	order: ThreadId[],
-};
-
-export type ReorderWorkItemsRequest = {
-	threadId: ThreadId | null,
-	order: WorkItemId[],
 };
 
 export type RepoConflictState = {
@@ -1290,6 +1287,67 @@ export type StreamId = string;
 // Whether a stream is the project's primary stream or a worktree.
 export type StreamKind = "primary" | "worktree";
 
+// A task row.
+export type Task = {
+	id: TaskId,
+	// `None` when the task is on the project-wide backlog.
+	thread_id: ThreadId | null,
+	parent_id: TaskId | null,
+	title: string,
+	description: string,
+	acceptance_criteria: string | null,
+	status: TaskStatus,
+	priority: TaskPriority,
+	sort_index: number,
+	created_by: TaskActorKind,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+	completed_at: Timestamp | null,
+	deleted_at: Timestamp | null,
+	note_count: number,
+	author: TaskAuthor | null,
+	// Free-text grooming bucket used by the Backlog page's group-by.
+	category: string | null,
+	// Comma-separated tags used by the Backlog page filter chips.
+	tags: string | null,
+};
+
+// Who or what wrote a task row to the DB.
+export type TaskActorKind = "user" | "agent" | "system";
+
+// Semantic origin — distinct from `created_by` (the writer).
+export type TaskAuthor = "user" | "agent";
+
+export type TaskEffort = {
+	id: EffortId,
+	task_id: TaskId,
+	thread_id: ThreadId,
+	started_at: Timestamp,
+	ended_at: Timestamp | null,
+	start_snapshot_id: number | null,
+	end_snapshot_id: number | null,
+	summary: string | null,
+};
+
+// Audit-log entry for state changes on a task.
+export type TaskEvent = {
+	id: string,
+	thread_id: ThreadId,
+	item_id: TaskId | null,
+	event_type: string,
+	actor_kind: TaskActorKind,
+	actor_id: string,
+	payload_json: string,
+	created_at: Timestamp,
+};
+
+// Task identifier — plain SQLite autoincrement integer.
+export type TaskId = number;
+
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+
+export type TaskStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
+
 export type TextSearchHit = {
 	path: string,
 	line: number,
@@ -1347,11 +1405,11 @@ export type ThreadStatus = "active" | "queued" | "closed";
 
 export type ThreadWorkState = {
 	threadId: ThreadId,
-	waiting: WorkItem[],
-	inProgress: WorkItem[],
-	done: WorkItem[],
-	epics: WorkItem[],
-	items: WorkItem[],
+	waiting: Task[],
+	inProgress: Task[],
+	done: Task[],
+	epics: Task[],
+	items: Task[],
 	followups: Followup[],
 };
 
@@ -1388,26 +1446,26 @@ export type UiLogEntry = {
 };
 
 /**
- *  Partial-patch for `update_work_item`. Each `Option` follows
+ *  Partial-patch for `update_task`. Each `Option` follows
  *  "missing -> keep, present -> replace" semantics. `category` and
  *  `tags` use a wrapping `Option<Option<…>>`-via-helper pattern to
  *  distinguish "keep" from "clear"; in this struct, `null` clears and
  *  missing keeps.
  */
-export type UpdateWorkItemChanges = {
+export type UpdateTaskChanges = {
 	title: string | null,
 	description: string | null,
 	acceptance_criteria: string | null,
-	parent_id: WorkItemId | null,
-	status: WorkItemStatus | null,
-	priority: WorkItemPriority | null,
+	parent_id: TaskId | null,
+	status: TaskStatus | null,
+	priority: TaskPriority | null,
 	category: string | null,
 	tags: string | null,
 };
 
-export type UpdateWorkItemRequest = {
-	id: WorkItemId,
-	changes: UpdateWorkItemChanges,
+export type UpdateTaskRequest = {
+	id: TaskId,
+	changes: UpdateTaskChanges,
 };
 
 export type UsageEvent = {
@@ -1457,94 +1515,12 @@ export type WikiPageSearchHit = {
 };
 
 /**
- *  A work item row.
- * 
- *  Field shape mirrors the TS interface so JSON payloads are
- *  indistinguishable across the migration. Nullable timestamps stay
- *  `Option<Timestamp>` rather than collapsing to a sentinel — a missing
- *  `completed_at` and a "completed at the epoch" must be distinguishable.
- */
-export type WorkItem = {
-	id: WorkItemId,
-	// `None` when the item is on the project-wide backlog.
-	thread_id: ThreadId | null,
-	parent_id: WorkItemId | null,
-	kind: WorkItemKind,
-	title: string,
-	description: string,
-	acceptance_criteria: string | null,
-	status: WorkItemStatus,
-	priority: WorkItemPriority,
-	sort_index: number,
-	created_by: WorkItemActorKind,
-	created_at: Timestamp,
-	updated_at: Timestamp,
-	completed_at: Timestamp | null,
-	deleted_at: Timestamp | null,
-	note_count: number,
-	// Legacy rows have `None`; v29+ rows are always populated.
-	author: WorkItemAuthor | null,
-	// Free-text grooming bucket used by the Backlog page's group-by.
-	category: string | null,
-	// Comma-separated tags used by the Backlog page filter chips.
-	tags: string | null,
-};
-
-// Who or what wrote a work-item row to the DB.
-export type WorkItemActorKind = "user" | "agent" | "system";
-
-/**
- *  Semantic origin — distinct from `created_by` (the writer).
- * 
- *  Narrowed to user/agent after auto-file was removed in v29+. Legacy
- *  `agent-auto` rows get mapped to `None` on read.
- */
-export type WorkItemAuthor = "user" | "agent";
-
-export type WorkItemEffort = {
-	id: EffortId,
-	work_item_id: WorkItemId,
-	thread_id: ThreadId,
-	started_at: Timestamp,
-	ended_at: Timestamp | null,
-	start_snapshot_id: number | null,
-	end_snapshot_id: number | null,
-	summary: string | null,
-};
-
-// Audit-log entry for state changes on a work item.
-export type WorkItemEvent = {
-	id: string,
-	thread_id: ThreadId,
-	item_id: WorkItemId | null,
-	event_type: string,
-	actor_kind: WorkItemActorKind,
-	actor_id: string,
-	payload_json: string,
-	created_at: Timestamp,
-};
-
-export type WorkItemId = string;
-
-/**
- *  What kind of work item this is.
- * 
- *  The hierarchy: `epic` parents `task`s parent `subtask`s. `bug` and
- *  `note` are flat — they don't normally parent anything.
- */
-export type WorkItemKind = "epic" | "task" | "subtask" | "bug" | "note";
-
-export type WorkItemPriority = "low" | "medium" | "high" | "urgent";
-
-export type WorkItemStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
-
-/**
- *  A note attached to either a work item or a thread (mutually
- *  exclusive — enforced at the DB CHECK constraint).
+ *  A note attached to either a task or a thread (mutually exclusive —
+ *  enforced at the DB CHECK constraint).
  */
 export type WorkNote = {
 	id: NoteId,
-	work_item_id: WorkItemId | null,
+	task_id: TaskId | null,
 	thread_id: ThreadId | null,
 	body: string,
 	author: string,

@@ -1,8 +1,8 @@
 use oxplow_app::OxplowEvent;
 use oxplow_db::analytics_stores::PageVisitStore as _;
 use oxplow_db::PageVisit;
-use oxplow_domain::stores::WorkItemStore as _;
-use oxplow_domain::{ThreadId, Timestamp, WorkItemStatus};
+use oxplow_domain::stores::TaskStore as _;
+use oxplow_domain::{TaskStatus, ThreadId, Timestamp};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -124,17 +124,17 @@ pub async fn list_currently_open_usage(
         .collect())
 }
 
-/// Recently completed work items merged with recently updated wiki
+/// Recently completed tasks merged with recently updated wiki
 /// notes, sorted by timestamp DESC. Drives the rail's "Finished"
 /// section. Items whose timestamp is `<= finished_cleared_at` are
 /// hidden until something newer lands.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum FinishedEntry {
-    #[serde(rename = "work-item")]
-    WorkItem {
+    #[serde(rename = "task")]
+    Task {
         #[serde(rename = "itemId")]
-        item_id: String,
+        item_id: i64,
         title: String,
         t: Timestamp,
     },
@@ -149,7 +149,7 @@ pub enum FinishedEntry {
 impl FinishedEntry {
     fn timestamp(&self) -> Timestamp {
         match self {
-            FinishedEntry::WorkItem { t, .. } => *t,
+            FinishedEntry::Task { t, .. } => *t,
             FinishedEntry::Wiki { t, .. } => *t,
         }
     }
@@ -177,13 +177,13 @@ pub async fn list_recently_finished(
         // Thread-scoped: only items filed against this thread, only
         // wiki pages the thread actually touched.
         let tid = ThreadId::from(tid.clone());
-        let items = state.work_item_store.list_for_thread(&tid).await?;
+        let items = state.task_store.list_for_thread(&tid).await?;
         for item in items {
-            if item.status != WorkItemStatus::Done {
+            if item.status != TaskStatus::Done {
                 continue;
             }
             let Some(t) = item.completed_at else { continue };
-            entries.push(FinishedEntry::WorkItem {
+            entries.push(FinishedEntry::Task {
                 item_id: item.id.0,
                 title: item.title,
                 t,
@@ -209,10 +209,10 @@ pub async fn list_recently_finished(
     } else {
         // No thread context — fall back to a global view (used for
         // initial paint before a thread is selected).
-        let done = state.work_item_store.list_recently_done(cap).await?;
+        let done = state.task_store.list_recently_done(cap).await?;
         for item in done {
             let Some(t) = item.completed_at else { continue };
-            entries.push(FinishedEntry::WorkItem {
+            entries.push(FinishedEntry::Task {
                 item_id: item.id.0,
                 title: item.title,
                 t,
@@ -238,7 +238,7 @@ pub async fn list_recently_finished(
 }
 
 /// Hide the current "Finished" entries behind a cursor. Source rows
-/// (work items / wiki pages) are untouched; new finishes still surface
+/// (tasks / wiki pages) are untouched; new finishes still surface
 /// because their timestamp is newer than the cursor. Cursor is
 /// per-thread so clearing one thread's section doesn't blank another.
 #[tauri::command]

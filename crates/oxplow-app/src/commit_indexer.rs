@@ -4,7 +4,7 @@
 //! - The diff against parent#0 produces `(git-commit:<sha>) --
 //!   touched_file --> (file:<path>)` edges.
 //! - The commit message (subject + body) is run through the shared
-//!   ref extractor so `(git-commit:<sha>) --wi_body_mention/
+//!   ref extractor so `(git-commit:<sha>) --task_body_mention/
 //!   wikilink/finding_mention--> (target)` edges appear too.
 //!
 //! Idempotent. The indexer uses [`SqlitePageRefStore::replace_source`]
@@ -24,8 +24,8 @@
 use std::path::Path;
 
 use oxplow_db::page_ref_projections::{
-    KIND_FILE, KIND_FINDING, KIND_GIT_COMMIT, KIND_WIKI, KIND_WORK_ITEM, RT_BODY_COMMIT,
-    RT_BODY_FINDING, RT_BODY_WORK_ITEM, RT_TOUCHED_FILE, RT_WIKILINK,
+    KIND_FILE, KIND_FINDING, KIND_GIT_COMMIT, KIND_TASK, KIND_WIKI, RT_BODY_COMMIT,
+    RT_BODY_FINDING, RT_BODY_TASK, RT_TOUCHED_FILE, RT_WIKILINK,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::refs::extract;
@@ -57,7 +57,7 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
     }
     // Parsed-message edges. Subject + body run through the shared
     // extractor so the same wikilink + inline-mention rules that
-    // apply to wiki bodies and work-item descriptions also apply to
+    // apply to wiki bodies and task descriptions also apply to
     // commit messages.
     let mut combined = String::new();
     combined.push_str(&detail.subject);
@@ -66,13 +66,13 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
         combined.push_str(&detail.body);
     }
     let refs = extract(&combined);
-    for wi in refs.work_items {
+    for task_id in refs.tasks {
         out.push(PageRefEdge::new(
             KIND_GIT_COMMIT,
             sha,
-            KIND_WORK_ITEM,
-            wi,
-            RT_BODY_WORK_ITEM,
+            KIND_TASK,
+            task_id.to_string(),
+            RT_BODY_TASK,
         ));
     }
     for w in refs.wikis {
@@ -215,10 +215,10 @@ mod tests {
     }
 
     #[test]
-    fn message_body_picks_up_work_item_and_wiki_refs() {
+    fn message_body_picks_up_task_and_wiki_refs() {
         let c = commit(
             "abc1234567890",
-            "Resolve wi-019abc-9 and clarify [[architecture]]",
+            "Resolve task:42 and clarify [[architecture]]",
             "see finding:fnd-7 for details",
             &[],
         );
@@ -227,7 +227,7 @@ mod tests {
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
-        assert!(targets.contains(&("work-item", "wi-019abc-9")));
+        assert!(targets.contains(&("task", "42")));
         assert!(targets.contains(&("wiki", "architecture")));
         assert!(targets.contains(&("finding", "fnd-7")));
     }
@@ -276,7 +276,7 @@ mod tests {
                 "commit",
                 "-q",
                 "-m",
-                "fix wi-019abc-1 and touch [[architecture]]",
+                "fix task:42 and touch [[architecture]]",
             ])
             .current_dir(dir.path())
             .status()
@@ -287,11 +287,8 @@ mod tests {
         let n = index_recent(dir.path(), &page_refs, 50).await;
         assert_eq!(n, 1, "should index the one commit");
 
-        // wi-019abc-1 has the commit as a backlink.
-        let inbound = page_refs
-            .list_backlinks("work-item", "wi-019abc-1", None)
-            .await
-            .unwrap();
+        // task:42 has the commit as a backlink.
+        let inbound = page_refs.list_backlinks("task", "42", None).await.unwrap();
         assert!(inbound.iter().any(|e| e.source_kind == "git-commit"));
         // file backlink covers a.rs.
         let file_inbound = page_refs

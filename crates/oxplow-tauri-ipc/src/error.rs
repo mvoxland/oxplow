@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
-use oxplow_app::WorkItemServiceError;
+use oxplow_app::TaskServiceError;
 use oxplow_domain::DomainError;
 use oxplow_session::{SessionError, ThreadError};
 
@@ -107,11 +107,11 @@ impl From<SessionError> for IpcError {
     }
 }
 
-impl From<WorkItemServiceError> for IpcError {
-    fn from(value: WorkItemServiceError) -> Self {
+impl From<TaskServiceError> for IpcError {
+    fn from(value: TaskServiceError) -> Self {
         match value {
-            WorkItemServiceError::NotFound(_) => IpcError::not_found(),
-            WorkItemServiceError::Storage(e) => IpcError::from(e),
+            TaskServiceError::NotFound(_) => IpcError::not_found(),
+            TaskServiceError::Storage(e) => IpcError::from(e),
         }
     }
 }
@@ -237,15 +237,13 @@ mod tests {
 
     #[test]
     fn from_work_item_service_not_found_maps_to_not_found() {
-        let e: IpcError =
-            WorkItemServiceError::NotFound(oxplow_domain::WorkItemId::from("wi-x")).into();
+        let e: IpcError = TaskServiceError::NotFound(oxplow_domain::TaskId(7)).into();
         assert_eq!(e.code, "NOT_FOUND");
     }
 
     #[test]
     fn from_work_item_service_storage_propagates() {
-        let e: IpcError =
-            WorkItemServiceError::Storage(DomainError::Invalid("bad row".into())).into();
+        let e: IpcError = TaskServiceError::Storage(DomainError::Invalid("bad row".into())).into();
         assert_eq!(e.code, "INVALID");
         assert_eq!(e.message, "bad row");
     }

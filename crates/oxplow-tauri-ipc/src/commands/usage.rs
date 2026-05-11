@@ -73,7 +73,7 @@ pub async fn list_recent_usage(
 }
 
 /// Per-key rollup of recent usage events of a single `kind`. Returns
-/// the most-recently-touched keys (file paths, note slugs, work-item
+/// the most-recently-touched keys (file paths, note slugs, task
 /// ids, …) along with how many times each has been touched. Drives
 /// "recent files" / "recent notes" affordances in the renderer.
 #[tauri::command]

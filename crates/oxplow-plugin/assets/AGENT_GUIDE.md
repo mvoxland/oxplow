@@ -3,13 +3,13 @@
 Reference catalog the agent can read on demand — you shouldn't need to
 quote this back, just use the right values when calling oxplow MCP tools.
 
-## Work-item kinds
+## task kinds
 
 - **epic** — multi-step feature that decomposes into tasks / subtasks.
 - **task** — a concrete unit of work that ships end-to-end in one or a
   few turns. The default for most user requests.
 - **subtask** — a small step inside a task; only create these when the
-  task itself is large enough that tracking sub-steps in the work-item
+  task itself is large enough that tracking sub-steps in the task
   log would help the user review progress.
 - **bug** — a defect to fix, as distinct from new work. Titles should
   read as an observation ("X doesn't do Y") not a prescription.

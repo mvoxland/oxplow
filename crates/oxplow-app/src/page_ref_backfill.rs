@@ -14,28 +14,27 @@
 //! Wiki bodies and recent commits are NOT re-projected here —
 //! the wiki watcher's initial scan and the commit indexer's boot
 //! pass already hit those paths. This module only covers the
-//! kinds whose data lives entirely in SQLite (work-items, links,
+//! kinds whose data lives entirely in SQLite (tasks, links,
 //! efforts, findings).
 
 use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{
     effort_ref_types, effort_touched_file_edges, finding_edges, link_edge, note_edges,
-    work_item_body_ref_types, work_item_edges, work_item_link_ref_types, KIND_FINDING,
-    KIND_WORK_ITEM, KIND_WORK_NOTE,
+    task_body_ref_types, task_edges, task_link_ref_types, KIND_FINDING, KIND_TASK, KIND_WORK_NOTE,
 };
-use oxplow_db::WorkItemEffortStore as _;
+use oxplow_db::TaskEffortStore as _;
 use oxplow_db::{
-    SqliteCodeQualityStore, SqlitePageRefStore, SqliteWorkItemEffortStore, SqliteWorkItemLinkStore,
-    SqliteWorkItemStore, SqliteWorkNoteStore,
+    SqliteCodeQualityStore, SqlitePageRefStore, SqliteTaskEffortStore, SqliteTaskLinkStore,
+    SqliteTaskStore, SqliteWorkNoteStore,
 };
-use oxplow_domain::stores::WorkItemLinkStore as _;
+use oxplow_domain::stores::TaskLinkStore as _;
 
 /// Counts of rows touched per kind. Logged at INFO so the boot
 /// trail makes the backfill observable.
 #[derive(Debug, Default)]
 pub struct BackfillCounts {
-    pub work_items: usize,
+    pub tasks: usize,
     pub links: usize,
     pub efforts: usize,
     pub findings: usize,
@@ -45,34 +44,30 @@ pub struct BackfillCounts {
 /// Project every existing row into `page_ref`. Idempotent.
 pub async fn run(
     page_refs: Arc<SqlitePageRefStore>,
-    work_items: Arc<SqliteWorkItemStore>,
-    links: Arc<SqliteWorkItemLinkStore>,
-    efforts: Arc<SqliteWorkItemEffortStore>,
+    tasks: Arc<SqliteTaskStore>,
+    links: Arc<SqliteTaskLinkStore>,
+    efforts: Arc<SqliteTaskEffortStore>,
     findings_store: Arc<SqliteCodeQualityStore>,
     work_notes: Arc<SqliteWorkNoteStore>,
 ) -> BackfillCounts {
     let mut counts = BackfillCounts::default();
 
-    // 1. Work-item body slice + touched-file slice.
-    if let Ok(items) = work_items.list_all_for_backfill().await {
+    // 1. task body slice + touched-file slice.
+    if let Ok(items) = tasks.list_all_for_backfill().await {
         for item in items {
-            let edges = work_item_edges(&item);
+            let edges = task_edges(&item);
+            let id_str = item.id.to_string();
             if let Err(e) = page_refs
-                .replace_source_for_ref_types(
-                    KIND_WORK_ITEM,
-                    item.id.as_str(),
-                    work_item_body_ref_types(),
-                    edges,
-                )
+                .replace_source_for_ref_types(KIND_TASK, &id_str, task_body_ref_types(), edges)
                 .await
             {
-                tracing::warn!(?e, id = %item.id, "page-ref backfill: work item failed");
+                tracing::warn!(?e, id = %item.id, "page-ref backfill: task failed");
                 continue;
             }
-            counts.work_items += 1;
+            counts.tasks += 1;
             // Touched-file union pulled from the effort store.
             let mut paths: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-            if let Ok(item_efforts) = efforts.list_for_item(&item.id).await {
+            if let Ok(item_efforts) = efforts.list_for_item(item.id).await {
                 for ef in item_efforts {
                     if let Ok(rows) = efforts.list_files(&ef.id).await {
                         for r in rows {
@@ -82,14 +77,9 @@ pub async fn run(
                 }
             }
             let path_vec: Vec<String> = paths.into_iter().collect();
-            let edges = effort_touched_file_edges(item.id.as_str(), &path_vec);
+            let edges = effort_touched_file_edges(&id_str, &path_vec);
             let _ = page_refs
-                .replace_source_for_ref_types(
-                    KIND_WORK_ITEM,
-                    item.id.as_str(),
-                    effort_ref_types(),
-                    edges,
-                )
+                .replace_source_for_ref_types(KIND_TASK, &id_str, effort_ref_types(), edges)
                 .await;
             if !path_vec.is_empty() {
                 counts.efforts += 1;
@@ -103,18 +93,14 @@ pub async fn run(
     //    deletions on the live path stay clean too.)
     if let Ok(from_items) = links.list_distinct_from_items().await {
         for from in from_items {
-            let outgoing = match links.list_outgoing(&from).await {
+            let outgoing = match links.list_outgoing(from).await {
                 Ok(v) => v,
                 Err(_) => continue,
             };
             let edges: Vec<_> = outgoing.iter().map(link_edge).collect();
+            let from_str = from.to_string();
             if let Err(e) = page_refs
-                .replace_source_for_ref_types(
-                    KIND_WORK_ITEM,
-                    from.as_str(),
-                    work_item_link_ref_types(),
-                    edges,
-                )
+                .replace_source_for_ref_types(KIND_TASK, &from_str, task_link_ref_types(), edges)
                 .await
             {
                 tracing::warn!(?e, id = %from, "page-ref backfill: link slice failed");
@@ -160,11 +146,10 @@ pub async fn run(
 mod tests {
     use super::*;
     use oxplow_db::Database;
-    use oxplow_domain::stores::{StreamStore, ThreadStore, WorkItemStore};
+    use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
     use oxplow_domain::{
-        Stream, StreamId, StreamKind, Thread, ThreadId, ThreadStatus, Timestamp, WorkItem,
-        WorkItemActorKind, WorkItemAuthor, WorkItemId, WorkItemKind, WorkItemPriority,
-        WorkItemStatus,
+        Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority,
+        TaskStatus, Thread, ThreadId, ThreadStatus, Timestamp,
     };
 
     fn ts() -> Timestamp {
@@ -172,14 +157,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn backfill_picks_up_pre_existing_work_item_refs() {
+    async fn backfill_picks_up_pre_existing_task_refs() {
         let db = Database::in_memory();
 
         // Construct stores WITHOUT page_refs first so writes don't
         // mirror — this simulates pre-migration data.
         let streams = oxplow_db::SqliteStreamStore::new(db.clone());
         let threads = oxplow_db::SqliteThreadStore::new(db.clone());
-        let bare_items = SqliteWorkItemStore::new(db.clone());
+        let bare_items = SqliteTaskStore::new(db.clone());
 
         streams
             .upsert(&Stream {
@@ -220,25 +205,24 @@ mod tests {
             })
             .await
             .unwrap();
-        bare_items
-            .upsert(&WorkItem {
-                id: WorkItemId::from("wi-9"),
+        let task_id = bare_items
+            .insert(&Task {
+                id: TaskId(0),
                 thread_id: Some(ThreadId::from("b-1")),
                 parent_id: None,
-                kind: WorkItemKind::Task,
                 title: "fix".into(),
-                description: "see [[src/app.rs]] and blocks wi-019zzz-2".into(),
+                description: "see [[src/app.rs]]".into(),
                 acceptance_criteria: None,
-                status: WorkItemStatus::Ready,
-                priority: WorkItemPriority::Medium,
+                status: TaskStatus::Ready,
+                priority: TaskPriority::Medium,
                 sort_index: 0,
-                created_by: WorkItemActorKind::User,
+                created_by: TaskActorKind::User,
                 created_at: ts(),
                 updated_at: ts(),
                 completed_at: None,
                 deleted_at: None,
                 note_count: 0,
-                author: Some(WorkItemAuthor::User),
+                author: Some(TaskAuthor::User),
                 category: None,
                 tags: None,
             })
@@ -255,12 +239,11 @@ mod tests {
 
         // Build the attached stores the backfill consumes.
         let items_attached =
-            Arc::new(SqliteWorkItemStore::new(db.clone()).with_page_refs((*page_refs).clone()));
+            Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_refs).clone()));
         let links =
-            Arc::new(SqliteWorkItemLinkStore::new(db.clone()).with_page_refs((*page_refs).clone()));
-        let efforts = Arc::new(
-            SqliteWorkItemEffortStore::new(db.clone()).with_page_refs((*page_refs).clone()),
-        );
+            Arc::new(SqliteTaskLinkStore::new(db.clone()).with_page_refs((*page_refs).clone()));
+        let efforts =
+            Arc::new(SqliteTaskEffortStore::new(db.clone()).with_page_refs((*page_refs).clone()));
         let findings_store =
             Arc::new(SqliteCodeQualityStore::new(db.clone()).with_page_refs((*page_refs).clone()));
         let notes =
@@ -275,13 +258,13 @@ mod tests {
             notes,
         )
         .await;
-        assert!(counts.work_items >= 1);
+        assert!(counts.tasks >= 1);
 
         let post = page_refs
             .list_backlinks("file", "src/app.rs", None)
             .await
             .unwrap();
         assert_eq!(post.len(), 1, "got {post:?}");
-        assert_eq!(post[0].source_id, "wi-9");
+        assert_eq!(post[0].source_id, task_id.to_string());
     }
 }

@@ -1,18 +1,18 @@
-//! Work-item effort tracking commands.
+//! task effort tracking commands.
 
-use oxplow_db::{EffortFile, WorkItemEffort, WorkItemEffortStore as _};
-use oxplow_domain::{EffortId, WorkItemId};
+use oxplow_db::{EffortFile, TaskEffort, TaskEffortStore as _};
+use oxplow_domain::{EffortId, TaskId};
 
 use crate::error::IpcError;
 use crate::state::AppState;
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_work_item_efforts(
+pub async fn list_task_efforts(
     state: tauri::State<'_, AppState>,
-    item_id: WorkItemId,
-) -> Result<Vec<WorkItemEffort>, IpcError> {
-    Ok(state.effort_store.list_for_item(&item_id).await?)
+    item_id: TaskId,
+) -> Result<Vec<TaskEffort>, IpcError> {
+    Ok(state.effort_store.list_for_item(item_id).await?)
 }
 
 #[tauri::command]
@@ -29,7 +29,7 @@ pub async fn get_effort_files(
 pub async fn list_efforts_ending_at_snapshots(
     state: tauri::State<'_, AppState>,
     snapshot_ids: Vec<i64>,
-) -> Result<Vec<WorkItemEffort>, IpcError> {
+) -> Result<Vec<TaskEffort>, IpcError> {
     Ok(state
         .effort_store
         .list_ending_at_snapshots(snapshot_ids)
