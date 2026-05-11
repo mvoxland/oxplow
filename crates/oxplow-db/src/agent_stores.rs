@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use rusqlite::params;
 
 use oxplow_domain::stores::AgentTurnStore;
-use oxplow_domain::{AgentTurn, AgentTurnId, DomainError, ThreadId, Timestamp, WorkItemId};
+use oxplow_domain::{AgentTurn, AgentTurnId, DomainError, TaskId, ThreadId, Timestamp};
 
 use crate::database::Database;
 
@@ -33,7 +33,7 @@ fn map_err_text(e: DomainError) -> rusqlite::Error {
 fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
     let id: String = row.get("id")?;
     let thread_id: String = row.get("thread_id")?;
-    let work_item_id: Option<String> = row.get("work_item_id")?;
+    let task_id: Option<i64> = row.get("task_id")?;
     let prompt: String = row.get("prompt")?;
     let answer: Option<String> = row.get("answer")?;
     let session_id: Option<String> = row.get("session_id")?;
@@ -42,7 +42,7 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
     Ok(AgentTurn {
         id: AgentTurnId::from(id),
         thread_id: ThreadId::from(thread_id),
-        work_item_id: work_item_id.map(WorkItemId::from),
+        task_id: task_id.map(TaskId),
         prompt,
         answer,
         session_id,
@@ -73,16 +73,16 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO agent_turn (id, thread_id, work_item_id, prompt, answer, session_id, started_at, ended_at)
+                    "INSERT INTO agent_turn (id, thread_id, task_id, prompt, answer, session_id, started_at, ended_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(id) DO UPDATE SET
                         prompt = excluded.prompt,
-                        work_item_id = excluded.work_item_id,
+                        task_id = excluded.task_id,
                         session_id = excluded.session_id",
                     params![
                         turn.id.as_str(),
                         turn.thread_id.as_str(),
-                        turn.work_item_id.as_ref().map(|w| w.as_str()),
+                        turn.task_id.map(|w| w.value()),
                         turn.prompt,
                         turn.answer,
                         turn.session_id,
@@ -242,7 +242,7 @@ mod tests {
         let turn = AgentTurn {
             id: AgentTurnId::new(),
             thread_id: tid.clone(),
-            work_item_id: None,
+            task_id: None,
             prompt: "do the thing".into(),
             answer: None,
             session_id: None,

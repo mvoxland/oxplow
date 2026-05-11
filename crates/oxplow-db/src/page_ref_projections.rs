@@ -9,19 +9,19 @@
 //!
 //! Canonical id shapes (matching the frontend's `TabRef.id`):
 //! - wiki:        `"<slug>"` for the wiki source kind
-//! - work-item:   `"wi-…"` (already prefixed)
+//! - task:        `"<integer id as string>"`
 //! - file:        `"<repo-relative path>"`
 //! - directory:   `"<repo-relative path, no trailing slash>"`
 //! - finding:     `"<finding id>"`
 //! - git-commit:  `"<sha>"`
 
 use oxplow_domain::refs::{extract, RefVersion};
-use oxplow_domain::{WorkItem, WorkItemLink, WorkItemLinkType};
+use oxplow_domain::{Task, TaskLink, TaskLinkType};
 
 use crate::page_ref_store::PageRefEdge;
 
 pub const KIND_WIKI: &str = "wiki";
-pub const KIND_WORK_ITEM: &str = "work-item";
+pub const KIND_TASK: &str = "task";
 pub const KIND_WORK_NOTE: &str = "work-note";
 pub const KIND_FILE: &str = "file";
 pub const KIND_DIRECTORY: &str = "directory";
@@ -31,29 +31,29 @@ pub const KIND_GIT_COMMIT: &str = "git-commit";
 pub const RT_WIKI_FILE: &str = "wiki_file_ref";
 pub const RT_WIKI_DIR: &str = "wiki_dir_ref";
 pub const RT_WIKILINK: &str = "wikilink";
-pub const RT_BODY_WORK_ITEM: &str = "wi_body_mention";
+pub const RT_BODY_TASK: &str = "task_body_mention";
 pub const RT_BODY_FINDING: &str = "finding_mention";
 pub const RT_BODY_COMMIT: &str = "commit_mention";
 pub const RT_TOUCHED_FILE: &str = "touched_file";
 pub const RT_FINDING_PATH: &str = "finding_path";
 
-/// Ref-types written by the work-item store from a body (title +
+/// Ref-types written by the task store from a body (title +
 /// description + AC). Used by the slice-replace call so other
-/// writers' rows for the same `work-item:wi-X` source survive.
-pub fn work_item_body_ref_types() -> Vec<String> {
+/// writers' rows for the same `task:<id>` source survive.
+pub fn task_body_ref_types() -> Vec<String> {
     vec![
         RT_WIKI_FILE.to_string(),
         RT_WIKI_DIR.to_string(),
         RT_WIKILINK.to_string(),
-        RT_BODY_WORK_ITEM.to_string(),
+        RT_BODY_TASK.to_string(),
         RT_BODY_FINDING.to_string(),
         RT_BODY_COMMIT.to_string(),
     ]
 }
 
 /// All link sub-types — the link store owns this slice for any
-/// given source work-item.
-pub fn work_item_link_ref_types() -> Vec<String> {
+/// given source task.
+pub fn task_link_ref_types() -> Vec<String> {
     [
         "blocks",
         "relates_to",
@@ -63,7 +63,7 @@ pub fn work_item_link_ref_types() -> Vec<String> {
         "replies_to",
     ]
     .iter()
-    .map(|t| format!("work_item_link:{t}"))
+    .map(|t| format!("task_link:{t}"))
     .collect()
 }
 
@@ -108,13 +108,13 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
     for w in refs.wikis {
         out.push(PageRefEdge::new(KIND_WIKI, slug, KIND_WIKI, w, RT_WIKILINK));
     }
-    for wi in refs.work_items {
+    for t in refs.tasks {
         out.push(PageRefEdge::new(
             KIND_WIKI,
             slug,
-            KIND_WORK_ITEM,
-            wi,
-            RT_BODY_WORK_ITEM,
+            KIND_TASK,
+            t.to_string(),
+            RT_BODY_TASK,
         ));
     }
     for f in refs.findings {
@@ -138,9 +138,7 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
     out
 }
 
-/// Edges contributed by a work-note body (whether the note is
-/// attached to a work-item or a thread). Single-owner source —
-/// uses the full `replace_source` form.
+/// Edges contributed by a work-note body. Single-owner source.
 pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     let refs = extract(body);
     let mut out = Vec::new();
@@ -171,13 +169,13 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
             RT_WIKILINK,
         ));
     }
-    for wi in refs.work_items {
+    for t in refs.tasks {
         out.push(PageRefEdge::new(
             KIND_WORK_NOTE,
             note_id,
-            KIND_WORK_ITEM,
-            wi,
-            RT_BODY_WORK_ITEM,
+            KIND_TASK,
+            t.to_string(),
+            RT_BODY_TASK,
         ));
     }
     for f in refs.findings {
@@ -201,9 +199,8 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     out
 }
 
-/// Edges contributed by a work item's title + description + AC text.
-/// Owned by `work_item_store` upsert.
-pub fn work_item_edges(item: &WorkItem) -> Vec<PageRefEdge> {
+/// Edges contributed by a task's title + description + AC text.
+pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
     let mut combined = String::new();
     combined.push_str(&item.title);
     combined.push('\n');
@@ -213,12 +210,12 @@ pub fn work_item_edges(item: &WorkItem) -> Vec<PageRefEdge> {
         combined.push_str(ac);
     }
     let refs = extract(&combined);
-    let id = item.id.as_str();
+    let id = item.id.to_string();
     let mut out = Vec::new();
     for fd in refs.files_detail {
         out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            id,
+            KIND_TASK,
+            &id,
             KIND_FILE,
             fd.path,
             RT_WIKI_FILE,
@@ -226,38 +223,32 @@ pub fn work_item_edges(item: &WorkItem) -> Vec<PageRefEdge> {
     }
     for d in refs.dirs {
         out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            id,
+            KIND_TASK,
+            &id,
             KIND_DIRECTORY,
             d,
             RT_WIKI_DIR,
         ));
     }
     for w in refs.wikis {
-        out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            id,
-            KIND_WIKI,
-            w,
-            RT_WIKILINK,
-        ));
+        out.push(PageRefEdge::new(KIND_TASK, &id, KIND_WIKI, w, RT_WIKILINK));
     }
-    for wi in refs.work_items {
-        if wi == id {
+    for t in refs.tasks {
+        if t == item.id.value() {
             continue;
         }
         out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            id,
-            KIND_WORK_ITEM,
-            wi,
-            RT_BODY_WORK_ITEM,
+            KIND_TASK,
+            &id,
+            KIND_TASK,
+            t.to_string(),
+            RT_BODY_TASK,
         ));
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            id,
+            KIND_TASK,
+            &id,
             KIND_FINDING,
             f,
             RT_BODY_FINDING,
@@ -265,8 +256,8 @@ pub fn work_item_edges(item: &WorkItem) -> Vec<PageRefEdge> {
     }
     for c in refs.commits {
         out.push(PageRefEdge::new(
-            KIND_WORK_ITEM,
-            id,
+            KIND_TASK,
+            &id,
             KIND_GIT_COMMIT,
             c,
             RT_BODY_COMMIT,
@@ -275,46 +266,34 @@ pub fn work_item_edges(item: &WorkItem) -> Vec<PageRefEdge> {
     out
 }
 
-/// Touched-file edges for one effort. The work-item is the source so
-/// "what files has this work-item touched" is one query. Multiple
-/// efforts contribute their own slice via different `source_extra`s
-/// — but for backlinks we collapse to a single edge per (wi, file).
-pub fn effort_touched_file_edges(work_item_id: &str, paths: &[String]) -> Vec<PageRefEdge> {
+/// Touched-file edges for one effort.
+pub fn effort_touched_file_edges(task_id: &str, paths: &[String]) -> Vec<PageRefEdge> {
     paths
         .iter()
-        .map(|p| {
-            PageRefEdge::new(
-                KIND_WORK_ITEM,
-                work_item_id,
-                KIND_FILE,
-                p.clone(),
-                RT_TOUCHED_FILE,
-            )
-        })
+        .map(|p| PageRefEdge::new(KIND_TASK, task_id, KIND_FILE, p.clone(), RT_TOUCHED_FILE))
         .collect()
 }
 
-fn link_type_str(t: WorkItemLinkType) -> &'static str {
+fn link_type_str(t: TaskLinkType) -> &'static str {
     match t {
-        WorkItemLinkType::Blocks => "blocks",
-        WorkItemLinkType::RelatesTo => "relates_to",
-        WorkItemLinkType::DiscoveredFrom => "discovered_from",
-        WorkItemLinkType::Duplicates => "duplicates",
-        WorkItemLinkType::Supersedes => "supersedes",
-        WorkItemLinkType::RepliesTo => "replies_to",
+        TaskLinkType::Blocks => "blocks",
+        TaskLinkType::RelatesTo => "relates_to",
+        TaskLinkType::DiscoveredFrom => "discovered_from",
+        TaskLinkType::Duplicates => "duplicates",
+        TaskLinkType::Supersedes => "supersedes",
+        TaskLinkType::RepliesTo => "replies_to",
     }
 }
 
-/// One edge per `WorkItemLink`. Source is `from_item`, target is
-/// `to_item`, ref_type encodes the link sub-type so the renderer can
-/// label it ("blocks", "relates to", …).
-pub fn link_edge(link: &WorkItemLink) -> PageRefEdge {
+/// One edge per `TaskLink`. Source is `from_item`, target is
+/// `to_item`, ref_type encodes the link sub-type.
+pub fn link_edge(link: &TaskLink) -> PageRefEdge {
     PageRefEdge::new(
-        KIND_WORK_ITEM,
-        link.from_item_id.as_str(),
-        KIND_WORK_ITEM,
-        link.to_item_id.as_str(),
-        format!("work_item_link:{}", link_type_str(link.link_type)),
+        KIND_TASK,
+        link.from_item_id.to_string(),
+        KIND_TASK,
+        link.to_item_id.to_string(),
+        format!("task_link:{}", link_type_str(link.link_type)),
     )
 }
 
@@ -333,33 +312,31 @@ pub fn finding_edges(finding_id: &str, path: &str) -> Vec<PageRefEdge> {
 mod tests {
     use super::*;
     use oxplow_domain::{
-        Timestamp, WorkItem, WorkItemActorKind, WorkItemAuthor, WorkItemId, WorkItemKind,
-        WorkItemLinkType, WorkItemPriority, WorkItemStatus,
+        Task, TaskActorKind, TaskAuthor, TaskId, TaskLinkType, TaskPriority, TaskStatus, Timestamp,
     };
 
     fn ts() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
     }
 
-    fn item(id: &str, title: &str, description: &str, ac: Option<&str>) -> WorkItem {
-        WorkItem {
-            id: WorkItemId::from(id),
+    fn item(id: i64, title: &str, description: &str, ac: Option<&str>) -> Task {
+        Task {
+            id: TaskId(id),
             thread_id: None,
             parent_id: None,
-            kind: WorkItemKind::Task,
             title: title.into(),
             description: description.into(),
             acceptance_criteria: ac.map(|s| s.to_string()),
-            status: WorkItemStatus::Ready,
-            priority: WorkItemPriority::Medium,
+            status: TaskStatus::Ready,
+            priority: TaskPriority::Medium,
             sort_index: 0,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: ts(),
             updated_at: ts(),
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         }
@@ -367,60 +344,61 @@ mod tests {
 
     #[test]
     fn wiki_edges_cover_all_kinds() {
-        let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[wi-019abc-1]] [[finding:fnd-1]] [[git:abcdef0]]";
+        let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[task:7]] [[finding:fnd-1]] [[git:abcdef0]]";
         let edges = wiki_edges("intro", body);
         let kinds: std::collections::BTreeSet<_> =
             edges.iter().map(|e| e.target_kind.as_str()).collect();
         assert!(kinds.contains("file"));
         assert!(kinds.contains("directory"));
         assert!(kinds.contains("wiki"));
-        assert!(kinds.contains("work-item"));
+        assert!(kinds.contains("task"));
         assert!(kinds.contains("finding"));
         assert!(kinds.contains("git-commit"));
     }
 
     #[test]
-    fn work_item_edges_parse_ac_and_description() {
-        let item = item(
-            "wi-1",
+    fn task_edges_parse_ac_and_description() {
+        let it = item(
+            1,
             "fix something",
-            "see [[src/app.rs]] for context, blocked by wi-019zzz-2",
+            "see [[src/app.rs]] for context, blocked by task:2",
             Some("touches finding:fnd-9"),
         );
-        let edges = work_item_edges(&item);
+        let edges = task_edges(&it);
         let targets: Vec<_> = edges
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
         assert!(targets.contains(&("file", "src/app.rs")));
-        assert!(targets.contains(&("work-item", "wi-019zzz-2")));
+        assert!(targets.contains(&("task", "2")));
         assert!(targets.contains(&("finding", "fnd-9")));
         // self-mention filtered out
-        assert!(!targets.iter().any(|(_, id)| *id == "wi-1"));
+        assert!(!targets.iter().any(|(k, id)| *k == "task" && *id == "1"));
     }
 
     #[test]
     fn effort_touched_file_edges_one_per_path() {
-        let edges = effort_touched_file_edges("wi-7", &["a.rs".into(), "b.rs".into()]);
+        let edges = effort_touched_file_edges("7", &["a.rs".into(), "b.rs".into()]);
         assert_eq!(edges.len(), 2);
-        assert_eq!(edges[0].source_id, "wi-7");
+        assert_eq!(edges[0].source_id, "7");
         assert_eq!(edges[0].ref_type, "touched_file");
     }
 
     #[test]
     fn link_edge_labels_link_subtype() {
-        let link = WorkItemLink {
-            id: "wil-1".into(),
+        use oxplow_domain::TaskLinkId;
+        let link = TaskLink {
+            id: TaskLinkId(1),
             thread_id: oxplow_domain::ThreadId::from("b-1"),
-            from_item_id: WorkItemId::from("wi-a"),
-            to_item_id: WorkItemId::from("wi-b"),
-            link_type: WorkItemLinkType::Blocks,
+            from_item_id: TaskId(10),
+            to_item_id: TaskId(20),
+            link_type: TaskLinkType::Blocks,
             created_at: ts(),
         };
         let edge = link_edge(&link);
-        assert_eq!(edge.source_id, "wi-a");
-        assert_eq!(edge.target_id, "wi-b");
-        assert_eq!(edge.ref_type, "work_item_link:blocks");
+        assert_eq!(edge.source_id, "10");
+        assert_eq!(edge.target_id, "20");
+        assert_eq!(edge.ref_type, "task_link:blocks");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 -- V11: Unified cross-page reference graph.
 --
 -- Every "X points at Y" relationship across page kinds (wiki ->
--- file, work-item -> wiki, commit -> work-item, …) lives here as
+-- file, task -> wiki, commit -> task, …) lives here as
 -- one row. Per-subsystem writers own their `source_kind` rows
 -- (delete-then-insert on save). A single reader joins on
 -- (target_kind, target_id) for backlinks and (source_kind,
@@ -10,7 +10,7 @@
 -- `kind` is denormalised next to `id` so kind-filtered queries
 -- ("all backlinks where target is a file") don't need LIKE on a
 -- combined "kind:id" column. Canonical ids match the frontend's
--- TabRef.id shape (e.g. "wiki:architecture", "wi-42",
+-- TabRef.id shape (e.g. "wiki:architecture", "task:42",
 -- "file:src/app.rs", "git-commit:abc123").
 --
 -- `ref_type` records HOW the source points at the target so the

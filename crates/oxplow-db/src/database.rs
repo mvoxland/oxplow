@@ -152,9 +152,6 @@ mod tests {
             "runtime_state",
             "threads",
             "thread_selection",
-            "work_items",
-            "work_item_links",
-            "work_item_events",
             "work_notes",
             "agent_turn",
             "wiki_page",
@@ -163,10 +160,13 @@ mod tests {
             "code_quality_scan",
             "code_quality_finding",
             "file_snapshot",
-            "work_item_commit",
-            "work_item_effort",
-            "work_item_effort_file",
-            "work_item_effort_turn",
+            "task",
+            "task_link",
+            "task_event",
+            "task_commit",
+            "task_effort",
+            "task_effort_file",
+            "task_effort_turn",
             "wiki_page_thread_update",
             "page_ref",
         ];
@@ -289,14 +289,14 @@ mod tests {
         );
         // Both set — must fail.
         let r = conn.execute(
-            "INSERT INTO work_items (id, kind, title, status, priority, created_by, created_at, updated_at)
-             VALUES ('wi-1', 'task', 't', 'ready', 'medium', 'user', ?1, ?1)",
+            "INSERT INTO task (title, status, priority, created_by, created_at, updated_at)
+             VALUES ('t', 'ready', 'medium', 'user', ?1, ?1)",
             [now],
         );
         assert!(r.is_ok());
         let r = conn.execute(
-            "INSERT INTO work_notes (id, work_item_id, thread_id, body, author, created_at)
-             VALUES ('n-bad2', 'wi-1', 'b-1', 'b', 'u', ?1)",
+            "INSERT INTO work_notes (id, task_id, thread_id, body, author, created_at)
+             VALUES ('n-bad2', 1, 'b-1', 'b', 'u', ?1)",
             [now],
         );
         assert!(r.is_err(), "work_notes with both parents should fail CHECK");

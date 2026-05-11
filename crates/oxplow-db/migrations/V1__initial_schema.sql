@@ -63,12 +63,11 @@ CREATE TABLE thread_selection (
     selected_thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL
 );
 
-CREATE TABLE work_items (
-    id TEXT PRIMARY KEY,
-    -- Nullable: null means the item is on the project-wide backlog.
+CREATE TABLE task (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Nullable: null means the task is on the project-wide backlog.
     thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
-    parent_id TEXT REFERENCES work_items(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL CHECK (kind IN ('epic', 'task', 'subtask', 'bug', 'note')),
+    parent_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     acceptance_criteria TEXT,
@@ -85,50 +84,50 @@ CREATE TABLE work_items (
     category TEXT,
     tags TEXT
 );
-CREATE INDEX idx_work_items_thread_parent ON work_items(thread_id, parent_id, sort_index);
-CREATE INDEX idx_work_items_thread_status ON work_items(thread_id, status, sort_index);
-CREATE INDEX idx_work_items_thread_deleted ON work_items(thread_id, deleted_at, sort_index);
-CREATE INDEX idx_work_items_backlog ON work_items(deleted_at, sort_index) WHERE thread_id IS NULL;
+CREATE INDEX idx_task_thread_parent ON task(thread_id, parent_id, sort_index);
+CREATE INDEX idx_task_thread_status ON task(thread_id, status, sort_index);
+CREATE INDEX idx_task_thread_deleted ON task(thread_id, deleted_at, sort_index);
+CREATE INDEX idx_task_backlog ON task(deleted_at, sort_index) WHERE thread_id IS NULL;
 
-CREATE TABLE work_item_links (
-    id TEXT PRIMARY KEY,
+CREATE TABLE task_link (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-    from_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
-    to_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+    from_item_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+    to_item_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     link_type TEXT NOT NULL CHECK (link_type IN ('blocks', 'relates_to', 'discovered_from', 'duplicates', 'supersedes', 'replies_to')),
     created_at TEXT NOT NULL,
     CHECK (from_item_id <> to_item_id)
 );
-CREATE INDEX idx_work_links_thread_from ON work_item_links(thread_id, from_item_id);
-CREATE INDEX idx_work_links_thread_to ON work_item_links(thread_id, to_item_id);
+CREATE INDEX idx_task_link_thread_from ON task_link(thread_id, from_item_id);
+CREATE INDEX idx_task_link_thread_to ON task_link(thread_id, to_item_id);
 
-CREATE TABLE work_item_events (
+CREATE TABLE task_event (
     id TEXT PRIMARY KEY,
     thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-    item_id TEXT REFERENCES work_items(id) ON DELETE CASCADE,
+    item_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
     event_type TEXT NOT NULL,
     actor_kind TEXT NOT NULL CHECK (actor_kind IN ('user', 'agent', 'system')),
     actor_id TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
-CREATE INDEX idx_work_events_thread_item ON work_item_events(thread_id, item_id, created_at);
+CREATE INDEX idx_task_event_thread_item ON task_event(thread_id, item_id, created_at);
 
 CREATE TABLE work_notes (
     id TEXT PRIMARY KEY,
-    work_item_id TEXT REFERENCES work_items(id) ON DELETE CASCADE,
+    task_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
     thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
     body TEXT NOT NULL,
     author TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    -- Mutually exclusive: a note is attached to either a work item or
+    -- Mutually exclusive: a note is attached to either a task or
     -- a thread, never both, never neither.
     CHECK (
-        (work_item_id IS NOT NULL AND thread_id IS NULL)
-        OR (work_item_id IS NULL AND thread_id IS NOT NULL)
+        (task_id IS NOT NULL AND thread_id IS NULL)
+        OR (task_id IS NULL AND thread_id IS NOT NULL)
     )
 );
-CREATE INDEX idx_work_notes_item ON work_notes(work_item_id, created_at);
+CREATE INDEX idx_work_notes_task ON work_notes(task_id, created_at);
 CREATE INDEX idx_work_notes_thread ON work_notes(thread_id, created_at);
 
 -- Wiki notes — durable, file-backed knowledge captured by agent
@@ -211,7 +210,7 @@ CREATE INDEX idx_file_snapshot_path ON file_snapshot(path, captured_at DESC);
 CREATE TABLE agent_turn (
     id TEXT PRIMARY KEY,
     thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-    work_item_id TEXT REFERENCES work_items(id) ON DELETE SET NULL,
+    task_id INTEGER REFERENCES task(id) ON DELETE SET NULL,
     prompt TEXT NOT NULL,
     answer TEXT,
     session_id TEXT,
@@ -219,7 +218,7 @@ CREATE TABLE agent_turn (
     ended_at TEXT
 );
 CREATE INDEX idx_agent_turn_thread ON agent_turn(thread_id, started_at DESC);
-CREATE INDEX idx_agent_turn_item ON agent_turn(work_item_id, started_at DESC);
+CREATE INDEX idx_agent_turn_task ON agent_turn(task_id, started_at DESC);
 CREATE INDEX idx_agent_turn_open ON agent_turn(thread_id) WHERE ended_at IS NULL;
 
 -- Durable hook-event log. Surfaces in the HookEventsPage and feeds
@@ -248,23 +247,23 @@ CREATE TABLE agent_status (
 );
 CREATE INDEX idx_agent_status_state ON agent_status(state, updated_at DESC);
 
--- Work-item commit attribution: which commits the agent produced
--- under a given item. Powers the "commits this item shipped" rail.
-CREATE TABLE work_item_commit (
-    work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+-- Task commit attribution: which commits the agent produced
+-- under a given task. Powers the "commits this task shipped" rail.
+CREATE TABLE task_commit (
+    task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     commit_sha TEXT NOT NULL,
     stream_id TEXT REFERENCES streams(id) ON DELETE SET NULL,
     recorded_at TEXT NOT NULL,
-    PRIMARY KEY (work_item_id, commit_sha)
+    PRIMARY KEY (task_id, commit_sha)
 );
-CREATE INDEX idx_work_item_commit_sha ON work_item_commit(commit_sha);
+CREATE INDEX idx_task_commit_sha ON task_commit(commit_sha);
 
--- Work-item effort tracking. An "effort" is one continuous push of
--- agent work on an item — bounded by snapshots at start and end. The
+-- Task effort tracking. An "effort" is one continuous push of
+-- agent work on a task — bounded by snapshots at start and end. The
 -- effort_file rows attribute concrete file changes.
-CREATE TABLE work_item_effort (
+CREATE TABLE task_effort (
     id TEXT PRIMARY KEY,
-    work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+    task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
     ended_at TEXT,
@@ -272,18 +271,18 @@ CREATE TABLE work_item_effort (
     end_snapshot_id INTEGER REFERENCES file_snapshot(id) ON DELETE SET NULL,
     summary TEXT
 );
-CREATE INDEX idx_work_item_effort_item ON work_item_effort(work_item_id, started_at DESC);
-CREATE INDEX idx_work_item_effort_thread ON work_item_effort(thread_id, started_at DESC);
+CREATE INDEX idx_task_effort_task ON task_effort(task_id, started_at DESC);
+CREATE INDEX idx_task_effort_thread ON task_effort(thread_id, started_at DESC);
 
-CREATE TABLE work_item_effort_file (
-    effort_id TEXT NOT NULL REFERENCES work_item_effort(id) ON DELETE CASCADE,
+CREATE TABLE task_effort_file (
+    effort_id TEXT NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     change_kind TEXT NOT NULL CHECK (change_kind IN ('created', 'updated', 'deleted')),
     PRIMARY KEY (effort_id, path)
 );
 
-CREATE TABLE work_item_effort_turn (
-    effort_id TEXT NOT NULL REFERENCES work_item_effort(id) ON DELETE CASCADE,
+CREATE TABLE task_effort_turn (
+    effort_id TEXT NOT NULL REFERENCES task_effort(id) ON DELETE CASCADE,
     turn_id TEXT NOT NULL REFERENCES agent_turn(id) ON DELETE CASCADE,
     PRIMARY KEY (effort_id, turn_id)
 );

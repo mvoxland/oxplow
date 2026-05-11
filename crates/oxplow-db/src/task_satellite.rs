@@ -1,21 +1,21 @@
-//! Stores for the satellites of `work_items`: notes, links, events.
+//! Stores for the satellites of `task`: notes, links, events.
 //!
 //! Each is small enough to share this module rather than warranting
 //! its own file. They share the timestamp + helper plumbing the
-//! main work_item_store already establishes.
+//! main task_store already establishes.
 
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::stores::{WorkItemEventStore, WorkItemLinkStore, WorkNoteStore};
+use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, WorkNoteStore};
 use oxplow_domain::{
-    DomainError, NoteId, ThreadId, Timestamp, WorkItemActorKind, WorkItemEvent, WorkItemId,
-    WorkItemLink, WorkItemLinkType, WorkNote,
+    DomainError, NoteId, TaskActorKind, TaskEvent, TaskId, TaskLink, TaskLinkId, TaskLinkType,
+    ThreadId, Timestamp, WorkNote,
 };
 
 use crate::database::Database;
 use crate::page_ref_projections::{
-    link_edge, note_edges, work_item_link_ref_types, KIND_WORK_ITEM, KIND_WORK_NOTE,
+    link_edge, note_edges, task_link_ref_types, KIND_TASK, KIND_WORK_NOTE,
 };
 use crate::page_ref_store::SqlitePageRefStore;
 
@@ -31,42 +31,42 @@ fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
         .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
 }
 
-fn link_type_to_str(t: WorkItemLinkType) -> &'static str {
+fn link_type_to_str(t: TaskLinkType) -> &'static str {
     match t {
-        WorkItemLinkType::Blocks => "blocks",
-        WorkItemLinkType::RelatesTo => "relates_to",
-        WorkItemLinkType::DiscoveredFrom => "discovered_from",
-        WorkItemLinkType::Duplicates => "duplicates",
-        WorkItemLinkType::Supersedes => "supersedes",
-        WorkItemLinkType::RepliesTo => "replies_to",
+        TaskLinkType::Blocks => "blocks",
+        TaskLinkType::RelatesTo => "relates_to",
+        TaskLinkType::DiscoveredFrom => "discovered_from",
+        TaskLinkType::Duplicates => "duplicates",
+        TaskLinkType::Supersedes => "supersedes",
+        TaskLinkType::RepliesTo => "replies_to",
     }
 }
 
-fn str_to_link_type(s: &str) -> Result<WorkItemLinkType, DomainError> {
+fn str_to_link_type(s: &str) -> Result<TaskLinkType, DomainError> {
     match s {
-        "blocks" => Ok(WorkItemLinkType::Blocks),
-        "relates_to" => Ok(WorkItemLinkType::RelatesTo),
-        "discovered_from" => Ok(WorkItemLinkType::DiscoveredFrom),
-        "duplicates" => Ok(WorkItemLinkType::Duplicates),
-        "supersedes" => Ok(WorkItemLinkType::Supersedes),
-        "replies_to" => Ok(WorkItemLinkType::RepliesTo),
+        "blocks" => Ok(TaskLinkType::Blocks),
+        "relates_to" => Ok(TaskLinkType::RelatesTo),
+        "discovered_from" => Ok(TaskLinkType::DiscoveredFrom),
+        "duplicates" => Ok(TaskLinkType::Duplicates),
+        "supersedes" => Ok(TaskLinkType::Supersedes),
+        "replies_to" => Ok(TaskLinkType::RepliesTo),
         other => Err(DomainError::Invalid(format!("unknown link type: {other}"))),
     }
 }
 
-fn actor_to_str(a: WorkItemActorKind) -> &'static str {
+fn actor_to_str(a: TaskActorKind) -> &'static str {
     match a {
-        WorkItemActorKind::User => "user",
-        WorkItemActorKind::Agent => "agent",
-        WorkItemActorKind::System => "system",
+        TaskActorKind::User => "user",
+        TaskActorKind::Agent => "agent",
+        TaskActorKind::System => "system",
     }
 }
 
-fn str_to_actor(s: &str) -> Result<WorkItemActorKind, DomainError> {
+fn str_to_actor(s: &str) -> Result<TaskActorKind, DomainError> {
     match s {
-        "user" => Ok(WorkItemActorKind::User),
-        "agent" => Ok(WorkItemActorKind::Agent),
-        "system" => Ok(WorkItemActorKind::System),
+        "user" => Ok(TaskActorKind::User),
+        "agent" => Ok(TaskActorKind::Agent),
+        "system" => Ok(TaskActorKind::System),
         other => Err(DomainError::Invalid(format!("unknown actor kind: {other}"))),
     }
 }
@@ -87,9 +87,6 @@ impl SqliteWorkNoteStore {
         }
     }
 
-    /// When set, every add / update_body / delete also re-projects
-    /// the note's body into `page_ref` under
-    /// `(work-note, <note id>)` (single-owner full replace).
     pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
         self.page_refs = Some(store);
         self
@@ -121,7 +118,7 @@ impl SqliteWorkNoteStore {
 
 fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkNote> {
     let id: String = row.get("id")?;
-    let work_item_id: Option<String> = row.get("work_item_id")?;
+    let task_id: Option<i64> = row.get("task_id")?;
     let thread_id: Option<String> = row.get("thread_id")?;
     let body: String = row.get("body")?;
     let author: String = row.get("author")?;
@@ -131,7 +128,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkNote> {
     };
     Ok(WorkNote {
         id: NoteId::from(id),
-        work_item_id: work_item_id.map(WorkItemId::from),
+        task_id: task_id.map(TaskId),
         thread_id: thread_id.map(ThreadId::from),
         body,
         author,
@@ -143,12 +140,11 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkNote> {
 impl WorkNoteStore for SqliteWorkNoteStore {
     async fn add_for_item(
         &self,
-        item: &WorkItemId,
+        item: TaskId,
         body: &str,
         author: &str,
     ) -> Result<WorkNote, DomainError> {
         let db = self.db.clone();
-        let item = item.clone();
         let body_owned = body.to_string();
         let author = author.to_string();
         let note = tokio::task::spawn_blocking(move || -> Result<WorkNote, DomainError> {
@@ -156,11 +152,11 @@ impl WorkNoteStore for SqliteWorkNoteStore {
             let now = Timestamp::now();
             db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO work_notes (id, work_item_id, body, author, created_at)
+                    "INSERT INTO work_notes (id, task_id, body, author, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
                         id.as_str(),
-                        item.as_str(),
+                        item.value(),
                         body_owned,
                         author,
                         ts_to_string(now)
@@ -170,7 +166,7 @@ impl WorkNoteStore for SqliteWorkNoteStore {
             })?;
             Ok(WorkNote {
                 id,
-                work_item_id: Some(item),
+                task_id: Some(item),
                 thread_id: None,
                 body: body_owned,
                 author,
@@ -212,7 +208,7 @@ impl WorkNoteStore for SqliteWorkNoteStore {
             })?;
             Ok(WorkNote {
                 id,
-                work_item_id: None,
+                task_id: None,
                 thread_id: Some(thread),
                 body: body_owned,
                 author,
@@ -225,15 +221,14 @@ impl WorkNoteStore for SqliteWorkNoteStore {
         Ok(note)
     }
 
-    async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkNote>, DomainError> {
+    async fn list_for_item(&self, item: TaskId) -> Result<Vec<WorkNote>, DomainError> {
         let db = self.db.clone();
-        let item = item.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM work_notes WHERE work_item_id = ?1 ORDER BY created_at ASC",
+                    "SELECT * FROM work_notes WHERE task_id = ?1 ORDER BY created_at ASC",
                 )?;
-                let rows = stmt.query_map(params![item.as_str()], row_to_note)?;
+                let rows = stmt.query_map(params![item.value()], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
@@ -298,15 +293,15 @@ impl WorkNoteStore for SqliteWorkNoteStore {
     }
 }
 
-// ---------------- Work item links ----------------
+// ---------------- Task links ----------------
 
 #[derive(Clone)]
-pub struct SqliteWorkItemLinkStore {
+pub struct SqliteTaskLinkStore {
     db: Database,
     page_refs: Option<SqlitePageRefStore>,
 }
 
-impl SqliteWorkItemLinkStore {
+impl SqliteTaskLinkStore {
     pub fn new(db: Database) -> Self {
         Self {
             db,
@@ -316,14 +311,14 @@ impl SqliteWorkItemLinkStore {
 
     /// Distinct `from_item_id` values across every link row. Used
     /// by the page-ref backfill so we can re-project each owning
-    /// item's slice exactly once.
-    pub async fn list_distinct_from_items(&self) -> Result<Vec<WorkItemId>, DomainError> {
+    /// task's slice exactly once.
+    pub async fn list_distinct_from_items(&self) -> Result<Vec<TaskId>, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                let mut stmt = conn.prepare("SELECT DISTINCT from_item_id FROM work_item_links")?;
-                let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-                rows.map(|r| r.map(WorkItemId::from))
+                let mut stmt = conn.prepare("SELECT DISTINCT from_item_id FROM task_link")?;
+                let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+                rows.map(|r| r.map(TaskId))
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
         })
@@ -331,31 +326,25 @@ impl SqliteWorkItemLinkStore {
         .unwrap()
     }
 
-    /// When set, every link create/delete also re-projects the
-    /// affected work-item's outgoing link edges into `page_ref`.
-    /// We project the WHOLE outgoing slice for `from_item_id` rather
-    /// than just the changed row so removals are clean.
     pub fn with_page_refs(mut self, store: SqlitePageRefStore) -> Self {
         self.page_refs = Some(store);
         self
     }
 
-    /// Re-emit `work_item_link:*` edges for all currently-stored
-    /// outgoing links of `from_item`. Called after create/delete
-    /// when `page_refs` is attached. Uses the slice variant so
-    /// body-mention edges from `work_item_store` survive.
-    async fn project_outgoing_links(&self, from_item: &WorkItemId) -> Result<(), DomainError> {
+    /// Re-emit `task_link:*` edges for all currently-stored outgoing
+    /// links of `from_item`. Called after create/delete when
+    /// `page_refs` is attached.
+    async fn project_outgoing_links(&self, from_item: TaskId) -> Result<(), DomainError> {
         let Some(refs) = &self.page_refs else {
             return Ok(());
         };
         let db = self.db.clone();
-        let from = from_item.clone();
-        let links: Vec<WorkItemLink> = tokio::task::spawn_blocking(move || {
+        let links: Vec<TaskLink> = tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM work_item_links WHERE from_item_id = ?1 ORDER BY created_at ASC",
+                    "SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC",
                 )?;
-                let rows = stmt.query_map(params![from.as_str()], row_to_link)?;
+                let rows = stmt.query_map(params![from_item.value()], row_to_link)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
@@ -363,71 +352,67 @@ impl SqliteWorkItemLinkStore {
         .unwrap()?;
         let edges: Vec<_> = links.iter().map(link_edge).collect();
         refs.replace_source_for_ref_types(
-            KIND_WORK_ITEM,
-            from_item.as_str(),
-            work_item_link_ref_types(),
+            KIND_TASK,
+            &from_item.to_string(),
+            task_link_ref_types(),
             edges,
         )
         .await
     }
 }
 
-fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkItemLink> {
-    let id: String = row.get("id")?;
+fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskLink> {
+    let id: i64 = row.get("id")?;
     let thread_id: String = row.get("thread_id")?;
-    let from_item_id: String = row.get("from_item_id")?;
-    let to_item_id: String = row.get("to_item_id")?;
+    let from_item_id: i64 = row.get("from_item_id")?;
+    let to_item_id: i64 = row.get("to_item_id")?;
     let link_type: String = row.get("link_type")?;
     let created_at: String = row.get("created_at")?;
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
-    Ok(WorkItemLink {
-        id,
+    Ok(TaskLink {
+        id: TaskLinkId(id),
         thread_id: ThreadId::from(thread_id),
-        from_item_id: WorkItemId::from(from_item_id),
-        to_item_id: WorkItemId::from(to_item_id),
+        from_item_id: TaskId(from_item_id),
+        to_item_id: TaskId(to_item_id),
         link_type: str_to_link_type(&link_type).map_err(map_err)?,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
     })
 }
 
 #[async_trait]
-impl WorkItemLinkStore for SqliteWorkItemLinkStore {
+impl TaskLinkStore for SqliteTaskLinkStore {
     async fn create(
         &self,
         thread: &ThreadId,
-        from: &WorkItemId,
-        to: &WorkItemId,
-        link_type: WorkItemLinkType,
-    ) -> Result<WorkItemLink, DomainError> {
+        from: TaskId,
+        to: TaskId,
+        link_type: TaskLinkType,
+    ) -> Result<TaskLink, DomainError> {
         let db = self.db.clone();
         let thread_clone = thread.clone();
-        let from_clone = from.clone();
-        let to_clone = to.clone();
-        let link = tokio::task::spawn_blocking(move || -> Result<WorkItemLink, DomainError> {
-            let id = format!("wil-{}", uuid::Uuid::new_v4().simple());
+        let link = tokio::task::spawn_blocking(move || -> Result<TaskLink, DomainError> {
             let now = Timestamp::now();
-            db.with_conn(|conn| {
+            let new_id = db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO work_item_links (id, thread_id, from_item_id, to_item_id, link_type, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    "INSERT INTO task_link (thread_id, from_item_id, to_item_id, link_type, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
-                        id,
                         thread_clone.as_str(),
-                        from_clone.as_str(),
-                        to_clone.as_str(),
+                        from.value(),
+                        to.value(),
                         link_type_to_str(link_type),
                         ts_to_string(now),
                     ],
                 )?;
-                Ok(())
+                Ok(conn.last_insert_rowid())
             })?;
-            Ok(WorkItemLink {
-                id,
+            Ok(TaskLink {
+                id: TaskLinkId(new_id),
                 thread_id: thread_clone,
-                from_item_id: from_clone,
-                to_item_id: to_clone,
+                from_item_id: from,
+                to_item_id: to,
                 link_type,
                 created_at: now,
             })
@@ -438,15 +423,14 @@ impl WorkItemLinkStore for SqliteWorkItemLinkStore {
         Ok(link)
     }
 
-    async fn list_outgoing(&self, item: &WorkItemId) -> Result<Vec<WorkItemLink>, DomainError> {
+    async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
         let db = self.db.clone();
-        let item = item.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM work_item_links WHERE from_item_id = ?1 ORDER BY created_at ASC",
+                    "SELECT * FROM task_link WHERE from_item_id = ?1 ORDER BY created_at ASC",
                 )?;
-                let rows = stmt.query_map(params![item.as_str()], row_to_link)?;
+                let rows = stmt.query_map(params![item.value()], row_to_link)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
@@ -454,15 +438,14 @@ impl WorkItemLinkStore for SqliteWorkItemLinkStore {
         .unwrap()
     }
 
-    async fn list_incoming(&self, item: &WorkItemId) -> Result<Vec<WorkItemLink>, DomainError> {
+    async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError> {
         let db = self.db.clone();
-        let item = item.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM work_item_links WHERE to_item_id = ?1 ORDER BY created_at ASC",
+                    "SELECT * FROM task_link WHERE to_item_id = ?1 ORDER BY created_at ASC",
                 )?;
-                let rows = stmt.query_map(params![item.as_str()], row_to_link)?;
+                let rows = stmt.query_map(params![item.value()], row_to_link)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
@@ -470,60 +453,53 @@ impl WorkItemLinkStore for SqliteWorkItemLinkStore {
         .unwrap()
     }
 
-    async fn delete(&self, id: &str) -> Result<(), DomainError> {
-        // Capture the from_item_id BEFORE deletion so we can re-project.
+    async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError> {
         let db = self.db.clone();
-        let id_str = id.to_string();
-        let from_item: Option<WorkItemId> = tokio::task::spawn_blocking({
+        let from_item: Option<TaskId> = tokio::task::spawn_blocking({
             let db = db.clone();
-            let id = id_str.clone();
-            move || -> Result<Option<WorkItemId>, DomainError> {
+            move || -> Result<Option<TaskId>, DomainError> {
                 db.with_conn(|conn| {
                     let mut stmt =
-                        conn.prepare("SELECT from_item_id FROM work_item_links WHERE id = ?1")?;
-                    let mut rows = stmt.query_map(params![id], |r| r.get::<_, String>(0))?;
-                    Ok(rows.next().transpose()?.map(WorkItemId::from))
+                        conn.prepare("SELECT from_item_id FROM task_link WHERE id = ?1")?;
+                    let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, i64>(0))?;
+                    Ok(rows.next().transpose()?.map(TaskId))
                 })
             }
         })
         .await
         .unwrap()?;
-        let id_str2 = id_str.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                conn.execute(
-                    "DELETE FROM work_item_links WHERE id = ?1",
-                    params![id_str2],
-                )?;
+                conn.execute("DELETE FROM task_link WHERE id = ?1", params![id.value()])?;
                 Ok(())
             })
         })
         .await
         .unwrap()?;
         if let Some(from) = from_item {
-            self.project_outgoing_links(&from).await?;
+            self.project_outgoing_links(from).await?;
         }
         Ok(())
     }
 }
 
-// ---------------- Work item events ----------------
+// ---------------- Task events ----------------
 
 #[derive(Clone)]
-pub struct SqliteWorkItemEventStore {
+pub struct SqliteTaskEventStore {
     db: Database,
 }
 
-impl SqliteWorkItemEventStore {
+impl SqliteTaskEventStore {
     pub fn new(db: Database) -> Self {
         Self { db }
     }
 }
 
-fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkItemEvent> {
+fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
     let id: String = row.get("id")?;
     let thread_id: String = row.get("thread_id")?;
-    let item_id: Option<String> = row.get("item_id")?;
+    let item_id: Option<i64> = row.get("item_id")?;
     let event_type: String = row.get("event_type")?;
     let actor_kind: String = row.get("actor_kind")?;
     let actor_id: String = row.get("actor_id")?;
@@ -532,10 +508,10 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkItemEvent> {
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
-    Ok(WorkItemEvent {
+    Ok(TaskEvent {
         id,
         thread_id: ThreadId::from(thread_id),
-        item_id: item_id.map(WorkItemId::from),
+        item_id: item_id.map(TaskId),
         event_type,
         actor_kind: str_to_actor(&actor_kind).map_err(map_err)?,
         actor_id,
@@ -545,20 +521,20 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkItemEvent> {
 }
 
 #[async_trait]
-impl WorkItemEventStore for SqliteWorkItemEventStore {
-    async fn append(&self, event: &WorkItemEvent) -> Result<(), DomainError> {
+impl TaskEventStore for SqliteTaskEventStore {
+    async fn append(&self, event: &TaskEvent) -> Result<(), DomainError> {
         let db = self.db.clone();
         let event = event.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO work_item_events
+                    "INSERT INTO task_event
                        (id, thread_id, item_id, event_type, actor_kind, actor_id, payload_json, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         event.id,
                         event.thread_id.as_str(),
-                        event.item_id.as_ref().map(|i| i.as_str()),
+                        event.item_id.map(|i| i.value()),
                         event.event_type,
                         actor_to_str(event.actor_kind),
                         event.actor_id,
@@ -573,15 +549,14 @@ impl WorkItemEventStore for SqliteWorkItemEventStore {
         .unwrap()
     }
 
-    async fn list_for_item(&self, item: &WorkItemId) -> Result<Vec<WorkItemEvent>, DomainError> {
+    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEvent>, DomainError> {
         let db = self.db.clone();
-        let item = item.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM work_item_events WHERE item_id = ?1 ORDER BY created_at ASC",
+                    "SELECT * FROM task_event WHERE item_id = ?1 ORDER BY created_at ASC",
                 )?;
-                let rows = stmt.query_map(params![item.as_str()], row_to_event)?;
+                let rows = stmt.query_map(params![item.value()], row_to_event)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
@@ -589,13 +564,13 @@ impl WorkItemEventStore for SqliteWorkItemEventStore {
         .unwrap()
     }
 
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkItemEvent>, DomainError> {
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskEvent>, DomainError> {
         let db = self.db.clone();
         let thread = thread.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM work_item_events WHERE thread_id = ?1 ORDER BY created_at ASC",
+                    "SELECT * FROM task_event WHERE thread_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![thread.as_str()], row_to_event)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -610,23 +585,23 @@ impl WorkItemEventStore for SqliteWorkItemEventStore {
 mod tests {
     use super::*;
     use crate::stream_store::SqliteStreamStore;
+    use crate::task_store::SqliteTaskStore;
     use crate::thread_store::SqliteThreadStore;
-    use crate::work_item_store::SqliteWorkItemStore;
-    use oxplow_domain::stores::{StreamStore, ThreadStore, WorkItemStore};
+    use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
     use oxplow_domain::{
-        Stream, StreamId, StreamKind, Thread, ThreadStatus, WorkItem, WorkItemAuthor, WorkItemKind,
-        WorkItemPriority, WorkItemStatus,
+        Stream, StreamId, StreamKind, Task, TaskAuthor, TaskPriority, TaskStatus, Thread,
+        ThreadStatus,
     };
 
     fn now() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
     }
 
-    async fn fixture() -> (Database, ThreadId, WorkItemId) {
+    async fn fixture() -> (Database, ThreadId, TaskId) {
         let db = Database::in_memory();
         let streams = SqliteStreamStore::new(db.clone());
         let threads = SqliteThreadStore::new(db.clone());
-        let items = SqliteWorkItemStore::new(db.clone());
+        let items = SqliteTaskStore::new(db.clone());
 
         let s = Stream {
             id: StreamId::from("s-1"),
@@ -665,29 +640,27 @@ mod tests {
         };
         threads.upsert(&t).await.unwrap();
 
-        let item_id = WorkItemId::from("wi-1");
-        let item = WorkItem {
-            id: item_id.clone(),
+        let item = Task {
+            id: TaskId(0),
             thread_id: Some(t.id.clone()),
             parent_id: None,
-            kind: WorkItemKind::Task,
             title: "x".into(),
             description: String::new(),
             acceptance_criteria: None,
-            status: WorkItemStatus::Ready,
-            priority: WorkItemPriority::Medium,
+            status: TaskStatus::Ready,
+            priority: TaskPriority::Medium,
             sort_index: 0,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now(),
             updated_at: now(),
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         };
-        items.upsert(&item).await.unwrap();
+        let item_id = items.insert(&item).await.unwrap();
         (db, t.id, item_id)
     }
 
@@ -696,12 +669,12 @@ mod tests {
         let (db, _tid, item_id) = fixture().await;
         let store = SqliteWorkNoteStore::new(db);
         let note = store
-            .add_for_item(&item_id, "looking good", "user")
+            .add_for_item(item_id, "looking good", "user")
             .await
             .unwrap();
-        assert_eq!(note.work_item_id.as_ref(), Some(&item_id));
+        assert_eq!(note.task_id, Some(item_id));
         assert!(note.thread_id.is_none());
-        let listed = store.list_for_item(&item_id).await.unwrap();
+        let listed = store.list_for_item(item_id).await.unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].body, "looking good");
     }
@@ -714,7 +687,7 @@ mod tests {
             .add_for_thread(&tid, "thread-level finding", "agent")
             .await
             .unwrap();
-        assert!(note.work_item_id.is_none());
+        assert!(note.task_id.is_none());
         assert_eq!(note.thread_id.as_ref(), Some(&tid));
         let listed = store.list_for_thread(&tid).await.unwrap();
         assert_eq!(listed.len(), 1);
@@ -724,13 +697,11 @@ mod tests {
     async fn note_delete_removes() {
         let (db, _tid, item_id) = fixture().await;
         let store = SqliteWorkNoteStore::new(db);
-        let note = store.add_for_item(&item_id, "x", "u").await.unwrap();
+        let note = store.add_for_item(item_id, "x", "u").await.unwrap();
         store.delete(&note.id).await.unwrap();
-        assert!(store.list_for_item(&item_id).await.unwrap().is_empty());
+        assert!(store.list_for_item(item_id).await.unwrap().is_empty());
     }
 
-    /// Notes attached to a page_refs store mirror their parsed body
-    /// into `page_ref` on add / update / delete.
     #[tokio::test]
     async fn note_with_page_refs_projects_body() {
         use crate::page_ref_store::SqlitePageRefStore;
@@ -739,18 +710,15 @@ mod tests {
         let store = SqliteWorkNoteStore::new(db).with_page_refs(page_refs.clone());
 
         let note = store
-            .add_for_item(&item_id, "blocked by wi-019zzz-1 see [[src/app.rs]]", "u")
+            .add_for_item(item_id, "blocked by task:99 see [[src/app.rs]]", "u")
             .await
             .unwrap();
-        let inbound_wi = page_refs
-            .list_backlinks("work-item", "wi-019zzz-1", None)
-            .await
-            .unwrap();
+        let inbound_task = page_refs.list_backlinks("task", "99", None).await.unwrap();
         assert!(
-            inbound_wi
+            inbound_task
                 .iter()
                 .any(|e| e.source_kind == "work-note" && e.source_id == note.id.as_str()),
-            "expected note to backlink wi-019zzz-1; got {inbound_wi:?}"
+            "expected note to backlink task:99; got {inbound_task:?}"
         );
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)
@@ -758,7 +726,6 @@ mod tests {
             .unwrap();
         assert!(inbound_file.iter().any(|e| e.source_id == note.id.as_str()));
 
-        // Editing the body replaces the slice cleanly.
         store.update_body(&note.id, "no refs").await.unwrap();
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)
@@ -766,16 +733,10 @@ mod tests {
             .unwrap();
         assert!(inbound_file.iter().all(|e| e.source_id != note.id.as_str()));
 
-        // Delete clears every edge.
         store.delete(&note.id).await.unwrap();
-        let inbound_wi = page_refs
-            .list_backlinks("work-item", "wi-019zzz-1", None)
-            .await
-            .unwrap();
-        assert!(inbound_wi.iter().all(|e| e.source_id != note.id.as_str()));
+        let inbound_task = page_refs.list_backlinks("task", "99", None).await.unwrap();
+        assert!(inbound_task.iter().all(|e| e.source_id != note.id.as_str()));
 
-        // Threaded notes also work — body parsing doesn't depend on
-        // which parent the note attaches to.
         let tnote = store
             .add_for_thread(&tid, "see [[src/lib.rs]]", "u")
             .await
@@ -787,71 +748,63 @@ mod tests {
         assert!(inbound_lib.iter().any(|e| e.source_id == tnote.id.as_str()));
     }
 
-    /// When a page-ref store is attached, link create/delete mirrors
-    /// the work_item_link slice into `page_ref` and survives
-    /// alongside body-mention edges from the work-item store.
     #[tokio::test]
     async fn link_create_delete_projects_page_ref_slice() {
         use crate::page_ref_store::SqlitePageRefStore;
         let (db, tid, from_id) = fixture().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        // Body-mention slice: from_id mentions a file; this should
-        // survive link mutations.
-        let items = SqliteWorkItemStore::new(db.clone()).with_page_refs(page_refs.clone());
-        let mut sender = items.get(&from_id).await.unwrap().unwrap();
+        let items = SqliteTaskStore::new(db.clone()).with_page_refs(page_refs.clone());
+        let mut sender = items.get(from_id).await.unwrap().unwrap();
         sender.description = "see [[src/app.rs]]".into();
-        items.upsert(&sender).await.unwrap();
+        items.update(&sender).await.unwrap();
 
-        // Add a second item to link to.
-        let to = WorkItem {
-            id: WorkItemId::from("wi-2"),
+        let to = Task {
+            id: TaskId(0),
             thread_id: Some(tid.clone()),
             parent_id: None,
-            kind: WorkItemKind::Task,
             title: "y".into(),
             description: String::new(),
             acceptance_criteria: None,
-            status: WorkItemStatus::Ready,
-            priority: WorkItemPriority::Medium,
+            status: TaskStatus::Ready,
+            priority: TaskPriority::Medium,
             sort_index: 1,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now(),
             updated_at: now(),
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         };
-        items.upsert(&to).await.unwrap();
+        let to_id = items.insert(&to).await.unwrap();
 
-        let links = SqliteWorkItemLinkStore::new(db.clone()).with_page_refs(page_refs.clone());
+        let links = SqliteTaskLinkStore::new(db.clone()).with_page_refs(page_refs.clone());
         let link = links
-            .create(&tid, &from_id, &to.id, WorkItemLinkType::Blocks)
+            .create(&tid, from_id, to_id, TaskLinkType::Blocks)
             .await
             .unwrap();
 
-        // Backlinks for wi-2 include the link from wi-1.
         let inbound_to = page_refs
-            .list_backlinks("work-item", to.id.as_str(), None)
+            .list_backlinks("task", &to_id.to_string(), None)
             .await
             .unwrap();
         assert!(inbound_to
             .iter()
-            .any(|e| e.source_id == from_id.as_str() && e.ref_type == "work_item_link:blocks"));
+            .any(|e| e.source_id == from_id.to_string() && e.ref_type == "task_link:blocks"));
 
-        // Body-mention slice still present.
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)
             .await
             .unwrap();
-        assert!(inbound_file.iter().any(|e| e.source_id == from_id.as_str()));
+        assert!(inbound_file
+            .iter()
+            .any(|e| e.source_id == from_id.to_string()));
 
-        // Delete the link → only the link slice clears.
-        links.delete(&link.id).await.unwrap();
+        links.delete(link.id).await.unwrap();
         let inbound_to = page_refs
-            .list_backlinks("work-item", to.id.as_str(), None)
+            .list_backlinks("task", &to_id.to_string(), None)
             .await
             .unwrap();
         assert!(inbound_to.is_empty(), "link backlink should clear");
@@ -860,7 +813,9 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            inbound_file.iter().any(|e| e.source_id == from_id.as_str()),
+            inbound_file
+                .iter()
+                .any(|e| e.source_id == from_id.to_string()),
             "body-mention slice must survive link deletion"
         );
     }
@@ -868,58 +823,56 @@ mod tests {
     #[tokio::test]
     async fn link_round_trip_and_directionality() {
         let (db, tid, from_id) = fixture().await;
-        // Create a second item to link to.
-        let items = SqliteWorkItemStore::new(db.clone());
-        let to = WorkItem {
-            id: WorkItemId::from("wi-2"),
+        let items = SqliteTaskStore::new(db.clone());
+        let to = Task {
+            id: TaskId(0),
             thread_id: Some(tid.clone()),
             parent_id: None,
-            kind: WorkItemKind::Task,
             title: "y".into(),
             description: String::new(),
             acceptance_criteria: None,
-            status: WorkItemStatus::Ready,
-            priority: WorkItemPriority::Medium,
+            status: TaskStatus::Ready,
+            priority: TaskPriority::Medium,
             sort_index: 1,
-            created_by: WorkItemActorKind::User,
+            created_by: TaskActorKind::User,
             created_at: now(),
             updated_at: now(),
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(WorkItemAuthor::User),
+            author: Some(TaskAuthor::User),
             category: None,
             tags: None,
         };
-        items.upsert(&to).await.unwrap();
-        let store = SqliteWorkItemLinkStore::new(db);
+        let to_id = items.insert(&to).await.unwrap();
+        let store = SqliteTaskLinkStore::new(db);
         store
-            .create(&tid, &from_id, &to.id, WorkItemLinkType::Blocks)
+            .create(&tid, from_id, to_id, TaskLinkType::Blocks)
             .await
             .unwrap();
-        let outgoing = store.list_outgoing(&from_id).await.unwrap();
-        let incoming = store.list_incoming(&to.id).await.unwrap();
+        let outgoing = store.list_outgoing(from_id).await.unwrap();
+        let incoming = store.list_incoming(to_id).await.unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(incoming.len(), 1);
-        assert_eq!(outgoing[0].link_type, WorkItemLinkType::Blocks);
+        assert_eq!(outgoing[0].link_type, TaskLinkType::Blocks);
     }
 
     #[tokio::test]
     async fn event_append_and_list() {
         let (db, tid, item_id) = fixture().await;
-        let store = SqliteWorkItemEventStore::new(db);
-        let evt = WorkItemEvent {
+        let store = SqliteTaskEventStore::new(db);
+        let evt = TaskEvent {
             id: "evt-1".into(),
             thread_id: tid.clone(),
-            item_id: Some(item_id.clone()),
+            item_id: Some(item_id),
             event_type: "transition".into(),
-            actor_kind: WorkItemActorKind::Agent,
+            actor_kind: TaskActorKind::Agent,
             actor_id: "claude".into(),
             payload_json: "{\"to\":\"in_progress\"}".into(),
             created_at: now(),
         };
         store.append(&evt).await.unwrap();
-        let item_events = store.list_for_item(&item_id).await.unwrap();
+        let item_events = store.list_for_item(item_id).await.unwrap();
         let thread_events = store.list_for_thread(&tid).await.unwrap();
         assert_eq!(item_events.len(), 1);
         assert_eq!(thread_events.len(), 1);

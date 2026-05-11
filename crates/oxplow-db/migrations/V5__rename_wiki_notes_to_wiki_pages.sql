@@ -1,6 +1,6 @@
 -- Wiki entries are pages, not notes. The earlier "note" naming
 -- conflated them with the Explore-subagent thread-scoped notes
--- (a different concept) and with the now-retired per-work-item
+-- (a different concept) and with the now-retired per-task
 -- notes. Rename every wiki_note* table/index/virtual table to
 -- the wiki_page* form so the schema, the Rust types, the IPC
 -- surface, and the UI all read consistently.

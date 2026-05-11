@@ -11,11 +11,11 @@ pub mod effort_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
 mod stream_store;
+pub mod task_satellite;
+pub mod task_store;
 mod thread_store;
 pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
-mod work_item_store;
-mod work_satellite;
 
 pub use agent_stores::SqliteAgentTurnStore;
 pub use analytics_stores::{
@@ -25,12 +25,12 @@ pub use analytics_stores::{
 };
 pub use database::{Database, DbInitError};
 pub use effort_store::{
-    EffortFile, EffortFileChange, SqliteWorkItemEffortStore, WorkItemEffort, WorkItemEffortStore,
+    EffortFile, EffortFileChange, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use stream_store::SqliteStreamStore;
+pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteWorkNoteStore};
+pub use task_store::SqliteTaskStore;
 pub use thread_store::SqliteThreadStore;
 pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};
 pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};
-pub use work_item_store::SqliteWorkItemStore;
-pub use work_satellite::{SqliteWorkItemEventStore, SqliteWorkItemLinkStore, SqliteWorkNoteStore};
