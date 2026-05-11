@@ -86,15 +86,19 @@ export function usePageOutbound(source: TabRef): BacklinkEntry[] {
  * the prefixed `ref.id`. Returns null for kinds the page-ref graph
  * doesn't track (settings, dialogs, …) so the hook short-circuits.
  */
-function canonicalIdForTarget(ref: TabRef): string | null {
+export function canonicalIdForTarget(ref: TabRef): string | null {
   switch (ref.kind) {
     case "wiki": {
       const p = ref.payload as { slug?: string } | null;
       return p?.slug ?? null;
     }
     case "task": {
-      const p = ref.payload as { itemId?: string } | null;
-      return p?.itemId ?? null;
+      // payload.itemId is a number (see `taskRef` in pageRefs.ts);
+      // stringify so the Tauri command receives the `String` it
+      // declares. Without this the IPC throws on deserialize and
+      // the hook silently sets entries to [].
+      const p = ref.payload as { itemId?: string | number } | null;
+      return p?.itemId != null ? String(p.itemId) : null;
     }
     case "file": {
       const p = ref.payload as { path?: string } | null;
