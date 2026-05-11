@@ -12,11 +12,12 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, EffortId, TaskId, TaskImpact, ThreadId, Timestamp};
 
 use crate::database::Database;
 use crate::page_ref_projections::{
-    effort_ref_types, effort_summary_edges, effort_touched_file_edges, KIND_TASK,
+    effort_impact_edges, effort_ref_types, effort_summary_edges, effort_touched_file_edges,
+    KIND_TASK,
 };
 use crate::page_ref_store::SqlitePageRefStore;
 
@@ -121,8 +122,14 @@ pub trait TaskEffortStore: Send + Sync {
         end_snapshot_id: Option<i64>,
         summary: Option<String>,
     ) -> Result<(), DomainError>;
+    /// Record the LLM-declared cross-page impacts for an effort.
+    /// Replaces any prior list. The store then re-projects the
+    /// owning task's effort slice so impact edges show up in
+    /// `page_ref` immediately.
+    async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError>;
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEffort>, DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
+    async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError>;
     async fn record_file(
         &self,
         id: &EffortId,
@@ -156,45 +163,66 @@ impl SqliteTaskEffortStore {
     }
 
     /// Re-emit the full effort-owned slice for `task_id` — the
-    /// union of touched-file edges and the parsed wikilink/file/
-    /// dir/task/finding/commit refs pulled from every effort's
-    /// `summary` body. Replaces under `effort_ref_types()` so the
-    /// task-body slice (owned by `task_store`) is unaffected.
+    /// union of touched-file edges, the parsed wikilink/file/dir/
+    /// task/finding/commit refs pulled from every effort's
+    /// `summary` body, and the declared `TaskImpact` rows.
+    /// Replaces under `effort_ref_types()` so the task-body slice
+    /// (owned by `task_store`) is unaffected.
     async fn project_effort_slice(&self, task_id: TaskId) -> Result<(), DomainError> {
         let Some(refs) = &self.page_refs else {
             return Ok(());
         };
         let db = self.db.clone();
-        let (paths, summaries): (Vec<String>, Vec<String>) =
-            tokio::task::spawn_blocking(move || {
-                db.with_conn(|conn| {
-                    let mut path_stmt = conn.prepare(
-                        "SELECT DISTINCT f.path FROM task_effort_file f
+        type SliceRows = (Vec<String>, Vec<String>, Vec<String>);
+        let (paths, summaries, impact_jsons): SliceRows = tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut path_stmt = conn.prepare(
+                    "SELECT DISTINCT f.path FROM task_effort_file f
                        JOIN task_effort e ON e.id = f.effort_id
                       WHERE e.task_id = ?1
                       ORDER BY f.path",
-                    )?;
-                    let paths: Vec<String> = path_stmt
-                        .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    let mut sum_stmt = conn.prepare(
-                        "SELECT summary FROM task_effort
+                )?;
+                let paths: Vec<String> = path_stmt
+                    .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let mut sum_stmt = conn.prepare(
+                    "SELECT summary FROM task_effort
                       WHERE task_id = ?1
                         AND summary IS NOT NULL
                         AND summary <> ''
                       ORDER BY started_at",
-                    )?;
-                    let summaries: Vec<String> = sum_stmt
-                        .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    Ok((paths, summaries))
-                })
+                )?;
+                let summaries: Vec<String> = sum_stmt
+                    .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let mut imp_stmt = conn.prepare(
+                    "SELECT impacts_json FROM task_effort
+                      WHERE task_id = ?1
+                        AND impacts_json IS NOT NULL
+                        AND impacts_json <> ''
+                      ORDER BY started_at",
+                )?;
+                let impact_jsons: Vec<String> = imp_stmt
+                    .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok((paths, summaries, impact_jsons))
             })
-            .await
-            .unwrap()?;
+        })
+        .await
+        .unwrap()?;
+        let mut impacts: Vec<TaskImpact> = Vec::new();
+        for j in &impact_jsons {
+            match serde_json::from_str::<Vec<TaskImpact>>(j) {
+                Ok(rows) => impacts.extend(rows),
+                Err(e) => {
+                    tracing::warn!(?e, "effort impacts_json deserialize failed; skipping");
+                }
+            }
+        }
         let id_str = task_id.to_string();
         let mut edges = effort_touched_file_edges(&id_str, &paths);
         edges.extend(effort_summary_edges(&id_str, &summaries));
+        edges.extend(effort_impact_edges(&id_str, &impacts));
         refs.replace_source_for_ref_types(KIND_TASK, &id_str, effort_ref_types(), edges)
             .await
     }
@@ -341,6 +369,57 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         })
         .await
         .unwrap()
+    }
+
+    async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id_clone = id.clone();
+        let json = if impacts.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::to_string(impacts)
+                    .map_err(|e| DomainError::Invalid(format!("impacts serialize failed: {e}")))?,
+            )
+        };
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE task_effort SET impacts_json = ?2 WHERE id = ?1",
+                    params![id_clone.as_str(), json],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()?;
+        if self.page_refs.is_some() {
+            if let Some(tid) = self.task_for_effort(id).await? {
+                self.project_effort_slice(tid).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError> {
+        let db = self.db.clone();
+        let id = id.clone();
+        let raw: Option<String> = tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt =
+                    conn.prepare("SELECT impacts_json FROM task_effort WHERE id = ?1")?;
+                let mut rows =
+                    stmt.query_map(params![id.as_str()], |r| r.get::<_, Option<String>>(0))?;
+                Ok(rows.next().transpose()?.flatten())
+            })
+        })
+        .await
+        .unwrap()?;
+        match raw {
+            Some(json) if !json.is_empty() => serde_json::from_str(&json)
+                .map_err(|e| DomainError::Invalid(format!("impacts deserialize failed: {e}"))),
+            _ => Ok(Vec::new()),
+        }
     }
 
     async fn record_file(
@@ -562,6 +641,86 @@ mod tests {
                 .any(|e| e.ref_type == "summary_task_mention" && e.source_id == tid.to_string()),
             "task backlink missing; got {task_back:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn set_impacts_projects_edges_and_round_trips() {
+        use crate::page_ref_store::SqlitePageRefStore;
+        use oxplow_domain::TaskImpact;
+        let (_, db, tid, t) = fixture_with_db().await;
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        let store = SqliteTaskEffortStore::new(db).with_page_refs(page_refs.clone());
+        let eff = store.start(tid, &t, None).await.unwrap();
+        let impacts = vec![
+            TaskImpact {
+                kind: "wiki".into(),
+                id: "url-schemes".into(),
+                action: Some("created".into()),
+            },
+            TaskImpact {
+                kind: "git_commit".into(),
+                id: "abc1234".into(),
+                action: Some("referenced".into()),
+            },
+        ];
+        store.set_impacts(&eff.id, &impacts).await.unwrap();
+
+        // Round-trip read
+        let listed = store.list_impacts(&eff.id).await.unwrap();
+        assert_eq!(listed, impacts);
+
+        // Edges projected with normalized target kind + action extra
+        let wiki = page_refs
+            .list_backlinks("wiki", "url-schemes", None)
+            .await
+            .unwrap();
+        let row = wiki
+            .iter()
+            .find(|e| e.source_id == tid.to_string())
+            .expect("wiki impact edge missing");
+        assert_eq!(row.ref_type, "impact");
+        assert!(row
+            .source_extra
+            .as_deref()
+            .is_some_and(|s| s.contains("created")));
+
+        let commit = page_refs
+            .list_backlinks("git-commit", "abc1234", None)
+            .await
+            .unwrap();
+        assert!(commit
+            .iter()
+            .any(|e| e.source_id == tid.to_string() && e.ref_type == "impact"));
+
+        // Replacing the impact set clears old edges
+        store
+            .set_impacts(
+                &eff.id,
+                &[TaskImpact {
+                    kind: "wiki".into(),
+                    id: "other-page".into(),
+                    action: None,
+                }],
+            )
+            .await
+            .unwrap();
+        let wiki = page_refs
+            .list_backlinks("wiki", "url-schemes", None)
+            .await
+            .unwrap();
+        assert!(
+            wiki.iter().all(|e| e.source_id != tid.to_string()),
+            "old wiki impact edge wasn't replaced: {wiki:?}"
+        );
+
+        // Empty list nulls the column and clears all impact edges
+        store.set_impacts(&eff.id, &[]).await.unwrap();
+        let wiki = page_refs
+            .list_backlinks("wiki", "other-page", None)
+            .await
+            .unwrap();
+        assert!(wiki.iter().all(|e| e.source_id != tid.to_string()));
+        assert!(store.list_impacts(&eff.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]

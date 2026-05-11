@@ -120,6 +120,30 @@ pub struct TaskNote {
     pub created_at: Timestamp,
 }
 
+/// One declared cross-page outcome of an effort — the LLM asserts
+/// "this effort created/updated/deleted/referenced/resolved <kind>:<id>".
+/// Stored as a JSON list on `task_effort.impacts_json` and projected
+/// into the unified `page_ref` graph as outbound edges from the
+/// owning task. Distinct from `touched_files` (which only covers
+/// the file kind) — impacts cover wiki pages, tasks, commits,
+/// findings, directories, and files alike.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+pub struct TaskImpact {
+    /// Page kind being impacted — `wiki | task | file | directory
+    /// | git_commit | finding`. Stored snake-case on the wire,
+    /// normalized to the unified `page_ref` kinds at projection
+    /// time (`git_commit` → `git-commit`, etc.).
+    pub kind: String,
+    /// Canonical id for that page kind (slug, integer string, repo
+    /// path, sha — see `page_ref_projections` docs).
+    pub id: String,
+    /// What the effort did. Free-form but conventionally one of
+    /// `created | updated | deleted | referenced | resolved |
+    /// completed | reopened`. Persisted in `source_extra` so the
+    /// UI can render it without re-querying.
+    pub action: Option<String>,
+}
+
 /// Audit-log entry for state changes on a task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct TaskEvent {

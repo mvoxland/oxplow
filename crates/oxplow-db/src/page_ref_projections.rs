@@ -16,7 +16,7 @@
 //! - git-commit:  `"<sha>"`
 
 use oxplow_domain::refs::{extract, RefVersion};
-use oxplow_domain::{Task, TaskLink, TaskLinkType};
+use oxplow_domain::{Task, TaskImpact, TaskLink, TaskLinkType};
 
 use crate::page_ref_store::PageRefEdge;
 
@@ -49,6 +49,12 @@ pub const RT_SUMMARY_TASK: &str = "summary_task_mention";
 pub const RT_SUMMARY_FINDING: &str = "summary_finding_mention";
 pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
 
+/// Declared impacts (per-effort `TaskImpact` rows) — the action
+/// taken is carried in `source_extra` as `{"action": "..."}`.
+/// Single ref_type covers every impacted kind because the target
+/// kind already discriminates wiki vs task vs file vs etc.
+pub const RT_IMPACT: &str = "impact";
+
 /// Ref-types written by the task store from a body (title +
 /// description + AC). Used by the slice-replace call so other
 /// writers' rows for the same `task:<id>` source survive.
@@ -80,8 +86,9 @@ pub fn task_link_ref_types() -> Vec<String> {
 }
 
 /// Slice owned by the effort store: the union of touched-file
-/// edges across every effort on a task, plus the projection of
-/// every `task_effort.summary` body parsed for refs.
+/// edges across every effort on a task, the projection of every
+/// `task_effort.summary` body parsed for refs, and the declared
+/// `TaskImpact` rows for each effort.
 pub fn effort_ref_types() -> Vec<String> {
     vec![
         RT_TOUCHED_FILE.to_string(),
@@ -91,7 +98,53 @@ pub fn effort_ref_types() -> Vec<String> {
         RT_SUMMARY_TASK.to_string(),
         RT_SUMMARY_FINDING.to_string(),
         RT_SUMMARY_COMMIT.to_string(),
+        RT_IMPACT.to_string(),
     ]
+}
+
+/// Normalize a `TaskImpact.kind` value (snake_case on the wire) to
+/// the canonical `page_ref` target_kind string.
+pub fn normalize_impact_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "wiki" => Some(KIND_WIKI),
+        "task" => Some(KIND_TASK),
+        "file" => Some(KIND_FILE),
+        "directory" | "dir" => Some(KIND_DIRECTORY),
+        "git_commit" | "git-commit" | "commit" => Some(KIND_GIT_COMMIT),
+        "finding" => Some(KIND_FINDING),
+        _ => None,
+    }
+}
+
+/// Edges contributed by the union of every effort's declared
+/// impacts. Self-task references are filtered out (an effort on
+/// task:7 declaring it "completed" task:7 is implicit).
+pub fn effort_impact_edges(task_id: &str, impacts: &[TaskImpact]) -> Vec<PageRefEdge> {
+    let mut out = Vec::new();
+    let self_id: Option<i64> = task_id.parse().ok();
+    for imp in impacts {
+        let Some(target_kind) = normalize_impact_kind(&imp.kind) else {
+            continue;
+        };
+        if imp.id.trim().is_empty() {
+            continue;
+        }
+        if target_kind == KIND_TASK {
+            if let Ok(t) = imp.id.parse::<i64>() {
+                if Some(t) == self_id {
+                    continue;
+                }
+            }
+        }
+        let mut edge = PageRefEdge::new(KIND_TASK, task_id, target_kind, imp.id.clone(), RT_IMPACT);
+        if let Some(action) = &imp.action {
+            if !action.trim().is_empty() {
+                edge = edge.with_extra(serde_json::json!({ "action": action.trim() }).to_string());
+            }
+        }
+        out.push(edge);
+    }
+    out
 }
 
 /// Edges contributed by a wiki page body. Owned by `wiki_pages` sync.
@@ -529,6 +582,65 @@ mod tests {
     #[test]
     fn effort_summary_edges_empty_input_yields_no_edges() {
         assert!(effort_summary_edges("7", &[]).is_empty());
+    }
+
+    #[test]
+    fn effort_impact_edges_normalize_kinds_and_carry_action() {
+        use oxplow_domain::TaskImpact;
+        let impacts = vec![
+            TaskImpact {
+                kind: "wiki".into(),
+                id: "url-schemes".into(),
+                action: Some("created".into()),
+            },
+            TaskImpact {
+                kind: "git_commit".into(),
+                id: "abc1234".into(),
+                action: Some("referenced".into()),
+            },
+            TaskImpact {
+                kind: "dir".into(),
+                id: "src/x".into(),
+                action: None,
+            },
+            TaskImpact {
+                kind: "task".into(),
+                id: "7".into(),
+                action: Some("completed".into()),
+            }, // self — filtered
+            TaskImpact {
+                kind: "bogus".into(),
+                id: "x".into(),
+                action: None,
+            }, // bad kind — filtered
+            TaskImpact {
+                kind: "task".into(),
+                id: "".into(),
+                action: None,
+            }, // empty id — filtered
+        ];
+        let edges = effort_impact_edges("7", &impacts);
+        assert_eq!(edges.len(), 3, "got {edges:?}");
+        let wiki = edges
+            .iter()
+            .find(|e| e.target_kind == "wiki")
+            .expect("wiki edge");
+        assert_eq!(wiki.target_id, "url-schemes");
+        assert!(wiki
+            .source_extra
+            .as_deref()
+            .is_some_and(|s| s.contains("created")));
+        let commit = edges
+            .iter()
+            .find(|e| e.target_kind == "git-commit")
+            .expect("commit edge");
+        assert_eq!(commit.target_id, "abc1234");
+        let dir = edges
+            .iter()
+            .find(|e| e.target_kind == "directory")
+            .expect("dir edge");
+        assert_eq!(dir.target_id, "src/x");
+        assert!(dir.source_extra.is_none());
     }
 
     #[test]

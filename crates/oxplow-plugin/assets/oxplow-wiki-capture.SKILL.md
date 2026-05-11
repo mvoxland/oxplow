@@ -152,6 +152,12 @@ so we pin to `@disk` until it lands. The committed entry point
 3. Call `mcp__oxplow__resync_wiki_page` with the slug so the freshness
    baseline pins to current HEAD without waiting for the watcher's
    200ms debounce.
+4. When you close the surrounding task via `complete_task`,
+   declare the wiki page in `impacts`:
+   `{ kind: "wiki", id: "<slug>", action: "created" | "updated" }`.
+   This produces a `page_ref` backlink from the task to the page,
+   so the page's "referenced by" list points at the task that
+   spawned it without anyone parsing the summary body.
 
 ## Diagrams — use mermaid
 

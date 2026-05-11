@@ -21,8 +21,8 @@ use oxplow_db::SqliteTaskStore;
 use oxplow_db::{EffortFileChange, SqliteTaskEffortStore, TaskEffortStore};
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
 use oxplow_domain::{
-    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskLinkType, TaskPriority, TaskStatus,
-    ThreadId, Timestamp,
+    DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskImpact, TaskLinkType, TaskPriority,
+    TaskStatus, ThreadId, Timestamp,
 };
 
 #[derive(Debug, Error)]
@@ -233,6 +233,8 @@ impl TaskService {
     }
 
     /// Open + record + close an effort for `item` against `thread`.
+    /// Declared `impacts` are persisted before finish so the
+    /// page_ref projection runs once with the full payload.
     pub async fn record_effort(
         &self,
         effort_store: &SqliteTaskEffortStore,
@@ -240,6 +242,7 @@ impl TaskService {
         thread: &ThreadId,
         touched_files: &[String],
         summary: Option<String>,
+        impacts: &[TaskImpact],
     ) -> Result<(), TaskServiceError> {
         let effort = effort_store.start(item, thread, None).await?;
         for path in touched_files {
@@ -249,6 +252,9 @@ impl TaskService {
             effort_store
                 .record_file(&effort.id, path, EffortFileChange::Updated)
                 .await?;
+        }
+        if !impacts.is_empty() {
+            effort_store.set_impacts(&effort.id, impacts).await?;
         }
         effort_store.finish(&effort.id, None, summary).await?;
         Ok(())

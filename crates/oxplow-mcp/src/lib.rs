@@ -171,6 +171,21 @@ pub struct UpdateTaskMcpParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct McpTaskImpact {
+    /// Page kind: `wiki | task | file | directory | git_commit |
+    /// finding`. Snake-case on the wire; normalized at projection.
+    pub kind: String,
+    /// Canonical id for that page kind (wiki slug, integer task id
+    /// as string, repo-relative file/directory path, commit sha,
+    /// finding id).
+    pub id: String,
+    /// What happened to it: `created | updated | deleted |
+    /// referenced | resolved | completed | reopened`. Free-form;
+    /// renders as a chip in the UI when present.
+    pub action: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CompleteTaskParams {
     pub id: String,
     /// Summary note appended to the task before marking done.
@@ -179,6 +194,13 @@ pub struct CompleteTaskParams {
     /// Repo-relative paths edited for this effort. Drives the file-
     /// attribution effort row Local History reads from.
     pub touched_files: Option<Vec<String>>,
+    /// Cross-page outcomes the LLM declares — wiki pages created
+    /// or updated, tasks completed/reopened, commits referenced,
+    /// findings resolved, etc. Each is projected into the
+    /// `page_ref` graph as an outbound edge from this task, so
+    /// backlinks on the target page show this task as the cause
+    /// without relying on summary-body parsing.
+    pub impacts: Option<Vec<McpTaskImpact>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -844,7 +866,14 @@ impl OxplowMcp {
                 if let Err(err) = self
                     .services
                     .tasks
-                    .record_effort(&self.services.effort_store, item.id, &tid, &touched, None)
+                    .record_effort(
+                        &self.services.effort_store,
+                        item.id,
+                        &tid,
+                        &touched,
+                        None,
+                        &[],
+                    )
                     .await
                 {
                     tracing::warn!(?err, "create_task: effort record failed");
@@ -923,6 +952,7 @@ impl OxplowMcp {
                         &tid,
                         &touched,
                         None,
+                        &[],
                     )
                     .await
                 {
@@ -937,7 +967,12 @@ impl OxplowMcp {
     #[tool(
         description = "Append a summary note to a task then mark it `done`. Pass \
                        `touched_files` (repo-relative paths edited for this effort) to attribute \
-                       the writes via Local History — skip only if you edited >100 files."
+                       the writes via Local History — skip only if you edited >100 files. Pass \
+                       `impacts` to declare what else this effort changed: wiki pages you \
+                       created/updated/deleted, tasks you completed/reopened, commits you \
+                       referenced, findings you resolved. Each is projected into the cross-page \
+                       backlink graph so e.g. a new wiki page lists this task as its origin \
+                       without relying on summary-body text parsing."
     )]
     async fn complete_task(
         &self,
@@ -960,8 +995,20 @@ impl OxplowMcp {
             .map_err(|e| internal(e.to_string()))?;
 
         let touched = p.touched_files.unwrap_or_default();
+        let impacts: Vec<oxplow_domain::TaskImpact> = p
+            .impacts
+            .unwrap_or_default()
+            .into_iter()
+            .map(|i| oxplow_domain::TaskImpact {
+                kind: i.kind,
+                id: i.id,
+                action: i.action,
+            })
+            .collect();
         let summary_has_body = !p.summary.trim().is_empty();
-        if (summary_has_body || !touched.is_empty()) && item.thread_id.is_some() {
+        if (summary_has_body || !touched.is_empty() || !impacts.is_empty())
+            && item.thread_id.is_some()
+        {
             let tid = item.thread_id.clone().unwrap();
             let summary = if summary_has_body {
                 Some(p.summary.clone())
@@ -977,6 +1024,7 @@ impl OxplowMcp {
                     &tid,
                     &touched,
                     summary,
+                    &impacts,
                 )
                 .await
             {

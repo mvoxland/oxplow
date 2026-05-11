@@ -67,6 +67,28 @@ History can attribute writes to this specific item when multiple
 items ran in parallel. Skip only if you edited >100 files (the
 assume-all fallback handles big change sets).
 
+**Declare `impacts` for non-file outcomes.** `complete_task` also
+accepts `impacts: { kind, id, action? }[]` — one row per
+cross-page outcome of this effort beyond raw file edits. Use it
+to record:
+
+- A wiki page you created/updated/deleted (`kind: "wiki", id:
+  "<slug>"`)
+- Another task you completed, blocked, or reopened
+  (`kind: "task", id: "<id>"`)
+- A commit you referenced or rolled back
+  (`kind: "git_commit", id: "<sha>"`)
+- A finding you resolved (`kind: "finding", id: "<id>"`)
+- A directory you reorganized (`kind: "directory", id: "<path>"`)
+
+The runtime projects each row into the unified `page_ref` graph
+under `ref_type=impact` with the `action` carried in
+`source_extra`, so the target page's backlinks list this task as
+the cause — without anyone parsing the summary body to find it.
+The wiki-capture skill leans on this: when you file or update a
+wiki page mid-turn, name it in `impacts` so the page's
+"referenced by" list points back here.
+
 For retroactive splits or "file and close in one call" rows (where
 the edits already shipped and you just want a durable row with
 attribution), pass `touchedFiles` directly into `create_task`

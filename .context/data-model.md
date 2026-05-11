@@ -213,7 +213,12 @@ An **effort** is one `in_progress → done` (or blocked/canceled) cycle
 of a task. Columns: `task_id`, `started_at`, `ended_at`,
 `start_snapshot_id`, `end_snapshot_id`, `summary` (v35 — free-form text
 written by `complete_task` describing what shipped in this effort; one
-summary per effort, replaces the old per-item note-history append).
+summary per effort, replaces the old per-item note-history append),
+`impacts_json` (V12 — nullable TEXT holding a JSON array of declared
+`TaskImpact` rows of the form `{kind, id, action?}`; the LLM uses this
+to call out wiki pages it created, tasks it completed, commits it
+referenced, etc. Each row projects into `page_ref` under
+`ref_type=impact` with the action carried in `source_extra`).
 Auto-managed by the runtime on `task.changed` status transitions:
 
 - `→ in_progress` opens a new effort; a `task-start` snapshot is flushed
@@ -468,7 +473,7 @@ Writers (one per source kind / slice):
 | `wiki_pages.rs` (`oxplow-app`) | `wiki:<slug>` | full source — uses `replace_source` |
 | `task_store::upsert` | `task:<id>` body slice | `task_body_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
 | `work_satellite::SqliteTaskLinkStore` create/delete | `task:<id>` link slice | `task_link:blocks` / `relates_to` / … |
-| `effort_store::record_file` + `effort_store::finish` | `task:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_task_mention`, `summary_finding_mention`, `summary_commit_mention` |
+| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `task:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_task_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
 | `commit_indexer.rs` (`oxplow-app`) | `git-commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
 
@@ -490,11 +495,19 @@ summary refs), and finding into the table on app start,
 idempotently. Wiki bodies and recent commits are covered by their
 own initial-scan paths and don't need separate backfill.
 
-The effort slice has two contributors that run independently —
-`record_file` re-projects after each touched-file write, and
-`finish` re-projects after `summary` lands — but they share the
+The effort slice has three contributors that run independently —
+`record_file` re-projects after each touched-file write, `finish`
+re-projects after `summary` lands, and `set_impacts` re-projects
+after the declared `TaskImpact` list is written. They share the
 same `effort_ref_types()` set, so each call replaces the full
-union and the other contributor's rows survive.
+union and the other contributors' rows survive.
+
+The `impact` ref_type uses a single string regardless of target
+kind (the `target_kind` discriminates wiki/task/commit/finding/
+file/directory). The action verb (`created`, `updated`, `deleted`,
+`completed`, `reopened`, `referenced`, `resolved`, …) lives in
+`source_extra` as `{"action": "..."}` so the UI can render
+"created by task #42" without an extra query.
 
 ### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_store.rs`)
 
