@@ -44,7 +44,7 @@ export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, o
       : undefined;
   if (!stream) {
     return (
-      <Page testId="page-wiki" kind="wiki page" backlinks={backlinks} outbound={outbound}>
+      <Page testId="page-wiki" kind="wiki" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
           No stream selected.
         </div>
@@ -52,7 +52,7 @@ export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, o
     );
   }
   return (
-    <Page testId="page-wiki" kind="wiki page" backlinks={backlinks} outbound={outbound}>
+    <Page testId="page-wiki" kind="wiki" backlinks={backlinks} outbound={outbound}>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <WikiPageTab
           stream={stream}

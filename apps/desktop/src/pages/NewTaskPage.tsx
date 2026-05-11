@@ -141,7 +141,7 @@ export function NewTaskPage({
     <Page
       testId="page-new-tasks"
       title="New task"
-      kind="new tasks"
+      kind="new-task"
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>

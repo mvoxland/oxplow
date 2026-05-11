@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listWorkspaceFiles, subscribeWorkspaceEvents, type Stream, type WorkspaceIndexedFile } from "../api.js";
 import { fuzzyMatches } from "../fuzzy-match.js";
+import { PageKindIcon } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 
@@ -160,9 +161,11 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
                       background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
                     }}
                   >
-                    <span style={{ width: 18, textAlign: "center" }}>{result.entry.label.split("  ")[0]}</span>
+                    <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
+                      <PageKindIcon kind={result.entry.ref.kind} size={14} style={{ color: "var(--text-secondary)" }} />
+                    </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {result.entry.label.split("  ").slice(1).join("  ") || result.entry.label}
+                      {result.entry.label}
                     </span>
                     <span style={{ color: "var(--muted)", fontSize: 11 }}>page</span>
                   </button>
@@ -178,7 +181,9 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, onClos
                     color: result.file.path === selectedFilePath ? "var(--accent)" : "var(--fg)",
                   }}
                 >
-                  <span style={{ width: 18, textAlign: "center" }}>📄</span>
+                  <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
+                    <PageKindIcon kind="file" size={14} style={{ color: "var(--text-secondary)" }} />
+                  </span>
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{result.file.path}</span>
                   <span style={{ color: "var(--muted)", fontSize: 11 }}>{shortStatus(result.file.gitStatus)}</span>
                 </button>

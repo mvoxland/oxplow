@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { kindForTabId, pageKindIconComponent } from "./pageKinds.js";
+import { kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 
 describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
@@ -52,7 +52,6 @@ describe("pageKindIconComponent", () => {
       "settings",
       "external-url",
       "uncommitted-changes",
-      "agent",
       "tasks",
       "done-work",
       "backlog",
@@ -75,15 +74,37 @@ describe("pageKindIconComponent", () => {
     }
   });
 
-  test("display-label aliases passed by <Page kind='...'> resolve", () => {
-    expect(pageKindIconComponent("wiki page")).not.toBeNull();
-    expect(pageKindIconComponent("commit")).not.toBeNull();
-    expect(pageKindIconComponent("new tasks")).not.toBeNull();
-    expect(pageKindIconComponent("threads")).not.toBeNull();
+  test("agent tab is intentionally iconless", () => {
+    // The agent tab is always present and unambiguous; an icon
+    // there would just widen the chip. Suppress.
+    expect(pageKindIconComponent("agent")).toBeNull();
   });
 
   test("unknown kinds return null", () => {
     expect(pageKindIconComponent("nope")).toBeNull();
     expect(pageKindIconComponent("")).toBeNull();
+  });
+});
+
+describe("pageKindLabel", () => {
+  test("rewrites hyphenated kinds to space-separated phrases", () => {
+    expect(pageKindLabel("git-commit")).toBe("commit");
+    expect(pageKindLabel("wiki")).toBe("wiki page");
+    expect(pageKindLabel("done-work")).toBe("done work");
+    expect(pageKindLabel("local-history")).toBe("local history");
+    expect(pageKindLabel("uncommitted-changes")).toBe("uncommitted");
+    expect(pageKindLabel("new-task")).toBe("new task");
+    expect(pageKindLabel("closed-threads")).toBe("threads");
+  });
+
+  test("passes plain kinds through unchanged", () => {
+    expect(pageKindLabel("file")).toBe("file");
+    expect(pageKindLabel("task")).toBe("task");
+    expect(pageKindLabel("finding")).toBe("finding");
+    expect(pageKindLabel("diff")).toBe("diff");
+  });
+
+  test("unknown kinds round-trip", () => {
+    expect(pageKindLabel("custom-thing")).toBe("custom-thing");
   });
 });

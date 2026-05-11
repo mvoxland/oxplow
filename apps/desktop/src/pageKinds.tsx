@@ -18,7 +18,6 @@ import {
   AlertTriangle,
   Archive,
   BookOpen,
-  Bot,
   CheckCheck,
   CheckSquare,
   Copy,
@@ -89,23 +88,12 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "snapshot":
       return Layers;
 
-    // Display-label aliases passed by `<Page kind="...">` callers
-    // — these arrived before the kind set was unified so they
-    // diverge from the canonical tab-id prefix. Map them through
-    // rather than forcing every page component to update in lock-
-    // step with this file.
-    case "wiki page":
-      return BookOpen;
-    case "commit":
-      return GitCommit;
-    case "new tasks":
-      return Plus;
-    case "threads":
-      return Archive;
 
     // Literal-id index pages (kind === id).
     case "agent":
-      return Bot;
+      // The agent tab is always present and unambiguous; an icon
+      // there just makes the tab wider without adding info.
+      return null;
     case "tasks":
       return CheckSquare;
     case "done-work":
@@ -166,6 +154,58 @@ export function PageKindIcon({
   const Icon = pageKindIconComponent(kind);
   if (!Icon) return null;
   return <Icon aria-hidden size={size} {...rest} />;
+}
+
+/**
+ * Human display label for a scheme kind — what the page chrome's
+ * kind chip renders. Defaults to the kind string itself for the
+ * many cases where the canonical kind reads fine ("file",
+ * "diff", "tasks"); short-circuits the cases where the chrome
+ * historically rendered a softer phrasing.
+ */
+export function pageKindLabel(kind: string): string {
+  switch (kind) {
+    case "wiki":
+      return "wiki page";
+    case "git-commit":
+      return "commit";
+    case "new-task":
+      return "new task";
+    case "new-stream":
+      return "new stream";
+    case "closed-threads":
+      return "threads";
+    case "wiki-index":
+      return "wiki";
+    case "done-work":
+      return "done work";
+    case "code-quality":
+      return "code quality";
+    case "local-history":
+      return "local history";
+    case "git-history":
+      return "git history";
+    case "git-dashboard":
+      return "git";
+    case "hook-events":
+      return "hook events";
+    case "subsystem-docs":
+      return "subsystem docs";
+    case "duplicate-block":
+      return "duplicate";
+    case "external-url":
+      return "external link";
+    case "uncommitted-changes":
+      return "uncommitted";
+    case "stream-settings":
+      return "stream settings";
+    case "thread-settings":
+      return "thread settings";
+    case "op-error":
+      return "error";
+    default:
+      return kind;
+  }
 }
 
 /**

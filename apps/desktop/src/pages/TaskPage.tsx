@@ -209,7 +209,7 @@ export function TaskPage({
 
   if (!item) {
     return (
-      <Page testId="page-tasks" title={`task:${itemId}`} kind="tasks" backlinks={backlinks} outbound={outbound}>
+      <Page testId="page-tasks" title={`task:${itemId}`} kind="task" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
           Loading tasks…
         </div>
@@ -224,7 +224,7 @@ export function TaskPage({
   ];
 
   return (
-    <Page testId="page-tasks" title={item.title} kind="tasks" chips={chips} backlinks={backlinks} outbound={outbound}>
+    <Page testId="page-tasks" title={item.title} kind="task" chips={chips} backlinks={backlinks} outbound={outbound}>
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
         <TaskDetail
           item={item}

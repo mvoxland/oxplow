@@ -128,7 +128,7 @@ export function GitCommitPage({
   const headerTitle = buildCommitTitle({ sha, subject: detail?.subject ?? subject });
 
   return (
-    <Page testId="page-git-commit" title={headerTitle} kind="commit" backlinks={backlinks} outbound={outbound}>
+    <Page testId="page-git-commit" title={headerTitle} kind="git-commit" backlinks={backlinks} outbound={outbound}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "12px 16px" }}>
         {scope ? (
           <ScopeFilterBanner

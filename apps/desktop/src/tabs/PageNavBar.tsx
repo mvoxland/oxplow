@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { PageKindIcon } from "../pageKinds.js";
+import { PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { BookmarkScope } from "./bookmarks.js";
 
 export interface PageNavBarProps {
@@ -346,7 +346,7 @@ export function PageNavBar({
               }}
             >
               <PageKindIcon kind={kind} size={12} />
-              {kind}
+              {pageKindLabel(kind)}
             </span>
           ) : null}
         </div>

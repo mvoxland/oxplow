@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import type { GitFileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
+import { PageKindIcon } from "../../pageKinds.js";
 import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
@@ -277,7 +278,11 @@ function TreeEntryRow({
           </svg>
         ) : null}
       </span>
-      <span>{entry.kind === "directory" ? "📁" : "📄"}</span>
+      <PageKindIcon
+        kind={entry.kind === "directory" ? "directory" : "file"}
+        size={13}
+        style={{ color: "var(--text-secondary)", flexShrink: 0 }}
+      />
       <span
         style={{
           flex: 1,
@@ -377,7 +382,7 @@ function FileRow({
         whiteSpace: "nowrap",
       }}
     >
-      <span>📄</span>
+      <PageKindIcon kind="file" size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
       <span style={{ flex: 1, whiteSpace: "nowrap" }}>{path}</span>
       {gitStatus ? <StatusBadge status={gitStatus} /> : null}
       <KebabButton

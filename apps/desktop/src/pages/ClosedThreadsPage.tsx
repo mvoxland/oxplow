@@ -75,7 +75,7 @@ export function ClosedThreadsPage({ stream, onAfterReopen }: ClosedThreadsPagePr
   }
 
   return (
-    <Page title="Closed threads" kind="threads" testId="closed-threads-page">
+    <Page title="Closed threads" kind="closed-threads" testId="closed-threads-page">
       {error ? <div style={{ color: "#ff6b6b", padding: "0 12px" }}>{error}</div> : null}
       {loading && rows.length === 0 ? (
         <div style={{ color: "var(--muted)", padding: 16 }}>Loading…</div>
