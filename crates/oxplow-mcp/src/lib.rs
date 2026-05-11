@@ -344,7 +344,7 @@ impl OxplowMcp {
             "list_thread_work",
             "stream_id",
             &params.0.stream_id,
-            oxplow_domain::IdKind::Stream,
+            ID_STREAM,
         )?;
         let stream_id = oxplow_domain::StreamId::from(params.0.stream_id);
         let list = self
@@ -378,7 +378,7 @@ impl OxplowMcp {
             "list_ready_work",
             "thread_id",
             &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
+            ID_THREAD,
         )?;
         let thread_id = ThreadId::from(params.0.thread_id);
         let list = self
@@ -405,7 +405,7 @@ impl OxplowMcp {
             "read_task_options",
             "thread_id",
             &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
+            ID_THREAD,
         )?;
         let thread_id = ThreadId::from(params.0.thread_id);
         let result = self
@@ -426,12 +426,7 @@ impl OxplowMcp {
         params: Parameters<ReorderTasksParams>,
     ) -> Result<CallToolResult, McpError> {
         if let Some(t) = params.0.thread_id.as_deref() {
-            expect_id_kind(
-                "reorder_tasks",
-                "thread_id",
-                t,
-                oxplow_domain::IdKind::Thread,
-            )?;
+            expect_id_kind("reorder_tasks", "thread_id", t, ID_THREAD)?;
         }
         let mut ids: Vec<TaskId> = Vec::with_capacity(params.0.ordered_item_ids.len());
         for raw in &params.0.ordered_item_ids {
@@ -467,7 +462,7 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         let mut item: Task = serde_json::from_str(&params.0.item_json)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
-        if item.id.0 == 0 {
+        if item.id.value() == 0 {
             let new_id = self
                 .services
                 .task_store
@@ -519,7 +514,7 @@ impl OxplowMcp {
             "add_thread_note",
             "thread_id",
             &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
+            ID_THREAD,
         )?;
         let id = ThreadId::from(params.0.thread_id);
         let note = self
@@ -540,7 +535,7 @@ impl OxplowMcp {
             "list_thread_notes",
             "thread_id",
             &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
+            ID_THREAD,
         )?;
         let id = ThreadId::from(params.0.thread_id);
         let notes = self
@@ -570,7 +565,7 @@ impl OxplowMcp {
             "delegate_query",
             "thread_id",
             &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
+            ID_THREAD,
         )?;
         let thread_id = ThreadId::from(params.0.thread_id.clone());
         let question = params.0.question.trim().to_string();
@@ -621,7 +616,7 @@ impl OxplowMcp {
             "record_query_finding",
             "note_id",
             &params.0.note_id,
-            oxplow_domain::IdKind::Note,
+            ID_NOTE,
         )?;
         let id = NoteId::from(params.0.note_id.clone());
         self.services
@@ -637,12 +632,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<DeleteNoteParams>,
     ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "delete_wiki_page",
-            "id",
-            &params.0.id,
-            oxplow_domain::IdKind::Note,
-        )?;
+        expect_id_kind("delete_wiki_page", "id", &params.0.id, ID_NOTE)?;
         let id = NoteId::from(params.0.id);
         self.services
             .work_note_store
@@ -714,12 +704,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<AddFollowupParams>,
     ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "add_followup",
-            "thread_id",
-            &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
-        )?;
+        expect_id_kind("add_followup", "thread_id", &params.0.thread_id, ID_THREAD)?;
         let id = ThreadId::from(params.0.thread_id);
         let item = self.services.followups.add(id, params.0.body);
         json_result(&item)
@@ -734,7 +719,7 @@ impl OxplowMcp {
             "list_followups",
             "thread_id",
             &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
+            ID_THREAD,
         )?;
         let id = ThreadId::from(params.0.thread_id);
         let list = self.services.followups.list_for_thread(&id);
@@ -746,12 +731,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<FollowupIdParams>,
     ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "remove_followup",
-            "id",
-            &params.0.id,
-            oxplow_domain::IdKind::Followup,
-        )?;
+        expect_id_kind("remove_followup", "id", &params.0.id, ID_FOLLOWUP)?;
         self.services.followups.remove(&params.0.id);
         Ok(CallToolResult::success(vec![Content::text("removed")]))
     }
@@ -816,12 +796,7 @@ impl OxplowMcp {
             _ => {}
         }
         if let Some(tid) = p.thread_id.as_deref() {
-            expect_id_kind(
-                "create_task",
-                "thread_id",
-                tid,
-                oxplow_domain::IdKind::Thread,
-            )?;
+            expect_id_kind("create_task", "thread_id", tid, ID_THREAD)?;
         }
         let parent_task_id = match p.parent_id.as_deref() {
             Some(pid) => Some(parse_task_id("create_task", "parent_id", pid)?),
@@ -1018,12 +993,7 @@ impl OxplowMcp {
         params: Parameters<LinktasksParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        expect_id_kind(
-            "link_tasks",
-            "thread_id",
-            &p.thread_id,
-            oxplow_domain::IdKind::Thread,
-        )?;
+        expect_id_kind("link_tasks", "thread_id", &p.thread_id, ID_THREAD)?;
         let from_id = parse_task_id("link_tasks", "from_id", &p.from_id)?;
         let to_id = parse_task_id("link_tasks", "to_id", &p.to_id)?;
         let link_type = parse_link_type(&p.link_type)?;
@@ -1084,12 +1054,7 @@ impl OxplowMcp {
         params: Parameters<AwaitUserParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        expect_id_kind(
-            "await_user",
-            "thread_id",
-            &p.thread_id,
-            oxplow_domain::IdKind::Thread,
-        )?;
+        expect_id_kind("await_user", "thread_id", &p.thread_id, ID_THREAD)?;
         let payload = serde_json::json!({
             "await_user": true,
             "question": p.question,
@@ -1133,7 +1098,7 @@ impl OxplowMcp {
             "get_thread_context",
             "thread_id",
             &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
+            ID_THREAD,
         )?;
         let id = ThreadId::from(params.0.thread_id);
         let thread = self
@@ -1171,12 +1136,7 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         if let Some(t) = p.thread_id.as_deref() {
-            expect_id_kind(
-                "file_epic_with_children",
-                "thread_id",
-                t,
-                oxplow_domain::IdKind::Thread,
-            )?;
+            expect_id_kind("file_epic_with_children", "thread_id", t, ID_THREAD)?;
         }
         let thread = p.thread_id.map(ThreadId::from);
         let epic = self
@@ -1232,12 +1192,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<DispatchTaskParams>,
     ) -> Result<CallToolResult, McpError> {
-        expect_id_kind(
-            "dispatch_task",
-            "thread_id",
-            &params.0.thread_id,
-            oxplow_domain::IdKind::Thread,
-        )?;
+        expect_id_kind("dispatch_task", "thread_id", &params.0.thread_id, ID_THREAD)?;
         let parsed_item_id = match params.0.item_id.as_deref() {
             Some(raw) => Some(parse_task_id("dispatch_task", "item_id", raw)?),
             None => None,
@@ -1252,7 +1207,7 @@ impl OxplowMcp {
                 .map_err(internal)?
                 .ok_or_else(|| {
                     McpError::invalid_params(
-                        format!("dispatch_task: item not found: {}", id.0),
+                        format!("dispatch_task: item not found: {}", id.value()),
                         None,
                     )
                 })?,
@@ -1318,7 +1273,7 @@ impl OxplowMcp {
             "fork_thread",
             "source_thread_id",
             &params.0.source_thread_id,
-            oxplow_domain::IdKind::Thread,
+            ID_THREAD,
         )?;
         let source = ThreadId::from(params.0.source_thread_id);
         let parent = self
@@ -1527,21 +1482,6 @@ impl OxplowMcp {
     }
 }
 
-// `kind` was dropped from the task model — epics are tasks with
-// children, and bug/note categorization is intentionally lost. This
-// stub is retained so legacy clients passing `kind: "task"` etc. still
-// validate, but the value is discarded.
-#[allow(dead_code)]
-fn parse_kind(s: &str) -> Result<(), McpError> {
-    match s {
-        "epic" | "task" | "subtask" | "bug" | "note" => Ok(()),
-        other => Err(McpError::invalid_params(
-            format!("unknown task kind: {other}"),
-            None,
-        )),
-    }
-}
-
 fn parse_status(s: &str) -> Result<TaskStatus, McpError> {
     Ok(match s {
         "ready" => TaskStatus::Ready,
@@ -1583,7 +1523,7 @@ async fn resolve_lsp_proxy(
     stream_id: &str,
     language: &str,
 ) -> Result<std::sync::Arc<oxplow_app::LspProxy>, McpError> {
-    expect_id_kind("lsp", "stream_id", stream_id, oxplow_domain::IdKind::Stream)?;
+    expect_id_kind("lsp", "stream_id", stream_id, ID_STREAM)?;
     let stream = services
         .streams
         .list_streams()
@@ -1655,23 +1595,65 @@ fn parse_task_id(tool: &str, param: &str, value: &str) -> Result<oxplow_domain::
     }
 }
 
+/// String-id prefix validator. Tasks now have integer ids and go
+/// through [`parse_task_id`]; everything else still carries a
+/// `<prefix>-<rest>` shape, and this helper confirms a caller-supplied
+/// value matches the prefix the tool wants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IdPrefix {
+    pub prefix: &'static str,
+    pub label: &'static str,
+}
+
+pub(crate) const ID_STREAM: IdPrefix = IdPrefix {
+    prefix: "s-",
+    label: "stream id (s-…)",
+};
+pub(crate) const ID_THREAD: IdPrefix = IdPrefix {
+    prefix: "b-",
+    label: "thread id (b-…)",
+};
+pub(crate) const ID_NOTE: IdPrefix = IdPrefix {
+    prefix: "n-",
+    label: "note id (n-…)",
+};
+pub(crate) const ID_FOLLOWUP: IdPrefix = IdPrefix {
+    prefix: "fu-",
+    label: "follow-up id (fu-…)",
+};
+
 fn expect_id_kind(
     tool: &str,
     param: &str,
     value: &str,
-    expected: oxplow_domain::IdKind,
+    expected: IdPrefix,
 ) -> Result<(), McpError> {
-    let actual = oxplow_domain::classify_id(value);
-    if actual == expected {
+    if value.starts_with(expected.prefix) && value.len() > expected.prefix.len() {
         return Ok(());
     }
+    // Tell the caller what the value *looks* like so they can correct
+    // an "I passed a thread id where a stream id was expected" mix-up
+    // without a second round-trip.
+    let actual_label = match value.split_once('-') {
+        Some(("s", _)) => "stream id (s-…)",
+        Some(("b", _)) => "thread id (b-…)",
+        Some(("n", _)) => "note id (n-…)",
+        Some(("fu", _)) => "follow-up id (fu-…)",
+        Some(("at", _)) => "agent-turn id (at-…)",
+        Some(("he", _)) => "hook-event id (he-…)",
+        Some(("ef", _)) => "effort id (ef-…)",
+        Some(("pv", _)) => "page-visit id (pv-…)",
+        Some(("ue", _)) => "usage-event id (ue-…)",
+        Some(("bg", _)) => "background-task id (bg-…)",
+        Some(_) => "id with an unrecognised prefix",
+        None => "value with no `<prefix>-…` shape",
+    };
     let msg = format!(
         "{tool}: `{param}` expects a {expected_label}, but got `{value}` which looks like a \
          {actual_label}",
         tool = tool,
         param = param,
-        expected_label = expected.label(),
-        actual_label = actual.label(),
+        expected_label = expected.label,
         value = value,
     );
     Err(McpError::invalid_params(msg, None))
@@ -1724,7 +1706,7 @@ fn compose_delegate_query_prompt(
 fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> String {
     let mut out: Vec<String> = vec![
         format!("Task: {}", item.title),
-        format!("itemId: {}", item.id.0),
+        format!("itemId: {}", item.id.value()),
         format!("priority: {:?}", item.priority),
         String::new(),
     ];
@@ -1799,7 +1781,7 @@ mod tests {
     fn make_task(thread_id: Option<ThreadId>, title: &str) -> Task {
         let now = Timestamp::now();
         Task {
-            id: TaskId(0),
+            id: TaskId::placeholder(),
             thread_id,
             parent_id: None,
             title: title.into(),
@@ -1901,7 +1883,7 @@ mod tests {
         let r = server.list_backlog().await.unwrap();
         let body = text_payload(r);
         assert!(
-            !body.contains(&format!("\"id\":{}", id.0)),
+            !body.contains(&format!("\"id\":{}", id.value())),
             "soft-deleted item should not appear in backlog: {body}",
         );
     }
@@ -1973,7 +1955,7 @@ mod tests {
         assert!(body.contains("via mcp"), "upsert response: {body}");
         // Parse the response to learn the assigned id, then re-fetch.
         let stored: Task = serde_json::from_str(&body).expect("upsert returns task json");
-        assert_ne!(stored.id.0, 0, "insert must assign a non-zero id");
+        assert_ne!(stored.id.value(), 0, "insert must assign a non-zero id");
 
         let fetched = server
             .get_task(Parameters(TaskIdParams {
@@ -1995,39 +1977,7 @@ mod tests {
         assert_eq!(body.trim(), "[]");
     }
 
-    // ---- Pure helpers: parse_kind / parse_status / parse_priority / parse_link_type ----
-
-    #[test]
-    fn parse_kind_accepts_each_canonical_string() {
-        // The `kind` token is accepted but discarded; we just check
-        // that each canonical form parses without an error.
-        assert!(parse_kind("epic").is_ok());
-        assert!(parse_kind("task").is_ok());
-        assert!(parse_kind("subtask").is_ok());
-        assert!(parse_kind("bug").is_ok());
-        assert!(parse_kind("note").is_ok());
-    }
-
-    #[test]
-    fn parse_kind_unknown_value_carries_value_in_error() {
-        let err = parse_kind("widget").unwrap_err();
-        let msg = err.message.to_string();
-        assert!(
-            msg.contains("widget"),
-            "error should name the offending value: {msg}"
-        );
-        assert!(
-            msg.contains("kind"),
-            "error should mention parameter family: {msg}"
-        );
-    }
-
-    #[test]
-    fn parse_kind_is_case_sensitive() {
-        // Mason-style canonical lowercase only — "Task" must NOT match.
-        assert!(parse_kind("Task").is_err());
-        assert!(parse_kind("EPIC").is_err());
-    }
+    // ---- Pure helpers: parse_status / parse_priority / parse_link_type ----
 
     #[test]
     fn parse_status_accepts_every_status() {
@@ -2090,24 +2040,12 @@ mod tests {
 
     #[test]
     fn expect_id_kind_accepts_matching_prefix() {
-        assert!(expect_id_kind(
-            "tool",
-            "thread_id",
-            "b-abc123",
-            oxplow_domain::IdKind::Thread,
-        )
-        .is_ok());
+        assert!(expect_id_kind("tool", "thread_id", "b-abc123", ID_THREAD,).is_ok());
     }
 
     #[test]
     fn expect_id_kind_error_names_tool_param_value_and_kinds() {
-        let err = expect_id_kind(
-            "create_task",
-            "thread_id",
-            "s-abc123",
-            oxplow_domain::IdKind::Thread,
-        )
-        .unwrap_err();
+        let err = expect_id_kind("create_task", "thread_id", "s-abc123", ID_THREAD).unwrap_err();
         let msg = err.message.to_string();
         assert!(msg.contains("create_task"), "tool name missing: {msg}");
         assert!(msg.contains("thread_id"), "param name missing: {msg}");
@@ -2119,13 +2057,7 @@ mod tests {
     #[test]
     fn expect_id_kind_unrecognised_id_shape_errors() {
         // No `<prefix>-…` shape at all — should still be flagged.
-        let err = expect_id_kind(
-            "tool",
-            "id",
-            "no-prefix-shape",
-            oxplow_domain::IdKind::Thread,
-        )
-        .unwrap_err();
+        let err = expect_id_kind("tool", "id", "no-prefix-shape", ID_THREAD).unwrap_err();
         let msg = err.message.to_string();
         assert!(msg.contains("no-prefix-shape"), "value missing: {msg}");
     }
@@ -2164,7 +2096,7 @@ mod tests {
         item.acceptance_criteria = None;
         let s = compose_dispatch_brief(&item, "");
         assert!(s.contains("Task: ship the thing"));
-        assert!(s.contains(&format!("itemId: {}", item.id.0)));
+        assert!(s.contains(&format!("itemId: {}", item.id.value())));
         assert!(s.contains("priority:"));
         assert!(s.contains("## Protocol"));
         assert!(!s.contains("## Description"));

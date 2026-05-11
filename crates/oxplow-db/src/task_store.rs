@@ -153,9 +153,9 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     };
 
     Ok(Task {
-        id: TaskId(id),
+        id: TaskId::new(id),
         thread_id: thread_id.map(ThreadId::from),
-        parent_id: parent_id.map(TaskId),
+        parent_id: parent_id.map(TaskId::new),
         title,
         description,
         acceptance_criteria,
@@ -308,7 +308,7 @@ impl TaskStore for SqliteTaskStore {
                     ],
                 )?;
                 let id = conn.last_insert_rowid();
-                Ok(TaskId(id))
+                Ok(TaskId::new(id))
             })
         })
         .await
@@ -474,7 +474,7 @@ mod tests {
 
     fn item(thread: Option<ThreadId>) -> Task {
         Task {
-            id: TaskId(0),
+            id: TaskId::placeholder(),
             thread_id: thread,
             parent_id: None,
             title: "ship it".into(),

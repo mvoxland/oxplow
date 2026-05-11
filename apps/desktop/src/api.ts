@@ -1251,12 +1251,12 @@ export function subscribeUsageEvents(
 export async function reorderThreadQueue(
   streamId: string,
   _threadId: string,
-  entries: Array<{ id: string | number }>,
+  entries: Array<{ id: string }>,
 ): Promise<void> {
   unwrap(
     await commands.reorderThreadQueue({
       streamId,
-      order: entries.map((e) => String(e.id)),
+      order: entries.map((e) => e.id),
     }),
   );
 }

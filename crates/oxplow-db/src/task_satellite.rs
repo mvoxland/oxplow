@@ -128,7 +128,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkNote> {
     };
     Ok(WorkNote {
         id: NoteId::from(id),
-        task_id: task_id.map(TaskId),
+        task_id: task_id.map(TaskId::new),
         thread_id: thread_id.map(ThreadId::from),
         body,
         author,
@@ -318,7 +318,7 @@ impl SqliteTaskLinkStore {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare("SELECT DISTINCT from_item_id FROM task_link")?;
                 let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
-                rows.map(|r| r.map(TaskId))
+                rows.map(|r| r.map(TaskId::new))
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
         })
@@ -372,10 +372,10 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskLink> {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
     Ok(TaskLink {
-        id: TaskLinkId(id),
+        id: TaskLinkId::new(id),
         thread_id: ThreadId::from(thread_id),
-        from_item_id: TaskId(from_item_id),
-        to_item_id: TaskId(to_item_id),
+        from_item_id: TaskId::new(from_item_id),
+        to_item_id: TaskId::new(to_item_id),
         link_type: str_to_link_type(&link_type).map_err(map_err)?,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
     })
@@ -409,7 +409,7 @@ impl TaskLinkStore for SqliteTaskLinkStore {
                 Ok(conn.last_insert_rowid())
             })?;
             Ok(TaskLink {
-                id: TaskLinkId(new_id),
+                id: TaskLinkId::new(new_id),
                 thread_id: thread_clone,
                 from_item_id: from,
                 to_item_id: to,
@@ -462,7 +462,7 @@ impl TaskLinkStore for SqliteTaskLinkStore {
                     let mut stmt =
                         conn.prepare("SELECT from_item_id FROM task_link WHERE id = ?1")?;
                     let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, i64>(0))?;
-                    Ok(rows.next().transpose()?.map(TaskId))
+                    Ok(rows.next().transpose()?.map(TaskId::new))
                 })
             }
         })
@@ -511,7 +511,7 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
     Ok(TaskEvent {
         id,
         thread_id: ThreadId::from(thread_id),
-        item_id: item_id.map(TaskId),
+        item_id: item_id.map(TaskId::new),
         event_type,
         actor_kind: str_to_actor(&actor_kind).map_err(map_err)?,
         actor_id,
@@ -641,7 +641,7 @@ mod tests {
         threads.upsert(&t).await.unwrap();
 
         let item = Task {
-            id: TaskId(0),
+            id: TaskId::placeholder(),
             thread_id: Some(t.id.clone()),
             parent_id: None,
             title: "x".into(),
@@ -759,7 +759,7 @@ mod tests {
         items.update(&sender).await.unwrap();
 
         let to = Task {
-            id: TaskId(0),
+            id: TaskId::placeholder(),
             thread_id: Some(tid.clone()),
             parent_id: None,
             title: "y".into(),
@@ -825,7 +825,7 @@ mod tests {
         let (db, tid, from_id) = fixture().await;
         let items = SqliteTaskStore::new(db.clone());
         let to = Task {
-            id: TaskId(0),
+            id: TaskId::placeholder(),
             thread_id: Some(tid.clone()),
             parent_id: None,
             title: "y".into(),

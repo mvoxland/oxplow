@@ -179,6 +179,14 @@ export const commands = {
 	// Comma-separated tags used by the Backlog page filter chips.
 	tags: string | null,
 } | null, IpcError>(__TAURI_INVOKE("get_task", { id })),
+	/**
+	 *  Insert-or-update a Task. The id field acts as the discriminator —
+	 *  `TaskId::placeholder()` (i.e. 0) means "client doesn't know an id
+	 *  yet, allocate one"; any other value means "update this row in
+	 *  place". On the update path we refetch the stored row so any
+	 *  server-side side effects (e.g. `completed_at` flips, sort_index
+	 *  rewrites a future change might add) appear in the returned shape.
+	 */
 	upsertTask: (item: Task) => typedError<Task, IpcError>(__TAURI_INVOKE("upsert_task", { item })),
 	deleteTask: (id: TaskId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_task", { id })),
 	createTask: (req: CreateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("create_task", { req })),
@@ -1341,7 +1349,18 @@ export type TaskEvent = {
 	created_at: Timestamp,
 };
 
-// Task identifier — plain SQLite autoincrement integer.
+/**
+ *  Task identifier — plain SQLite autoincrement integer.
+ * 
+ *  The inner field is intentionally private: every construction path
+ *  goes through one of the named constructors so the "what does this
+ *  integer mean" question always has a textual answer at the call site.
+ *  In particular, the `0` value is reserved as the
+ *  [`TaskId::placeholder`] sentinel that the upsert IPC uses to
+ *  distinguish "client doesn't know an id yet, allocate one" from
+ *  "update this row in place". SQLite `AUTOINCREMENT` never issues 0,
+ *  so the sentinel is unambiguous.
+ */
 export type TaskId = number;
 
 export type TaskPriority = "low" | "medium" | "high" | "urgent";

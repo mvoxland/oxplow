@@ -123,7 +123,7 @@ impl TaskService {
         let now = Timestamp::now();
         let mut item = Task {
             // id assigned by store.insert
-            id: TaskId(0),
+            id: TaskId::placeholder(),
             thread_id: thread,
             parent_id: input.parent_id,
             title: input.title,
@@ -575,7 +575,7 @@ mod tests {
     fn backlog_state_buckets_by_status() {
         let now = Timestamp::from_unix_ms(1);
         let mk = |id: i64, status| Task {
-            id: TaskId(id),
+            id: TaskId::new(id),
             thread_id: None,
             parent_id: None,
             title: id.to_string(),
@@ -611,7 +611,7 @@ mod tests {
     fn backlog_state_collapses_canceled_and_archived_into_done() {
         let now = Timestamp::from_unix_ms(1);
         let mk = |id: i64, status| Task {
-            id: TaskId(id),
+            id: TaskId::new(id),
             thread_id: None,
             parent_id: None,
             title: id.to_string(),

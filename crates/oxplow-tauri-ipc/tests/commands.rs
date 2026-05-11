@@ -83,7 +83,7 @@ async fn list_closed_threads_empty_for_unknown_stream() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_task_missing_returns_none() {
     let app = TestApp::build();
-    let item = commands::tasks::get_task(app.state(), TaskId(999))
+    let item = commands::tasks::get_task(app.state(), TaskId::new(999))
         .await
         .unwrap();
     assert!(item.is_none());
@@ -332,7 +332,7 @@ async fn get_task_summaries_for_empty_thread() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_task_efforts_empty_for_unknown_item() {
     let app = TestApp::build();
-    let v = commands::effort::list_task_efforts(app.state(), TaskId(999))
+    let v = commands::effort::list_task_efforts(app.state(), TaskId::new(999))
         .await
         .unwrap();
     assert!(v.is_empty());

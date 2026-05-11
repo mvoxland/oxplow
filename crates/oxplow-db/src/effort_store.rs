@@ -92,7 +92,7 @@ fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
     };
     Ok(TaskEffort {
         id: EffortId::from(id),
-        task_id: TaskId(task_id),
+        task_id: TaskId::new(task_id),
         thread_id: ThreadId::from(thread_id),
         started_at: string_to_ts(&started_at).map_err(map_err)?,
         ended_at: ended_at
@@ -191,7 +191,7 @@ impl SqliteTaskEffortStore {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare("SELECT task_id FROM task_effort WHERE id = ?1")?;
                 let mut rows = stmt.query_map(params![id.as_str()], |r| r.get::<_, i64>(0))?;
-                Ok(rows.next().transpose()?.map(TaskId))
+                Ok(rows.next().transpose()?.map(TaskId::new))
             })
         })
         .await
@@ -432,7 +432,7 @@ mod tests {
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         let tid = SqliteTaskStore::new(db.clone())
             .insert(&Task {
-                id: TaskId(0),
+                id: TaskId::placeholder(),
                 thread_id: Some(t.id.clone()),
                 parent_id: None,
                 title: "x".into(),
@@ -528,7 +528,7 @@ mod tests {
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
         let tid = SqliteTaskStore::new(db.clone())
             .insert(&Task {
-                id: TaskId(0),
+                id: TaskId::placeholder(),
                 thread_id: Some(t.id.clone()),
                 parent_id: None,
                 title: "x".into(),

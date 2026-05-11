@@ -11,7 +11,6 @@ import type {
 } from "../../api.js";
 import {
   removeFollowup,
-  reorderThreadQueue,
 } from "../../api.js";
 import { TASK_DRAG_MIME } from "../ThreadRail.js";
 import { ContextMenu } from "../ContextMenu.js";
@@ -555,9 +554,6 @@ export function PlanPane({
                 scopeThreadId={currentScopeThreadId}
                 onUpdateTask={activeUpdate}
                 onReorderTasks={activeReorder}
-                onReorderMixed={isRootThread && streamId && threadId
-                  ? (entries) => runWithError("Reorder queue", reorderThreadQueue(streamId, threadId, entries))
-                  : undefined}
                 onOpenMenu={(rect, item) => {
                   const groupIds = markedIds.has(item.id) && markedIds.size > 1
                     ? [...markedIds]

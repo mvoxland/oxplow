@@ -157,7 +157,7 @@ mod tests {
     fn task_round_trips() {
         let now = Timestamp::from_unix_ms(1_700_000_000_000);
         let item = Task {
-            id: TaskId(1),
+            id: TaskId::new(1),
             thread_id: Some(ThreadId::from("b-1")),
             parent_id: None,
             title: "ship it".into(),

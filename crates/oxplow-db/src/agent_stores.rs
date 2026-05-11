@@ -42,7 +42,7 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
     Ok(AgentTurn {
         id: AgentTurnId::from(id),
         thread_id: ThreadId::from(thread_id),
-        task_id: task_id.map(TaskId),
+        task_id: task_id.map(TaskId::new),
         prompt,
         answer,
         session_id,

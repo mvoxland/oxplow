@@ -17,10 +17,7 @@ pub mod time;
 
 pub use error::DomainError;
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
-pub use ids::{
-    classify_id, AgentTurnId, EffortId, HookEventId, IdKind, NoteId, StreamId, TaskId, TaskLinkId,
-    ThreadId,
-};
+pub use ids::{AgentTurnId, EffortId, HookEventId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 pub use stream::{Stream, StreamKind};
 pub use task::{
     Task, TaskActorKind, TaskAuthor, TaskEvent, TaskLink, TaskLinkType, TaskPriority, TaskStatus,

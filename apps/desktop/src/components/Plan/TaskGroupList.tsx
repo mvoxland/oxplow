@@ -54,7 +54,6 @@ export function TaskGroupList({
   scopeThreadId,
   onUpdateTask,
   onReorderTasks,
-  onReorderMixed,
   onOpenMenu,
   sectionActions,
   selectedId,
@@ -79,7 +78,6 @@ export function TaskGroupList({
   scopeThreadId: string | null;
   onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onReorderTasks: (orderedItemIds: number[]) => Promise<void>;
-  onReorderMixed?(entries: Array<{ id: number }>): void;
   onOpenMenu(rect: DOMRect, item: Task): void;
   /** Per-section action buttons (right-aligned in each section header).
    *  The PlanPane builds this map and threads it in — add new per-section
@@ -329,11 +327,7 @@ export function TaskGroupList({
         status: statusOverrides.get(row.id) ?? row.item.status,
       }));
     const persistedWorkIds = finalizeReorderIds(workRowsInVisualOrder);
-    if (onReorderMixed) {
-      onReorderMixed(persistedWorkIds.map((id) => ({ id })));
-    } else {
-      void onReorderTasks(persistedWorkIds);
-    }
+    void onReorderTasks(persistedWorkIds);
   };
 
   const handleDropOnSection = (section: TaskSectionKind) => {

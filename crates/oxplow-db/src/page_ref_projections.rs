@@ -321,7 +321,7 @@ mod tests {
 
     fn item(id: i64, title: &str, description: &str, ac: Option<&str>) -> Task {
         Task {
-            id: TaskId(id),
+            id: TaskId::new(id),
             thread_id: None,
             parent_id: None,
             title: title.into(),
@@ -388,10 +388,10 @@ mod tests {
     fn link_edge_labels_link_subtype() {
         use oxplow_domain::TaskLinkId;
         let link = TaskLink {
-            id: TaskLinkId(1),
+            id: TaskLinkId::new(1),
             thread_id: oxplow_domain::ThreadId::from("b-1"),
-            from_item_id: TaskId(10),
-            to_item_id: TaskId(20),
+            from_item_id: TaskId::new(10),
+            to_item_id: TaskId::new(20),
             link_type: TaskLinkType::Blocks,
             created_at: ts(),
         };

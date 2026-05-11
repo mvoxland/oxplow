@@ -184,7 +184,7 @@ pub async fn list_recently_finished(
             }
             let Some(t) = item.completed_at else { continue };
             entries.push(FinishedEntry::Task {
-                item_id: item.id.0,
+                item_id: item.id.value(),
                 title: item.title,
                 t,
             });
@@ -213,7 +213,7 @@ pub async fn list_recently_finished(
         for item in done {
             let Some(t) = item.completed_at else { continue };
             entries.push(FinishedEntry::Task {
-                item_id: item.id.0,
+                item_id: item.id.value(),
                 title: item.title,
                 t,
             });

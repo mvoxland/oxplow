@@ -207,7 +207,7 @@ mod tests {
             .unwrap();
         let task_id = bare_items
             .insert(&Task {
-                id: TaskId(0),
+                id: TaskId::placeholder(),
                 thread_id: Some(ThreadId::from("b-1")),
                 parent_id: None,
                 title: "fix".into(),

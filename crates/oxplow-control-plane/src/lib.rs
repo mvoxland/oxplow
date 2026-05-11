@@ -778,7 +778,7 @@ async fn stop_directive(
 fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
     let titles: Vec<String> = items
         .iter()
-        .map(|i| format!("  • [{}] {}", i.id.0, i.title))
+        .map(|i| format!("  • [{}] {}", i.id.value(), i.title))
         .collect();
     format!(
         "AUDIT: this turn is closing with {} task(s) still `in_progress`:\n{}\n\n\

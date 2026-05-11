@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn from_task_service_not_found_maps_to_not_found() {
-        let e: IpcError = TaskServiceError::NotFound(oxplow_domain::TaskId(7)).into();
+        let e: IpcError = TaskServiceError::NotFound(oxplow_domain::TaskId::new(7)).into();
         assert_eq!(e.code, "NOT_FOUND");
     }
 

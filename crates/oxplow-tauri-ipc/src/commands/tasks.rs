@@ -26,18 +26,29 @@ pub async fn get_task(
     Ok(state.task_store.get(id).await?)
 }
 
+/// Insert-or-update a Task. The id field acts as the discriminator —
+/// `TaskId::placeholder()` (i.e. 0) means "client doesn't know an id
+/// yet, allocate one"; any other value means "update this row in
+/// place". On the update path we refetch the stored row so any
+/// server-side side effects (e.g. `completed_at` flips, sort_index
+/// rewrites a future change might add) appear in the returned shape.
 #[tauri::command]
 #[specta::specta]
 pub async fn upsert_task(state: tauri::State<'_, AppState>, item: Task) -> Result<Task, IpcError> {
     let thread_id = item.thread_id.clone();
-    let result = if item.id.value() == 0 {
+    let result = if item.id.is_placeholder() {
         let mut new_item = item;
         let id = state.task_store.insert(&new_item).await?;
         new_item.id = id;
         new_item
     } else {
+        let id = item.id;
         state.task_store.update(&item).await?;
-        item
+        state
+            .task_store
+            .get(id)
+            .await?
+            .ok_or_else(|| IpcError::not_found())?
     };
     state.events.emit(OxplowEvent::TasksChanged { thread_id });
     Ok(result)
@@ -146,11 +157,16 @@ pub async fn move_task(
         .await?
         .and_then(|i| i.thread_id);
     let item = state.tasks.move_to(req.id, req.thread_id.clone()).await?;
+    // Notify both buckets so the renderer refetches the source and
+    // destination. When origin == destination it's a noop reorder and
+    // a single event is enough.
     state.events.emit(OxplowEvent::TasksChanged {
-        thread_id: origin_thread_id,
+        thread_id: origin_thread_id.clone(),
     });
-    state.events.emit(OxplowEvent::TasksChanged {
-        thread_id: req.thread_id,
-    });
+    if origin_thread_id != req.thread_id {
+        state.events.emit(OxplowEvent::TasksChanged {
+            thread_id: req.thread_id,
+        });
+    }
     Ok(item)
 }

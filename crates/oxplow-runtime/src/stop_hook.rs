@@ -223,9 +223,9 @@ mod tests {
 
     fn item(id: i64, status: TaskStatus, parent: Option<i64>) -> Task {
         Task {
-            id: TaskId(id),
+            id: TaskId::new(id),
             thread_id: None,
-            parent_id: parent.map(TaskId),
+            parent_id: parent.map(TaskId::new),
             title: format!("t{id}"),
             description: String::new(),
             acceptance_criteria: None,
@@ -444,7 +444,7 @@ mod tests {
         ];
         let pairs = find_stale_epic_children_pairs(&items);
         assert_eq!(pairs.len(), 1);
-        assert_eq!(pairs[0].epic.id, TaskId(1));
+        assert_eq!(pairs[0].epic.id, TaskId::new(1));
         assert_eq!(pairs[0].stale_children.len(), 1);
     }
 
