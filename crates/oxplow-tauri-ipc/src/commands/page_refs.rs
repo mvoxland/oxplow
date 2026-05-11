@@ -64,33 +64,13 @@ pub async fn list_outbound(
         .await?;
     // For outbound, the "label" we want is for the *target*. We
     // keep the same struct shape, but populate `source_label` with
-    // the target's label so the renderer can be kind-agnostic.
-    let mut out = decorate_outbound_targets(&state, edges).await;
-    // Also fold in the source label for completeness (some
-    // renderers display "from <X>" too).
-    let augmented = decorate_with_labels(&state, edge_views(&out)).await;
-    for (i, e) in augmented.into_iter().enumerate() {
-        if let Some(orig) = out.get_mut(i) {
-            // If target-label was None, fall through to source label.
-            if orig.source_label.is_none() {
-                orig.source_label = e.source_label;
-            }
-        }
-    }
-    Ok(out)
-}
-
-fn edge_views(rows: &[BacklinkEdge]) -> Vec<PageRefEdge> {
-    rows.iter()
-        .map(|r| PageRefEdge {
-            source_kind: r.source_kind.clone(),
-            source_id: r.source_id.clone(),
-            target_kind: r.target_kind.clone(),
-            target_id: r.target_id.clone(),
-            ref_type: r.ref_type.clone(),
-            source_extra: r.source_extra.clone(),
-        })
-        .collect()
+    // the target's label so the renderer can be kind-agnostic. When
+    // the target kind has no first-class label (files, directories,
+    // findings), leave `source_label` as None — the frontend falls
+    // back to `target_id`, which IS the meaningful display for
+    // those kinds. Folding in the source's label here would stamp
+    // the current page's own title on every file/dir/finding row.
+    Ok(decorate_outbound_targets(&state, edges).await)
 }
 
 async fn decorate_with_labels(state: &AppState, edges: Vec<PageRefEdge>) -> Vec<BacklinkEdge> {
