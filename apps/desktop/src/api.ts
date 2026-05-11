@@ -1200,6 +1200,10 @@ export function subscribeCodeQualityEvents(
   });
 }
 
+export async function getWorkItem(id: string): Promise<WorkItem | null> {
+  return unwrap(await commands.getWorkItem(id)) as unknown as WorkItem | null;
+}
+
 export async function getWorkItemSummaries(ids: string[]): Promise<Array<{
   id: string;
   title: string;

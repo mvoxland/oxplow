@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { EffortDetail, WorkItem, WorkItemPriority, WorkItemStatus } from "../../api.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { deleteButtonStyle, inputStyle, miniButtonStyle } from "./plan-utils.js";
@@ -58,10 +58,13 @@ export function WorkItemDetail({
   item,
   onUpdateWorkItem,
   onRequestDelete,
+  headerActions,
 }: {
   item: WorkItem;
   onUpdateWorkItem: (itemId: string, changes: WorkItemDetailChanges) => Promise<void>;
   onRequestDelete(): void;
+  /** Optional buttons rendered before Delete in the header row. */
+  headerActions?: ReactNode;
 }) {
   return (
     <div
@@ -86,6 +89,7 @@ export function WorkItemDetail({
         <span style={{ color: "var(--muted)" }}>·</span>
         <span style={{ color: "var(--muted)" }}>by {item.created_by}</span>
         <span style={{ flex: 1 }} />
+        {headerActions}
         <button type="button" onClick={onRequestDelete} style={deleteButtonStyle} title="Delete work item">Delete</button>
       </div>
       <EditableField

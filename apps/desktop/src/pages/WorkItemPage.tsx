@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { EffortDetail, Stream, Thread, ThreadWorkState, WorkItem, WorkItemPriority, WorkItemStatus } from "../api.js";
 import {
+  getWorkItem,
   listWorkItemEfforts,
+  moveBacklogItemToThread,
+  moveWorkItemToBacklog,
   subscribeOxplowEvents,
   updateWorkItem,
 } from "../api.js";
+import { miniButtonStyle } from "../components/Plan/plan-utils.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, workItemRef } from "../tabs/pageRefs.js";
@@ -50,7 +54,11 @@ export function WorkItemPage({
   onShowInHistory,
   onOpenDiff,
 }: WorkItemPageProps) {
-  const item = items.find((i) => i.id === itemId) ?? null;
+  // Fallback for items not in the current thread's loaded buckets — backlog
+  // rows and items owned by another thread won't appear in `items`. Fetch
+  // the row directly so the page renders the full editor regardless.
+  const [fetchedItem, setFetchedItem] = useState<WorkItem | null>(null);
+  const item = items.find((i) => i.id === itemId) ?? fetchedItem;
   const refForGraph = workItemRef(itemId);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
@@ -106,6 +114,30 @@ export function WorkItemPage({
         }
       : undefined;
 
+  // Refresh the fallback row whenever this item id is missing from the live
+  // thread state, or when the runtime fires a change event for it. This
+  // covers backlog rows, foreign-thread rows, and moves between scopes.
+  const inThreadItems = items.some((i) => i.id === itemId);
+  useEffect(() => {
+    let cancelled = false;
+    const refetch = () => {
+      void getWorkItem(itemId).then((row) => {
+        if (!cancelled) setFetchedItem(row);
+      });
+    };
+    if (!inThreadItems) refetch();
+    const unsub = subscribeOxplowEvents((event) => {
+      if (event.type !== "work-item.changed") return;
+      const targetId = (event as unknown as { itemId?: string }).itemId;
+      if (targetId !== itemId) return;
+      refetch();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [itemId, inThreadItems]);
+
   useEffect(() => {
     if (!item) return;
     let cancelled = false;
@@ -134,6 +166,33 @@ export function WorkItemPage({
     await updateWorkItem(stream.id, thread.id, targetId, changes);
   };
 
+  // Backlog ↔ thread scope toggle. The button label/handler depend on the
+  // item's current `thread_id`: a thread-attached row offers "Send to
+  // backlog"; a backlog row offers "Bring to thread" against the active
+  // thread. Items owned by another thread show no action — the user would
+  // need to navigate there to move them.
+  const itemThreadId = item?.thread_id ?? null;
+  const scopeAction: { label: string; run: () => Promise<void> } | null = (() => {
+    if (!item || !stream) return null;
+    if (itemThreadId === null && thread) {
+      return {
+        label: "Bring to this thread",
+        run: async () => {
+          await moveBacklogItemToThread(stream.id, item.id, thread.id);
+        },
+      };
+    }
+    if (thread && itemThreadId === thread.id) {
+      return {
+        label: "Send to backlog",
+        run: async () => {
+          await moveWorkItemToBacklog(stream.id, thread.id, item.id);
+        },
+      };
+    }
+    return null;
+  })();
+
   const slideover = (
     <SnapshotDetailSlideover
       open={!!slideoverSnapshot}
@@ -152,7 +211,7 @@ export function WorkItemPage({
     return (
       <Page testId="page-work-item" title={itemId} kind="work item" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
-          This work item is not loaded in the current thread. Open the thread that owns it to edit, or use the rail to navigate.
+          Loading work item…
         </div>
         {slideover}
       </Page>
@@ -171,6 +230,17 @@ export function WorkItemPage({
           item={item}
           onUpdateWorkItem={handleUpdate}
           onRequestDelete={() => {}}
+          headerActions={
+            scopeAction ? (
+              <button
+                type="button"
+                style={miniButtonStyle}
+                onClick={() => void scopeAction.run()}
+              >
+                {scopeAction.label}
+              </button>
+            ) : undefined
+          }
         />
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>
