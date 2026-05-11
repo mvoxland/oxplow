@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { AgentStatus } from "../../api.js";
+import { kindForTabId, PageKindIcon } from "../../pageKinds.js";
 import { AgentStatusDot } from "../AgentStatusDot.js";
 import { Kebab } from "../Kebab.js";
 import type { MenuItem } from "../../menu.js";
@@ -155,6 +156,11 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               }}
             >
               {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
+              <PageKindIcon
+                kind={kindForTabId(tab.id)}
+                size={13}
+                style={{ color: "var(--text-secondary)", flexShrink: 0 }}
+              />
               <span
                 title={tab.label}
                 style={{

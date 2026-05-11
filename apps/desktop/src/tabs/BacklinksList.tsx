@@ -1,6 +1,7 @@
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import type { BacklinkEntry } from "./backlinkTypes.js";
+import { PageKindIcon } from "../pageKinds.js";
 import type { TabRef } from "./tabState.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";
@@ -143,6 +144,7 @@ export function BacklinksList({
           disabled={!onOpenSnapshot}
           style={listButtonStyle}
         >
+          <PageKindIcon kind="snapshot" size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {entry.label}
           </span>
@@ -162,6 +164,7 @@ export function BacklinksList({
           disabled={!onOpenCommit}
           style={listButtonStyle}
         >
+          <PageKindIcon kind="git-commit" size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {entry.label}
           </span>
@@ -209,6 +212,7 @@ export function BacklinksList({
             fontSize: 12,
           }}
         >
+          <PageKindIcon kind={entry.ref.kind} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {entry.label}
           </span>

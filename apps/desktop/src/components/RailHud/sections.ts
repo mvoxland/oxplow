@@ -40,29 +40,31 @@ export const RAIL_PAGE_IDS: ReadonlySet<string> = new Set([
  */
 export function computePagesDirectory(opts: { backlogReadyCount: number }): PageDirectoryEntry[] {
   return [
-    { id: "tasks", label: "📋  Tasks", ref: tasksRef() },
-    { id: "done-work", label: "✓  Done Work", ref: doneWorkRef() },
+    // Labels are emoji-free — `PageKindIcon` resolves the leading
+    // glyph from the entry's ref kind at render time.
+    { id: "tasks", label: "Tasks", ref: tasksRef() },
+    { id: "done-work", label: "Done Work", ref: doneWorkRef() },
     {
       id: "backlog",
-      label: "📦  Backlog",
+      label: "Backlog",
       ref: backlogRef(),
       badge: opts.backlogReadyCount > 0 ? opts.backlogReadyCount : undefined,
     },
-    { id: "archived", label: "▣  Archived", ref: archivedRef() },
-    { id: "wiki-index", label: "📒  Wiki", ref: indexRef("wiki-index") },
-    { id: "files", label: "📁  Files", ref: indexRef("files") },
-    { id: "code-quality", label: "⚠  Code Quality", ref: indexRef("code-quality") },
-    { id: "local-history", label: "⏱  Local History", ref: indexRef("local-history") },
-    { id: "git-dashboard", label: "🌐  Git", ref: gitDashboardRef() },
-    { id: "uncommitted-changes", label: "✎  Uncommitted", ref: uncommittedChangesRef() },
-    { id: "change-analysis", label: "🔍  Change Analysis", ref: changeAnalysisRef("working") },
-    { id: "hook-events", label: "🪝  Hook Events", ref: indexRef("hook-events") },
-    { id: "subsystem-docs", label: "📑  Subsystem Docs", ref: indexRef("subsystem-docs") },
-    { id: "settings", label: "⚙  Settings", ref: indexRef("settings") },
-    { id: "dashboard-planning", label: "📊  Planning", ref: dashboardRef("planning") },
-    { id: "dashboard-review", label: "📊  Review", ref: dashboardRef("review") },
-    { id: "dashboard-quality", label: "📊  Quality", ref: dashboardRef("quality") },
-    { id: "dashboard-visits", label: "📊  Visits", ref: dashboardRef("visits") },
+    { id: "archived", label: "Archived", ref: archivedRef() },
+    { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index") },
+    { id: "files", label: "Files", ref: indexRef("files") },
+    { id: "code-quality", label: "Code Quality", ref: indexRef("code-quality") },
+    { id: "local-history", label: "Local History", ref: indexRef("local-history") },
+    { id: "git-dashboard", label: "Git", ref: gitDashboardRef() },
+    { id: "uncommitted-changes", label: "Uncommitted", ref: uncommittedChangesRef() },
+    { id: "change-analysis", label: "Change Analysis", ref: changeAnalysisRef("working") },
+    { id: "hook-events", label: "Hook Events", ref: indexRef("hook-events") },
+    { id: "subsystem-docs", label: "Subsystem Docs", ref: indexRef("subsystem-docs") },
+    { id: "settings", label: "Settings", ref: indexRef("settings") },
+    { id: "dashboard-planning", label: "Planning", ref: dashboardRef("planning") },
+    { id: "dashboard-review", label: "Review", ref: dashboardRef("review") },
+    { id: "dashboard-quality", label: "Quality", ref: dashboardRef("quality") },
+    { id: "dashboard-visits", label: "Visits", ref: dashboardRef("visits") },
   ];
 }
 

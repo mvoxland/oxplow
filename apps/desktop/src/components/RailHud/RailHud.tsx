@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BacklogState, FinishedEntry, ThreadWorkState, Task } from "../../api.js";
+import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, taskRef } from "../../tabs/pageRefs.js";
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
@@ -753,6 +754,7 @@ function BookmarksSection({
               style={{ ...rowHoverStyle(), flex: 1 }}
             >
               <span aria-hidden style={{ color: "var(--accent-fg)", fontSize: 11 }}>★</span>
+              <PageKindIcon kind={entry.ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {entry.label}
               </span>
@@ -907,6 +909,7 @@ function FinishedSection({
               onClick={() => onOpenPage(ref)}
               style={rowHoverStyle()}
             >
+              <PageKindIcon kind={e.kind === "task" ? "task" : "wiki"} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {e.title}
               </span>
@@ -1025,6 +1028,7 @@ function HistorySection({
               onClick={() => onOpenPage(ref)}
               style={rowHoverStyle()}
             >
+              <PageKindIcon kind={ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {e.label}
               </span>
@@ -1085,6 +1089,7 @@ function PagesDirectory({
             onClick={() => onOpenPage(entry.ref)}
             style={rowHoverStyle()}
           >
+            <PageKindIcon kind={entry.ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {entry.label}
             </span>

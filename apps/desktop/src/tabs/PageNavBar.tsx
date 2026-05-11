@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import { PageKindIcon } from "../pageKinds.js";
 import type { BookmarkScope } from "./bookmarks.js";
 
 export interface PageNavBarProps {
@@ -331,6 +332,9 @@ export function PageNavBar({
             <span
               data-testid="page-nav-kind"
               style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
                 fontSize: 11,
                 fontWeight: 500,
                 color: "var(--text-secondary)",
@@ -341,6 +345,7 @@ export function PageNavBar({
                 flexShrink: 0,
               }}
             >
+              <PageKindIcon kind={kind} size={12} />
               {kind}
             </span>
           ) : null}

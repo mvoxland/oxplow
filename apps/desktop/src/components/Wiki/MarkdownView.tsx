@@ -17,6 +17,7 @@ function urlTransform(value: string): string {
 }
 import { Kebab } from "../Kebab.js";
 import type { MenuItem } from "../../menu.js";
+import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
 import { DISK, type FileVersion } from "../../file-version.js";
@@ -198,6 +199,28 @@ export function parseGitRefTarget(target: string): string | null {
  * Classify a markdown link href. Shared by WikiPageTab (wiki navigation) and
  * TaskDetail (tasks modal markdown rendering). Pure — easy to test.
  */
+/**
+ * Map a `ParsedLink.kind` to the unified scheme/kind string the
+ * shared `PageKindIcon` understands. Returns `null` for kinds that
+ * shouldn't carry a leading glyph.
+ */
+function parsedLinkIconKind(kind: ParsedLink["kind"]): string | null {
+  switch (kind) {
+    case "internal":
+      return "wiki";
+    case "file":
+      return "file";
+    case "directory":
+      return "directory";
+    case "git-commit":
+      return "git-commit";
+    case "external":
+      return "external-url";
+    default:
+      return null;
+  }
+}
+
 export function parseMarkdownLink(rawHref: string): ParsedLink {
   if (!rawHref) return { kind: "empty" };
   if (rawHref.startsWith("#")) return { kind: "anchor" };
@@ -576,8 +599,16 @@ export function MarkdownView({
               return <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />;
             }
             const items = buildLinkMenu(href);
+            const iconKind = parsedLinkIconKind(parsed.kind);
             return (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }} className="oxplow-md-link">
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }} className="oxplow-md-link">
+                {iconKind ? (
+                  <PageKindIcon
+                    kind={iconKind}
+                    size={12}
+                    style={{ color: "var(--text-secondary)", flexShrink: 0, verticalAlign: "middle" }}
+                  />
+                ) : null}
                 <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />
                 {items.length > 0 ? (
                   <span className="oxplow-md-link-kebab" style={{ display: "inline-flex" }}>
