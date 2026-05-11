@@ -22,7 +22,7 @@ export interface TaskPageProps {
   stream: Stream | null;
   thread: Thread | null;
   itemId: number;
-  /** Live snapshot of all work items in the current thread (used to find this one). */
+  /** Live snapshot of all tasks in the current thread (used to find this one). */
   items: Task[];
   threadWork: ThreadWorkState | null;
   onOpenPage(ref: TabRef): void;
@@ -34,7 +34,7 @@ export interface TaskPageProps {
 }
 
 /**
- * Single-record page for a work item. Shows the full editable detail
+ * Single-record page for a tasks. Shows the full editable detail
  * (title, description, acceptance, status, priority) plus the merged
  * activity timeline (notes + efforts). Phase 4 entry point — replaces
  * the modal-only edit flow when callers route via `onOpenPage`.
@@ -69,7 +69,7 @@ export function TaskPage({
     snapshotId: string;
     label: string | null;
     source: string;
-    workItemId: number | null;
+    tasksId: number | null;
   } | null>(null);
   // Synthesize snapshot backlinks from this item's efforts. Each completed
   // effort's `end_snapshot_id` becomes a clickable row that opens the
@@ -84,7 +84,7 @@ export function TaskPage({
         label: `Effort ${i + 1} end snapshot`,
         source: "task-end",
         snapshotLabel: null,
-        workItemId: itemId,
+        tasksId: itemId,
         subtitle: `${d.changed_paths.length} file${d.changed_paths.length === 1 ? "" : "s"}`,
       }));
   }, [efforts, itemId]);
@@ -100,7 +100,7 @@ export function TaskPage({
           snapshotId: payload.snapshotId,
           label: payload.label ?? null,
           source: payload.source ?? "",
-          workItemId: payload.workItemId ?? null,
+          tasksId: payload.tasksId ?? null,
         })}
         onOpenCommit={(payload) => onOpenPage(gitCommitRef(payload.sha))}
       />
@@ -201,7 +201,7 @@ export function TaskPage({
       snapshotId={slideoverSnapshot?.snapshotId ?? null}
       snapshotLabel={slideoverSnapshot?.label ?? null}
       snapshotSource={slideoverSnapshot?.source ?? ""}
-      workItemId={slideoverSnapshot?.workItemId ?? null}
+      tasksId={slideoverSnapshot?.tasksId ?? null}
       onOpenDiff={onOpenDiff}
       onOpenTask={(targetId) => onOpenPage(taskRef(targetId))}
     />
@@ -209,9 +209,9 @@ export function TaskPage({
 
   if (!item) {
     return (
-      <Page testId="page-work-item" title={`task:${itemId}`} kind="work item" backlinks={backlinks} outbound={outbound}>
+      <Page testId="page-tasks" title={`task:${itemId}`} kind="tasks" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
-          Loading work item…
+          Loading tasks…
         </div>
         {slideover}
       </Page>
@@ -224,7 +224,7 @@ export function TaskPage({
   ];
 
   return (
-    <Page testId="page-work-item" title={item.title} kind="work item" chips={chips} backlinks={backlinks} outbound={outbound}>
+    <Page testId="page-tasks" title={item.title} kind="tasks" chips={chips} backlinks={backlinks} outbound={outbound}>
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
         <TaskDetail
           item={item}

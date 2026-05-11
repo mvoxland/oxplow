@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { AgentStatus, ThreadFollowup, Task, TaskPriority, TaskStatus } from "../../api.js";
-import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
+import { TASK_DRAG_MIME } from "../ThreadRail.js";
 import {
   classifyRow,
   finalizeReorderIds,
@@ -12,8 +12,8 @@ import {
   statusIcon,
   statusLabel,
   type PlanSectionKey,
-  type WorkItemGroup,
-  type WorkItemSectionKind,
+  type tasksGroup,
+  type tasksectionKind,
 } from "./plan-utils.js";
 import { PriorityIcon } from "./plan-icons.js";
 import type { TaskDetailChanges } from "./TaskDetail.js";
@@ -21,12 +21,12 @@ import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 
 /**
- * Renders one work-item group (an epic + its children, or the root group
+ * Renders one tasks group (an epic + its children, or the root group
  * with no epic). Items are split by status into four sections —
  * In progress → To do → Blocked → Done — with dividers between non-empty
  * sections.
  *
- * Drag-reorder rewrites `sort_index` globally. Dragging a work item across
+ * Drag-reorder rewrites `sort_index` globally. Dragging a tasks across
  * section boundaries also changes its status to that section's default
  * (ready → ready, done → done) so the user can
  * triage straight from the Work panel. InProgress rejects drop-in: the
@@ -37,12 +37,12 @@ import type { MenuItem } from "../../menu.js";
 export type QueueRow = { kind: "work"; id: number; sortIndex: number; item: Task };
 
 interface SectionBucket {
-  kind: WorkItemSectionKind;
+  kind: tasksectionKind;
   label: string;
   rows: QueueRow[];
 }
 
-const SECTION_ORDER: Array<{ kind: WorkItemSectionKind; label: string }> = [
+const SECTION_ORDER: Array<{ kind: tasksectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
   { kind: "ready", label: "Ready" },
   { kind: "blocked", label: "Blocked" },
@@ -75,7 +75,7 @@ export function TaskGroupList({
   sectionLabelOverrides,
   hideArchiveToggle,
 }: {
-  group: WorkItemGroup;
+  group: tasksGroup;
   scopeThreadId: string | null;
   onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onReorderTasks: (orderedItemIds: number[]) => Promise<void>;
@@ -85,7 +85,7 @@ export function TaskGroupList({
    *  The PlanPane builds this map and threads it in — add new per-section
    *  commands here rather than in the header rendering. Done's built-in
    *  archive controls render alongside whatever's passed for `done`. */
-  sectionActions?: Partial<Record<WorkItemSectionKind, React.ReactNode>>;
+  sectionActions?: Partial<Record<tasksectionKind, React.ReactNode>>;
   selectedId?: number | null;
   markedIds?: ReadonlySet<number>;
   onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
@@ -112,14 +112,14 @@ export function TaskGroupList({
   /** When provided, only sections in this list render. Used by the
    *  page split (Plan Work / Done Work / Archived) to restrict the
    *  panel to a subset of the five buckets. Default = all. */
-  visibleSections?: WorkItemSectionKind[];
+  visibleSections?: tasksectionKind[];
   /** Cap rows per section after the in-section sort. Used by Plan
    *  Work to render previews of Done. Sections with no entry render
    *  fully. */
-  sectionItemLimit?: Partial<Record<WorkItemSectionKind, number>>;
+  sectionItemLimit?: Partial<Record<tasksectionKind, number>>;
   /** Override the default section header label per kind. Used by the
    *  Archived page so the (singular) Done section reads "Archived". */
-  sectionLabelOverrides?: Partial<Record<WorkItemSectionKind, string>>;
+  sectionLabelOverrides?: Partial<Record<tasksectionKind, string>>;
   /** Suppress the built-in "Show archived (N) / Archive all" controls
    *  on the Done section header. Plan Work, Done Work, and Archived
    *  all set this — those pages own their own archive flow (a
@@ -132,7 +132,7 @@ export function TaskGroupList({
   const lockInProgress = isActive !== false;
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
-  const [overSection, setOverSection] = useState<WorkItemSectionKind | null>(null);
+  const [overSection, setOverSection] = useState<tasksectionKind | null>(null);
   // Archived items fold into the Done section but are hidden by default — the
   // done-section header carries a "Show archived (N)" toggle and an
   // "Archive all" action.
@@ -143,7 +143,7 @@ export function TaskGroupList({
     const work: QueueRow[] = group.items.map((item) => ({
       kind: "work" as const, id: item.id, sortIndex: item.sort_index, item,
     }));
-    const buckets: Record<WorkItemSectionKind, QueueRow[]> = {
+    const buckets: Record<tasksectionKind, QueueRow[]> = {
       inProgress: [], ready: [], blocked: [], done: [],
     };
     for (const row of work) {
@@ -163,7 +163,7 @@ export function TaskGroupList({
       // surface at the top so the user can triage (or reopen) them
       // without scrolling. The "drop into Done lands at the top" contract
       // depends on this + the MAX+1 sort_index bump in
-      // `work-item-store.updateItem`. `finalizeReorderIds` unwinds
+      // `tasks-store.updateItem`. `finalizeReorderIds` unwinds
       // descending runs when we persist a reorder so the underlying
       // sort_index space stays ascending.
       const descending = kind === "done";
@@ -188,12 +188,12 @@ export function TaskGroupList({
     return { sections: orderedSections, allRows: flat };
   }, [group.items, epicChildrenMap, visibleSections, sectionItemLimit, sectionLabelOverrides]);
 
-  // Index every work item visible in this group (root + every epic's
+  // Index every tasks visible in this group (root + every epic's
   // children) so the drag-start handler can encode the resolved
-  // {id, title, status} slice into the WORK_ITEM_DRAG_MIME payload.
+  // {id, title, status} slice into the TASK_DRAG_MIME payload.
   // The agent terminal reads this slice to add each marked row as a
-  // context ref without needing its own work-item lookup.
-  const allWorkItemsById = useMemo(() => {
+  // context ref without needing its own tasks lookup.
+  const alltasksById = useMemo(() => {
     const map = new Map<number, Task>();
     for (const item of group.items) map.set(item.id, item);
     for (const children of epicChildrenMap.values()) {
@@ -204,7 +204,7 @@ export function TaskGroupList({
 
   const keyFor = (row: { kind: string; id: number }) => `${row.kind}:${row.id}`;
 
-  // Look up the dragged work item (if any) so cross-section drops can route
+  // Look up the dragged tasks (if any) so cross-section drops can route
   // through onUpdateTask. Commit/wait rows don't have a status to change.
   const draggedTask = (() => {
     if (!draggingKey) return null;
@@ -336,7 +336,7 @@ export function TaskGroupList({
     }
   };
 
-  const handleDropOnSection = (section: WorkItemSectionKind) => {
+  const handleDropOnSection = (section: tasksectionKind) => {
     if (!draggedTask) { resetDrag(); return; }
     const nextStatus = sectionDefaultStatus(section);
     resetDrag();
@@ -395,11 +395,11 @@ export function TaskGroupList({
         // always present even if not in the page-local index — it's the
         // row the user actually grabbed.
         const items = ids
-          .map((id) => allWorkItemsById.get(id) ?? (id === row.item.id ? row.item : null))
+          .map((id) => alltasksById.get(id) ?? (id === row.item.id ? row.item : null))
           .filter((item): item is Task => item !== null)
           .map((item) => ({ id: item.id, title: item.title, status: item.status }));
         event.dataTransfer.setData(
-          WORK_ITEM_DRAG_MIME,
+          TASK_DRAG_MIME,
           JSON.stringify({
             itemId: row.item.id,
             itemIds: ids,
@@ -420,7 +420,7 @@ export function TaskGroupList({
       onDrop: (event: React.DragEvent) => {
         event.preventDefault();
         if (draggingKey) { handleDropOnKey(key); return; }
-        const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
+        const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
         if (!raw) return;
         try {
           const payload = JSON.parse(raw) as { itemId?: number; itemIds?: number[]; parentEpicId?: number };
@@ -852,7 +852,7 @@ function EpicInlineRow({
       }}
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
-      data-testid={`work-item-row-${item.id}`}
+      data-testid={`tasks-row-${item.id}`}
     >
       <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateTask(item.id, { status }); }} locked={locked} />
       <span
@@ -873,7 +873,7 @@ function EpicInlineRow({
           e.stopPropagation();
           onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), item);
         }}
-        data-testid={`work-item-row-kebab-${item.id}`}
+        data-testid={`tasks-row-kebab-${item.id}`}
         style={{
           background: "transparent",
           border: "none",
@@ -929,7 +929,7 @@ function EpicChildrenPane({
   const handleExternalDrop = (event: React.DragEvent) => {
     event.preventDefault();
     setDropTargetOver(false);
-    const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
+    const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
     if (!raw) return;
     try {
       const payload = JSON.parse(raw) as { itemId?: number; itemIds?: number[]; fromThreadId?: string | null };
@@ -980,7 +980,7 @@ function EpicChildrenPane({
                 .filter((item): item is Task => item !== null)
                 .map((item) => ({ id: item.id, title: item.title, status: item.status }));
               event.dataTransfer.setData(
-                WORK_ITEM_DRAG_MIME,
+                TASK_DRAG_MIME,
                 JSON.stringify({ itemId: child.id, itemIds: ids, items, fromThreadId: scopeThreadId, parentEpicId: epicId }),
               );
               queueMicrotask(() => setDraggingKey(key));
@@ -999,7 +999,7 @@ function EpicChildrenPane({
       })}
       <div
         onDragOver={(event) => {
-          if (!event.dataTransfer.types.includes(WORK_ITEM_DRAG_MIME)) return;
+          if (!event.dataTransfer.types.includes(TASK_DRAG_MIME)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
           setDropTargetOver(true);
@@ -1033,7 +1033,7 @@ function EpicChildrenPane({
 }
 
 /**
- * One collapsed work-item row with inline editing. Title click swaps to an
+ * One collapsed tasks row with inline editing. Title click swaps to an
  * input; status icon and priority marker each open a transparent <select>
  * overlay that commits on change. Clicking anywhere else on the row toggles
  * the expanded TaskDetail (for description + acceptance + delete).
@@ -1128,7 +1128,7 @@ function InlineItemRow({
       }}
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
-      data-testid={`work-item-row-${item.id}`}
+      data-testid={`tasks-row-${item.id}`}
     >
       <InlineStatusPicker
         status={item.status}
@@ -1157,7 +1157,7 @@ function InlineItemRow({
           e.stopPropagation();
           onOpenMenu((e.currentTarget as HTMLButtonElement).getBoundingClientRect(), item);
         }}
-        data-testid={`work-item-row-kebab-${item.id}`}
+        data-testid={`tasks-row-kebab-${item.id}`}
         style={{
           background: "transparent",
           border: "none",

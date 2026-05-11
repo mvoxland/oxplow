@@ -140,7 +140,7 @@ function noopHandlers() {
     find() {},
     showAgentPane() {},
     showEditorPane() {},
-    newWorkItem() {},
+    newTask() {},
     newStream() {},
     newThread() {},
     openHistory() {},

@@ -25,7 +25,7 @@ interface Props {
   openFiles: Record<string, OpenFileState>;
   onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
   onRevealCommit?(sha: string): void;
-  onRevealWorkItem?(itemId: number): void;
+  onRevealTask?(itemId: number): void;
   onCompareWithClipboard?(selection: string, path: string): void;
 }
 
@@ -42,7 +42,7 @@ export function EditorPane({
   openFiles,
   onNavigateToLocation,
   onRevealCommit,
-  onRevealWorkItem,
+  onRevealTask,
   onCompareWithClipboard,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -74,8 +74,8 @@ export function EditorPane({
   const prevDirtyRef = useRef(isDirty);
   const onRevealCommitRef = useRef(onRevealCommit);
   onRevealCommitRef.current = onRevealCommit;
-  const onRevealWorkItemRef = useRef(onRevealWorkItem);
-  onRevealWorkItemRef.current = onRevealWorkItem;
+  const onRevealtasksRef = useRef(onRevealTask);
+  onRevealtasksRef.current = onRevealTask;
   const headByPathRef = useRef<Map<string, string | null>>(new Map());
   const diffDecoIdsRef = useRef<string[]>([]);
   // Monaco loads asynchronously, so the model-binding effect below needs a
@@ -631,7 +631,7 @@ export function EditorPane({
             scrollTop={blameScrollTop}
             lineHeight={blameLineHeight}
             onLocalClick={(itemId) => {
-              onRevealWorkItemRef.current?.(itemId);
+              onRevealtasksRef.current?.(itemId);
             }}
             onGitClick={(sha) => {
               onRevealCommitRef.current?.(sha);
@@ -853,16 +853,16 @@ function BlameOverlay({
     >
       <div style={{ position: "absolute", top: -scrollTop, left: 0, right: 0 }}>
         {entries.map((entry) => {
-          if (entry.source === "local" && entry.workItem) {
-            const endedAtSec = Date.parse(entry.workItem.endedAt) / 1000;
+          if (entry.source === "local" && entry.tasks) {
+            const endedAtSec = Date.parse(entry.tasks.endedAt) / 1000;
             const ageDays = Math.max(0, (nowSec - endedAtSec) / 86400);
             const bg = blameLocalColor(ageDays);
-            const label = truncateAuthor(entry.workItem.title);
-            const itemId = entry.workItem.id;
+            const label = truncateAuthor(entry.tasks.title);
+            const itemId = entry.tasks.id;
             return (
               <div
                 key={entry.line}
-                title={`${entry.workItem.title}\nwork item ${itemId}\nfinished ${formatBlameDate(endedAtSec)}`}
+                title={`${entry.tasks.title}\ntasks ${itemId}\nfinished ${formatBlameDate(endedAtSec)}`}
                 onClick={() => onLocalClick(itemId)}
                 style={{
                   ...rowStyle(lineHeight, bg),

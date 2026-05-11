@@ -16,7 +16,7 @@ interface Props {
   onPromoteThread(threadId: string): void | Promise<void>;
   onCloseThread(threadId: string): void | Promise<void>;
   onOpenClosedThreads?(): void;
-  onMoveWorkItem?(itemId: number, fromThreadId: string, toThreadId: string): Promise<void>;
+  onMovetasks?(itemId: number, fromThreadId: string, toThreadId: string): Promise<void>;
   onMoveBacklogItemToThread?(itemId: number, toThreadId: string): Promise<void>;
   onRenameThread?(threadId: string, newTitle: string): Promise<void> | void;
   onReorderThreads?(orderedThreadIds: string[]): Promise<void> | void;
@@ -29,7 +29,7 @@ interface Props {
   createRequest?: number;
 }
 
-export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-task";
+export const TASK_DRAG_MIME = "application/x-oxplow-task";
 export const THREAD_DRAG_MIME = "application/x-oxplow-thread";
 
 export function ThreadRail({
@@ -43,7 +43,7 @@ export function ThreadRail({
   onPromoteThread,
   onCloseThread,
   onOpenClosedThreads,
-  onMoveWorkItem,
+  onMovetasks,
   onMoveBacklogItemToThread,
   onRenameThread,
   onReorderThreads,
@@ -81,7 +81,7 @@ export function ThreadRail({
     const closeReason = isWriter
       ? "Promote another thread to writer first"
       : openItemCount > 0
-      ? `Finish or move ${openItemCount} open work item${openItemCount === 1 ? "" : "s"} first`
+      ? `Finish or move ${openItemCount} open tasks${openItemCount === 1 ? "" : "s"} first`
       : null;
     return [
       {
@@ -151,11 +151,11 @@ export function ThreadRail({
               await onRenameThread?.(thread.id, trimmed);
             }}
             menuItems={buildThreadMenu(thread)}
-            onDropWorkItem={(onMoveWorkItem || onMoveBacklogItemToThread) ? (payload) => {
+            onDroptasks={(onMovetasks || onMoveBacklogItemToThread) ? (payload) => {
               if (payload.fromThreadId === null) {
                 if (onMoveBacklogItemToThread) void onMoveBacklogItemToThread(payload.itemId, thread.id);
               } else {
-                if (onMoveWorkItem) void onMoveWorkItem(payload.itemId, payload.fromThreadId, thread.id);
+                if (onMovetasks) void onMovetasks(payload.itemId, payload.fromThreadId, thread.id);
               }
             } : undefined}
             onDragStart={onReorderThreads ? () => setDraggingId(thread.id) : undefined}
@@ -219,7 +219,7 @@ function ThreadChip({
   onPromote,
   onClose,
   menuItems,
-  onDropWorkItem,
+  onDroptasks,
   isRenaming,
   onSubmitRename,
   onCancelRename,
@@ -239,7 +239,7 @@ function ThreadChip({
   onPromote(): void;
   onClose(): void;
   menuItems?: MenuItem[];
-  onDropWorkItem?(payload: { itemId: number; fromThreadId: string | null }): void;
+  onDroptasks?(payload: { itemId: number; fromThreadId: string | null }): void;
   isRenaming?: boolean;
   onSubmitRename?(newTitle: string): void | Promise<void>;
   onCancelRename?(): void;
@@ -290,8 +290,8 @@ function ThreadChip({
       onDragOver?.();
       return;
     }
-    if (!onDropWorkItem) return;
-    if (!types.includes(WORK_ITEM_DRAG_MIME)) return;
+    if (!onDroptasks) return;
+    if (!types.includes(TASK_DRAG_MIME)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     if (!dragOver) setDragOver(true);
@@ -305,8 +305,8 @@ function ThreadChip({
       onDrop?.();
       return;
     }
-    if (!onDropWorkItem) return;
-    const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
+    if (!onDroptasks) return;
+    const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
     if (!raw) return;
     event.preventDefault();
     setDragOver(false);
@@ -325,7 +325,7 @@ function ThreadChip({
         ? payload.itemIds
         : payload.itemId ? [payload.itemId] : [];
       for (const id of ids) {
-        onDropWorkItem({ itemId: id, fromThreadId });
+        onDroptasks({ itemId: id, fromThreadId });
       }
     } catch {
       // ignore malformed payload
@@ -544,7 +544,7 @@ function HoverCard({
               title={canClose
                 ? "Close this thread; you can reopen it later from the Closed threads page"
                 : openCount > 0
-                ? `Close blocked: ${openCount} open work item${openCount === 1 ? "" : "s"}`
+                ? `Close blocked: ${openCount} open tasks${openCount === 1 ? "" : "s"}`
                 : "Cannot close the writer thread"}
             >
               Close thread

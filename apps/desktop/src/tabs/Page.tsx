@@ -55,7 +55,7 @@ export interface PageProps {
    *  so the same string drives both the chrome header and the tab
    *  strip label. */
   title?: ReactNode;
-  /** Optional kind/type label rendered as a small chip ("file", "work item"…). */
+  /** Optional kind/type label rendered as a small chip ("file", "tasks"…). */
   kind?: string;
   /** Optional status / metadata chips rendered next to the kind. */
   chips?: PageChip[];

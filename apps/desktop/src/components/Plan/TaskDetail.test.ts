@@ -11,7 +11,7 @@ function effort(
   return {
     effort: {
       id,
-      work_item_id: "w1",
+      task_id: "w1",
       started_at,
       ended_at,
       start_snapshot_id: null,

@@ -20,7 +20,7 @@ export interface FilePageProps extends ComponentProps<typeof EditorPane> {
  * EditorPane keeps owning all of its internal toolbar / Monaco
  * decorations / blame overlay — the chrome only adds the title row +
  * optional nav bar above it. Backlinks come from the unified
- * `page_ref` graph: every wiki page, work-item, commit, or finding
+ * `page_ref` graph: every wiki page, tasks, commit, or finding
  * that references this file's path appears in the dropdown.
  * Outbound is generally empty for files (the file itself doesn't
  * point at other pages today), but the slot is wired so a future

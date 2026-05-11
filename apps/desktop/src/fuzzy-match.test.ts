@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { fuzzyMatches } from "./fuzzy-match.js";
 
 test("subsequence matches skip over unrelated characters", () => {
-  expect(fuzzyMatches("work new work item", "wn")).toBe(true);
+  expect(fuzzyMatches("new task item", "nti")).toBe(true);
   expect(fuzzyMatches("file save", "fs")).toBe(true);
-  expect(fuzzyMatches("work new work item", "nwi")).toBe(true);
+  expect(fuzzyMatches("new task item", "tk")).toBe(true);
 });
 
 test("characters must appear in order", () => {

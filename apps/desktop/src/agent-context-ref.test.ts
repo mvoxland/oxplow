@@ -15,22 +15,22 @@ describe("formatContextMention", () => {
     expect(formatContextMention({ kind: "wiki", slug: "auth-flow" })).toBe("@.oxplow/wiki/auth-flow.md ");
   });
 
-  test("work-item → bracketed reference with id, title, status, trailing space", () => {
+  test("tasks → bracketed reference with id, title, status, trailing space", () => {
     expect(formatContextMention({
       kind: "task", itemId: "wi-abc123", title: "Add to agent context", status: "in_progress",
     })).toBe('[oxplow task wi-abc123: "Add to agent context" (in_progress)] ');
   });
 
-  test("work-item collapses whitespace in title", () => {
+  test("tasks collapses whitespace in title", () => {
     expect(formatContextMention({
-      kind: "task", itemId: "wi-1", title: "Multi\nline\ttitle  here", status: "ready",
-    })).toBe('[oxplow task wi-1: "Multi line title here" (ready)] ');
+      kind: "task", itemId: 1, title: "Multi\nline\ttitle  here", status: "ready",
+    })).toBe('[oxplow task 1: "Multi line title here" (ready)] ');
   });
 
-  test("work-item leaves quotes in title untouched (plain text reference)", () => {
+  test("tasks leaves quotes in title untouched (plain text reference)", () => {
     expect(formatContextMention({
-      kind: "task", itemId: "wi-1", title: 'Fix "broken" thing', status: "ready",
-    })).toBe('[oxplow task wi-1: "Fix "broken" thing" (ready)] ');
+      kind: "task", itemId: 1, title: 'Fix "broken" thing', status: "ready",
+    })).toBe('[oxplow task 1: "Fix "broken" thing" (ready)] ');
   });
 
   test("every output ends with a space so the user can keep typing", () => {

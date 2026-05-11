@@ -1,6 +1,6 @@
 // Subsequence match — each character in the query must appear in order in
 // the haystack, with any gap allowed. Matches Linear's feel ("wn" → "work /
-// new work item") without pulling in a scoring library. Used by both the
+// new tasks") without pulling in a scoring library. Used by both the
 // command palette (Cmd+K) and the quick-open file picker (Cmd+P) so both
 // accept the same kind of terse typing.
 export function fuzzyMatches(haystack: string, needle: string): boolean {

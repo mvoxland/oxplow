@@ -3,13 +3,16 @@ import type { ThreadWorkState, Task } from "../../api.js";
 import { computeActiveEpicContext, computeActiveItem, computePagesDirectory, computeUpNext, type RecentFileEntry, sortRecentFiles } from "./sections.js";
 import { gitDashboardRef, uncommittedChangesRef } from "../../tabs/pageRefs.js";
 
-function makeItem(partial: Partial<Task> & { id: string; status: Task["status"] }): Task {
+function makeItem(partial: Partial<Task> & { id: number; status: Task["status"]; kind?: string }): Task {
+  // Local `kind` is just a marker used by these test fixtures to flag
+  // items that should land in the epics bucket. The Task type itself no
+  // longer carries `kind` — we strip it before returning.
+  const { kind: _kind, ...rest } = partial;
   const base: Task = {
     id: partial.id,
     thread_id: "t-1",
     parent_id: null,
-    kind: "task",
-    title: partial.id,
+    title: String(partial.id),
     description: "",
     acceptance_criteria: null,
     status: partial.status,
@@ -24,7 +27,7 @@ function makeItem(partial: Partial<Task> & { id: string; status: Task["status"] 
     category: null,
     tags: null,
   };
-  return { ...base, ...partial };
+  return { ...base, ...rest };
 }
 
 const baseState = (items: Task[]): ThreadWorkState => ({
@@ -32,27 +35,29 @@ const baseState = (items: Task[]): ThreadWorkState => ({
   waiting: items.filter((i) => i.status === "ready"),
   inProgress: items.filter((i) => i.status === "in_progress"),
   done: items.filter((i) => i.status === "done"),
-  epics: [],
+  // Treat any item that has at least one child in the list as an epic —
+  // the backend uses the same has-children rule.
+  epics: items.filter((parent) => items.some((c) => c.parent_id === parent.id)),
   items,
   followups: [],
 });
 
 describe("computeActiveItem", () => {
   test("picks the lowest-sort_index in_progress item", () => {
-    const a = makeItem({ id: "wi-1", status: "in_progress", sort_index: 5 });
-    const b = makeItem({ id: "wi-2", status: "in_progress", sort_index: 2 });
+    const a = makeItem({ id: 1, status: "in_progress", sort_index: 5 });
+    const b = makeItem({ id: 2, status: "in_progress", sort_index: 2 });
     const state = baseState([a, b]);
-    expect(computeActiveItem(state)?.id).toBe("wi-2");
+    expect(computeActiveItem(state)?.id).toBe(2);
   });
 
   test("returns null when no in_progress items", () => {
-    const state = baseState([makeItem({ id: "wi-1", status: "ready" })]);
+    const state = baseState([makeItem({ id: 1, status: "ready" })]);
     expect(computeActiveItem(state)).toBeNull();
   });
 
   test("ignores epics for active-item picking", () => {
-    const epic = makeItem({ id: "wi-epic", status: "in_progress", sort_index: 1, kind: "epic" });
-    const task = makeItem({ id: "wi-task", status: "in_progress", sort_index: 5 });
+    const epic = makeItem({ id: 9000, status: "in_progress", sort_index: 1, kind: "epic" });
+    const task = makeItem({ id: 9001, status: "in_progress", sort_index: 5 });
     const state: ThreadWorkState = {
       threadId: "t-1",
       waiting: [],
@@ -62,7 +67,7 @@ describe("computeActiveItem", () => {
       items: [epic, task],
       followups: [],
     };
-    expect(computeActiveItem(state)?.id).toBe("wi-task");
+    expect(computeActiveItem(state)?.id).toBe(9001);
   });
 
   test("returns null for null state", () => {
@@ -73,35 +78,37 @@ describe("computeActiveItem", () => {
 
 describe("computeActiveEpicContext", () => {
   test("returns the parent epic and its children sorted by sort_index", () => {
-    const epic = makeItem({ id: "wi-epic", kind: "epic", status: "in_progress", sort_index: 0 });
-    const c1 = makeItem({ id: "wi-c1", parent_id: "wi-epic", status: "done", sort_index: 1 });
-    const c2 = makeItem({ id: "wi-c2", parent_id: "wi-epic", status: "in_progress", sort_index: 2 });
-    const c3 = makeItem({ id: "wi-c3", parent_id: "wi-epic", status: "ready", sort_index: 3 });
+    const epic = makeItem({ id: 9000, kind: "epic", status: "in_progress", sort_index: 0 });
+    const c1 = makeItem({ id: 9101, parent_id: 9000, status: "done", sort_index: 1 });
+    const c2 = makeItem({ id: 9102, parent_id: 9000, status: "in_progress", sort_index: 2 });
+    const c3 = makeItem({ id: 9103, parent_id: 9000, status: "ready", sort_index: 3 });
     const state = baseState([epic, c2, c1, c3]);
     const ctx = computeActiveEpicContext(state, c2);
-    expect(ctx?.epic.id).toBe("wi-epic");
-    expect(ctx?.children.map((c) => c.id)).toEqual(["wi-c1", "wi-c2", "wi-c3"]);
+    expect(ctx?.epic.id).toBe(9000);
+    expect(ctx?.children.map((c) => c.id)).toEqual([9101, 9102, 9103]);
   });
 
   test("returns null when active item has no parent", () => {
-    const t = makeItem({ id: "wi-t", status: "in_progress" });
+    const t = makeItem({ id: 9200, status: "in_progress" });
     expect(computeActiveEpicContext(baseState([t]), t)).toBeNull();
   });
 
-  test("returns null when parent is not an epic", () => {
-    const parent = makeItem({ id: "wi-p", kind: "task", status: "in_progress" });
-    const child = makeItem({ id: "wi-c", parent_id: "wi-p", status: "in_progress" });
-    expect(computeActiveEpicContext(baseState([parent, child]), child)).toBeNull();
+  test("returns null when parent does not exist in the state", () => {
+    // The kind discriminator is gone — any parent task is treated as
+    // an epic anchor. The only path to null (other than no parent_id)
+    // is when the parent isn't loaded into state.
+    const child = makeItem({ id: 9301, parent_id: 9300, status: "in_progress" });
+    expect(computeActiveEpicContext(baseState([child]), child)).toBeNull();
   });
 });
 
 describe("computeUpNext", () => {
   test("returns ready items sorted by sort_index", () => {
-    const a = makeItem({ id: "wi-3", status: "ready", sort_index: 10 });
-    const b = makeItem({ id: "wi-4", status: "ready", sort_index: 1 });
-    const c = makeItem({ id: "wi-5", status: "ready", sort_index: 5 });
+    const a = makeItem({ id: 3, status: "ready", sort_index: 10 });
+    const b = makeItem({ id: 4, status: "ready", sort_index: 1 });
+    const c = makeItem({ id: 5, status: "ready", sort_index: 5 });
     const state = baseState([a, b, c]);
-    expect(computeUpNext(state).map((i) => i.id)).toEqual(["wi-4", "wi-5", "wi-3"]);
+    expect(computeUpNext(state).map((i) => i.id)).toEqual([4, 5, 3]);
   });
 
   test("limits result to the requested count", () => {

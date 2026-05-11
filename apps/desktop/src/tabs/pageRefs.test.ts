@@ -40,7 +40,7 @@ describe("pageRefs", () => {
 
   test("wikiPageRef and taskRef encode their identifiers", () => {
     expect(wikiPageRef("how-x-works").id).toBe("wiki:how-x-works");
-    expect(taskRef("wi-123").id).toBe("wi:wi-123");
+    expect(taskRef(123).id).toBe("task:123");
   });
 
   test("findingRef encodes the finding id", () => {
@@ -66,6 +66,6 @@ describe("pageRefs", () => {
 
   test("newTaskRef has stable create id", () => {
     expect(newTaskRef().id).toBe("new-task");
-    expect(newTaskRef({ parentId: "wi-1" }).id).toBe("new-task");
+    expect(newTaskRef({ parentId: 1 }).id).toBe("new-task");
   });
 });

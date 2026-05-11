@@ -2,17 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   WORK_ITEM_DRAG_MIME_VALUE,
   decodeTaskDragPayload,
-  decodeWorkItemDragRefs,
-  resolveWorkItemContextRefs,
+  decodeTaskDragRefs,
+  resolveTaskContextRefs,
 } from "./agent-context-dnd.js";
-import { WORK_ITEM_DRAG_MIME } from "./components/ThreadRail.js";
+import { TASK_DRAG_MIME } from "./components/ThreadRail.js";
 
 describe("WORK_ITEM_DRAG_MIME_VALUE", () => {
   test("matches the canonical MIME string from ThreadRail", () => {
     // Guards against drift between the constant agent-context-dnd holds
     // (so it can decode payloads without importing the React tree) and
     // the one ThreadRail/TaskGroupList encode with.
-    expect(WORK_ITEM_DRAG_MIME_VALUE).toBe(WORK_ITEM_DRAG_MIME);
+    expect(WORK_ITEM_DRAG_MIME_VALUE).toBe(TASK_DRAG_MIME);
   });
 });
 
@@ -29,23 +29,23 @@ describe("decodeTaskDragPayload", () => {
   });
 
   test("returns ids from the itemIds array form", () => {
-    const raw = JSON.stringify({ itemIds: ["wi-a", "wi-b", "wi-c"], fromThreadId: "t-1" });
-    expect(decodeTaskDragPayload(raw)).toEqual(["wi-a", "wi-b", "wi-c"]);
+    const raw = JSON.stringify({ itemIds: [101, 102, 9301], fromThreadId: "t-1" });
+    expect(decodeTaskDragPayload(raw)).toEqual([101, 102, 9301]);
   });
 
   test("falls back to single itemId when itemIds is absent", () => {
-    const raw = JSON.stringify({ itemId: "wi-a", fromThreadId: "t-1" });
-    expect(decodeTaskDragPayload(raw)).toEqual(["wi-a"]);
+    const raw = JSON.stringify({ itemId: 101, fromThreadId: "t-1" });
+    expect(decodeTaskDragPayload(raw)).toEqual([101]);
   });
 
   test("prefers itemIds when both are present", () => {
-    const raw = JSON.stringify({ itemId: "wi-a", itemIds: ["wi-b", "wi-c"] });
-    expect(decodeTaskDragPayload(raw)).toEqual(["wi-b", "wi-c"]);
+    const raw = JSON.stringify({ itemId: 101, itemIds: [102, 9301] });
+    expect(decodeTaskDragPayload(raw)).toEqual([102, 9301]);
   });
 
-  test("skips non-string entries in itemIds", () => {
-    const raw = JSON.stringify({ itemIds: ["wi-a", 42, null, "wi-b"] });
-    expect(decodeTaskDragPayload(raw)).toEqual(["wi-a", "wi-b"]);
+  test("skips non-number entries in itemIds", () => {
+    const raw = JSON.stringify({ itemIds: [101, "abc", null, 102] });
+    expect(decodeTaskDragPayload(raw)).toEqual([101, 102]);
   });
 
   test("returns [] when itemIds is empty and no fallback id", () => {
@@ -54,71 +54,71 @@ describe("decodeTaskDragPayload", () => {
   });
 });
 
-describe("resolveWorkItemContextRefs", () => {
-  test("maps each id through the lookup into a work-item ContextRef", () => {
-    const lookup = (id: string) => {
-      if (id === "wi-a") return { title: "Alpha", status: "ready" };
-      if (id === "wi-b") return { title: "Beta", status: "in_progress" };
+describe("resolveTaskContextRefs", () => {
+  test("maps each id through the lookup into a tasks ContextRef", () => {
+    const lookup = (id: number) => {
+      if (id === 101) return { title: "Alpha", status: "ready" };
+      if (id === 102) return { title: "Beta", status: "in_progress" };
       return null;
     };
-    const refs = resolveWorkItemContextRefs(["wi-a", "wi-b"], lookup);
+    const refs = resolveTaskContextRefs([101, 102], lookup);
     expect(refs).toEqual([
-      { kind: "task", itemId: "wi-a", title: "Alpha", status: "ready" },
-      { kind: "task", itemId: "wi-b", title: "Beta", status: "in_progress" },
+      { kind: "task", itemId: 101, title: "Alpha", status: "ready" },
+      { kind: "task", itemId: 102, title: "Beta", status: "in_progress" },
     ]);
   });
 
   test("skips ids the lookup doesn't resolve", () => {
-    const lookup = (id: string) =>
-      id === "wi-a" ? { title: "Alpha", status: "ready" } : null;
-    const refs = resolveWorkItemContextRefs(["wi-missing", "wi-a"], lookup);
+    const lookup = (id: number) =>
+      id === 101 ? { title: "Alpha", status: "ready" } : null;
+    const refs = resolveTaskContextRefs([999, 101], lookup);
     expect(refs).toEqual([
-      { kind: "task", itemId: "wi-a", title: "Alpha", status: "ready" },
+      { kind: "task", itemId: 101, title: "Alpha", status: "ready" },
     ]);
   });
 
   test("returns [] for empty id list", () => {
-    expect(resolveWorkItemContextRefs([], () => null)).toEqual([]);
+    expect(resolveTaskContextRefs([], () => null)).toEqual([]);
   });
 });
 
-describe("decodeWorkItemDragRefs", () => {
+describe("decodeTaskDragRefs", () => {
   test("returns [] when items slice is absent", () => {
-    const raw = JSON.stringify({ itemIds: ["wi-a"] });
-    expect(decodeWorkItemDragRefs(raw)).toEqual([]);
+    const raw = JSON.stringify({ itemIds: [101] });
+    expect(decodeTaskDragRefs(raw)).toEqual([]);
   });
 
   test("returns ContextRefs from the items slice", () => {
     const raw = JSON.stringify({
-      itemIds: ["wi-a", "wi-b"],
+      itemIds: [101, 102],
       items: [
-        { id: "wi-a", title: "Alpha", status: "ready" },
-        { id: "wi-b", title: "Beta", status: "in_progress" },
+        { id: 101, title: "Alpha", status: "ready" },
+        { id: 102, title: "Beta", status: "in_progress" },
       ],
     });
-    expect(decodeWorkItemDragRefs(raw)).toEqual([
-      { kind: "task", itemId: "wi-a", title: "Alpha", status: "ready" },
-      { kind: "task", itemId: "wi-b", title: "Beta", status: "in_progress" },
+    expect(decodeTaskDragRefs(raw)).toEqual([
+      { kind: "task", itemId: 101, title: "Alpha", status: "ready" },
+      { kind: "task", itemId: 102, title: "Beta", status: "in_progress" },
     ]);
   });
 
   test("skips malformed entries but keeps valid ones", () => {
     const raw = JSON.stringify({
       items: [
-        { id: "wi-a", title: "Alpha", status: "ready" },
-        { id: 7, title: "x", status: "y" },
-        { id: "wi-c", title: "Charlie", status: "done" },
+        { id: 101, title: "Alpha", status: "ready" },
+        { id: "not-a-number", title: "x", status: "y" },
+        { id: 9301, title: "Charlie", status: "done" },
         { title: "no id", status: "x" },
       ],
     });
-    expect(decodeWorkItemDragRefs(raw)).toEqual([
-      { kind: "task", itemId: "wi-a", title: "Alpha", status: "ready" },
-      { kind: "task", itemId: "wi-c", title: "Charlie", status: "done" },
+    expect(decodeTaskDragRefs(raw)).toEqual([
+      { kind: "task", itemId: 101, title: "Alpha", status: "ready" },
+      { kind: "task", itemId: 9301, title: "Charlie", status: "done" },
     ]);
   });
 
   test("returns [] for malformed JSON", () => {
-    expect(decodeWorkItemDragRefs("not json")).toEqual([]);
-    expect(decodeWorkItemDragRefs(null)).toEqual([]);
+    expect(decodeTaskDragRefs("not json")).toEqual([]);
+    expect(decodeTaskDragRefs(null)).toEqual([]);
   });
 });

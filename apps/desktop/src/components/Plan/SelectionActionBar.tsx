@@ -3,7 +3,7 @@ import type { Task } from "../../api.js";
 import { miniButtonStyle } from "./plan-utils.js";
 
 /**
- * Selection-aware action bar that hovers above the work-item list whenever
+ * Selection-aware action bar that hovers above the tasks list whenever
  * one or more rows are marked. Used by `PlanPane`. The actions mirror the
  * batch options that previously lived only behind the right-click menu on
  * a marked row, so a keyboard- or kebab-first user can reach them without
@@ -24,7 +24,7 @@ export function summarizeSelection(markedCount: number): string {
 }
 
 export interface SelectionActionBarProps {
-  /** Marked work items (the ones the bar's actions apply to). */
+  /** Marked tasks (the ones the bar's actions apply to). */
   items: Task[];
   onClear(): void;
   onChangeStatus(): void;

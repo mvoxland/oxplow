@@ -17,7 +17,7 @@ quote this back, just use the right values when calling oxplow MCP tools.
   findings, open questions, decisions to revisit). Appears in the
   history panel but never enters the ready queue.
 
-## Link types (`oxplow__link_work_items`)
+## Link types (`oxplow__link_tasks`)
 
 - **blocks** — from-item must finish before to-item can start. Use
   this for hard ordering (migration before feature that uses it).

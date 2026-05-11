@@ -75,8 +75,9 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
  */
 export function computeActiveItem(state: ThreadWorkState | null): Task | null {
   if (!state) return null;
+  const epicIds = new Set(state.epics.map((e) => e.id));
   const candidates = state.inProgress.filter(
-    (item) => item.status === "in_progress",
+    (item) => item.status === "in_progress" && !epicIds.has(item.id),
   );
   if (candidates.length === 0) return null;
   return candidates.reduce((best, current) =>
@@ -94,9 +95,13 @@ export function computeActiveEpicContext(
   active: Task | null,
 ): { epic: Task; children: Task[] } | null {
   if (!state || !active || !active.parent_id) return null;
-  const pool = state.items.length > 0 ? state.items : [...state.epics, ...state.inProgress, ...state.waiting, ...state.done];
-  const epic = pool.find((i) => i.id === active.parent_id);
+  // Only treat the parent as an "epic" if it is in state.epics — i.e. it
+  // has children (the runtime classifies any task with children as an
+  // epic). A plain task whose id happens to match active.parent_id is
+  // not an epic anchor.
+  const epic = state.epics.find((i) => i.id === active.parent_id);
   if (!epic) return null;
+  const pool = state.items.length > 0 ? state.items : [...state.epics, ...state.inProgress, ...state.waiting, ...state.done];
   const children = pool
     .filter((i) => i.parent_id === epic.id && i.status !== "archived")
     .sort((a, b) => a.sort_index - b.sort_index);

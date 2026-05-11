@@ -13,7 +13,7 @@ import {
   removeFollowup,
   reorderThreadQueue,
 } from "../../api.js";
-import { WORK_ITEM_DRAG_MIME } from "../ThreadRail.js";
+import { TASK_DRAG_MIME } from "../ThreadRail.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { showToast } from "../toastStore.js";
 import type { MenuItem } from "../../menu.js";
@@ -27,16 +27,16 @@ import {
   applyStatusFilter,
   buildBacklogGroups,
   buildGroups,
-  classifyWorkItem,
+  classifytasks,
   filterAutoAuthored,
   statusLabel,
   useCollapsedSections,
-  type WorkItemSectionKind,
+  type tasksectionKind,
 } from "./plan-utils.js";
 
 const STATUS_RANK: Record<string, number> = { inProgress: 0, ready: 1, blocked: 2, done: 3 };
 function statusOrderRank(status: TaskStatus): number {
-  return STATUS_RANK[classifyWorkItem(status)] ?? 0;
+  return STATUS_RANK[classifytasks(status)] ?? 0;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -67,7 +67,7 @@ interface Props {
   onReorderBacklog(orderedItemIds: number[]): Promise<void>;
   onMoveItemToBacklog(itemId: number, fromThreadId: string): Promise<void>;
   openNewRequest?: number;
-  /** Open the edit modal for the specified work item. Change the token to
+  /** Open the edit modal for the specified tasks. Change the token to
    *  request again even if the itemId repeats. */
   editRequest?: { itemId: number; token: number } | null;
   /** On mount, PlanPane calls this with its openCreateModal function so
@@ -81,7 +81,7 @@ interface Props {
   /** Route a row click / Enter to the read+edit TaskPage tab for that
    *  item. When omitted, row clicks still select but no page opens. */
   onOpenTaskPage?(itemId: number): void;
-  /** When true, agent-authored work items are filtered out of the visible
+  /** When true, agent-authored tasks are filtered out of the visible
    *  groups. Mirrors the legacy `plan-toggle-hide-auto` toggle from the
    *  pre-IA-redesign Plan pane. Epics are always kept so their children
    *  don't silently lose their container row. */
@@ -89,13 +89,13 @@ interface Props {
   /** Restrict the visible sections (Ready / Blocked / etc). Used by the
    *  page split: Plan Work shows ready+blocked+done previews,
    *  Done Work / Archived show only "done", etc. Default = all four. */
-  visibleSections?: WorkItemSectionKind[];
+  visibleSections?: tasksectionKind[];
   /** Cap the number of items rendered per section after sort. Used by
    *  Plan Work to render "last 5" previews of Done. */
-  sectionItemLimit?: Partial<Record<WorkItemSectionKind, number>>;
+  sectionItemLimit?: Partial<Record<tasksectionKind, number>>;
   /** Override the default section header label per kind. The Archived
    *  page uses this so the Done section reads "Archived". */
-  sectionLabelOverrides?: Partial<Record<WorkItemSectionKind, string>>;
+  sectionLabelOverrides?: Partial<Record<tasksectionKind, string>>;
   /** Filter raw items by status before grouping. Done Work passes
    *  `excludeStatuses: ["archived"]`; Archived passes
    *  `onlyStatuses: ["archived"]`. */
@@ -104,7 +104,7 @@ interface Props {
   /** Per-section header link nodes (right-aligned, after `sectionActions`).
    *  Used by Plan Work for "View all done →" links pointing at the
    *  dedicated Done Work / Archived pages. */
-  extraSectionLinks?: Partial<Record<WorkItemSectionKind, React.ReactNode>>;
+  extraSectionLinks?: Partial<Record<tasksectionKind, React.ReactNode>>;
   /** Pin the pane mode and disable the bottom-bar toggle. The Backlog
    *  page passes `"backlog"` so the pane renders the stream-global
    *  backlog full-pane. */
@@ -182,7 +182,7 @@ export function PlanPane({
     return hideAuto ? filterAutoAuthored(raw) : raw;
   }, [mode, threadWork, backlog, hideAuto, onlyStatuses, excludeStatuses]);
 
-  // Flat top-to-bottom list of work-item ids in the order they appear on
+  // Flat top-to-bottom list of tasks ids in the order they appear on
   // screen. Rebuilt whenever the groups change so ↑/↓ navigation stays in
   // sync with the section split in TaskGroupList (In progress → To do →
   // Blocked → Done).
@@ -304,10 +304,10 @@ export function PlanPane({
         if (!selectedId) return;
         const selected = allItems.find((item) => item.id === selectedId);
         if (!selected) return;
-        const selSection = classifyWorkItem(selected.status);
+        const selSection = classifytasks(selected.status);
         const sectionIds = navigableIds.filter((id) => {
           const item = allItems.find((i) => i.id === id);
-          return item ? classifyWorkItem(item.status) === selSection : false;
+          return item ? classifytasks(item.status) === selSection : false;
         });
         const posInSection = sectionIds.indexOf(selectedId);
         const neighborPosInSection = key === "ArrowDown" ? posInSection + 1 : posInSection - 1;
@@ -319,7 +319,7 @@ export function PlanPane({
         const j = nextOrder.indexOf(neighborId);
         if (i < 0 || j < 0) return;
         [nextOrder[i], nextOrder[j]] = [nextOrder[j]!, nextOrder[i]!];
-        void runWithError("Reorder work items", activeReorder(nextOrder));
+        void runWithError("Reorder tasks", activeReorder(nextOrder));
         return;
       }
       if (key === "ArrowDown" || key === "ArrowUp") {
@@ -348,7 +348,7 @@ export function PlanPane({
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
   const openCreateModal = (parentId: number | null = null) => {
-    // The legacy inline NewWorkItemModal was retired by the IA redesign;
+    // The legacy inline NewtasksModal was retired by the IA redesign;
     // creation always routes through a full-tab NewTaskPage now. Tests
     // / standalone harnesses must wire `onOpenNewTaskPage`.
     onOpenNewTaskPage?.({ parentId });
@@ -404,14 +404,14 @@ export function PlanPane({
 
   const handleBacklogChipDragOver = (event: React.DragEvent) => {
     const types = event.dataTransfer.types;
-    if (!types || !Array.from(types).includes(WORK_ITEM_DRAG_MIME)) return;
+    if (!types || !Array.from(types).includes(TASK_DRAG_MIME)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     if (!backlogChipDragOver) setBacklogChipDragOver(true);
   };
 
   const handleBacklogChipDrop = (event: React.DragEvent) => {
-    const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
+    const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
     setBacklogChipDragOver(false);
     if (!raw) return;
     event.preventDefault();
@@ -487,7 +487,7 @@ export function PlanPane({
               onAddAllToAgent={() => {
                 // Reuse the same mention formatter the kebab "Add to agent
                 // context" path uses; concatenate so the user sees a
-                // space-separated chain of bracketed work-item refs.
+                // space-separated chain of bracketed tasks refs.
                 const text = markedItems
                   .map((item) => formatContextMention({
                     kind: "task",
@@ -505,7 +505,7 @@ export function PlanPane({
                 if (liveIds.length === 0) return;
                 for (const id of liveIds) void activeDelete(id);
                 showToast({
-                  message: `Deleted ${liveIds.length} work item${liveIds.length === 1 ? "" : "s"}.`,
+                  message: `Deleted ${liveIds.length} tasks${liveIds.length === 1 ? "" : "s"}.`,
                 });
                 setMarkedIds(new Set());
               }}
@@ -515,7 +515,7 @@ export function PlanPane({
         {groups.length === 0 ? (
           <>
             <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
-              No work items.
+              No tasks.
             </div>
           </>
         ) : (
@@ -536,11 +536,11 @@ export function PlanPane({
                 <SectionHeaderMenu items={readyMenuItems} testId="plan-ready-menu" />
               </span>
             );
-            const sectionActions: Partial<Record<WorkItemSectionKind, React.ReactNode>> = {
+            const sectionActions: Partial<Record<tasksectionKind, React.ReactNode>> = {
               ready: readyActions,
             };
             if (extraSectionLinks) {
-              for (const [k, node] of Object.entries(extraSectionLinks) as Array<[WorkItemSectionKind, React.ReactNode]>) {
+              for (const [k, node] of Object.entries(extraSectionLinks) as Array<[tasksectionKind, React.ReactNode]>) {
                 if (!node) continue;
                 const existing = sectionActions[k];
                 sectionActions[k] = existing ? (
@@ -632,7 +632,7 @@ export function PlanPane({
                   if (liveIds.length === 0) return;
                   for (const id of liveIds) void activeDelete(id);
                   showToast({
-                    message: `Deleted ${liveIds.length} work item${liveIds.length === 1 ? "" : "s"}.`,
+                    message: `Deleted ${liveIds.length} tasks${liveIds.length === 1 ? "" : "s"}.`,
                   });
                 },
                 onAddToAgent: (ids) => {
@@ -651,7 +651,7 @@ export function PlanPane({
                   if (text.length > 0) insertIntoAgent(text);
                 },
               })
-            : buildWorkItemMenu(contextMenu.item, {
+            : buildtasksMenu(contextMenu.item, {
                 onDelete: (item) => {
                   setContextMenu(null);
                   if (expandedId === item.id) setExpandedId(null);
@@ -718,7 +718,7 @@ const KB_PRIORITY_OPTIONS: TaskPriority[] = ["urgent", "high", "medium", "low"];
 
 /**
  * Small centered picker opened by the keyboard shortcuts `S` / `P` when a
- * work-item row is selected. Autofocuses, ↑/↓ navigate options, Enter
+ * tasks row is selected. Autofocuses, ↑/↓ navigate options, Enter
  * commits, Escape cancels. Mouse click on a row also commits. Kept in-line
  * in this file rather than extracted because nothing else uses it.
  */
@@ -817,7 +817,7 @@ const kbPickerStyle: CSSProperties = {
 };
 
 
-function buildWorkItemMenu(
+function buildtasksMenu(
   item: Task,
   actions: {
     onDelete: (item: Task) => void;
@@ -830,31 +830,31 @@ function buildWorkItemMenu(
   const locked = item.status === "in_progress";
   return [
     {
-      id: "workitem.rename",
+      id: "tasks.rename",
       label: "Rename…",
       enabled: !locked,
       run: () => actions.onRename(item),
     },
     {
-      id: "workitem.status",
+      id: "tasks.status",
       label: "Change status…",
       enabled: !locked,
       run: () => actions.onChangeStatus(item),
     },
     {
-      id: "workitem.priority",
+      id: "tasks.priority",
       label: "Change priority…",
       enabled: true,
       run: () => actions.onChangePriority(item),
     },
     {
-      id: "workitem.add-to-agent",
+      id: "tasks.add-to-agent",
       label: "Add to agent context",
       enabled: true,
       run: () => actions.onAddToAgent(item),
     },
     {
-      id: "workitem.delete",
+      id: "tasks.delete",
       label: "Delete",
       enabled: !locked,
       run: () => actions.onDelete(item),
@@ -876,25 +876,25 @@ function buildGroupMenu(
   const n = groupIds.length;
   return [
     {
-      id: "workitem.status",
+      id: "tasks.status",
       label: `Change status… (${n} items)`,
       enabled: !locked,
       run: () => actions.onChangeStatus(item, groupIds),
     },
     {
-      id: "workitem.priority",
+      id: "tasks.priority",
       label: `Change priority… (${n} items)`,
       enabled: true,
       run: () => actions.onChangePriority(item, groupIds),
     },
     {
-      id: "workitem.add-to-agent",
+      id: "tasks.add-to-agent",
       label: `Add to agent context (${n} items)`,
       enabled: true,
       run: () => actions.onAddToAgent(groupIds),
     },
     {
-      id: "workitem.delete",
+      id: "tasks.delete",
       label: `Delete (${n} items)`,
       enabled: !locked,
       run: () => actions.onDelete(item, groupIds),

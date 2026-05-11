@@ -196,7 +196,7 @@ export function parseGitRefTarget(target: string): string | null {
 
 /**
  * Classify a markdown link href. Shared by WikiPageTab (wiki navigation) and
- * TaskDetail (work-item modal markdown rendering). Pure — easy to test.
+ * TaskDetail (tasks modal markdown rendering). Pure — easy to test.
  */
 export function parseMarkdownLink(rawHref: string): ParsedLink {
   if (!rawHref) return { kind: "empty" };
@@ -360,7 +360,7 @@ export interface MarkdownViewProps {
   onOpenExternalUrl?: (url: string) => void;
   /**
    * Render mermaid code blocks as SVG diagrams. WikiPageTab uses this; the
-   * work-item modal disables it (default false) since work-item notes
+   * tasks modal disables it (default false) since tasks notes
    * tend to be short and a stray code fence shouldn't trigger rendering.
    */
   renderMermaid?: boolean;
@@ -373,7 +373,7 @@ export interface MarkdownViewProps {
 
 /**
  * Generic safe-markdown renderer used by Notes (wiki) and the
- * Plan work-item modal. Sanitization is delegated to react-markdown +
+ * Plan tasks modal. Sanitization is delegated to react-markdown +
  * remark-gfm, which strip raw HTML by default — no scripts, no
  * arbitrary external fetches beyond standard markdown links/images.
  *
@@ -381,7 +381,7 @@ export interface MarkdownViewProps {
  * - external links open in the OS browser (Electron `_blank`).
  * - anchor (`#…`) links use default behavior (in-page jump).
  * - internal links route through `onNavigateInternal` / `onOpenInNewTab`
- *   when those handlers are supplied; otherwise they no-op (work-item
+ *   when those handlers are supplied; otherwise they no-op (tasks
  *   notes don't have a wiki to navigate to).
  */
 export function MarkdownView({
@@ -402,7 +402,7 @@ export function MarkdownView({
   // Page-context chokepoint: when this MarkdownView renders inside a
   // page, plain-click follows browser-tab semantics (in-tab nav).
   // Modifier-click + middle/right-click always escape to a new tab.
-  // Outside a page (e.g. work-item modal), the host callbacks own
+  // Outside a page (e.g. tasks modal), the host callbacks own
   // the click.
   const ctxNav = useOptionalPageNavigation();
 
@@ -454,7 +454,7 @@ export function MarkdownView({
     }
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
     else if (onNavigateInternal) onNavigateInternal(parsed.slug);
-    // No handlers? Silently ignore — work-item notes don't have wiki nav.
+    // No handlers? Silently ignore — tasks notes don't have wiki nav.
   }, [ctxNav, onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
 
   const buildLinkMenu = useCallback((href: string): MenuItem[] => {

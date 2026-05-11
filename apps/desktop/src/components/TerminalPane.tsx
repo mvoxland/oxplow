@@ -13,7 +13,7 @@ import {
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import {
   WORK_ITEM_DRAG_MIME_VALUE,
-  decodeWorkItemDragRefs,
+  decodeTaskDragRefs,
   dragHasContextRef,
   dragHasTaskRefs,
   readContextRef,
@@ -208,8 +208,8 @@ export function TerminalPane({
   }, [visible]);
 
   function handleDragOver(e: ReactDragEvent<HTMLDivElement>) {
-    // Accept either the standalone "context ref" MIME (file/note/work-item
-    // single-row drag) or a multi-id work-item DnD payload (Plan pane
+    // Accept either the standalone "context ref" MIME (file/note/tasks
+    // single-row drag) or a multi-id tasks DnD payload (Plan pane
     // marked-set drag). Both end up inserted as @-mentions / bracketed
     // refs through the same `term.paste` pipeline.
     if (!dragHasContextRef(e) && !dragHasTaskRefs(e)) return;
@@ -230,12 +230,12 @@ export function TerminalPane({
     const term = termRef.current;
     if (!term) return;
 
-    // Multi-id work-item payload first — when present, iterate every id
+    // Multi-id tasks payload first — when present, iterate every id
     // and paste a space-separated chain of context mentions. This is the
     // path for "drag a marked Plan-pane row into the agent" (one or many).
     if (dragHasTaskRefs(e)) {
       const raw = e.dataTransfer.getData(WORK_ITEM_DRAG_MIME_VALUE);
-      const refs = decodeWorkItemDragRefs(raw);
+      const refs = decodeTaskDragRefs(raw);
       if (refs.length > 0) {
         e.preventDefault();
         const text = refs.map(formatContextMention).join("");

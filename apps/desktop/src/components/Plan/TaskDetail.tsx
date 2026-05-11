@@ -7,7 +7,7 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 
 /**
- * One entry in the work-item Activity timeline. Each effort
+ * One entry in the tasks Activity timeline. Each effort
  * (in_progress → done/blocked/canceled cycle) carries a free-form
  * `summary` field that the runtime fills in via `complete_task`, so
  * efforts double as the "what happened on this item" log. Per-item
@@ -50,7 +50,7 @@ function statusOptionsFor(current: TaskStatus): TaskStatus[] {
 }
 
 /**
- * Expanded view of a work-item row — inline edit of title / description /
+ * Expanded view of a tasks row — inline edit of title / description /
  * acceptance, status + priority pickers, delete button. Each field commits
  * on blur or Enter; Escape reverts.
  */
@@ -90,7 +90,7 @@ export function TaskDetail({
         <span style={{ color: "var(--muted)" }}>by {item.created_by}</span>
         <span style={{ flex: 1 }} />
         {headerActions}
-        <button type="button" onClick={onRequestDelete} style={deleteButtonStyle} title="Delete work item">Delete</button>
+        <button type="button" onClick={onRequestDelete} style={deleteButtonStyle} title="Delete tasks">Delete</button>
       </div>
       <EditableField
         key={`title-${item.id}-${item.updated_at}`}
@@ -160,8 +160,8 @@ export function TaskDetail({
 }
 
 /**
- * Single chronological list (newest first) mixing work-item notes and
- * efforts inside the work-item modal. Replaces the previous two-section
+ * Single chronological list (newest first) mixing tasks notes and
+ * efforts inside the tasks modal. Replaces the previous two-section
  * layout (Notes pane + separate Efforts pane with an "active effort"
  * callout box) so the timeline reads top-to-bottom without overlap.
  *
@@ -194,7 +194,7 @@ export function ActivityTimeline({
   }
   return (
     <div
-      data-testid="work-item-activity"
+      data-testid="tasks-activity"
       style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, padding: 8, background: "var(--bg-1)" }}
     >
       {rows.map((row) => (
@@ -234,7 +234,7 @@ function ActivityEffortRow({
   const totalChanged = counts.created + counts.updated + counts.deleted;
   return (
     <div
-      data-testid={active ? "work-item-effort-in-progress" : `work-item-effort-${detail.effort.id}`}
+      data-testid={active ? "tasks-effort-in-progress" : `tasks-effort-${detail.effort.id}`}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -259,7 +259,7 @@ function ActivityEffortRow({
         {onShowInHistory && !active ? (
           <button
             type="button"
-            data-testid={`work-item-show-in-history-${detail.effort.id}`}
+            data-testid={`tasks-show-in-history-${detail.effort.id}`}
             onClick={() => { if (endSnapshotId) onShowInHistory(endSnapshotId); }}
             style={{ ...miniButtonStyle, padding: "1px 6px", fontSize: 10 }}
             disabled={!endSnapshotId}
@@ -289,11 +289,11 @@ function ActivityEffortRow({
         </div>
       ) : null}
       {detail.effort.summary && detail.effort.summary.length > 0 ? (
-        <div data-testid={`work-item-effort-summary-${detail.effort.id}`} style={{ fontSize: 12 }}>
+        <div data-testid={`tasks-effort-summary-${detail.effort.id}`} style={{ fontSize: 12 }}>
           <MarkdownView body={detail.effort.summary} maxHeight={240} />
         </div>
       ) : !active ? (
-        <div data-testid={`work-item-effort-summary-${detail.effort.id}`} style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
+        <div data-testid={`tasks-effort-summary-${detail.effort.id}`} style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>
           No summary recorded for this effort.
         </div>
       ) : null}

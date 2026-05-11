@@ -49,8 +49,8 @@ export interface SnapshotDetailSlideoverProps {
   snapshotSource?: string;
   /** Forwarded to the file rows. */
   onOpenDiff?(spec: DiffSpec): void;
-  /** Optional: open the work item that wrote this snapshot. */
-  workItemId?: number | null;
+  /** Optional: open the tasks that wrote this snapshot. */
+  tasksId?: number | null;
   onOpenTask?(itemId: number): void;
 }
 
@@ -70,7 +70,7 @@ export function SnapshotDetailSlideover({
   snapshotLabel = null,
   snapshotSource = "",
   onOpenDiff,
-  workItemId = null,
+  tasksId = null,
   onOpenTask,
 }: SnapshotDetailSlideoverProps) {
   const [summary, setSummary] = useState<SnapshotSummary | null>(null);
@@ -149,7 +149,7 @@ export function SnapshotDetailSlideover({
       ) : (
         <SnapshotDetailBody
           summary={summary}
-          workItemId={workItemId}
+          tasksId={tasksId}
           onOpenTask={onOpenTask}
           onOpenFileDiff={handleOpenFileDiff}
           onRestore={(path) => { void handleRestore(path); }}
@@ -161,13 +161,13 @@ export function SnapshotDetailSlideover({
 
 function SnapshotDetailBody({
   summary,
-  workItemId,
+  tasksId,
   onOpenTask,
   onOpenFileDiff,
   onRestore,
 }: {
   summary: SnapshotSummary;
-  workItemId: number | null;
+  tasksId: number | null;
   onOpenTask?(itemId: number): void;
   onOpenFileDiff(path: string): void;
   onRestore(path: string): void;
@@ -176,11 +176,11 @@ function SnapshotDetailBody({
   const { counts } = summary;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
-      {workItemId && onOpenTask ? (
+      {tasksId && onOpenTask ? (
         <div>
           <button
             type="button"
-            onClick={() => onOpenTask(workItemId)}
+            onClick={() => onOpenTask(tasksId)}
             style={openTaskButtonStyle}
             data-testid="snapshot-slideover-open-task"
           >

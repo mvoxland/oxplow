@@ -236,13 +236,13 @@ mod tests {
     }
 
     #[test]
-    fn from_work_item_service_not_found_maps_to_not_found() {
+    fn from_task_service_not_found_maps_to_not_found() {
         let e: IpcError = TaskServiceError::NotFound(oxplow_domain::TaskId(7)).into();
         assert_eq!(e.code, "NOT_FOUND");
     }
 
     #[test]
-    fn from_work_item_service_storage_propagates() {
+    fn from_task_service_storage_propagates() {
         let e: IpcError = TaskServiceError::Storage(DomainError::Invalid("bad row".into())).into();
         assert_eq!(e.code, "INVALID");
         assert_eq!(e.message, "bad row");

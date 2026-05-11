@@ -28,14 +28,14 @@ interface Props {
   /** When set, the panel selects the snapshot with the matching id. Change
    *  the token to request a new selection even if the id repeats. */
   revealSnapshotId?: { snapshotId: string; token: number } | null;
-  /** Open the given work item in the edit modal (switching tool windows). */
+  /** Open the given tasks in the edit modal (switching tool windows). */
   onRequestEditTask?(itemId: number): void;
 }
 
 export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequestEditTask }: Props) {
   const [snapshots, setSnapshots] = useState<FileSnapshot[]>([]);
   const [effortsBySnapshot, setEffortsBySnapshot] = useState<
-    Record<string, Array<{ effortId: string; workItemId: number; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>
+    Record<string, Array<{ effortId: string; tasksId: number; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>
   >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,25 +174,25 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
   }, [dragging]);
 
   const handleChangeStatus = async (
-    workItemId: number,
+    tasksId: number,
     threadId: string,
     status: TaskStatus,
   ) => {
     if (!stream || !threadId) return;
     try {
-      await updateTask(stream.id, threadId, workItemId, { status });
+      await updateTask(stream.id, threadId, tasksId, { status });
       // Optimistic local update; the snapshot-event subscription refreshes.
       setEffortsBySnapshot((prev) => {
         const next: typeof prev = {};
         for (const [sid, list] of Object.entries(prev)) {
           next[sid] = list.map((e) =>
-            e.workItemId === workItemId ? { ...e, status } : e,
+            e.tasksId === tasksId ? { ...e, status } : e,
           );
         }
         return next;
       });
     } catch (err) {
-      logUi("warn", "update work item status failed", { error: String(err) });
+      logUi("warn", "update tasks status failed", { error: String(err) });
     }
   };
 
@@ -281,7 +281,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
   // snapshot (per the per-effort write log attribution model). When zero
   // efforts end at a snapshot, a single "external change" / source-derived
   // row is rendered. When one effort ends at it, a single row with the
-  // work item title is rendered (effortId carried so the detail pane calls
+  // tasks title is rendered (effortId carried so the detail pane calls
   // `getEffortFiles` — same result as the raw pair-diff in the 1-effort
   // fallback, but keeps the UI rendering rule uniform).
   type Row = {
@@ -289,7 +289,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
     snap: FileSnapshot;
     label: string;
     effortId: string | null;
-    workItemId: number | null;
+    tasksId: number | null;
     threadId: string | null;
     status: TaskStatus | null;
     isExternal: boolean;
@@ -303,7 +303,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
         snap,
         label: labelFor(snap),
         effortId: null,
-        workItemId: null,
+        tasksId: null,
         threadId: null,
         status: null,
         isExternal: orphanEndIds.has(snap.id),
@@ -316,7 +316,7 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
         snap,
         label: e.title,
         effortId: e.effortId,
-        workItemId: e.workItemId,
+        tasksId: e.tasksId,
         threadId: e.threadId,
         status: e.status,
         isExternal: false,
@@ -386,17 +386,17 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
                     compareBase={compareBaseId === row.snap.id}
                     onClick={() => handleRowClick(row.snap.id, row.effortId)}
                     status={row.status}
-                    workItemId={row.workItemId}
+                    tasksId={row.tasksId}
                     isExternal={row.isExternal}
                     rowRef={(node) => { rowRefs.current.set(refKey, node); }}
                     onChangeStatus={
-                      row.workItemId && row.threadId
-                        ? (nextStatus) => { void handleChangeStatus(row.workItemId!, row.threadId!, nextStatus); }
+                      row.tasksId && row.threadId
+                        ? (nextStatus) => { void handleChangeStatus(row.tasksId!, row.threadId!, nextStatus); }
                         : undefined
                     }
                     onDoubleClick={
-                      row.workItemId && onRequestEditTask
-                        ? () => onRequestEditTask(row.workItemId!)
+                      row.tasksId && onRequestEditTask
+                        ? () => onRequestEditTask(row.tasksId!)
                         : undefined
                     }
                   />
@@ -418,9 +418,9 @@ export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequest
             loading={summaryLoading}
             onOpenFileDiff={handleOpenFileDiff}
             onRestore={(path) => { void performRestore(path); }}
-            workItemId={
+            tasksId={
               selectedId && selectedEffortId
-                ? (effortsBySnapshot[selectedId] ?? []).find((e) => e.effortId === selectedEffortId)?.workItemId ?? null
+                ? (effortsBySnapshot[selectedId] ?? []).find((e) => e.effortId === selectedEffortId)?.tasksId ?? null
                 : null
             }
             onOpenTask={onRequestEditTask}
@@ -476,7 +476,7 @@ function SnapshotRow({
   compareBase,
   onClick,
   status,
-  workItemId,
+  tasksId,
   isExternal,
   onChangeStatus,
   onDoubleClick,
@@ -489,7 +489,7 @@ function SnapshotRow({
   compareBase: boolean;
   onClick(): void;
   status: TaskStatus | null;
-  workItemId: number | null;
+  tasksId: number | null;
   isExternal: boolean;
   onChangeStatus?(nextStatus: TaskStatus): void;
   onDoubleClick?(): void;
@@ -501,9 +501,9 @@ function SnapshotRow({
   const description = label;
   // Row "modes":
   //   - external  → distinct glyph, non-interactive status, no dbl-click
-  //   - effort    → InlineStatusPicker bound to the work item status
+  //   - effort    → InlineStatusPicker bound to the tasks status
   //   - other     → keep the legacy pencil icon (system rows, etc.)
-  const isEffortRow = !!workItemId && !isExternal && !!status;
+  const isEffortRow = !!tasksId && !isExternal && !!status;
   return (
     <div
       ref={rowRef}
@@ -592,14 +592,14 @@ function DetailPane({
   loading,
   onOpenFileDiff,
   onRestore,
-  workItemId,
+  tasksId,
   onOpenTask,
 }: {
   summary: SnapshotSummary | null;
   loading: boolean;
   onOpenFileDiff(path: string): void;
   onRestore(path: string): void;
-  workItemId: number | null;
+  tasksId: number | null;
   onOpenTask?(itemId: number): void;
 }) {
   if (loading && !summary) {
@@ -612,11 +612,11 @@ function DetailPane({
   const { counts } = summary;
   return (
     <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 10, fontSize: 12, overflow: "auto", height: "100%" }}>
-      {workItemId && onOpenTask ? (
+      {tasksId && onOpenTask ? (
         <div>
           <button
             type="button"
-            onClick={() => onOpenTask(workItemId)}
+            onClick={() => onOpenTask(tasksId)}
             style={openTaskButtonStyle}
             title="Open this task in the edit modal"
           >

@@ -1,6 +1,6 @@
 /**
  * Drag-and-drop transport for "Add to agent context" gestures. A
- * separate MIME from the work-item reorder DnD (`WORK_ITEM_DRAG_MIME`)
+ * separate MIME from the tasks reorder DnD (`TASK_DRAG_MIME`)
  * so the existing reorder logic ignores our payload and vice versa.
  *
  * Drag sources call `setContextRefDrag(e, ref)` in `onDragStart`; the
@@ -16,10 +16,10 @@ type AnyDragEvent = ReactDragEvent | DragEvent;
 export const CONTEXT_REF_MIME = "application/x-oxplow-context-ref";
 
 /**
- * MIME type carried by the work-item reorder DnD (defined in
+ * MIME type carried by the tasks reorder DnD (defined in
  * `ThreadRail.tsx`). Re-declared here as a constant so this module can
- * decode multi-payload work-item drags without pulling in the React
- * tree. The actual MIME string MUST match `WORK_ITEM_DRAG_MIME` —
+ * decode multi-payload tasks drags without pulling in the React
+ * tree. The actual MIME string MUST match `TASK_DRAG_MIME` —
  * tests guard against drift.
  */
 export const WORK_ITEM_DRAG_MIME_VALUE = "application/x-oxplow-task";
@@ -83,24 +83,24 @@ export function dragHasContextRef(e: AnyDragEvent): boolean {
 }
 
 /**
- * Returns true iff the drag payload includes a work-item DnD payload
+ * Returns true iff the drag payload includes a tasks DnD payload
  * (the multi-id reorder MIME). The agent terminal accepts these for the
- * "drag a marked work-item row onto the agent" gesture — each id
- * resolves to a `work-item` context ref.
+ * "drag a marked tasks row onto the agent" gesture — each id
+ * resolves to a `tasks` context ref.
  */
 export function dragHasTaskRefs(e: AnyDragEvent): boolean {
   return Array.from(e.dataTransfer?.types ?? []).includes(WORK_ITEM_DRAG_MIME_VALUE);
 }
 
 /**
- * Decode a `WORK_ITEM_DRAG_MIME` payload into the list of work-item ids
+ * Decode a `TASK_DRAG_MIME` payload into the list of tasks ids
  * it carries. Accepts both the multi-id `itemIds` form and the single
  * `itemId` legacy form. Returns `[]` for any malformed payload so
  * callers can `return` cleanly without nested try/catch.
  *
  * Pure — exported for tests.
  */
-export function decodeTaskDragPayload(raw: string | null | undefined): string[] {
+export function decodeTaskDragPayload(raw: string | null | undefined): number[] {
   if (!raw) return [];
   let parsed: { itemId?: unknown; itemIds?: unknown };
   try {
@@ -109,13 +109,13 @@ export function decodeTaskDragPayload(raw: string | null | undefined): string[] 
     return [];
   }
   if (!parsed || typeof parsed !== "object") return [];
-  const ids: string[] = [];
+  const ids: number[] = [];
   if (Array.isArray(parsed.itemIds)) {
     for (const id of parsed.itemIds) {
-      if (typeof id === "string" && id.length > 0) ids.push(id);
+      if (typeof id === "number" && Number.isFinite(id)) ids.push(id);
     }
   }
-  if (ids.length === 0 && typeof parsed.itemId === "string" && parsed.itemId.length > 0) {
+  if (ids.length === 0 && typeof parsed.itemId === "number" && Number.isFinite(parsed.itemId)) {
     ids.push(parsed.itemId);
   }
   return ids;
@@ -123,8 +123,8 @@ export function decodeTaskDragPayload(raw: string | null | undefined): string[] 
 
 /**
  * Decode the optional `items: [{id,title,status}, …]` slice of a
- * `WORK_ITEM_DRAG_MIME` payload. Drag sources that have visibility into
- * the work-item record can include this so cross-pane drop targets
+ * `TASK_DRAG_MIME` payload. Drag sources that have visibility into
+ * the tasks record can include this so cross-pane drop targets
  * (e.g. the agent terminal) don't need to look up titles themselves.
  *
  * Returns the resolved `ContextRef[]` directly. Falls back to `[]` when
@@ -132,7 +132,7 @@ export function decodeTaskDragPayload(raw: string | null | undefined): string[] 
  *
  * Pure — exported for tests.
  */
-export function decodeWorkItemDragRefs(raw: string | null | undefined): ContextRef[] {
+export function decodeTaskDragRefs(raw: string | null | undefined): ContextRef[] {
   if (!raw) return [];
   let parsed: { items?: unknown };
   try {
@@ -156,14 +156,14 @@ export function decodeWorkItemDragRefs(raw: string | null | undefined): ContextR
 }
 
 /**
- * Resolve a list of work-item ids into `ContextRef`s by looking up each
+ * Resolve a list of tasks ids into `ContextRef`s by looking up each
  * id in `lookup`. Ids that don't resolve are skipped (the user dragged
  * a row whose data the agent terminal doesn't have visibility into —
  * silently dropping is friendlier than throwing).
  *
  * Pure — exported for tests.
  */
-export function resolveWorkItemContextRefs(
+export function resolveTaskContextRefs(
   ids: number[],
   lookup: (id: number) => { title: string; status: string } | null,
 ): ContextRef[] {

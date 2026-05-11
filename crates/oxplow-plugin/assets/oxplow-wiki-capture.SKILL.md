@@ -184,10 +184,10 @@ captions, not boxes.
 ```mermaid
 graph TD
   Stream[streams] --> Thread[threads]
-  Thread --> WorkItem[work_items]
-  WorkItem --> Note[work_note]
-  WorkItem --> Effort[work_item_effort]
-  Effort --> EffortFile[work_item_effort_file]
+  Thread --> Task[task]
+  Task --> Note[work_note]
+  Task --> Effort[task_effort]
+  Effort --> EffortFile[task_effort_file]
 ```
 
 ### stateDiagram-v2 — lifecycle

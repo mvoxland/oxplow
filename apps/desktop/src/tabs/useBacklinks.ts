@@ -164,8 +164,8 @@ function refFor(kind: string, id: string): TabRef | null {
 
 /** Short label for the relationship type, used as the row's subtitle. */
 function humanRefType(refType: string): string {
-  if (refType.startsWith("work_item_link:")) {
-    const sub = refType.slice("work_item_link:".length);
+  if (refType.startsWith("task_link:")) {
+    const sub = refType.slice("task_link:".length);
     return sub.replace(/_/g, " ");
   }
   switch (refType) {

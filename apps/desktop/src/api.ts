@@ -247,7 +247,7 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-// Work-item types now come from the Tauri bindings. The bindings
+// tasks types now come from the Tauri bindings. The bindings
 // emit a `deleted_at` field that the earlier UI interface didn't model;
 // readers either ignore it or filter on it (earlier stores already
 // excluded soft-deleted rows in their list queries). New code can
@@ -261,7 +261,7 @@ export type { Task, TaskStatus, TaskPriority };
 
 export interface WorkNote {
   id: string;
-  work_item_id: string;
+  task_id: string;
   body: string;
   author: string;
   created_at: string;
@@ -319,7 +319,7 @@ export interface SnapshotDiffResult {
 
 export interface TaskEffort {
   id: string;
-  work_item_id: string;
+  task_id: string;
   started_at: string;
   ended_at: string | null;
   start_snapshot_id: string | null;
@@ -1005,16 +1005,16 @@ export async function gitBlame(
 }
 
 /// Renderer-side LocalBlameEntry: the bindings shape plus an
-/// optional `workItem` overlay the editor's blame margin paints
-/// when a snapshot/work-item attribution exists. The runtime
-/// today only populates {line, source, git}; `workItem` arrives
+/// optional `tasks` overlay the editor's blame margin paints
+/// when a snapshot/tasks attribution exists. The runtime
+/// today only populates {line, source, git}; `tasks` arrives
 /// once the snapshot blob store grows attribution lookup. Until
 /// then the editor's local-blame branch is dormant but typesafe.
 export interface LocalBlameEntry {
   line: number;
   source: string;
   git: import("./tauri-bridge/index.js").BlameLine | null;
-  workItem?: {
+  tasks?: {
     id: number;
     title: string;
     endedAt: string;
@@ -1451,14 +1451,14 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
 
 export async function listEffortsEndingAtSnapshots(
   snapshotIds: string[],
-): Promise<Record<string, Array<{ effortId: string; workItemId: number; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>> {
+): Promise<Record<string, Array<{ effortId: string; tasksId: number; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>> {
   return unwrap(
     await commands.listEffortsEndingAtSnapshots(snapshotIds.map(Number)),
   ) as unknown as Record<
     string,
     Array<{
       effortId: string;
-      workItemId: number;
+      tasksId: number;
       threadId: string;
       title: string;
       status: TaskStatus;
@@ -1639,12 +1639,12 @@ export function subscribeGitRefsEvents(
   });
 }
 
-export type WorkItemChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
+export type tasksChangeKind = "created" | "updated" | "note" | "linked" | "deleted" | "reordered" | "moved";
 
-export interface WorkItemChangeEvent {
+export interface tasksChangeEvent {
   streamId: string;
   threadId: string;
-  kind: WorkItemChangeKind;
+  kind: tasksChangeKind;
   itemId: number | null;
 }
 
@@ -1876,17 +1876,17 @@ export function subscribeAgentStatus(
 }
 
 export interface BacklogChangeEvent {
-  kind: WorkItemChangeKind;
+  kind: tasksChangeKind;
   itemId: number | null;
 }
 
 export function subscribeBacklogEvents(onEvent: (event: BacklogChangeEvent) => void): () => void {
-  // Backlog == work items not attached to a thread. The backend
-  // collapses both onto `WorkItemsChanged { threadId? }`; threadId is
+  // Backlog == tasks not attached to a thread. The backend
+  // collapses both onto `tasksChanged { threadId? }`; threadId is
   // null for backlog rows. The bus event no longer carries kind/itemId
   // so we synthesize a coarse "updated" — receivers refetch.
   return subscribeOxplowEvents((event) => {
-    if (event.kind !== "workItemsChanged") return;
+    if (event.kind !== "tasksChanged") return;
     if (event.threadId != null) return;
     onEvent({ kind: "updated", itemId: null });
   });
@@ -1894,16 +1894,16 @@ export function subscribeBacklogEvents(onEvent: (event: BacklogChangeEvent) => v
 
 export function subscribeTaskEvents(
   _streamId: string | "all",
-  onEvent: (event: WorkItemChangeEvent) => void,
+  onEvent: (event: tasksChangeEvent) => void,
 ): () => void {
-  // The backend `WorkItemsChanged` payload only carries `threadId`
+  // The backend `tasksChanged` payload only carries `threadId`
   // (no streamId / itemId / kind), so we can't honour the streamId
   // filter or report which item changed. Fire a coarse "updated"
-  // for every thread-scoped work-item change — receivers refetch.
+  // for every thread-scoped tasks change — receivers refetch.
   // The streamId filter parameter is preserved for API compatibility
   // but is currently a no-op.
   return subscribeOxplowEvents((event) => {
-    if (event.kind !== "workItemsChanged") return;
+    if (event.kind !== "tasksChanged") return;
     const threadId = event.threadId as string | undefined | null;
     if (!threadId) return;
     onEvent({

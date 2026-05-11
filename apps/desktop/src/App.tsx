@@ -1121,7 +1121,7 @@ export function App() {
     return out;
   }, [streams, threadStates]);
 
-  async function handleDropWorkItemOnStream(targetStreamId: string, itemId: number, fromThreadId: string | null) {
+  async function handleDropTaskOnStream(targetStreamId: string, itemId: number, fromThreadId: string | null) {
     if (!stream || !fromThreadId) return;
     const toThreadId = streamActiveThreadIds[targetStreamId];
     if (!toThreadId || toThreadId === fromThreadId) return;
@@ -1174,7 +1174,7 @@ export function App() {
   // Runs once per mount — subsequent stream switches have their own
   // centerActive logic in handleSwitch. The page-tab case matters
   // because the user's first click after startup often opens a page tab
-  // (work-item, plan-work, git-history, …); the previous fall-through
+  // (tasks, plan-work, git-history, …); the previous fall-through
   // reset for unknown id shapes would clobber that click and snap focus
   // back to the agent. Now we trust `effectiveCenterActive`'s fallback
   // gate by checking membership in the same available set.
@@ -1194,7 +1194,7 @@ export function App() {
       if (!diffTabs.some((tab) => tab.id === centerActive)) setCenterActive("agent");
       return;
     }
-    // Page tabs (work-item, plan-work, git-history, …) — validate
+    // Page tabs (tasks, plan-work, git-history, …) — validate
     // against the per-thread page-tab list. Reset to agent only when
     // the page wasn't restored. The previous unknown-id fall-through
     // unconditionally reset every page id, clobbering the user's
@@ -1336,7 +1336,7 @@ export function App() {
   // Followups are transient (in-memory), but we still want the Ready
   // section to live-update when the agent adds/removes one mid-turn.
   // Re-fetch the same ThreadWorkState envelope (followups are layered
-  // in by the work-item API wrapper) after every followup.changed
+  // in by the tasks API wrapper) after every followup.changed
   // event. Stream id is recovered from the cached threadState map —
   // the event itself only carries threadId.
   useEffect(() => {
@@ -1600,7 +1600,7 @@ export function App() {
     showEditorPane() {
       if (selectedFilePath) setCenterActive(`file:${selectedFilePath}`);
     },
-    newWorkItem() {
+    newTask() {
       // handleOpenPage is declared further down; forward through the ref
       // so the menu/keyboard handler routes to a NewTaskPage tab
       // (replaces the legacy openCreateModal-via-PlanPane path).
@@ -1668,11 +1668,11 @@ export function App() {
     function handleKeyDown(event: KeyboardEvent) {
       const commandId = getCommandIdForShortcut(event);
       if (!commandId) return;
-      // Only "plan.newWorkItem" suppresses itself inside a text input — the
+      // Only "plan.newTask" suppresses itself inside a text input — the
       // rest (save, find, quick-open) are explicitly useful while editing.
       // Rationale: a user in the middle of typing a description shouldn't
       // lose focus to a New-Task modal and drop their half-typed text.
-      if (commandId === "plan.newWorkItem" && isEditableTarget(event.target)) return;
+      if (commandId === "plan.newTask" && isEditableTarget(event.target)) return;
       const command = commandMap.get(commandId);
       if (!command || !command.enabled || !command.run) return;
       event.preventDefault();
@@ -1701,7 +1701,7 @@ export function App() {
       // this callback stay queued until the next real input event wakes
       // the scheduler — users reported menu dispatches stalling 10+
       // seconds. flushSync commits inside the callback. The commands
-      // that open modals (plan.newWorkItem, etc.) additionally go
+      // that open modals (plan.newTask, etc.) additionally go
       // through an imperative ref registered by the target pane so the
       // modal setState also commits here rather than via useEffect.
       const run = command.run;
@@ -1727,7 +1727,7 @@ export function App() {
   //
   // The effect's dependency list is intentionally minimal: only the
   // active id + selected thread should re-fire it. The supporting
-  // context (page tabs, file open-order, work-item titles, stream id)
+  // context (page tabs, file open-order, tasks titles, stream id)
   // is read through a ref so e.g. opening a SECOND tab doesn't
   // re-record a visit for the FIRST (still-active) one.
   // tabLabelByIdRef is the single source of "what's this tab called
@@ -1952,9 +1952,9 @@ export function App() {
     return order.map((path, idx) => ({ path, touchedAt: order.length - idx }));
   }, [currentSession.openOrder]);
 
-  // Recently-finished work merged across closed work-item efforts
+  // Recently-finished work merged across closed tasks efforts
   // (per-thread) and updated wiki notes (global). Refetched on
-  // work-item or wiki-page changes; sub-100ms IPC, so coarse
+  // tasks or wiki-page changes; sub-100ms IPC, so coarse
   // invalidation is fine.
   const [uncommittedSummary, setUncommittedSummary] = useState<{
     added: number; modified: number; deleted: number; additions: number; deletions: number;
@@ -2422,7 +2422,7 @@ export function App() {
     // tab membership and order are driven by the unified list.
     // The unified-chrome wrap loop below applies to every tab pushed
     // after this index — every per-thread page tab (notes, files,
-    // diffs, work items, etc.). Only the agent at index 0 is excluded.
+    // diffs, tasks, etc.). Only the agent at index 0 is excluded.
     // Diffs live in `threadPageTabs` like every other page kind; the
     // standalone diffTabs array is just the spec registry indexed by
     // id, looked up by the diff render branch below.
@@ -2482,7 +2482,7 @@ export function App() {
       };
       // Open a diff *in this slot* — slot navigates to the diff,
       // back returns to the originating page. Used by pages that
-      // surface a diff (work items, wiki, local history, etc.).
+      // surface a diff (tasks, wiki, local history, etc.).
       const navOpenDiff = (
         spec: DiffSpec,
         siblings?: import("./tabs/PageNavigationContext.js").NavSiblings,
@@ -2607,7 +2607,7 @@ export function App() {
               openFileOrder={currentSession.openOrder}
               openFiles={currentSession.files}
               onRevealCommit={handleRevealCommit}
-              onRevealWorkItem={handleRequestEditTask}
+              onRevealTask={handleRequestEditTask}
               onCompareWithClipboard={handleCompareWithClipboard}
             />
           ) : null,

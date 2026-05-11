@@ -46,7 +46,7 @@ export type PageKind =
 export interface TabRef {
   id: string;
   kind: PageKind;
-  /** Page-kind-specific data — file path, work item id, dashboard variant, etc. */
+  /** Page-kind-specific data — file path, tasks id, dashboard variant, etc. */
   payload: unknown;
 }
 

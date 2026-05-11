@@ -83,7 +83,7 @@ export function wikiPageRef(slug: string): TabRef {
 }
 
 export function taskRef(itemId: number): TabRef {
-  return { id: `wi:${itemId}`, kind: "task", payload: { itemId } };
+  return { id: `task:${itemId}`, kind: "task", payload: { itemId } };
 }
 
 export function findingRef(findingId: string): TabRef {
@@ -195,11 +195,11 @@ export function dashboardRef(variant: DashboardKind): TabRef {
 
 /**
  * Form pages introduced by phase 5e. These replace the legacy modal
- * dialogs (NewStreamModal / NewWorkItemModal / Stream-Thread settings)
+ * dialogs (NewStreamModal / NewtasksModal / Stream-Thread settings)
  * with a focused full-tab workspace, matching `SettingsPage`.
  */
 
-export interface NewWorkItemPayload {
+export interface NewtasksPayload {
   /** Optional pre-selected parent epic id. */
   parentId?: number | null;
   /** Optional default category (carried forward by "Save and Another"). */
@@ -212,7 +212,7 @@ export function newStreamRef(): TabRef {
   return { id: "new-stream", kind: "new-stream", payload: null };
 }
 
-export function newTaskRef(payload: NewWorkItemPayload = {}): TabRef {
+export function newTaskRef(payload: NewtasksPayload = {}): TabRef {
   // Use a stable id so re-opening the page reuses the existing tab
   // rather than stacking duplicates. "Save and Another" relies on the
   // form re-mounting in place; the page reads its initial values on

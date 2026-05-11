@@ -13,7 +13,7 @@ export function getCommandIdForShortcut(event: {
 
   const key = event.key.toLowerCase();
   if (event.shiftKey) {
-    if (key === "n") return "plan.newWorkItem";
+    if (key === "n") return "plan.newTask";
     return null;
   }
 

@@ -61,7 +61,7 @@ export interface NewTaskPageProps {
 }
 
 /**
- * Full-tab "New work item" form. Replaces the centred NewWorkItemModal
+ * Full-tab "New tasks" form. Replaces the centred NewtasksModal
  * that used to live inside `PlanPane.tsx`. Carries Save-and-Another
  * forward by remembering the last-submitted kind/priority and
  * re-mounting the form with those values prefilled. The parent id is
@@ -139,9 +139,9 @@ export function NewTaskPage({
 
   return (
     <Page
-      testId="page-new-work-item"
+      testId="page-new-tasks"
       title="New task"
-      kind="new work item"
+      kind="new tasks"
       actions={
         onClose ? (
           <button type="button" onClick={onClose} style={buttonStyle}>
@@ -160,7 +160,7 @@ export function NewTaskPage({
         <Field label="Title">
           <input
             ref={titleRef}
-            data-testid="work-item-title"
+            data-testid="tasks-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Title (required)"
@@ -169,7 +169,7 @@ export function NewTaskPage({
         </Field>
         <Field label="Description">
           <textarea
-            data-testid="work-item-description"
+            data-testid="tasks-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description"
@@ -179,7 +179,7 @@ export function NewTaskPage({
         </Field>
         <Field label="Acceptance criteria">
           <textarea
-            data-testid="work-item-acceptance"
+            data-testid="tasks-acceptance"
             value={acceptance}
             onChange={(e) => setAcceptance(e.target.value)}
             placeholder="One per line"
@@ -190,7 +190,7 @@ export function NewTaskPage({
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           <Field label="Kind">
             <select
-              data-testid="work-item-kind"
+              data-testid="tasks-kind"
               value={kind}
               onChange={(e) => setKind(coerceKind(e.target.value))}
               style={inputStyle}
@@ -204,7 +204,7 @@ export function NewTaskPage({
           </Field>
           <Field label="Priority">
             <select
-              data-testid="work-item-priority"
+              data-testid="tasks-priority"
               value={priority}
               onChange={(e) => setPriority(coercePriority(e.target.value))}
               style={inputStyle}
@@ -218,7 +218,7 @@ export function NewTaskPage({
           </Field>
           <Field label="Status">
             <select
-              data-testid="work-item-status"
+              data-testid="tasks-status"
               value={status}
               onChange={(e) => setStatus(e.target.value === "blocked" ? "blocked" : "ready")}
               style={inputStyle}
@@ -233,7 +233,7 @@ export function NewTaskPage({
           {epics.length > 0 ? (
             <Field label="Parent epic">
               <select
-                data-testid="work-item-parent"
+                data-testid="tasks-parent"
                 value={parentId ?? ""}
                 onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
                 style={inputStyle}
@@ -257,7 +257,7 @@ export function NewTaskPage({
           </button>
           <button
             type="button"
-            data-testid="work-item-save-another"
+            data-testid="tasks-save-another"
             onClick={() => void handleSubmit(true)}
             disabled={!canSubmit}
             style={buttonStyle}
@@ -266,7 +266,7 @@ export function NewTaskPage({
           </button>
           <button
             type="submit"
-            data-testid="work-item-save"
+            data-testid="tasks-save"
             disabled={!canSubmit}
             style={primaryButtonStyle}
           >

@@ -18,7 +18,7 @@ export interface NavigateOptions {
 
 export interface NavSiblingEntry {
   ref: TabRef;
-  /** Human-readable label for hover-tooltips (file path, work-item title, …). */
+  /** Human-readable label for hover-tooltips (file path, tasks title, …). */
   label: string;
   /** When the entry's `ref.kind === "diff"`, the full DiffSpec is
    *  carried alongside so the navigation host can pre-register every

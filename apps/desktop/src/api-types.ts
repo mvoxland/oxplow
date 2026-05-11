@@ -53,7 +53,7 @@ export interface Task {
 
 export interface WorkNote {
   id: string;
-  work_item_id: string | null;
+  task_id: string | null;
   thread_id: string | null;
   body: string;
   author: string;
@@ -95,7 +95,7 @@ export interface SnapshotDiffResult {
 
 export interface TaskEffort {
   id: string;
-  workItemId: number;
+  tasksId: number;
   startedAt: string;
   endedAt: string | null;
 }
@@ -113,7 +113,7 @@ export interface ThreadFollowup {
 }
 
 export interface ThreadWorkState {
-  workItems: Task[];
+  tasks: Task[];
   effortsInFlight: TaskEffort[];
   followups: ThreadFollowup[];
 }

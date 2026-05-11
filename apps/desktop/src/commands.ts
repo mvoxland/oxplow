@@ -8,7 +8,7 @@ export type CommandId =
   | "view.editor"
   | "history.open"
   | "snapshots.open"
-  | "plan.newWorkItem"
+  | "plan.newTask"
   | "stream.new"
   | "thread.new"
   | "files.commit"
@@ -66,7 +66,7 @@ export interface CommandHandlers {
   find(): void;
   showAgentPane(): void;
   showEditorPane(): void;
-  newWorkItem(): void;
+  newTask(): void;
   newStream(): void;
   newThread(): void;
   openHistory(): void;
@@ -120,7 +120,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       id: "plan",
       label: "Work",
       items: [
-        { id: "plan.newWorkItem", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
+        { id: "plan.newTask", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
         { id: "thread.new", label: "New Thread…", enabled: state.hasStream },
         { id: "stream.new", label: "New Stream…", enabled: true },
       ],
@@ -136,7 +136,7 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "edit.find": handlers.find,
     "view.agent": handlers.showAgentPane,
     "view.editor": handlers.showEditorPane,
-    "plan.newWorkItem": handlers.newWorkItem,
+    "plan.newTask": handlers.newTask,
     "stream.new": handlers.newStream,
     "thread.new": handlers.newThread,
     "history.open": handlers.openHistory,

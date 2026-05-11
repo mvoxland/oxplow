@@ -4,7 +4,7 @@ import { archiveStream, checkoutStreamBranch, listBranches, type BranchRef, type
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { Kebab } from "./Kebab.js";
 import type { MenuItem } from "../menu.js";
-import { WORK_ITEM_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
+import { TASK_DRAG_MIME, THREAD_DRAG_MIME } from "./ThreadRail.js";
 import { Slideover } from "./Slideover.js";
 
 interface Props {
@@ -21,7 +21,7 @@ interface Props {
   onOpenStreamSettings?(streamId: string): void;
   /** Open the New-stream page (replaces the in-rail modal when wired). */
   onOpenNewStreamPage?(): void;
-  onDropWorkItemOnStream?(targetStreamId: string, itemId: number, fromThreadId: string | null): void;
+  onDroptasksOnStream?(targetStreamId: string, itemId: number, fromThreadId: string | null): void;
   onReorderStreams?(orderedStreamIds: string[]): Promise<void> | void;
   /** Bumping this number opens the New-stream page via
    *  `onOpenNewStreamPage`. The legacy in-rail modal was retired in
@@ -31,7 +31,7 @@ interface Props {
 
 export const STREAM_DRAG_MIME = "application/x-oxplow-stream";
 
-export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onRenameStream, onRequestCreateThread, onOpenStreamSettings, onOpenNewStreamPage, onDropWorkItemOnStream, onReorderStreams, createRequest }: Props) {
+export function StreamRail({ stream, streams, streamStatuses, streamActiveThreadIds, gitEnabled, onSwitch, onRenameStream, onRequestCreateThread, onOpenStreamSettings, onOpenNewStreamPage, onDroptasksOnStream, onReorderStreams, createRequest }: Props) {
   const [dragOverStreamId, setDragOverStreamId] = useState<string | null>(null);
   const [draggingStreamId, setDraggingStreamId] = useState<string | null>(null);
   // Inline rename state — set to a stream id to swap the tab title for an
@@ -125,7 +125,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
           {orderedStreams.map((candidate) => {
             const active = candidate.id === stream?.id;
             const status = streamStatuses[candidate.id] ?? "waiting";
-            const canDrop = !!onDropWorkItemOnStream && !!streamActiveThreadIds?.[candidate.id];
+            const canDrop = !!onDroptasksOnStream && !!streamActiveThreadIds?.[candidate.id];
             const isDragOver = dragOverStreamId === candidate.id;
             const isStreamDragTarget = isDragOver && draggingStreamId !== null && draggingStreamId !== candidate.id;
             const isPrimary = candidate.kind === "primary";
@@ -162,8 +162,8 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                     return;
                   }
                   if (!canDrop) return;
-                  if (!types.includes(WORK_ITEM_DRAG_MIME) && !types.includes(THREAD_DRAG_MIME)) return;
-                  if (!types.includes(WORK_ITEM_DRAG_MIME)) return;
+                  if (!types.includes(TASK_DRAG_MIME) && !types.includes(THREAD_DRAG_MIME)) return;
+                  if (!types.includes(TASK_DRAG_MIME)) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                   if (dragOverStreamId !== candidate.id) setDragOverStreamId(candidate.id);
@@ -191,7 +191,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                     return;
                   }
                   if (!canDrop) return;
-                  const raw = event.dataTransfer.getData(WORK_ITEM_DRAG_MIME);
+                  const raw = event.dataTransfer.getData(TASK_DRAG_MIME);
                   if (!raw) return;
                   event.preventDefault();
                   setDragOverStreamId(null);
@@ -205,7 +205,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                       ? payload.itemIds
                       : payload.itemId ? [payload.itemId] : [];
                     for (const id of ids) {
-                      onDropWorkItemOnStream?.(candidate.id, id, payload.fromThreadId ?? null);
+                      onDroptasksOnStream?.(candidate.id, id, payload.fromThreadId ?? null);
                     }
                   } catch {
                     // ignore malformed payload

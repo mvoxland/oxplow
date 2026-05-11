@@ -6,7 +6,7 @@ import {
   buildGroups,
   classifyEpic,
   classifyRow,
-  classifyWorkItem,
+  classifytasks,
   filterAutoAuthored,
   finalizeReorderIds,
   sectionDefaultStatus,
@@ -32,13 +32,13 @@ function item(id: number, status: TaskStatus, sort_index: number): Task {
   };
 }
 
-test("classifyWorkItem buckets each status into exactly one section", () => {
-  expect(classifyWorkItem("in_progress")).toBe("inProgress");
-  expect(classifyWorkItem("ready")).toBe("ready");
-  expect(classifyWorkItem("blocked")).toBe("blocked");
-  expect(classifyWorkItem("done")).toBe("done");
-  expect(classifyWorkItem("canceled")).toBe("done");
-  expect(classifyWorkItem("archived")).toBe("done");
+test("classifytasks buckets each status into exactly one section", () => {
+  expect(classifytasks("in_progress")).toBe("inProgress");
+  expect(classifytasks("ready")).toBe("ready");
+  expect(classifytasks("blocked")).toBe("blocked");
+  expect(classifytasks("done")).toBe("done");
+  expect(classifytasks("canceled")).toBe("done");
+  expect(classifytasks("archived")).toBe("done");
 });
 
 test("splitIntoSections returns sections in fixed order: inProgress → ready → blocked → done", () => {
@@ -84,10 +84,10 @@ test("sectionDefaultStatus maps drop-target sections to landing statuses; in-pro
 
 test("finalizeReorderIds is a no-op when there are no descending rows", () => {
   const visualRows = [
-    { id: "a", status: "ready" as const },
-    { id: "b", status: "ready" as const },
+    { id: 501, status: "ready" as const },
+    { id: 502, status: "ready" as const },
   ];
-  expect(finalizeReorderIds(visualRows)).toEqual(["a", "b"]);
+  expect(finalizeReorderIds(visualRows)).toEqual([501, 502]);
 });
 
 test("finalizeReorderIds reverses the Done/canceled/archived run too — matches TaskGroupList's descending Done render", () => {
@@ -126,12 +126,12 @@ test("buildBacklogGroups still returns an empty group when state is null", () =>
   expect(groups[0]?.items).toEqual([]);
 });
 
-function epicItem(id: string, sort_index: number, status: TaskStatus = "ready"): Task {
-  return { ...item(id, status, sort_index), kind: "epic" };
+function epicItem(id: number, sort_index: number, status: TaskStatus = "ready"): Task {
+  return { ...item(id, status, sort_index) };
 }
 
 test("classifyEpic: any blocked child → blocked", () => {
-  const epic = epicItem("e1", 0);
+  const epic = epicItem(1, 0);
   expect(
     classifyEpic(epic, [
       item(101, "in_progress", 1),
@@ -142,7 +142,7 @@ test("classifyEpic: any blocked child → blocked", () => {
 });
 
 test("classifyEpic: all children terminal → done", () => {
-  const epic = epicItem("e1", 0);
+  const epic = epicItem(1, 0);
   expect(classifyEpic(epic, [
     item(101, "done", 1),
     item(102, "canceled", 2),
@@ -151,7 +151,7 @@ test("classifyEpic: all children terminal → done", () => {
 });
 
 test("classifyEpic: in_progress child → inProgress", () => {
-  const epic = epicItem("e1", 0);
+  const epic = epicItem(1, 0);
   expect(classifyEpic(epic, [
     item(101, "ready", 1),
     item(102, "in_progress", 2),
@@ -160,7 +160,7 @@ test("classifyEpic: in_progress child → inProgress", () => {
 });
 
 test("classifyEpic: mixed done + non-blocked unfinished → inProgress", () => {
-  const epic = epicItem("e1", 0);
+  const epic = epicItem(1, 0);
   // Phase 1 done, Phase 2 ready: epic stays in_progress, not done.
   expect(classifyEpic(epic, [
     item(101, "done", 1),
@@ -169,7 +169,7 @@ test("classifyEpic: mixed done + non-blocked unfinished → inProgress", () => {
 });
 
 test("classifyEpic: all children ready → ready", () => {
-  const epic = epicItem("e1", 0);
+  const epic = epicItem(1, 0);
   expect(classifyEpic(epic, [
     item(101, "ready", 1),
     item(102, "ready", 2),
@@ -177,14 +177,14 @@ test("classifyEpic: all children ready → ready", () => {
 });
 
 test("classifyEpic: empty epic falls back to its literal status", () => {
-  expect(classifyEpic(epicItem("e1", 0, "ready"), [])).toBe("ready");
-  expect(classifyEpic(epicItem("e1", 0, "in_progress"), [])).toBe("inProgress");
+  expect(classifyEpic(epicItem(1, 0, "ready"), [])).toBe("ready");
+  expect(classifyEpic(epicItem(1, 0, "in_progress"), [])).toBe("inProgress");
 });
 
 test("classifyRow uses epic rollup for epics, literal status for non-epics", () => {
-  const epic = epicItem("e1", 0);
+  const epic = epicItem(1, 0);
   const child = item(101, "in_progress", 1);
-  const map = new Map<string, Task[]>([[epic.id, [item(102, "blocked", 2)]]]);
+  const map = new Map<number, Task[]>([[epic.id, [item(102, "blocked", 2)]]]);
   expect(classifyRow(epic, map)).toBe("blocked");
   expect(classifyRow(child, map)).toBe("inProgress");
 });
@@ -192,7 +192,7 @@ test("classifyRow uses epic rollup for epics, literal status for non-epics", () 
 test("buildGroups groups epic children under their parent without lifting in_progress to root", () => {
   // Epics now move between sections as a block — children no longer
   // surface separately at the top level.
-  const epic = epicItem("e1", 0);
+  const epic = epicItem(1, 0);
   const c1 = { ...item(101, "in_progress", 1), parent_id: epic.id };
   const c2 = { ...item(102, "ready", 2), parent_id: epic.id };
   const groups = buildGroups({
@@ -203,9 +203,9 @@ test("buildGroups groups epic children under their parent without lifting in_pro
   } as any);
   expect(groups).toHaveLength(1);
   // Top-level rows: only the epic. No children lifted.
-  expect(groups[0]!.items.map((i) => i.id)).toEqual(["e1"]);
+  expect(groups[0]!.items.map((i) => i.id)).toEqual([1]);
   // Children stay in the epic's children map for the renderer.
-  expect(groups[0]!.epicChildren.get("e1")!.map((i) => i.id)).toEqual(["c1", "c2"]);
+  expect(groups[0]!.epicChildren.get(1)!.map((i) => i.id)).toEqual([101, 102]);
 });
 
 test("filterAutoAuthored drops agent-authored rows but keeps user-authored ones", () => {
@@ -216,19 +216,19 @@ test("filterAutoAuthored drops agent-authored rows but keeps user-authored ones"
       { ...item(301, "ready", 1), created_by: "agent" },
       { ...item(202, "in_progress", 2), created_by: "user" },
     ] as Task[],
-    epicChildren: new Map<string, Task[]>(),
+    epicChildren: new Map<number, Task[]>(),
   }];
   const filtered = filterAutoAuthored(groups);
-  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["u1", "u2"]);
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual([201, 202]);
 });
 
 test("filterAutoAuthored keeps epic rows even if agent-authored, and filters their children", () => {
-  const epic = { ...item(1, "ready", 0), kind: "epic" as const, created_by: "agent" };
+  const epic = { ...item(1, "ready", 0), created_by: "agent" };
   const groups = [{
     epic: null,
     items: [epic] as Task[],
-    epicChildren: new Map<string, Task[]>([[
-      "e1",
+    epicChildren: new Map<number, Task[]>([[
+      1,
       [
         { ...item(401, "ready", 1), created_by: "user" },
         { ...item(402, "ready", 2), created_by: "agent" },
@@ -236,8 +236,8 @@ test("filterAutoAuthored keeps epic rows even if agent-authored, and filters the
     ]]),
   }];
   const filtered = filterAutoAuthored(groups);
-  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["e1"]);
-  expect(filtered[0]!.epicChildren.get("e1")!.map((i) => i.id)).toEqual(["u-child"]);
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual([1]);
+  expect(filtered[0]!.epicChildren.get(1)!.map((i) => i.id)).toEqual([401]);
 });
 
 test("applyStatusFilter exclude drops matching items", () => {
@@ -248,10 +248,10 @@ test("applyStatusFilter exclude drops matching items", () => {
       item(502, "archived", 1),
       item(503, "done", 2),
     ] as Task[],
-    epicChildren: new Map<string, Task[]>(),
+    epicChildren: new Map<number, Task[]>(),
   }];
   const filtered = applyStatusFilter(groups, { exclude: ["archived"] });
-  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["a", "c"]);
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual([501, 503]);
 });
 
 test("applyStatusFilter only keeps matching items", () => {
@@ -262,23 +262,23 @@ test("applyStatusFilter only keeps matching items", () => {
       item(502, "archived", 1),
       item(503, "done", 2),
     ] as Task[],
-    epicChildren: new Map<string, Task[]>(),
+    epicChildren: new Map<number, Task[]>(),
   }];
   const filtered = applyStatusFilter(groups, { only: ["archived"] });
-  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["b"]);
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual([502]);
 });
 
 test("applyStatusFilter keeps epic rows even when status would exclude them, and filters their children", () => {
-  const epic = { ...item(1, "ready", 0), kind: "epic" as const };
+  const epic = { ...item(1, "ready", 0) };
   const groups = [{
     epic: null,
     items: [epic] as Task[],
-    epicChildren: new Map<string, Task[]>([[
-      "e1",
+    epicChildren: new Map<number, Task[]>([[
+      1,
       [item(101, "ready", 1), item(102, "archived", 2)] as Task[],
     ]]),
   }];
   const filtered = applyStatusFilter(groups, { only: ["ready"] });
-  expect(filtered[0]!.items.map((i) => i.id)).toEqual(["e1"]);
-  expect(filtered[0]!.epicChildren.get("e1")!.map((i) => i.id)).toEqual(["c1"]);
+  expect(filtered[0]!.items.map((i) => i.id)).toEqual([1]);
+  expect(filtered[0]!.epicChildren.get(1)!.map((i) => i.id)).toEqual([101]);
 });

@@ -23,8 +23,8 @@ export interface SnapshotBacklinkEntry {
   source?: string;
   /** Optional pre-known free-form label for the header. */
   snapshotLabel?: string | null;
-  /** Optional related work-item id (for the "Open task" affordance in the slideover). */
-  workItemId?: number | null;
+  /** Optional related tasks id (for the "Open task" affordance in the slideover). */
+  tasksId?: number | null;
   subtitle?: string;
 }
 
@@ -53,7 +53,7 @@ export interface BacklinksListProps {
   onOpenPage(ref: TabRef): void;
   /** Required when `snapshotEntries` is provided. Receives the snapshot
    *  id + a small descriptor so the host can route into a slideover. */
-  onOpenSnapshot?(payload: { snapshotId: string; label?: string | null; source?: string; workItemId?: number | null }): void;
+  onOpenSnapshot?(payload: { snapshotId: string; label?: string | null; source?: string; tasksId?: number | null }): void;
   /** Required when `commitEntries` is provided. */
   onOpenCommit?(payload: { sha: string; subject?: string }): void;
 }
@@ -61,7 +61,7 @@ export interface BacklinksListProps {
 /**
  * Translate a `TabRef` into a `ContextRef` so a backlink entry can be
  * dragged into the agent terminal as an @-mention. Files / notes /
- * work-items have direct mappings; finding refs land as a file ref to
+ * tasks have direct mappings; finding refs land as a file ref to
  * the finding's path because the agent doesn't have its own
  * `@finding:<id>` syntax. Returns null for ref kinds the agent can't
  * use as context (index pages, settings, etc).
@@ -138,7 +138,7 @@ export function BacklinksList({
             snapshotId: entry.snapshotId,
             label: entry.snapshotLabel ?? null,
             source: entry.source,
-            workItemId: entry.workItemId ?? null,
+            tasksId: entry.tasksId ?? null,
           })}
           disabled={!onOpenSnapshot}
           style={listButtonStyle}

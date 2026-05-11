@@ -41,7 +41,7 @@ export interface RailHudProps {
   backlog: BacklogState | null;
   recentFiles: RecentFileEntry[];
   bookmarks?: BookmarkRailEntry[];
-  /** Most recently finished work — closed work item efforts merged
+  /** Most recently finished work — closed tasks efforts merged
    *  with updated wiki notes, sorted by timestamp DESC. */
   recentlyFinished?: FinishedEntry[];
   /** Working-tree uncommitted summary; section hidden when null or empty. */
