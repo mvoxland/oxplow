@@ -113,7 +113,7 @@ CREATE TABLE task_event (
 );
 CREATE INDEX idx_task_event_thread_item ON task_event(thread_id, item_id, created_at);
 
-CREATE TABLE work_notes (
+CREATE TABLE task_note (
     id TEXT PRIMARY KEY,
     task_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
     thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
@@ -127,8 +127,8 @@ CREATE TABLE work_notes (
         OR (task_id IS NULL AND thread_id IS NOT NULL)
     )
 );
-CREATE INDEX idx_work_notes_task ON work_notes(task_id, created_at);
-CREATE INDEX idx_work_notes_thread ON work_notes(thread_id, created_at);
+CREATE INDEX idx_task_note_task ON task_note(task_id, created_at);
+CREATE INDEX idx_task_note_thread ON task_note(thread_id, created_at);
 
 -- Wiki notes — durable, file-backed knowledge captured by agent
 -- exploration. Body lives at .oxplow/notes/<slug>.md; this table

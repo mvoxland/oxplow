@@ -111,7 +111,7 @@ pub const BACKLOG_SCOPE: &str = "__backlog__";
 /// A note attached to either a task or a thread (mutually exclusive —
 /// enforced at the DB CHECK constraint).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct WorkNote {
+pub struct TaskNote {
     pub id: crate::ids::NoteId,
     pub task_id: Option<TaskId>,
     pub thread_id: Option<ThreadId>,

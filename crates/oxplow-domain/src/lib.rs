@@ -21,7 +21,7 @@ pub use ids::{AgentTurnId, EffortId, HookEventId, NoteId, StreamId, TaskId, Task
 pub use stream::{Stream, StreamKind};
 pub use task::{
     Task, TaskActorKind, TaskAuthor, TaskEvent, TaskLink, TaskLinkType, TaskPriority, TaskStatus,
-    WorkNote,
+    TaskNote,
 };
 pub use thread::{Thread, ThreadStatus};
 pub use time::Timestamp;

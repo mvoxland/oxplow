@@ -152,7 +152,7 @@ mod tests {
             "runtime_state",
             "threads",
             "thread_selection",
-            "work_notes",
+            "task_note",
             "agent_turn",
             "wiki_page",
             "page_visit",
@@ -280,12 +280,12 @@ mod tests {
         .unwrap();
         // Both null — must fail.
         let r = conn.execute(
-            "INSERT INTO work_notes (id, body, author, created_at) VALUES ('n-bad', 'b', 'u', ?1)",
+            "INSERT INTO task_note (id, body, author, created_at) VALUES ('n-bad', 'b', 'u', ?1)",
             [now],
         );
         assert!(
             r.is_err(),
-            "work_notes with neither parent should fail CHECK"
+            "task_note with neither parent should fail CHECK"
         );
         // Both set — must fail.
         let r = conn.execute(
@@ -295,10 +295,10 @@ mod tests {
         );
         assert!(r.is_ok());
         let r = conn.execute(
-            "INSERT INTO work_notes (id, task_id, thread_id, body, author, created_at)
+            "INSERT INTO task_note (id, task_id, thread_id, body, author, created_at)
              VALUES ('n-bad2', 1, 'b-1', 'b', 'u', ?1)",
             [now],
         );
-        assert!(r.is_err(), "work_notes with both parents should fail CHECK");
+        assert!(r.is_err(), "task_note with both parents should fail CHECK");
     }
 }

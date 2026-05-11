@@ -66,7 +66,7 @@ use oxplow_db::{
     Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqlitePageRefStore,
     SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
     SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskStore, SqliteThreadStore,
-    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore, SqliteWorkNoteStore,
+    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore, SqliteTaskNoteStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -123,7 +123,7 @@ pub struct Services {
     pub stream_store: Arc<SqliteStreamStore>,
     pub thread_store: Arc<SqliteThreadStore>,
     pub task_store: Arc<SqliteTaskStore>,
-    pub work_note_store: Arc<SqliteWorkNoteStore>,
+    pub work_note_store: Arc<SqliteTaskNoteStore>,
     pub task_link_store: Arc<SqliteTaskLinkStore>,
     pub task_event_store: Arc<SqliteTaskEventStore>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
@@ -189,7 +189,7 @@ impl Services {
         let task_store =
             Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_ref_store).clone()));
         let work_note_store = Arc::new(
-            SqliteWorkNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
+            SqliteTaskNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
         let task_link_store = Arc::new(
             SqliteTaskLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
@@ -315,7 +315,7 @@ impl Services {
         let task_store =
             Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_ref_store).clone()));
         let work_note_store = Arc::new(
-            SqliteWorkNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
+            SqliteTaskNoteStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),
         );
         let task_link_store = Arc::new(
             SqliteTaskLinkStore::new(db.clone()).with_page_refs((*page_ref_store).clone()),

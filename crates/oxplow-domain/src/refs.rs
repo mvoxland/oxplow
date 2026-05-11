@@ -1,7 +1,7 @@
 //! Pure cross-kind reference extractor.
 //!
 //! Given a free-text body (wiki page, task description, commit
-//! message, work-note, …) extracts the references it makes to other
+//! message, task-note, …) extracts the references it makes to other
 //! pages: file paths, directory paths, wiki slugs, task ids
 //! (`task:<n>`), finding ids (`finding:…`), and git commit shas.
 //!

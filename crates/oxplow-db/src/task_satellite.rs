@@ -7,15 +7,15 @@
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, WorkNoteStore};
+use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, TaskNoteStore};
 use oxplow_domain::{
     DomainError, NoteId, TaskActorKind, TaskEvent, TaskId, TaskLink, TaskLinkId, TaskLinkType,
-    ThreadId, Timestamp, WorkNote,
+    ThreadId, Timestamp, TaskNote,
 };
 
 use crate::database::Database;
 use crate::page_ref_projections::{
-    link_edge, note_edges, task_link_ref_types, KIND_TASK, KIND_WORK_NOTE,
+    link_edge, note_edges, task_link_ref_types, KIND_TASK, KIND_TASK_NOTE,
 };
 use crate::page_ref_store::SqlitePageRefStore;
 
@@ -74,12 +74,12 @@ fn str_to_actor(s: &str) -> Result<TaskActorKind, DomainError> {
 // ---------------- Work notes ----------------
 
 #[derive(Clone)]
-pub struct SqliteWorkNoteStore {
+pub struct SqliteTaskNoteStore {
     db: Database,
     page_refs: Option<SqlitePageRefStore>,
 }
 
-impl SqliteWorkNoteStore {
+impl SqliteTaskNoteStore {
     pub fn new(db: Database) -> Self {
         Self {
             db,
@@ -97,7 +97,7 @@ impl SqliteWorkNoteStore {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                let mut stmt = conn.prepare("SELECT id, body FROM work_notes")?;
+                let mut stmt = conn.prepare("SELECT id, body FROM task_note")?;
                 let rows =
                     stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -112,11 +112,11 @@ impl SqliteWorkNoteStore {
             return Ok(());
         };
         let edges = note_edges(id, body);
-        refs.replace_source(KIND_WORK_NOTE, id, edges).await
+        refs.replace_source(KIND_TASK_NOTE, id, edges).await
     }
 }
 
-fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkNote> {
+fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskNote> {
     let id: String = row.get("id")?;
     let task_id: Option<i64> = row.get("task_id")?;
     let thread_id: Option<String> = row.get("thread_id")?;
@@ -126,7 +126,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkNote> {
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
-    Ok(WorkNote {
+    Ok(TaskNote {
         id: NoteId::from(id),
         task_id: task_id.map(TaskId::new),
         thread_id: thread_id.map(ThreadId::from),
@@ -137,22 +137,22 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkNote> {
 }
 
 #[async_trait]
-impl WorkNoteStore for SqliteWorkNoteStore {
+impl TaskNoteStore for SqliteTaskNoteStore {
     async fn add_for_item(
         &self,
         item: TaskId,
         body: &str,
         author: &str,
-    ) -> Result<WorkNote, DomainError> {
+    ) -> Result<TaskNote, DomainError> {
         let db = self.db.clone();
         let body_owned = body.to_string();
         let author = author.to_string();
-        let note = tokio::task::spawn_blocking(move || -> Result<WorkNote, DomainError> {
+        let note = tokio::task::spawn_blocking(move || -> Result<TaskNote, DomainError> {
             let id = NoteId::new();
             let now = Timestamp::now();
             db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO work_notes (id, task_id, body, author, created_at)
+                    "INSERT INTO task_note (id, task_id, body, author, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
                         id.as_str(),
@@ -164,7 +164,7 @@ impl WorkNoteStore for SqliteWorkNoteStore {
                 )?;
                 Ok(())
             })?;
-            Ok(WorkNote {
+            Ok(TaskNote {
                 id,
                 task_id: Some(item),
                 thread_id: None,
@@ -184,17 +184,17 @@ impl WorkNoteStore for SqliteWorkNoteStore {
         thread: &ThreadId,
         body: &str,
         author: &str,
-    ) -> Result<WorkNote, DomainError> {
+    ) -> Result<TaskNote, DomainError> {
         let db = self.db.clone();
         let thread = thread.clone();
         let body_owned = body.to_string();
         let author = author.to_string();
-        let note = tokio::task::spawn_blocking(move || -> Result<WorkNote, DomainError> {
+        let note = tokio::task::spawn_blocking(move || -> Result<TaskNote, DomainError> {
             let id = NoteId::new();
             let now = Timestamp::now();
             db.with_conn(|conn| {
                 conn.execute(
-                    "INSERT INTO work_notes (id, thread_id, body, author, created_at)
+                    "INSERT INTO task_note (id, thread_id, body, author, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
                         id.as_str(),
@@ -206,7 +206,7 @@ impl WorkNoteStore for SqliteWorkNoteStore {
                 )?;
                 Ok(())
             })?;
-            Ok(WorkNote {
+            Ok(TaskNote {
                 id,
                 task_id: None,
                 thread_id: Some(thread),
@@ -221,12 +221,12 @@ impl WorkNoteStore for SqliteWorkNoteStore {
         Ok(note)
     }
 
-    async fn list_for_item(&self, item: TaskId) -> Result<Vec<WorkNote>, DomainError> {
+    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM work_notes WHERE task_id = ?1 ORDER BY created_at ASC",
+                    "SELECT * FROM task_note WHERE task_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![item.value()], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -236,13 +236,13 @@ impl WorkNoteStore for SqliteWorkNoteStore {
         .unwrap()
     }
 
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkNote>, DomainError> {
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskNote>, DomainError> {
         let db = self.db.clone();
         let thread = thread.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM work_notes WHERE thread_id = ?1 ORDER BY created_at ASC",
+                    "SELECT * FROM task_note WHERE thread_id = ?1 ORDER BY created_at ASC",
                 )?;
                 let rows = stmt.query_map(params![thread.as_str()], row_to_note)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -259,7 +259,7 @@ impl WorkNoteStore for SqliteWorkNoteStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
-                    "UPDATE work_notes SET body = ?2 WHERE id = ?1",
+                    "UPDATE task_note SET body = ?2 WHERE id = ?1",
                     params![id_clone.as_str(), body_clone],
                 )?;
                 Ok(())
@@ -277,7 +277,7 @@ impl WorkNoteStore for SqliteWorkNoteStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
-                    "DELETE FROM work_notes WHERE id = ?1",
+                    "DELETE FROM task_note WHERE id = ?1",
                     params![id_clone.as_str()],
                 )?;
                 Ok(())
@@ -286,7 +286,7 @@ impl WorkNoteStore for SqliteWorkNoteStore {
         .await
         .unwrap()?;
         if let Some(refs) = &self.page_refs {
-            refs.replace_source(KIND_WORK_NOTE, id.as_str(), vec![])
+            refs.replace_source(KIND_TASK_NOTE, id.as_str(), vec![])
                 .await?;
         }
         Ok(())
@@ -667,7 +667,7 @@ mod tests {
     #[tokio::test]
     async fn note_for_item_round_trips() {
         let (db, _tid, item_id) = fixture().await;
-        let store = SqliteWorkNoteStore::new(db);
+        let store = SqliteTaskNoteStore::new(db);
         let note = store
             .add_for_item(item_id, "looking good", "user")
             .await
@@ -682,7 +682,7 @@ mod tests {
     #[tokio::test]
     async fn note_for_thread_round_trips() {
         let (db, tid, _item_id) = fixture().await;
-        let store = SqliteWorkNoteStore::new(db);
+        let store = SqliteTaskNoteStore::new(db);
         let note = store
             .add_for_thread(&tid, "thread-level finding", "agent")
             .await
@@ -696,7 +696,7 @@ mod tests {
     #[tokio::test]
     async fn note_delete_removes() {
         let (db, _tid, item_id) = fixture().await;
-        let store = SqliteWorkNoteStore::new(db);
+        let store = SqliteTaskNoteStore::new(db);
         let note = store.add_for_item(item_id, "x", "u").await.unwrap();
         store.delete(&note.id).await.unwrap();
         assert!(store.list_for_item(item_id).await.unwrap().is_empty());
@@ -707,7 +707,7 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (db, tid, item_id) = fixture().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteWorkNoteStore::new(db).with_page_refs(page_refs.clone());
+        let store = SqliteTaskNoteStore::new(db).with_page_refs(page_refs.clone());
 
         let note = store
             .add_for_item(item_id, "blocked by task:99 see [[src/app.rs]]", "u")
@@ -717,7 +717,7 @@ mod tests {
         assert!(
             inbound_task
                 .iter()
-                .any(|e| e.source_kind == "work-note" && e.source_id == note.id.as_str()),
+                .any(|e| e.source_kind == "task-note" && e.source_id == note.id.as_str()),
             "expected note to backlink task:99; got {inbound_task:?}"
         );
         let inbound_file = page_refs

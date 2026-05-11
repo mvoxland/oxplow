@@ -181,7 +181,7 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 }
 
 const SELECT_BASE: &str =
-    "SELECT t.*, COALESCE((SELECT COUNT(*) FROM work_notes wn WHERE wn.task_id = t.id), 0) AS note_count
+    "SELECT t.*, COALESCE((SELECT COUNT(*) FROM task_note wn WHERE wn.task_id = t.id), 0) AS note_count
      FROM task t";
 
 impl SqliteTaskStore {

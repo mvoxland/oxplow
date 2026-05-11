@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use oxplow_app::{CreateTaskInput, OxplowEvent, Services, UpdateTaskChanges};
-use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, TaskStore, ThreadStore, WorkNoteStore};
+use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, TaskStore, ThreadStore, TaskNoteStore};
 use oxplow_domain::{NoteId, Task, TaskId, TaskLinkType, TaskStatus, ThreadId};
 
 #[derive(Clone)]

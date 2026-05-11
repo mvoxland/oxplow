@@ -259,7 +259,7 @@ import type {
 } from "./tauri-bridge/index.js";
 export type { Task, TaskStatus, TaskPriority };
 
-export interface WorkNote {
+export interface TaskNote {
   id: string;
   task_id: string;
   body: string;

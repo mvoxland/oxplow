@@ -21,12 +21,12 @@ use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{
     effort_ref_types, effort_touched_file_edges, finding_edges, link_edge, note_edges,
-    task_body_ref_types, task_edges, task_link_ref_types, KIND_FINDING, KIND_TASK, KIND_WORK_NOTE,
+    task_body_ref_types, task_edges, task_link_ref_types, KIND_FINDING, KIND_TASK, KIND_TASK_NOTE,
 };
 use oxplow_db::TaskEffortStore as _;
 use oxplow_db::{
     SqliteCodeQualityStore, SqlitePageRefStore, SqliteTaskEffortStore, SqliteTaskLinkStore,
-    SqliteTaskStore, SqliteWorkNoteStore,
+    SqliteTaskStore, SqliteTaskNoteStore,
 };
 use oxplow_domain::stores::TaskLinkStore as _;
 
@@ -48,7 +48,7 @@ pub async fn run(
     links: Arc<SqliteTaskLinkStore>,
     efforts: Arc<SqliteTaskEffortStore>,
     findings_store: Arc<SqliteCodeQualityStore>,
-    work_notes: Arc<SqliteWorkNoteStore>,
+    task_note: Arc<SqliteTaskNoteStore>,
 ) -> BackfillCounts {
     let mut counts = BackfillCounts::default();
 
@@ -111,11 +111,11 @@ pub async fn run(
     }
 
     // 3. Work notes — one source per note row, parsed from body.
-    if let Ok(rows) = work_notes.list_all_for_backfill().await {
+    if let Ok(rows) = task_note.list_all_for_backfill().await {
         for (id, body) in rows {
             let edges = note_edges(&id, &body);
             if page_refs
-                .replace_source(KIND_WORK_NOTE, &id, edges)
+                .replace_source(KIND_TASK_NOTE, &id, edges)
                 .await
                 .is_ok()
             {
@@ -247,7 +247,7 @@ mod tests {
         let findings_store =
             Arc::new(SqliteCodeQualityStore::new(db.clone()).with_page_refs((*page_refs).clone()));
         let notes =
-            Arc::new(SqliteWorkNoteStore::new(db.clone()).with_page_refs((*page_refs).clone()));
+            Arc::new(SqliteTaskNoteStore::new(db.clone()).with_page_refs((*page_refs).clone()));
 
         let counts = run(
             page_refs.clone(),

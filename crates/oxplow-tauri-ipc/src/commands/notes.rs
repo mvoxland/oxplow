@@ -3,8 +3,8 @@
 //! — task_effort.summary already records what shipped on a
 //! task, so a separate note table for the same purpose was duplicative.
 
-use oxplow_domain::stores::{TaskEventStore, WorkNoteStore};
-use oxplow_domain::{NoteId, TaskEvent, TaskId, ThreadId, WorkNote};
+use oxplow_domain::stores::{TaskEventStore, TaskNoteStore};
+use oxplow_domain::{NoteId, TaskEvent, TaskId, ThreadId, TaskNote};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -16,7 +16,7 @@ pub async fn add_thread_note(
     thread_id: ThreadId,
     body: String,
     author: String,
-) -> Result<WorkNote, IpcError> {
+) -> Result<TaskNote, IpcError> {
     Ok(state
         .work_note_store
         .add_for_thread(&thread_id, &body, &author)
@@ -28,7 +28,7 @@ pub async fn add_thread_note(
 pub async fn list_thread_notes(
     state: tauri::State<'_, AppState>,
     thread_id: ThreadId,
-) -> Result<Vec<WorkNote>, IpcError> {
+) -> Result<Vec<TaskNote>, IpcError> {
     Ok(state.work_note_store.list_for_thread(&thread_id).await?)
 }
 

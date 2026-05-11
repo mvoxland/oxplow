@@ -51,7 +51,7 @@ export interface Task {
   tags: string | null;
 }
 
-export interface WorkNote {
+export interface TaskNote {
   id: string;
   task_id: string | null;
   thread_id: string | null;

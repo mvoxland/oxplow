@@ -29,7 +29,7 @@ pub use effort_store::{
 };
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use stream_store::SqliteStreamStore;
-pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteWorkNoteStore};
+pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::SqliteTaskStore;
 pub use thread_store::SqliteThreadStore;
 pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};

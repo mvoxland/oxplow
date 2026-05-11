@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use crate::hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
 use crate::ids::{AgentTurnId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
-use crate::task::{Task, TaskEvent, TaskLink, TaskLinkType, WorkNote};
+use crate::task::{Task, TaskEvent, TaskLink, TaskLinkType, TaskNote};
 use crate::thread::Thread;
 use crate::DomainError;
 
@@ -67,21 +67,21 @@ pub trait TaskStore: Send + Sync {
 }
 
 #[async_trait]
-pub trait WorkNoteStore: Send + Sync {
+pub trait TaskNoteStore: Send + Sync {
     async fn add_for_item(
         &self,
         item: TaskId,
         body: &str,
         author: &str,
-    ) -> Result<WorkNote, DomainError>;
+    ) -> Result<TaskNote, DomainError>;
     async fn add_for_thread(
         &self,
         thread: &ThreadId,
         body: &str,
         author: &str,
-    ) -> Result<WorkNote, DomainError>;
-    async fn list_for_item(&self, item: TaskId) -> Result<Vec<WorkNote>, DomainError>;
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<WorkNote>, DomainError>;
+    ) -> Result<TaskNote, DomainError>;
+    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskNote>, DomainError>;
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskNote>, DomainError>;
     /// Replace the body of an existing note. Used by
     /// `oxplow__record_query_finding` to fill in a note that was
     /// pre-allocated empty by `oxplow__delegate_query`.

@@ -22,7 +22,7 @@ use crate::page_ref_store::PageRefEdge;
 
 pub const KIND_WIKI: &str = "wiki";
 pub const KIND_TASK: &str = "task";
-pub const KIND_WORK_NOTE: &str = "work-note";
+pub const KIND_TASK_NOTE: &str = "task-note";
 pub const KIND_FILE: &str = "file";
 pub const KIND_DIRECTORY: &str = "directory";
 pub const KIND_FINDING: &str = "finding";
@@ -138,13 +138,13 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
     out
 }
 
-/// Edges contributed by a work-note body. Single-owner source.
+/// Edges contributed by a task-note body. Single-owner source.
 pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     let refs = extract(body);
     let mut out = Vec::new();
     for fd in refs.files_detail {
         out.push(PageRefEdge::new(
-            KIND_WORK_NOTE,
+            KIND_TASK_NOTE,
             note_id,
             KIND_FILE,
             fd.path,
@@ -153,7 +153,7 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     }
     for d in refs.dirs {
         out.push(PageRefEdge::new(
-            KIND_WORK_NOTE,
+            KIND_TASK_NOTE,
             note_id,
             KIND_DIRECTORY,
             d,
@@ -162,7 +162,7 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     }
     for w in refs.wikis {
         out.push(PageRefEdge::new(
-            KIND_WORK_NOTE,
+            KIND_TASK_NOTE,
             note_id,
             KIND_WIKI,
             w,
@@ -171,7 +171,7 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     }
     for t in refs.tasks {
         out.push(PageRefEdge::new(
-            KIND_WORK_NOTE,
+            KIND_TASK_NOTE,
             note_id,
             KIND_TASK,
             t.to_string(),
@@ -180,7 +180,7 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
-            KIND_WORK_NOTE,
+            KIND_TASK_NOTE,
             note_id,
             KIND_FINDING,
             f,
@@ -189,7 +189,7 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     }
     for c in refs.commits {
         out.push(PageRefEdge::new(
-            KIND_WORK_NOTE,
+            KIND_TASK_NOTE,
             note_id,
             KIND_GIT_COMMIT,
             c,

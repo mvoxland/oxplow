@@ -197,8 +197,8 @@ export const commands = {
 	listBacklog: () => typedError<Task[], IpcError>(__TAURI_INVOKE("list_backlog")),
 	// Bucketed backlog view: ready/blocked/in_progress/done.
 	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
-	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<WorkNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
-	listThreadNotes: (threadId: ThreadId) => typedError<WorkNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
+	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
+	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
 	listTaskEvents: (itemId: number | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
 	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
@@ -1363,6 +1363,19 @@ export type TaskEvent = {
  */
 export type TaskId = number;
 
+/**
+ *  A note attached to either a task or a thread (mutually exclusive —
+ *  enforced at the DB CHECK constraint).
+ */
+export type TaskNote = {
+	id: NoteId,
+	task_id: TaskId | null,
+	thread_id: ThreadId | null,
+	body: string,
+	author: string,
+	created_at: Timestamp,
+};
+
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
 export type TaskStatus = "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
@@ -1531,19 +1544,6 @@ export type WikiPageSearchHit = {
 	title: string,
 	snippet: string,
 	updated_at: Timestamp,
-};
-
-/**
- *  A note attached to either a task or a thread (mutually exclusive —
- *  enforced at the DB CHECK constraint).
- */
-export type WorkNote = {
-	id: NoteId,
-	task_id: TaskId | null,
-	thread_id: ThreadId | null,
-	body: string,
-	author: string,
-	created_at: Timestamp,
 };
 
 export type WorkspaceContext = {
