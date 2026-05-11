@@ -46,7 +46,7 @@ git operation (merge / rebase / cherry-pick / revert — i.e. when
 exists in the gitdir) are also exempt: the authored change is the
 merge commit itself, and conflict resolution would otherwise dead-
 lock against the filing rule. The `.context/` read rule still gets a
-soft pass for tiny mechanical edits — just don't skip the work item.
+soft pass for tiny mechanical edits — just don't skip the task.
 
 **Asking the user a question.** When your reply ends with a real
 clarifying question, A/B/C choice, or any ask where the user owns the
@@ -131,7 +131,7 @@ commits. The durable fix is a PostToolUse hook on `Edit`/`Write` that
 runs `rustfmt` + `cargo clippy --fix` against the touched crate.
 Until that's installed, run both manually each turn.
 
-## Work items are observational
+## tasks are observational
 
 Oxplow passively tracks active agent turns: each open `agent_turn` row
 (`ended_at IS NULL` and started after runtime boot) renders as a live
@@ -140,7 +140,7 @@ spinner. When the turn Stops, the row disappears. No synthesized work
 items, no auto-file/auto-complete, no adoption — you don't need to
 narrate turn boundaries.
 
-**File a durable work item before you start editing** (unless the
+**File a durable task before you start editing** (unless the
 change qualifies for the trivial-edit carve-out above). When you're
 about to change project files in a turn and you aren't already working
 against an existing item, file one with status `in_progress`. The item
@@ -148,7 +148,7 @@ should describe the real piece of work you're committing to ship, not
 a placeholder. When it's settled, call `complete_task` to ship an
 explicit summary.
 
-**Pick `create_work_item` (kind defaults to `task`) for one coherent
+**Pick `create_task` (kind defaults to `task`) for one coherent
 change**, even if it spans a few files. Use `file_epic_with_children`
 only when the work has ≥3 sub-steps a reviewer would naturally
 inspect independently — distinct phases, handoffs, or separable
@@ -163,17 +163,17 @@ rows.
 
 **Multiple independent asks in a single prompt → multiple tasks.**
 When the user packs two or more independent things into one message
-(e.g. "fix X. ALSO: do Y", "do A, then B"), file a separate work item
+(e.g. "fix X. ALSO: do Y", "do A, then B"), file a separate task
 for each one before starting work — even if you'll do them in the same
 turn. They are independent concerns by definition; a reviewer must be
 able to accept one and reject the other. Don't lump them under a
 single "do everything the user asked" task.
 
 **Every new ask gets its own item.** When the user sends a new request
-mid-turn, file a new work item rather than silently expanding the
+mid-turn, file a new task rather than silently expanding the
 current item's scope. The exception: if the new ask is genuinely a
 correction to the same concern (a fix/redo on something you just
-shipped to `done`), reopen that item — call `update_work_item`
+shipped to `done`), reopen that item — call `update_task`
 to flip it back to `in_progress`, redo the work, then `complete_task`
 back to `done`. Filing a "Fix what I just did" task
 fragments the history.
@@ -192,12 +192,12 @@ item and asks you to choose explicitly. Don't ignore it.
 
 **File backlog ideas as you have them.** When you notice a follow-up
 worth doing later — a deferred polish item, a TODO surfaced while
-finishing something else — file it as a `ready` work item right then.
+finishing something else — file it as a `ready` task right then.
 Don't bury follow-ups in prose at the end of a reply where they'll be
 forgotten. The backlog is the durable record; replies are not.
 
 The runtime handles the rest of the state machine for you: tasks
 persist across turn boundaries automatically, the Stop hook reminds
 you to audit `in_progress` items only when something actually changed,
-and the redo-detection hint on `create_work_item` flags when a new
+and the redo-detection hint on `create_task` flags when a new
 "Fix …" task probably belongs as a reopen instead.

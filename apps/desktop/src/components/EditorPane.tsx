@@ -25,7 +25,7 @@ interface Props {
   openFiles: Record<string, OpenFileState>;
   onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
   onRevealCommit?(sha: string): void;
-  onRevealWorkItem?(itemId: string): void;
+  onRevealWorkItem?(itemId: number): void;
   onCompareWithClipboard?(selection: string, path: string): void;
 }
 
@@ -825,7 +825,7 @@ function BlameOverlay({
   entries: LocalBlameEntry[];
   scrollTop: number;
   lineHeight: number;
-  onLocalClick(itemId: string): void;
+  onLocalClick(itemId: number): void;
   onGitClick(sha: string): void;
   /**
    * Open the git-blame menu for `sha`. `rect` is the bounding rect of the

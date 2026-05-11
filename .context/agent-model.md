@@ -31,7 +31,7 @@ messages — for example, the periodic "The task tools haven't been used
 recently; consider using TaskCreate" nudge. **Hooks can add context to
 a prompt but cannot edit existing system-reminders out**, so oxplow has
 no way to suppress these from the agent's view. Related asks (e.g.
-"don't nag about TaskCreate while a oxplow work item is in_progress")
+"don't nag about TaskCreate while a oxplow task is in_progress")
 require upstream Claude Code support; a oxplow-side "just inject a
 counter-instruction" workaround would leave both the nag and the
 counter-nag visible, which is worse than the status quo. If Claude
@@ -71,7 +71,7 @@ oxplow agent:
   …`". The runtime never invokes `git commit` and there are no
   queueable commit/wait point markers. The Stop-hook does not emit
   any commit-related directives.
-- **Work-item lifecycle.** Create → Stop-hook picks next ready item →
+- **task lifecycle.** Create → Stop-hook picks next ready item →
   agent marks `in_progress` → agent works → agent marks `done`
   when acceptance criteria are met. The user can reopen by flipping
   back to `in_progress`. Polling "is everything done?" treats `done`
@@ -143,7 +143,7 @@ to `runtime.handleHookEnvelope`, which:
    relaunches claude with `--resume <id>`.
 3. Drives effort-anchored snapshot flushes (see "Snapshot tracking"
    below). The runtime no longer tracks per-turn rows; snapshots and
-   per-effort attribution are anchored to `work_item_effort`.
+   per-effort attribution are anchored to `task_effort`.
 4. For `PreToolUse`: returns a deny response if `buildWriteGuardResponse`
    blocks the tool (read-only thread; see Write guard below) or if
    `buildFilingEnforcementPreToolDeny` blocks it (Edit / Write /
@@ -183,7 +183,7 @@ UserPromptSubmit fired) is treated as "unknown → don't suppress" so
 older tests / edge cases stay stable.
 
 **Awaiting-user gate.** A turn that *did* have qualifying tool
-activity (e.g. filed a work item) but ended with the agent asking the
+activity (e.g. filed a task) but ended with the agent asking the
 user a question still needs to stop cleanly — the Q&A short-circuit
 won't fire because activity ≠ false. The agent signals this
 explicitly via `mcp__oxplow__await_user({ threadId, question })`.
@@ -196,7 +196,7 @@ next UserPromptSubmit.
 in the PreToolUse hook (`buildFilingEnforcementPreToolDeny` in
 `crates/oxplow-runtime/src/filing.rs`), not the Stop hook. When the agent invokes
 Edit / Write / MultiEdit / NotebookEdit on a writer thread and the
-thread has no `in_progress` work item, the hook returns
+thread has no `in_progress` task, the hook returns
 `permissionDecision: "deny"` and the edit is rejected before it
 lands. The agent files an item at `in_progress` (or flips an existing
 ready row to `in_progress`) and re-issues the edit. **A `ready`-status
@@ -206,8 +206,8 @@ now. Earlier versions accepted "any filing call this turn" via a
 per-thread `filedThisTurn` flag; that let the agent create a ready
 row and quietly edit against it without ever transitioning. The
 `hasInProgressItem` predicate is now computed live from the
-work-item store on each PreToolUse, so a `create_work_item` /
-`update_work_item` / `transition_work_items` that lands at
+task store on each PreToolUse, so a `create_task` /
+`update_task` / `transition_tasks` that lands at
 `in_progress` is reflected immediately. Bash is **excluded** — shell
 commands routinely mutate the worktree as a side effect (`git
 merge`, `git pull`, codegen, formatters) without representing
@@ -273,7 +273,7 @@ broadened framing — wiki ≠ codebase-only.
 
 The pipeline runs in priority order:
 
-1. **Writer thread with `in_progress` work items.** Block with the audit
+1. **Writer thread with `in_progress` tasks.** Block with the audit
    directive built by `buildInProgressAuditStopReason` — lists every
    `in_progress` item on the thread (id + title) and instructs the agent
    to reconcile each: still active → leave alone; acceptance criteria met
@@ -285,7 +285,7 @@ The pipeline runs in priority order:
    (`lastAuditSignatureByThread`, signature = sorted
    `id|updated_at` over the in_progress set) of the last set
    it audited. On the next Stop, if the current signature matches the
-   recorded one — same items, no `update_work_item` /
+   recorded one — same items, no `update_task` /
    `complete_task` (which bumps `updated_at`) — the directive is
    suppressed. Any
    change re-arms the audit. This stops the tight ack-loop where the
@@ -293,7 +293,7 @@ The pipeline runs in priority order:
    nudge → same answer, costing the user a wall of repeated lines and
    model tokens. See wi-c468e8fc093d.
 2. **Filed-but-didn't-ship advisory.** Fires when the turn filed at
-   least one new `ready` work item, made zero project edits, and has
+   least one new `ready` task, made zero project edits, and has
    nothing `in_progress` — the "user said do X, agent logged it as
    backlog and stopped" misread. Same dedup pattern as the audit
    branch: a per-thread `filedButDidntShipFiredByThread` flag is set
@@ -316,7 +316,7 @@ no Stop-hook directive that pushes the agent onto the next ready work
 item. When the agent finishes its current obligations and Stops, it
 stops — the user resumes queue work by typing a prompt or running the
 plugin-emitted `/work-next` slash command (which calls
-`read_work_options` and dispatches to a `general-purpose` subagent per
+`read_task_options` and dispatches to a `general-purpose` subagent per
 the `oxplow-runtime` skill).
 
 **Subagent-in-flight carve-out.** The runtime tracks per-thread `Task`
@@ -334,18 +334,18 @@ summary, moveItemIds? })` — one transaction that:
 
 1. Creates a new thread on the same stream, status `queued` (never
    auto-writer — promote explicitly if you want it to commit).
-2. Seeds the new thread with a single `note`-kind work item titled
+2. Seeds the new thread with a single `note`-kind task titled
    "Context from fork" whose description is the caller-supplied
    `summary` (no schema change — the `note` kind already exists on
-   `work_items`).
+   `tasks`).
 3. Optionally moves each `moveItemIds` entry over via
-   `WorkItemStore.moveItemToThread`. Items must currently be `ready` or
+   `taskstore.moveItemToThread`. Items must currently be `ready` or
    `blocked` on the source thread; `in_progress` / terminal items are
    rejected with an error listing the offenders so
    the caller can settle them first.
 4. For each moved item, copies its last 3 notes (by `created_at DESC`,
    re-inserted in chronological order) as fresh rows on the same item
-   id via `WorkItemStore.copyLastItemNotes`. Source rows are untouched.
+   id via `taskstore.copyLastItemNotes`. Source rows are untouched.
    Items with fewer than 3 notes copy all; items with none are no-ops.
    The user landing in the forked thread sees decisions/rationale
    carried over rather than a bare title.
@@ -358,21 +358,21 @@ is just a thin surface.
 
 The thread agent is a long-lived process that must stay context-lean
 across a work queue that could span dozens of items. Every file change
-is filed as a work item first (traceability IS the point — local
+is filed as a task first (traceability IS the point — local
 history attributes snapshots back to the sole in-progress item). Past
 that, the orchestrator has two modes:
 
 1. **Inline small-fix shortcut.** For mechanical, low-risk changes (≤
    ~20 lines across ≤ 2 files — test fixtures, import cleanup, label
    renames), the orchestrator does the Read/Edit/Bash directly under
-   the work item. Mark `in_progress`, edit, run tests, mark
+   the task. Mark `in_progress`, edit, run tests, mark
    `done`. Snapshots still fire with correct attribution; we
    just skip the subagent round-trip.
 2. **Subagent dispatch for bigger work.** For multi-file/multi-step/
    risky changes, the orchestrator calls `oxplow__read_work_options`,
    launches one `general-purpose` subagent with the brief, and
    closes the item via `complete_task` (whose `summary` lands on the
-   matching `work_item_effort.summary` row). Subagents run in isolated
+   matching `task_effort.summary` row). Subagents run in isolated
    context windows — their tokens don't count against the orchestrator,
    so main context stays flat regardless of queue depth.
 
@@ -388,7 +388,7 @@ one item, not four). Claude Code's built-in `TaskCreate` is a
 within-turn micro-planner and never mirrors oxplow items.
 
 `oxplow__read_work_options` (defined in `crates/oxplow-mcp/src/lib.rs`, backed by
-`WorkItemStore.readWorkOptions`) returns one of three shapes:
+`taskstore.readWorkOptions`) returns one of three shapes:
 - `{ mode: "epic", epic, children }` — the highest-priority ready item is
   an epic; all ready descendants (filtered for blocks links, transitively)
   are included as children. Dispatch the entire epic as one unit.
@@ -397,7 +397,7 @@ within-turn micro-planner and never mirrors oxplow items.
   pick one or a link-related cluster. Epics are excluded from this list.
 - `{ mode: "empty" }` — nothing ready; allow stop.
 
-`read_work_options` is the dispatch unit: the agent (or the user, via
+`read_task_options` is the dispatch unit: the agent (or the user, via
 `/work-next`) calls it and dispatches the returned cluster to a
 `general-purpose` subagent. The grouping (epic-as-unit vs standalone
 items) lives in the tool, not the caller.
@@ -407,16 +407,16 @@ primary tool for queue-driven dispatch.
 
 ## MCP tools
 
-`buildWorkItemMcpTools` (`crates/oxplow-mcp/src/lib.rs`) registers the agent's
+`buildTaskMcpTools` (`crates/oxplow-mcp/src/lib.rs`) registers the agent's
 tool surface. Internally each `ToolDef.name` carries an `oxplow__`
 prefix (historical), but `crates/oxplow-mcp/src/lib.rs` strips that prefix at the
 `tools/list` boundary via `exposedToolName` so the harness sees clean
-names like `create_work_item`. With the harness's own `mcp__oxplow__`
-namespace on top, the agent calls `mcp__oxplow__create_work_item` —
-not the legacy `mcp__oxplow__oxplow__create_work_item`. The long form
+names like `create_task`. With the harness's own `mcp__oxplow__`
+namespace on top, the agent calls `mcp__oxplow__create_task` —
+not the legacy `mcp__oxplow__oxplow__create_task`. The long form
 still resolves on `tools/call` for back-compat.
 
-The default `kind` for `create_work_item` is `"task"` — omit it
+The default `kind` for `create_task` is `"task"` — omit it
 unless you specifically need an epic/subtask/bug/note. Forcing the
 field on every call produced a guaranteed first-call failure for
 trivial fixes.
@@ -435,18 +435,18 @@ constraint failed` into something actionable. Add the same call at
 the top of any new tool handler — see the `IdKind` enum in
 `crates/oxplow-domain/src/ids.rs` for the canonical list.
 
-`update_work_item` accepts `blocked → in_progress` directly (deliberate
+`update_task` accepts `blocked → in_progress` directly (deliberate
 unblock gesture; no separate hop through `ready` required). Only
 terminal states (`done`/`canceled`/`archived`) still require an
 intermediate `ready` step.
 
 - `get_batch_context`, `list_batch_work`,
-  `list_ready_work`, `read_work_options`, `create_work_item`, `update_work_item`,
-  `get_work_item`, `delete_work_item`, `reorder_work_items`,
-  `link_work_items`, `list_recent_file_changes`,
-  `dispatch_work_item`, `file_epic_with_children`, `complete_task`,
-  `transition_work_items`
-- `dispatch_work_item({ threadId, itemId, extraContext?, autoStart? })` composes
+  `list_ready_work`, `read_task_options`, `create_task`, `update_task`,
+  `get_task`, `delete_task`, `reorder_tasks`,
+  `link_tasks`, `list_recent_file_changes`,
+  `dispatch_task`, `file_epic_with_children`, `complete_task`,
+  `transition_tasks`
+- `dispatch_task({ threadId, itemId, extraContext?, autoStart? })` composes
   a subagent brief server-side (preamble + item fields + children + last notes
   + optional extra context) so the orchestrator doesn't have to Read the item
   description/AC/notes into chat context. Default `autoStart=true` atomically
@@ -466,7 +466,7 @@ intermediate `ready` step.
   follow-up reminders. No DB row, lost on runtime restart. Surfaces as
   italic muted "↳ follow-up: …" lines at the top of the To Do section
   in the Work panel. Use when you defer a sub-ask mid-turn that doesn't
-  warrant a full `create_work_item`. Always call `remove_followup` in
+  warrant a full `create_task`. Always call `remove_followup` in
   the same turn you handle it. Never file both a follow-up and a real
   task for the same concern. NOT exposed to subagents — the dispatch
   brief deliberately omits any mention of follow-ups so subagents can't
@@ -485,19 +485,19 @@ queries (definition, references, hover) the agent can use without
 shelling out.
 
 **Unified backlinks graph (`list_backlinks` / `list_outbound`).** Every
-page kind — wiki, work-item, file, commit, finding, directory — lives
+page kind — wiki, task, file, commit, finding, directory — lives
 in one persisted edge table (`page_ref`; see
 [data-model.md](./data-model.md)). The two MCP tools query both
 directions of any edge:
 
 - `list_backlinks({ kind, id, limit? })` — pages pointing AT
   `(kind, id)`. Use this for cross-kind backlinks of any sort:
-  "what work-items / commits / wiki pages reference src/foo.rs?",
+  "what tasks / commits / wiki pages reference src/foo.rs?",
   "who links to wi-42?", "what mentions finding:fnd-1?".
 - `list_outbound({ kind, id, limit? })` — what `(kind, id)` itself
   points at.
 
-Canonical id shapes: `wiki:<slug>` uses just the slug; `work-item`
+Canonical id shapes: `wiki:<slug>` uses just the slug; `task`
 uses the full `wi-…` id; `file` uses the bare repo-relative path;
 `directory` the bare path with no trailing slash; `git-commit` the
 full sha; `finding` the rowid as a string. Each row carries
@@ -586,7 +586,7 @@ calls `startMcpServer` again so the rebuilt tool registrations and a
 fresh TCP port + lockfile are live.
 
 **Known limitation.** ESM caches imported modules by URL, so
-re-invoking `buildWorkItemMcpTools` returns the *same* in-memory
+re-invoking `buildTaskMcpTools` returns the *same* in-memory
 module graph — an edit to handler source still needs a full runtime
 restart to actually pick up new logic. The watcher still has value: it
 logs the triggering file loudly so the dev knows a restart is due,
@@ -616,7 +616,7 @@ A few system-reminders come from the Claude Code harness itself, not
 oxplow hooks, and are **not suppressible** from the plugin side:
 
 - "The task tools haven't been used recently…" — harness nudge about
-  `TaskCreate`/`TaskUpdate`. Noise in oxplow projects where work items
+  `TaskCreate`/`TaskUpdate`. Noise in oxplow projects where tasks
   live in `mcp__oxplow__*` tools instead. No hook, env var, or plugin
   config lets us silence it; it fires on its own schedule. If a future
   Claude Code release exposes a suppression hook, revisit wi-2a0262ae2ac2.
@@ -795,10 +795,10 @@ snapshot id. Mechanics:
   previous snapshot.
 - Snapshots are anchored to **efforts**, not turns. A status
   transition into `in_progress` flushes a `task-start` snapshot and
-  records its id on `work_item_effort.start_snapshot_id`. Any move
+  records its id on `task_effort.start_snapshot_id`. Any move
   *out* of `in_progress` (done / blocked / ready / canceled /
   archived) flushes a `task-end` snapshot recorded on
-  `work_item_effort.end_snapshot_id`, subject to the 5-minute gap
+  `task_effort.end_snapshot_id`, subject to the 5-minute gap
   rule: when the stream's most recent snapshot is younger than
   `END_SNAPSHOT_MIN_GAP_MS`, the flush is skipped and
   `end_snapshot_id` is left null. Both task-start and task-end are
@@ -811,15 +811,15 @@ snapshot id. Mechanics:
   while the app was down, `version_hash` dedup returns the existing
   snapshot and no new row is written; otherwise a fresh one is
   recorded so the "changes during downtime" are visible.
-- On work-item status transitions, `handleStatusTransition` (and the
+- On task status transitions, `handleStatusTransition` (and the
   pure `applyStatusTransition` helper it delegates to) runs. A
   transition *into* `in_progress` flushes `source: "task-start"` and
-  opens a new `work_item_effort` row pointing at it; a transition
+  opens a new `task_effort` row pointing at it; a transition
   *out of* `in_progress` (to `done`, `canceled`, `blocked`, etc.)
   flushes `source: "task-end"` and closes the effort.
   Re-entering `in_progress` creates a second effort — efforts are a
   per-cycle record, not a single lifetime span. A DB-level UNIQUE
-  partial index on `work_item_effort(work_item_id) WHERE ended_at IS
+  partial index on `task_effort(task_id) WHERE ended_at IS
   NULL` enforces "at most one open effort per item."
 - Effort close enforces a **5-minute minimum gap**: if the latest
   snapshot is fresher than `END_SNAPSHOT_MIN_GAP_MS`, the close path
@@ -827,13 +827,13 @@ snapshot id. Mechanics:
   near-identical states. The effort's `end_snapshot_id` may be left
   null in that case.
 - Effort-level diffs come from
-  `getSnapshotPairDiff(work_item_effort.start_snapshot_id,
-  work_item_effort.end_snapshot_id, path)` and the analogous
+  `getSnapshotPairDiff(task_effort.start_snapshot_id,
+  task_effort.end_snapshot_id, path)` and the analogous
   `getSnapshotSummary` call, exposed to the UI via
-  `workItemApi.listWorkItemEfforts`.
+  `taskApi.listTaskEfforts`.
 
 See [data-model.md](./data-model.md) for the `file_snapshot` and
-`work_item_effort` schemas, and
+`task_effort` schemas, and
 [ipc-and-stores.md](./ipc-and-stores.md) for the `file-snapshot.created`
 EventBus event and the snapshot/effort IPC methods.
 
@@ -843,18 +843,18 @@ Snapshot pair-diffs over-report when two subagents edit the same worktree
 in parallel: both efforts share the same window, so each shows the
 union. To attribute writes correctly the agent declares its touched
 files on the status transition that closes the effort; the runtime
-stores them in `work_item_effort_file` (see data-model.md).
+stores them in `task_effort_file` (see data-model.md).
 
-**Agent-declared payload.** When calling `update_work_item` or
+**Agent-declared payload.** When calling `update_task` or
 `complete_task` to close an effort, the agent passes
 `touchedFiles: string[]` — the repo-relative paths it wrote or edited
 during this effort. `applyStatusTransition` (in `crates/oxplow-runtime/src/lib.rs`) captures
 the open effort id, flushes the task-end snapshot, closes the effort,
-and then inserts `work_item_effort_file` rows for each deduped path
+and then inserts `task_effort_file` rows for each deduped path
 via `INSERT OR IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100
 paths) drop all rows, so the "assume all" fallback engages in
 `computeEffortFiles`. The PostToolUse hook no longer writes to
-`work_item_effort_file`; the previous active-effort heuristic was
+`task_effort_file`; the previous active-effort heuristic was
 unreliable whenever ≥2 efforts were in_progress (the common case the
 log is meant to cover).
 
@@ -864,7 +864,7 @@ currently open for the item. A `touchedFiles` payload on a plain
 metadata update or on an already-closed item is accepted by the
 schema but silently ignored — there's no effort row to attach it to.
 
-**File-and-close shortcut.** `create_work_item` also accepts
+**File-and-close shortcut.** `create_task` also accepts
 `touchedFiles`. When the caller asks for `status: "done"` or
 `"blocked"` AND passes `touchedFiles`, the MCP handler files the row
 at `ready`, then runs `ready → in_progress → <target>` under the
@@ -878,19 +878,19 @@ that case.
 closed an item to `done` on the thread that's submitting a new
 prompt, the UserPromptSubmit hook injects a `<recent-done-reminder>`
 block into `additionalContext` pointing at the item and spelling out
-the reopen flow (`update_work_item → in_progress → redo →
+the reopen flow (`update_task → in_progress → redo →
 complete_task`). This fires even when the agent never touches
-`create_work_item` next turn — the most reliable failure mode was the
+`create_task` next turn — the most reliable failure mode was the
 agent investigating/reverting in-place on a correction without
 recording a new effort. See `buildRecentDoneReminder` in
 `crates/oxplow-app/src/lib.rs` and the wiring in `handleHookEnvelope`'s
 `UserPromptSubmit` branch. Window is 15 minutes by default.
 
-**Redo-hint on `create_work_item`.** When the caller files a new row
+**Redo-hint on `create_task`.** When the caller files a new row
 on a thread that has an agent-authored `done` item closed within the
 last 10 minutes, the response carries a `redoHint` field pointing at
 that item and telling the agent to consider reopening
-(`update_work_item → in_progress`) instead of filing the new task.
+(`update_task → in_progress`) instead of filing the new task.
 This is a soft nudge — the create still succeeds, because a
 genuinely separate concern *should* get its own row. The heuristic
 just makes the reopen path impossible to miss when the most common
@@ -904,12 +904,12 @@ snapshot `S`:
 
 - 0 efforts end at S → single "External Change" / source-labelled row
   (unchanged from pre-write-log behaviour).
-- 1 effort ends at S → one row labelled with the work item title;
+- 1 effort ends at S → one row labelled with the task title;
   detail pane uses `getEffortFiles(effortId)`, which short-circuits to
   the raw pair-diff.
 - ≥2 efforts end at S → one row per effort, each labelled with its
-  work item title; detail panes call `getEffortFiles(effortId)`. If
-  the effort has ≥1 `work_item_effort_file` row the pair-diff is
+  task title; detail panes call `getEffortFiles(effortId)`. If
+  the effort has ≥1 `task_effort_file` row the pair-diff is
   filtered to those paths; if it has 0 rows (agent skipped the
   `touchedFiles` payload, or list exceeded the cap) we fall back to
   the raw pair-diff — better to over-report than silently show empty.
@@ -921,11 +921,11 @@ pattern as `get_snapshot_summary`.
 
 ## Task lifecycle
 
-Tasks (`work_item` rows) are the user-visible primitive. The Work
-panel's in_progress bucket is driven purely by `work_item` rows —
+Tasks (`task` rows) are the user-visible primitive. The Work
+panel's in_progress bucket is driven purely by `task` rows —
 there are no synthesized "live turn" rows, no auto-file /
 auto-complete / adoption. Per-effort attribution and snapshots are
-anchored to `work_item_effort`, which the runtime opens/closes on
+anchored to `task_effort`, which the runtime opens/closes on
 status transitions.
 
 Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
@@ -961,7 +961,7 @@ task-shaped branch on the writer thread:
 There is intentionally no ready-work branch — cross-turn queue
 progression is user-driven (a plain prompt, or `/work-next` shipped
 via the plugin). If a turn spawns real follow-up work, the agent
-calls `mcp__oxplow__create_work_item` /
+calls `mcp__oxplow__create_task` /
 `file_epic_with_children`.
 
 ## Related

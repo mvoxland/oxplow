@@ -29,7 +29,7 @@ interface Props {
    *  the token to request a new selection even if the id repeats. */
   revealSnapshotId?: { snapshotId: string; token: number } | null;
   /** Open the given work item in the edit modal (switching tool windows). */
-  onRequestEditWorkItem?(itemId: string): void;
+  onRequestEditWorkItem?(itemId: number): void;
 }
 
 export function SnapshotsPanel({ stream, onOpenDiff, revealSnapshotId, onRequestEditWorkItem }: Props) {
@@ -600,7 +600,7 @@ function DetailPane({
   onOpenFileDiff(path: string): void;
   onRestore(path: string): void;
   workItemId: string | null;
-  onOpenWorkItem?(itemId: string): void;
+  onOpenWorkItem?(itemId: number): void;
 }) {
   if (loading && !summary) {
     return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>Loading…</div>;

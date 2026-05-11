@@ -19,7 +19,7 @@ authoritative list lives in
 | Save active file | `Cmd+S` | `Ctrl+S` |
 | Quick open (file + page picker) | `Cmd+P` | `Ctrl+P` |
 | Find in current editor | `Cmd+F` | `Ctrl+F` |
-| File new work item (in plan view) | `Cmd+Shift+N` | `Ctrl+Shift+N` |
+| File new task (in plan view) | `Cmd+Shift+N` | `Ctrl+Shift+N` |
 
 `Cmd+P` opens the QuickOpen overlay — fuzzy-match across files
 in the active stream's worktree plus oxplow's named pages (Plan
@@ -57,7 +57,7 @@ Standard Monaco bindings apply. The most-used:
 LSP go-to-definition / hover / references all flow through the
 oxplow LSP bridge — same servers the agent calls via MCP.
 
-## Work items (Plan / Backlog / Done / Archived pages)
+## tasks (Plan / Backlog / Done / Archived pages)
 
 | Action | Key |
 |---|---|
@@ -84,12 +84,12 @@ discoverability over chord memorization.
 
 ## Drop targets
 
-When you drag a file, work item, or rail entry, the target zone
+When you drag a file, task, or rail entry, the target zone
 highlights as you drag. Drop highlighting is *the* signal that a
 drop will work — if you don't see a highlight, the drop isn't
 supported there.
 
-The agent terminal accepts drag-to-add-context from work-item
+The agent terminal accepts drag-to-add-context from task
 rows, file rows, the rail's recent-files / active item / up-next
 lists, backlinks entries, and code-quality file groups.
 

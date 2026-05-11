@@ -1,6 +1,6 @@
 # Local History
 
-Every time the agent works on a work item, oxplow snapshots
+Every time the agent works on a task, oxplow snapshots
 the files it touches — before and after. The collected
 snapshots are **Local History**: a per-file, per-effort
 timeline, independent of git, that lets you see exactly what
@@ -21,7 +21,7 @@ Snapshots are stored under `.oxplow/` and attributed to the
 
 ## Effort
 
-An effort is one open-and-close cycle of a work item. If you
+An effort is one open-and-close cycle of a task. If you
 flip a `done` item back to `in_progress` to redo it, that
 opens a *second* effort on the same item. The Local History
 page groups snapshots by effort, so you can see the full
@@ -29,7 +29,7 @@ history of attempts against a single concern.
 
 When the agent closes an item, it passes the list of
 repo-relative paths it edited, so attribution is precise even
-when multiple work items run in parallel. If that list is
+when multiple tasks run in parallel. If that list is
 omitted, oxplow falls back to "assume all" (every file modified
 during the effort).
 
@@ -39,11 +39,11 @@ during the effort).
   (project-wide, grouped by item).
 - Right-click a file → **Local History** (filtered to that
   file).
-- A work item's kebab → **Local History** (every file the
+- A task's kebab → **Local History** (every file the
   efforts on that item touched).
 
 The page shows a chronological list. Each row is a snapshot:
-file path, timestamp, effort it belongs to, and the work item
+file path, timestamp, effort it belongs to, and the task
 title.
 
 ## Comparing and restoring

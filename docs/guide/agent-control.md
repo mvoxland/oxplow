@@ -28,14 +28,14 @@ Oxplow's response decides whether the agent gets to stop or has
 to keep working. The pipeline runs in priority order:
 
 1. **Q&A short-circuit.** If the turn had no qualifying tool
-   activity (no edits, no work-item filing, no dispatch), the
+   activity (no edits, no task filing, no dispatch), the
    agent answered or asked a question and is allowed to stop.
    Every directive is suppressed.
 2. **Awaiting-user gate.** If the agent has flagged that it is
    waiting on the user, the runtime allows the stop and
    suppresses every directive until the user replies.
 3. **In-progress audit.** If the writer thread has any
-   `in_progress` work items, the runtime blocks with an audit
+   `in_progress` tasks, the runtime blocks with an audit
    directive: reconcile each item — still active → leave alone;
    acceptance criteria met → close it; stuck → mark `blocked`;
    obsolete → mark `canceled`. A signature dedup prevents the
@@ -54,7 +54,7 @@ slash command (which dispatches the next ready cluster).
 
 When the agent invokes `Edit` / `Write` / `MultiEdit` /
 `NotebookEdit` on the writer thread without an `in_progress`
-work item, the hook denies the edit before it lands. The agent
+task, the hook denies the edit before it lands. The agent
 files an item at `in_progress` (or flips an existing `ready`
 row) and re-issues the edit.
 
@@ -85,7 +85,7 @@ output, not authored project change.
 
 ## MCP control plane
 
-Oxplow exposes its primitives over MCP — work items, dispatch,
+Oxplow exposes its primitives over MCP — tasks, dispatch,
 threads, follow-ups, wiki pages, LSP — so the agent can drive
 them directly without raw shell escapes. Each thread gets its
 own MCP endpoint scoped to that thread, so tool calls implicitly

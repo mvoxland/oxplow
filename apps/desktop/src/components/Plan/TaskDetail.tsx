@@ -31,7 +31,7 @@ export interface TaskDetailChanges {
   title?: string;
   description?: string;
   acceptanceCriteria?: string | null;
-  parentId?: string | null;
+  parentId?: number | null;
   status?: TaskStatus;
   priority?: TaskPriority;
   /** Backlog grooming bucket. Pass `null` to clear, omit to keep. */
@@ -61,7 +61,7 @@ export function TaskDetail({
   headerActions,
 }: {
   item: Task;
-  onUpdateWorkItem: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateWorkItem: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onRequestDelete(): void;
   /** Optional buttons rendered before Delete in the header row. */
   headerActions?: ReactNode;

@@ -77,8 +77,8 @@ export function TaskGroupList({
 }: {
   group: WorkItemGroup;
   scopeThreadId: string | null;
-  onUpdateWorkItem: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
-  onReorderWorkItems: (orderedItemIds: string[]) => Promise<void>;
+  onUpdateWorkItem: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onReorderWorkItems: (orderedItemIds: number[]) => Promise<void>;
   onReorderMixed?(entries: Array<{ id: string }>): void;
   onOpenMenu(rect: DOMRect, item: Task): void;
   /** Per-section action buttons (right-aligned in each section header).
@@ -91,7 +91,7 @@ export function TaskGroupList({
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
   epicChildrenMap: Map<string, Task[]>;
-  onReparentWorkItem: (itemId: string, newParentId: string | null) => Promise<void>;
+  onReparentWorkItem: (itemId: number, newParentId: string | null) => Promise<void>;
   onAddChildTask?: (epicId: string) => void;
   isActive?: boolean;
   /** Live agent state for this thread, used to drive the In Progress
@@ -816,7 +816,7 @@ function EpicInlineRow({
   lockInProgress?: boolean;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
-  onUpdateWorkItem: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateWorkItem: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;
@@ -897,8 +897,8 @@ function EpicChildrenPane({
   epicId: string;
   children: Task[];
   onReorderWorkItems(ids: string[]): Promise<void>;
-  onReparentWorkItem(itemId: string, newParentId: string | null): Promise<void>;
-  onUpdateWorkItem(itemId: string, changes: TaskDetailChanges): Promise<void>;
+  onReparentWorkItem(itemId: number, newParentId: string | null): Promise<void>;
+  onUpdateWorkItem(itemId: number, changes: TaskDetailChanges): Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   scopeThreadId: string | null;
   onRequestEdit?(item: Task): void;
@@ -1069,7 +1069,7 @@ function InlineItemRow({
   lockInProgress?: boolean;
   onSelect?(id: string, modifiers?: { toggle?: boolean; range?: boolean }): void;
   onRequestEdit?(item: Task): void;
-  onUpdateWorkItem: (itemId: string, changes: TaskDetailChanges) => Promise<void>;
+  onUpdateWorkItem: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onOpenMenu(rect: DOMRect, item: Task): void;
   onDragStart(event: React.DragEvent): void;
   onDragEnd(event: React.DragEvent): void;

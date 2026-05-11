@@ -21,7 +21,7 @@ The core loop works:
 - **Commit and wait points.** A shared timeline so a "wait until commit X lands" dependency is a real, durable thing instead of a sticky note.
 - **Local History.** Every agent turn captures snapshots of what it touched. Rolling back a bad turn doesn't require `git reflog` heroics -- you pick the snapshot and restore.
 - **Editor pane.** Monaco with blame, diff view, and an LSP bridge for the languages I had handy. It's not VS Code; it's the surface I needed for reviewing what an agent just did.
-- **MCP tool surface.** The agent talks to Oxplow over MCP -- filing work items, recording findings, requesting commits. The toolset is small on purpose.
+- **MCP tool surface.** The agent talks to Oxplow over MCP -- filing tasks, recording findings, requesting commits. The toolset is small on purpose.
 - **Notes.** A lightweight wiki-link space for the durable knowledge that doesn't belong in a commit message.
 
 ## Where it stands

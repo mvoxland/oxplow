@@ -927,11 +927,10 @@ export function App() {
   }
 
   async function handleCreateTask(input: {
-    kind: "epic" | "task" | "subtask" | "bug" | "note";
     title: string;
     description?: string;
     acceptanceCriteria?: string | null;
-    parentId?: string | null;
+    parentId?: number | null;
     status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
     priority?: "low" | "medium" | "high" | "urgent";
   }) {
@@ -946,13 +945,13 @@ export function App() {
     }
   }
 
-  async function handleUpdateWorkItem(
-    itemId: string,
+  async function handleUpdateTask(
+    itemId: number,
     changes: {
       title?: string;
       description?: string;
       acceptanceCriteria?: string | null;
-      parentId?: string | null;
+      parentId?: number | null;
       status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
       priority?: "low" | "medium" | "high" | "urgent";
     },
@@ -968,7 +967,7 @@ export function App() {
     }
   }
 
-  async function handleDeleteWorkItem(itemId: string) {
+  async function handleDeleteWorkItem(itemId: number) {
     if (!stream || !selectedThread) return;
     try {
       const next = await deleteTask(stream.id, selectedThread.id, itemId);
@@ -980,7 +979,7 @@ export function App() {
     }
   }
 
-  async function handleReorderWorkItems(orderedItemIds: string[]) {
+  async function handleReorderWorkItems(orderedItemIds: number[]) {
     if (!stream || !selectedThread) return;
     try {
       const next = await reorderTasks(stream.id, selectedThread.id, orderedItemIds);
@@ -992,7 +991,7 @@ export function App() {
     }
   }
 
-  async function handleMoveWorkItemToThread(itemId: string, fromThreadId: string, toThreadId: string) {
+  async function handleMoveWorkItemToThread(itemId: number, fromThreadId: string, toThreadId: string) {
     if (!stream || fromThreadId === toThreadId) return;
     try {
       const { from, to } = await moveTaskToThread(stream.id, fromThreadId, itemId, toThreadId);
@@ -1004,7 +1003,7 @@ export function App() {
     }
   }
 
-  async function handleMoveItemToBacklog(itemId: string, fromThreadId: string) {
+  async function handleMoveItemToBacklog(itemId: number, fromThreadId: string) {
     if (!stream) return;
     try {
       const { from, backlog } = await moveTaskToBacklog(stream.id, fromThreadId, itemId);
@@ -1017,7 +1016,7 @@ export function App() {
     }
   }
 
-  async function handleMoveBacklogItemToThread(itemId: string, toThreadId: string) {
+  async function handleMoveBacklogItemToThread(itemId: number, toThreadId: string) {
     if (!stream) return;
     try {
       const { backlog, to } = await moveBacklogItemToThread(stream.id, itemId, toThreadId);
@@ -1030,7 +1029,7 @@ export function App() {
     }
   }
 
-  async function handleUpdateBacklogItem(itemId: string, changes: Parameters<typeof updateBacklogItem>[1]) {
+  async function handleUpdateBacklogItem(itemId: number, changes: Parameters<typeof updateBacklogItem>[1]) {
     try {
       const next = await updateBacklogItem(itemId, changes);
       setBacklogState(next);
@@ -1041,7 +1040,7 @@ export function App() {
     }
   }
 
-  async function handleDeleteBacklogItem(itemId: string) {
+  async function handleDeleteBacklogItem(itemId: number) {
     try {
       const next = await deleteBacklogItem(itemId);
       setBacklogState(next);
@@ -1052,7 +1051,7 @@ export function App() {
     }
   }
 
-  async function handleReorderBacklog(orderedItemIds: string[]) {
+  async function handleReorderBacklog(orderedItemIds: number[]) {
     try {
       const next = await reorderBacklog(orderedItemIds);
       setBacklogState(next);
@@ -1122,7 +1121,7 @@ export function App() {
     return out;
   }, [streams, threadStates]);
 
-  async function handleDropWorkItemOnStream(targetStreamId: string, itemId: string, fromThreadId: string | null) {
+  async function handleDropWorkItemOnStream(targetStreamId: string, itemId: number, fromThreadId: string | null) {
     if (!stream || !fromThreadId) return;
     const toThreadId = streamActiveThreadIds[targetStreamId];
     if (!toThreadId || toThreadId === fromThreadId) return;
@@ -1557,7 +1556,7 @@ export function App() {
   // Reset to direct when the active thread changes (the old TerminalPane
   // had this behavior via a useEffect on paneTarget).
   const [agentTransportMode, setAgentTransportMode] = useState<"direct" | "tmux">("direct");
-  const [planEditRequest, setPlanEditRequest] = useState<{ itemId: string; token: number } | null>(null);
+  const [planEditRequest, setPlanEditRequest] = useState<{ itemId: number; token: number } | null>(null);
   // Imperative shortcut for opening the New-Task modal. When PlanPane is
   // mounted it registers its openCreateModal here; the menu handler can
   // call this ref directly instead of going through setState + useEffect.
@@ -1846,7 +1845,7 @@ export function App() {
     handleOpenPage(gitCommitRef(sha));
   };
 
-  const handleRequestEditTask = (itemId: string) => {
+  const handleRequestEditTask = (itemId: number) => {
     const token = Date.now();
     handleOpenPage(indexRef("tasks"));
     setPlanEditRequest({ itemId, token });
@@ -2770,7 +2769,7 @@ export function App() {
           threadWork: selectedThreadWork,
           agentStatus: agentThreadStatus,
           backlog: backlogState,
-          onUpdateWorkItem: handleUpdateWorkItem,
+          onUpdateWorkItem: handleUpdateTask,
           onDeleteWorkItem: handleDeleteWorkItem,
           onReorderWorkItems: handleReorderWorkItems,
           onUpdateBacklogItem: handleUpdateBacklogItem,
@@ -2779,9 +2778,9 @@ export function App() {
           onMoveItemToBacklog: handleMoveItemToBacklog,
           editRequest: planEditRequest,
           registerOpenCreate: (fn: () => void) => { planOpenCreateRef.current = fn; },
-          onOpenNewWorkItemPage: (payload: { parentId?: string | null }) =>
+          onOpenNewWorkItemPage: (payload: { parentId?: number | null }) =>
             navOpen(newTaskRef(payload)),
-          onOpenWorkItemPage: (itemId: string) => navOpen(taskRef(itemId)),
+          onOpenWorkItemPage: (itemId: number) => navOpen(taskRef(itemId)),
         };
         const labelByKind: Record<string, string> = {
           "tasks": "Tasks",
@@ -3001,7 +3000,7 @@ export function App() {
         });
       } else if (ref.kind === "new-task") {
         const payload = (ref.payload as {
-          parentId?: string | null;
+          parentId?: number | null;
           initialCategory?: string | null;
           initialPriority?: string | null;
         } | null) ?? {};

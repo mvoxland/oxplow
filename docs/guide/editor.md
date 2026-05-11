@@ -1,7 +1,7 @@
 # Editor and pages
 
 The center of the window is a stack of **page tabs**. Most
-pages are one of: file, diff, work item, wiki page,
+pages are one of: file, diff, task, wiki page,
 code-quality finding, dashboard, settings, agent terminal, or
 a panel-style index page (Files, Notes, Code quality, Local
 history, Git history, etc.).

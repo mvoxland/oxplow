@@ -21,7 +21,7 @@ interface Props {
   onOpenStreamSettings?(streamId: string): void;
   /** Open the New-stream page (replaces the in-rail modal when wired). */
   onOpenNewStreamPage?(): void;
-  onDropWorkItemOnStream?(targetStreamId: string, itemId: string, fromThreadId: string | null): void;
+  onDropWorkItemOnStream?(targetStreamId: string, itemId: number, fromThreadId: string | null): void;
   onReorderStreams?(orderedStreamIds: string[]): Promise<void> | void;
   /** Bumping this number opens the New-stream page via
    *  `onOpenNewStreamPage`. The legacy in-rail modal was retired in

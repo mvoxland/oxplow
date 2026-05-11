@@ -11,9 +11,9 @@ in case any of these regress; delete when comfortable.
 | 3 | Wire stop_hook decideStopDirective into Stop                    | done   |
 | 4 | Restart MCP / control plane on dev source change                | partial — see note below |
 | 5 | Resume-tracker: capture session_id from hooks                   | done   |
-| 6 | `read_work_options` MCP tool                                    | done   |
+| 6 | `read_task_options` MCP tool                                    | done   |
 | 7 | `delegate_query` + `record_query_finding` MCP tools             | done   |
-| 8 | `reorder_work_items` MCP tool                                   | done   |
+| 8 | `reorder_tasks` MCP tool                                   | done   |
 | 9 | Wiki-note refs parser + backlinks (`find_wiki_pages_for_file`/`for_note`) | done   |
 | 10 | Per-thread wiki-note attribution (`wiki_page_thread_update`)    | done   |
 | 11 | Wiki-notes fs watcher                                           | done   |
@@ -32,7 +32,7 @@ real iteration, `bun run tauri:dev` rebuilds the Rust side on save.
 ## Useful follow-ups discovered during the sweep
 
 These are smaller polish items, not parity-blockers, but worth filing
-once the running daemon can reach `mcp__oxplow__create_work_item`
+once the running daemon can reach `mcp__oxplow__create_task`
 again on a fresh launch:
 
 - The Stop pipeline runs the in-progress audit branch but defaults

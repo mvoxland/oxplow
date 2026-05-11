@@ -1,7 +1,7 @@
 # Work queue
 
 The work queue is the durable, ordered list of tasks for a thread.
-Each row is a **work item**. Work items survive turn boundaries,
+Each row is a **task**. tasks survive turn boundaries,
 restarts, and crashes — they are the difference between "what the
 agent is doing right now" and "what we're trying to ship."
 

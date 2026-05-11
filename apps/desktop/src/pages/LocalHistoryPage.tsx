@@ -7,7 +7,7 @@ export interface LocalHistoryPageProps {
   stream: Stream | null;
   onOpenDiff?(spec: DiffSpec): void;
   revealSnapshotId?: { snapshotId: string; token: number } | null;
-  onRequestEditWorkItem?(itemId: string): void;
+  onRequestEditWorkItem?(itemId: number): void;
 }
 
 /**

@@ -16,8 +16,8 @@ interface Props {
   onPromoteThread(threadId: string): void | Promise<void>;
   onCloseThread(threadId: string): void | Promise<void>;
   onOpenClosedThreads?(): void;
-  onMoveWorkItem?(itemId: string, fromThreadId: string, toThreadId: string): Promise<void>;
-  onMoveBacklogItemToThread?(itemId: string, toThreadId: string): Promise<void>;
+  onMoveWorkItem?(itemId: number, fromThreadId: string, toThreadId: string): Promise<void>;
+  onMoveBacklogItemToThread?(itemId: number, toThreadId: string): Promise<void>;
   onRenameThread?(threadId: string, newTitle: string): Promise<void> | void;
   onReorderThreads?(orderedThreadIds: string[]): Promise<void> | void;
   onRequestCreateStream?(): void;
@@ -239,7 +239,7 @@ function ThreadChip({
   onPromote(): void;
   onClose(): void;
   menuItems?: MenuItem[];
-  onDropWorkItem?(payload: { itemId: string; fromThreadId: string | null }): void;
+  onDropWorkItem?(payload: { itemId: number; fromThreadId: string | null }): void;
   isRenaming?: boolean;
   onSubmitRename?(newTitle: string): void | Promise<void>;
   onCancelRename?(): void;

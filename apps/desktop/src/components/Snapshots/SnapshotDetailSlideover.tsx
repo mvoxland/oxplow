@@ -51,7 +51,7 @@ export interface SnapshotDetailSlideoverProps {
   onOpenDiff?(spec: DiffSpec): void;
   /** Optional: open the work item that wrote this snapshot. */
   workItemId?: string | null;
-  onOpenWorkItem?(itemId: string): void;
+  onOpenWorkItem?(itemId: number): void;
 }
 
 /**
@@ -168,7 +168,7 @@ function SnapshotDetailBody({
 }: {
   summary: SnapshotSummary;
   workItemId: string | null;
-  onOpenWorkItem?(itemId: string): void;
+  onOpenWorkItem?(itemId: number): void;
   onOpenFileDiff(path: string): void;
   onRestore(path: string): void;
 }) {

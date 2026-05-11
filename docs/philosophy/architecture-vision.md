@@ -12,12 +12,12 @@ shipped today; most is not.
 - **Threads inside streams.** Independent lines of work per stream
   — a writer that ships, plus optional read-only research threads
   with their own agents and tab sets.
-- **Durable work queue.** Work items as rows with a real lifecycle
+- **Durable work queue.** tasks as rows with a real lifecycle
   (`ready` → `in_progress` → `done`), ordered by `sort_index`,
   grouped by epic, persisted in SQLite. Filing-enforcement and
   Stop-hook audits keep the queue honest.
 - **Local History.** Per-effort file snapshots, grouped under their
-  work item, with a page that lets you compare and restore.
+  task, with a page that lets you compare and restore.
 - **Project wiki.** First-class markdown pages under
   `.oxplow/wiki/`, with `[[wikilinks]]` to other wiki pages,
   files, and commits, plus cross-kind backlinks.
@@ -45,7 +45,7 @@ shipped today; most is not.
 
 ## Near-term direction
 
-- **Richer review affordances.** The work-item-level diff is a
+- **Richer review affordances.** The task-level diff is a
   better unit than the file-level diff. Surface it more
   prominently. Make accept / push-back / reopen one click.
 - **Better wiki.** Wiki pages are shipping as a first-class

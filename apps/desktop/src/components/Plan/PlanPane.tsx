@@ -59,17 +59,17 @@ interface Props {
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
   agentStatus?: AgentStatus;
   backlog: BacklogState | null;
-  onUpdateWorkItem(itemId: string, changes: TaskDetailChanges): Promise<void>;
-  onDeleteWorkItem(itemId: string): Promise<void>;
-  onReorderWorkItems(orderedItemIds: string[]): Promise<void>;
-  onUpdateBacklogItem(itemId: string, changes: TaskDetailChanges): Promise<void>;
-  onDeleteBacklogItem(itemId: string): Promise<void>;
-  onReorderBacklog(orderedItemIds: string[]): Promise<void>;
-  onMoveItemToBacklog(itemId: string, fromThreadId: string): Promise<void>;
+  onUpdateWorkItem(itemId: number, changes: TaskDetailChanges): Promise<void>;
+  onDeleteWorkItem(itemId: number): Promise<void>;
+  onReorderWorkItems(orderedItemIds: number[]): Promise<void>;
+  onUpdateBacklogItem(itemId: number, changes: TaskDetailChanges): Promise<void>;
+  onDeleteBacklogItem(itemId: number): Promise<void>;
+  onReorderBacklog(orderedItemIds: number[]): Promise<void>;
+  onMoveItemToBacklog(itemId: number, fromThreadId: string): Promise<void>;
   openNewRequest?: number;
   /** Open the edit modal for the specified work item. Change the token to
    *  request again even if the itemId repeats. */
-  editRequest?: { itemId: string; token: number } | null;
+  editRequest?: { itemId: number; token: number } | null;
   /** On mount, PlanPane calls this with its openCreateModal function so
    *  the parent can open the New-Task modal imperatively — used for
    *  menu-click dispatches where React's effect scheduler can stall. */
@@ -77,10 +77,10 @@ interface Props {
   /** Route the "new task" / "+ Task on epic" buttons to a NewWorkItemPage
    *  tab. When omitted, the legacy modal path stays in place (used by
    *  tests and standalone usages). */
-  onOpenNewWorkItemPage?(payload: { parentId?: string | null }): void;
+  onOpenNewWorkItemPage?(payload: { parentId?: number | null }): void;
   /** Route a row click / Enter to the read+edit WorkItemPage tab for that
    *  item. When omitted, row clicks still select but no page opens. */
-  onOpenWorkItemPage?(itemId: string): void;
+  onOpenWorkItemPage?(itemId: number): void;
   /** When true, agent-authored work items are filtered out of the visible
    *  groups. Mirrors the legacy `plan-toggle-hide-auto` toggle from the
    *  pre-IA-redesign Plan pane. Epics are always kept so their children
@@ -155,20 +155,20 @@ export function PlanPane({
   hideBacklogChip = false,
   hideArchiveToggle = false,
 }: Props) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [internalMode, setInternalMode] = useState<"thread" | "backlog">("thread");
   const mode = forceMode ?? internalMode;
   const [backlogChipDragOver, setBacklogChipDragOver] = useState(false);
   const { isCollapsed: isSectionCollapsed, toggle: onToggleSectionCollapsed } = useCollapsedSections();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
   // by Cmd/Ctrl+click (toggle) and Shift+click (range from selectedId). When a
   // drag starts on any of the effectiveMarkedIds, the drag payload carries the
   // whole set so drop targets (ThreadRail, backlog chip, stream chip) can move
   // them all in one gesture. Plain click clears marks.
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
-  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
+  const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: number; extraIds?: string[] } | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const threadId = thread?.id ?? null;
@@ -347,7 +347,7 @@ export function PlanPane({
     return () => el.removeEventListener("keydown", handler);
   }, [navigableIds, selectedId, kbPicker, groups, activeReorder]);
 
-  const openCreateModal = (parentId: string | null = null) => {
+  const openCreateModal = (parentId: number | null = null) => {
     // The legacy inline NewWorkItemModal was retired by the IA redesign;
     // creation always routes through a full-tab NewWorkItemPage now. Tests
     // / standalone harnesses must wire `onOpenNewWorkItemPage`.

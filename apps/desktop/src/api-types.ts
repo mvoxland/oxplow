@@ -33,7 +33,7 @@ export type TaskPriority = "low" | "medium" | "high" | "urgent";
 export interface Task {
   id: string;
   thread_id: string | null;
-  parent_id: string | null;
+  parent_id: number | null;
   kind: TaskKind;
   title: string;
   description: string;

@@ -89,7 +89,7 @@ state to keep in sync.
   ranking in mind.
 - **After an agent effort.** When the agent says it shipped
   something, Change Analysis from before-effort to head shows
-  whether the touched surface matches the work item's intent.
+  whether the touched surface matches the task's intent.
 
 The pitch is small but specific: the first screen of a review
 shouldn't be a flat file list. It should tell you which three

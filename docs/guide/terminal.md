@@ -23,7 +23,7 @@ Per-thread bits worth knowing:
   hook level. The agent can still read, search, and answer
   questions.
 - **Filing enforcement.** Even on the writer thread, edits are
-  denied if there's no `in_progress` work item. The agent
+  denied if there's no `in_progress` task. The agent
   files one and re-issues.
 - **Per-stream isolation.** The agent's CWD is the stream's
   worktree. It cannot see other streams' working trees.
@@ -41,9 +41,9 @@ The agent tab's header kebab carries:
 ## Drag-to-add-context
 
 Drag rows from the rail's recent files, active item, up-next,
-backlinks lists, work-item rows, or code-quality file groups
+backlinks lists, task rows, or code-quality file groups
 onto the agent terminal to inject them into the agent's
-context. Multi-select drag works for work-item lists.
+context. Multi-select drag works for task lists.
 
 ## Shells
 

@@ -336,7 +336,7 @@ each one into the unified `page_ref` graph (see
   (file:<path>)` edge per file.
 - Subject + body run through `oxplow_domain::refs::extract` so the
   same wikilink + inline-mention rules used by wiki bodies and
-  work-item descriptions also apply to commit messages
+  task descriptions also apply to commit messages
   (`wi-…`, `[[architecture]]`, `finding:fnd-1`, bare 7-40 hex shas).
 
 Idempotent. Each commit is keyed by its full sha, and a one-row

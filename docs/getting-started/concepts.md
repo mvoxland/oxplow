@@ -47,7 +47,7 @@ on disk.
 ## Page
 
 A **page** is anything addressable inside a tab — a file, a
-diff, a work item, a wiki page, a code-quality finding, a
+diff, a task, a wiki page, a code-quality finding, a
 dashboard, a settings panel, the agent terminal. Pages share
 common chrome: title + status chips + collapsible **Backlinks**
 panel + browser-style back/forward navigation.
@@ -55,16 +55,16 @@ panel + browser-style back/forward navigation.
 The center of the window is a stack of page tabs. The rail HUD
 on the left lists the available pages and links into them.
 
-## Work item
+## task
 
-A **work item** is a row in the queue with a real lifecycle:
+A **task** is a row in the queue with a real lifecycle:
 
 ```
 ready → in_progress → done
                     ↘ blocked / canceled / archived
 ```
 
-Work items are durable: they survive turns, sessions, and
+tasks are durable: they survive turns, sessions, and
 crashes. The agent files them before changing project files
 (enforced — see [Work queue](../guide/work-queue.md)) and
 closes them when acceptance criteria are met. You can reopen
@@ -98,10 +98,10 @@ see exactly which functions grew, shrank, or changed shape. See
 
 ## Effort and snapshot
 
-Every time the agent works on a work item, that's one
+Every time the agent works on a task, that's one
 **effort**. An effort accumulates **file snapshots** — one per
 file the agent touched, before and after. The Local History
-page groups efforts under their work item and lets you compare
+page groups efforts under their task and lets you compare
 or restore at any point.
 
 This is how rollback works: you don't reset the whole repo, you
@@ -109,17 +109,17 @@ restore the files this effort touched.
 
 ## Backlinks
 
-Wiki pages, work items, files, and code-quality findings are
-linked both ways. Open a work item and the Backlinks panel
+Wiki pages, tasks, files, and code-quality findings are
+linked both ways. Open a task and the Backlinks panel
 shows every wiki page that mentions it; open a wiki page and
-you see every work item or finding that points back. The rail's
+you see every task or finding that points back. The rail's
 recent-files and active items also surface as backlinks where
 relevant.
 
 ## How they fit together
 
 You start a **stream** on a branch. You give it a writer
-**thread**. You file **work items** describing what you want
+**thread**. You file **tasks** describing what you want
 done; the agent works through them, capturing **efforts** and
 **snapshots** as it goes. Decisions and exploration land in
 **wiki pages**. You navigate the project as **pages** in a

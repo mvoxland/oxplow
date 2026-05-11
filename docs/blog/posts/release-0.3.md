@@ -41,7 +41,7 @@ A long tail of smaller things came along for the ride:
 - **Git is more honest about state.** Branch reconciliation against live HEAD on refresh and seed. Recent commits surface branch + tag labels next to each row. Capped diff navigation, sibling page lists with the jump-to dropdown.
 - **Editor and terminal pulled their weight.** Clickable file-path links in the terminal pane. Better blame overlay. The Monaco bridge knows about the LSP layer.
 - **LSP installer.** Fetches Mason packages for the supported languages, caches them under `.oxplow/lsp/`, and the proxy hands the right binary to whichever stream asked. Clojure joined the supported list as the tenth language.
-- **Live agent turns surface in the work panel.** Each open turn renders as a passive in-progress row with the prompt and a spinner; no synthesized work items, no narration.
+- **Live agent turns surface in the work panel.** Each open turn renders as a passive in-progress row with the prompt and a spinner; no synthesized tasks, no narration.
 
 ## Where it stands
 

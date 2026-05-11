@@ -1395,7 +1395,7 @@ export async function readFileAtRef(
   return { content };
 }
 
-export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
+export async function listTaskEfforts(itemId: number): Promise<EffortDetail[]> {
   // The Tauri command returns flat `TaskEffort` rows. Consumers
   // (WorkItemPage activity timeline, useBacklinks, TaskDetail)
   // expect the richer `EffortDetail` shape with snapshots + changed
@@ -1645,7 +1645,7 @@ export interface WorkItemChangeEvent {
   streamId: string;
   threadId: string;
   kind: WorkItemChangeKind;
-  itemId: string | null;
+  itemId: number | null;
 }
 
 export type AgentStatus = "working" | "waiting";
@@ -1693,7 +1693,7 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
 }
 
 export type FinishedEntry =
-  | { kind: "task"; itemId: string; title: string; t: string }
+  | { kind: "task"; itemId: number; title: string; t: string }
   | { kind: "wiki"; slug: string; title: string; t: string };
 
 export async function listRecentlyFinished(threadId: string | null, limit: number): Promise<FinishedEntry[]> {
@@ -1877,7 +1877,7 @@ export function subscribeAgentStatus(
 
 export interface BacklogChangeEvent {
   kind: WorkItemChangeKind;
-  itemId: string | null;
+  itemId: number | null;
 }
 
 export function subscribeBacklogEvents(onEvent: (event: BacklogChangeEvent) => void): () => void {

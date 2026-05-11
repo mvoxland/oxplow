@@ -8,8 +8,8 @@ Things I keep forgetting. Read this before adding any UI.
 > the right-click → `ContextMenu` reflex was replaced by visible
 > kebab `⋯` buttons on each row; per-stream and per-thread settings
 > ship as Page tabs (`StreamSettingsPage`, `ThreadSettingsPage`); new-
-> stream and new-work-item flows ship as Page tabs (`NewStreamPage`,
-> `NewWorkItemPage`); snapshot- and commit-detail Slideover wrappers
+> stream and new-task flows ship as Page tabs (`NewStreamPage`,
+> `NewTaskPage`); snapshot- and commit-detail Slideover wrappers
 > (`SnapshotDetailSlideover`, `CommitDetailSlideover`) cover the
 > cross-page open path. The rules below describe the redesigned
 > target. Phase 7 (density + visual polish) details live in
@@ -22,7 +22,7 @@ Things I keep forgetting. Read this before adding any UI.
 - **Edit-X-in-place actions are inline, not modal.** Click the
   displayed value to swap to an input; Enter commits, Escape reverts,
   blur commits unless Escape was pressed. The shared helper is
-  `apps/desktop/src/components/InlineEdit.tsx`; `WorkItemDetail`'s
+  `apps/desktop/src/components/InlineEdit.tsx`; `TaskDetail`'s
   `EditableField` and `WorkGroupList`'s `InlineItemRow` are older
   hand-rolled equivalents — copy whichever is closest. The cancel
   latch must be a `useRef` (state updates are async; the blur fires
@@ -37,11 +37,11 @@ Things I keep forgetting. Read this before adding any UI.
   the strip is dismissed by the panel's local `pendingPrompt` state.
 - **Form-shaped flows that warrant a focused workspace use a page tab
   or a slideover, not a centered modal.** The "+ New" flows ship as
-  Page tabs (`NewStreamPage`, `NewWorkItemPage`, the `Stream/Thread`
+  Page tabs (`NewStreamPage`, `NewTaskPage`, the `Stream/Thread`
   settings pages); cross-page detail openings (snapshot, commit,
   branch rename, file commit) ship as Slideovers. The remaining
   legacy hand-rolled modal chrome inside `PlanPane.tsx`'s
-  `NewWorkItemModal` only backs the edit-double-click flow — do not
+  `NewTaskModal` only backs the edit-double-click flow — do not
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
   `apps/desktop/src/pages/SettingsPage.tsx` — full Page tab, no backdrop.
@@ -83,7 +83,7 @@ Things I keep forgetting. Read this before adding any UI.
 - **"Save and Another"** for repetitive-entry flows (see the New Work
   Item modal): saves and re-opens the form with the same
   category/priority/parent pre-filled so the user doesn't re-select
-  them. Carry this convention forward when New Work Item migrates to
+  them. Carry this convention forward when New task migrates to
   a page (phase 5e).
 
 ## Destructive actions
@@ -102,7 +102,7 @@ Things I keep forgetting. Read this before adding any UI.
   ~7s and the [Undo] button calls the supplied callback. Mount the
   `<UndoToastStack />` once near the app root (already done in
   `App.tsx`). When the action is genuinely irreversible (delete a
-  work item permanently) push a toast without `onUndo` so the user
+  task permanently) push a toast without `onUndo` so the user
   still sees confirmation feedback even if they can't undo. Don't
   block the renderer with a centered confirm modal.
 - **Closing a dirty file tab** is fire-and-undo: the close completes
@@ -125,8 +125,8 @@ Things I keep forgetting. Read this before adding any UI.
   menu.
 - **`menu-item-<item.id>` testids** stay on every button inside the
   shared `MenuList` — the `MenuItem.id` becomes the testid suffix
-  (e.g. `menu-item-workitem.delete`,
-  `menu-item-workitem.rename`).
+  (e.g. `menu-item-task.delete`,
+  `menu-item-task.rename`).
 - Close on outside click, scroll, window resize.
 
 ## Keyboard
@@ -135,9 +135,9 @@ Things I keep forgetting. Read this before adding any UI.
   `commands.ts` and `keybindings.ts` so they appear in the native
   menu and help discoverability.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
-  Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new work item. Don't
+  Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.
-- **Plan pane: single-click selects a work-item row (keyboard
+- **Plan pane: single-click selects a task row (keyboard
   cursor); double-click opens the edit modal.** Enter also opens the
   modal for the selected row. Cmd/Ctrl+click toggles the mark set;
   Shift+click ranges from the selected anchor. A plain click clears
@@ -155,7 +155,7 @@ Things I keep forgetting. Read this before adding any UI.
   the existing marked-set state in `PlanPane`; there is no separate
   store. Pure helpers (`shouldShowSelectionActionBar`,
   `summarizeSelection`) are exported for tests.
-- **Plan pane: Shift+↑/↓ reorders the selected work item within its
+- **Plan pane: Shift+↑/↓ reorders the selected task within its
   own status section.** Crossing a section boundary is a deliberate
   no-op — to change status, the user drags (which changes status as
   a side effect). Plain ↑/↓ just moves selection; Enter toggles the
@@ -171,7 +171,7 @@ Things I keep forgetting. Read this before adding any UI.
   adding a user-visible action, prefer wiring it as a CommandId over
   a bespoke button so it stays keyboard-reachable. Current entries
   include `stream.new`, `thread.new`, `history.open`, `snapshots.open`
-  alongside save/find/quick-open/new-work-item.
+  alongside save/find/quick-open/new-task.
 
 ## Test-driveability
 
@@ -182,9 +182,9 @@ Things I keep forgetting. Read this before adding any UI.
   - `file-tree-entry-<path>` on FileTree nodes (plus `data-kind` and,
     for dirs, `data-expanded`)
   - `monaco-host` on the editor container, `data-file-path=<path>`
-  - `plan-new-task`, `work-item-title`, `work-item-priority`,
-    `work-item-description`, `work-item-acceptance`, `work-item-save`,
-    `work-item-save-another`, `work-item-cancel`
+  - `plan-new-task`, `task-title`, `task-priority`,
+    `task-description`, `task-acceptance`, `task-save`,
+    `task-save-another`, `task-cancel`
   - `command-palette-input`
   - `plan-pane` (the keydown-listening wrapper — focus this before
     dispatching keyboard probes, otherwise the listener misses them)
@@ -197,12 +197,12 @@ Things I keep forgetting. Read this before adding any UI.
     button inside each chip
   - `stream-tab-kebab-<id>` on the kebab button inside each stream
     tab; `center-tab-kebab-<id>` on each center-tab kebab
-  - `work-item-row-kebab-<id>` on each work-item row's kebab
+  - `task-row-kebab-<id>` on each task row's kebab
   - `menu-item-<item.id>` on every button inside the shared
     `ContextMenu` / `MenuList` — the `MenuItem.id` becomes the
-    testid suffix (e.g. `menu-item-workitem.delete`,
-    `menu-item-workitem.rename`, `menu-item-workitem.status`,
-    `menu-item-workitem.priority` — rename/status/priority mirror
+    testid suffix (e.g. `menu-item-task.delete`,
+    `menu-item-task.rename`, `menu-item-task.status`,
+    `menu-item-task.priority` — rename/status/priority mirror
     the inline click / `s` / `p` shortcuts so keyboard-first users
     don't have to hover)
   - `undo-toast-stack`, `undo-toast-<id>`,
@@ -246,7 +246,7 @@ Things I keep forgetting. Read this before adding any UI.
   a compatible drag enters it. Clear the highlight on leave/drop.
 - **Use a custom MIME type** for internal drags so foreign drags
   (files, text) don't accidentally trigger app drops. Existing MIMEs:
-  `WORK_ITEM_DRAG_MIME` (work-item reorder) in
+  `WORK_ITEM_DRAG_MIME` (task reorder) in
   `apps/desktop/src/components/ThreadRail.tsx`, and `CONTEXT_REF_MIME`
   ("Add to agent context") in `apps/desktop/src/agent-context-dnd.ts`. Add a
   new MIME rather than overloading an existing one.
@@ -313,15 +313,15 @@ context" kebab/menu action; both share one path through
   MIME (`application/x-oxplow-context-ref`) for any new referenceable
   surface — separate from `WORK_ITEM_DRAG_MIME`, which carries the
   reorder payload.
-- **Multi-row work-item drag** is a separate path. Plan-pane
+- **Multi-row task drag** is a separate path. Plan-pane
   `WorkGroupList` drag-start enriches the `WORK_ITEM_DRAG_MIME`
   payload with `items: [{id,title,status}, …]` so cross-pane drop
-  targets can decode resolved refs without their own work-item
+  targets can decode resolved refs without their own task
   lookup. The TerminalPane drop handler accepts both
   `CONTEXT_REF_MIME` (single ref) and `WORK_ITEM_DRAG_MIME`
   (multi-id), iterates the latter, and pastes a space-separated
   chain of mentions in one drop. Helpers:
-  `decodeWorkItemDragRefs` / `dragHasWorkItemRefs` in
+  `decodeTaskDragRefs` / `dragHasTaskRefs` in
   `apps/desktop/src/agent-context-dnd.ts`.
 - **Sink**: `TerminalPane` is the only drop target. It writes through
   `term.paste(text)` so the same xterm input pipeline handles both
@@ -330,9 +330,9 @@ context" kebab/menu action; both share one path through
   - file → `@<workspace-relative path> ` (Claude reads the file
     automatically on the next prompt).
   - note → `@.oxplow/wiki/<slug>.md `.
-  - work-item → `[oxplow work-item <id>: "<title>" (<status>)] `
+  - task → `[oxplow task <id>: "<title>" (<status>)] `
     (plain-text reference; agent can fetch via
-    `oxplow__get_work_item`).
+    `oxplow__get_task`).
   - Always trailing space so the user can keep typing.
 - **Kebab parity**: every drag source should also offer "Add to agent
   context" in its kebab menu — keyboard-first users shouldn't have to

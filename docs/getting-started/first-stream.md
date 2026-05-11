@@ -17,7 +17,7 @@ inside it:
 
 ```
 .oxplow/
-  state.sqlite           # work items, threads, snapshots, settings
+  state.sqlite           # tasks, threads, snapshots, settings
   wiki/                  # wiki markdown files (`<slug>.md`)
   snapshots/             # per-effort file snapshots (Local History)
   runtime/               # the Claude Code plugin oxplow installs per project
@@ -42,7 +42,7 @@ The window is web-style, not IDE-style:
 - **Rail HUD** (left) — your home base. Search trigger, active
   item, up-next, bookmarks, recent files, and a directory of
   every page you can open.
-- **Page tabs** (center) — files, diffs, work items, wiki pages,
+- **Page tabs** (center) — files, diffs, tasks, wiki pages,
   dashboards, the agent terminal, code-quality findings, and
   more. Each page has back/forward navigation and a Backlinks
   panel.
@@ -78,10 +78,10 @@ Try something small and reversible:
 
 A few things happen:
 
-1. The agent files a work item before editing — it has to. The
+1. The agent files a task before editing — it has to. The
    filing-enforcement hook denies edits unless an `in_progress`
    item is open.
-2. The work item appears in the rail's **Active item** slot with
+2. The task appears in the rail's **Active item** slot with
    a live status dot.
 3. The agent edits `README.md` and snapshots it before/after.
 4. The agent closes the item to `done` with a summary note.
@@ -113,7 +113,7 @@ it to ship changes (only one writer per stream).
 
 ## 7. What to read next
 
-- [Concepts](concepts.md) — streams, threads, pages, work items,
+- [Concepts](concepts.md) — streams, threads, pages, tasks,
   wiki pages, efforts.
 - [Work queue](../guide/work-queue.md) — when to file work
   items and how the lifecycle behaves.

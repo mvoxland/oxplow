@@ -38,8 +38,8 @@ why this approach was chosen over the alternative, or what was
 tried and rejected. The agent re-explores, sometimes re-introduces
 the rejected approach.
 
-**Oxplow primitive: durable work items + wiki pages + threads.**
-The work item is the persistent intent. Notes on it carry rationale
+**Oxplow primitive: durable tasks + wiki pages + threads.**
+The task is the persistent intent. Notes on it carry rationale
 across turns. The project wiki captures non-trivial Q&A as wiki
 pages automatically — design rationale, comparisons, walkthroughs —
 with backlinks so it stays discoverable. A read-only thread can ask the
@@ -53,7 +53,7 @@ The diff exists; the conversation that shaped it does not. Six
 months later, nobody knows whether the weird-looking thing in
 `auth.ts` was deliberate or a one-shot artifact.
 
-**Oxplow primitive: efforts and notes.** Each work item accumulates
+**Oxplow primitive: efforts and notes.** Each task accumulates
 efforts (one per attempt) with the files touched, the snapshots
 taken, and the agent's own notes. The trail outlives the
 conversation.

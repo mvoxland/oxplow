@@ -12,7 +12,7 @@ editing a file.
 
     ```
     .oxplow/
-      state.sqlite        # work items, threads, snapshots, settings
+      state.sqlite        # tasks, threads, snapshots, settings
       wiki/               # wiki pages (markdown)
       snapshots/          # per-effort file snapshots (Local History)
       runtime/            # Claude Code plugin oxplow installs per project
@@ -64,7 +64,7 @@ thread into tmux mode.
 
 ### Snapshot retention
 
-Snapshots from closed work items are pruned on a configurable
+Snapshots from closed tasks are pruned on a configurable
 schedule. Tune from the project's settings page if defaults
 don't fit (most users never touch this).
 
@@ -77,7 +77,7 @@ no `lsp.json` to maintain — supported languages are
 auto-detected from project content (file extensions, root
 markers).
 
-If a server you need isn't yet supported, file a work item; the
+If a server you need isn't yet supported, file a task; the
 installer's manifest lives in
 `crates/oxplow-lsp/src/installer/`.
 
@@ -93,12 +93,12 @@ Off. Always. There is no telemetry to configure.
 ## Settings the agent can change
 
 None. The MCP surface deliberately does not expose product
-settings — the agent operates on intent, files, work items, and
+settings — the agent operates on intent, files, tasks, and
 wiki pages. Configuration is the human's job.
 
 ## Resetting
 
 Wipe `.oxplow/` to reset a project. Wipe the user-config
 directory to reset everything. Both are safe; oxplow rebuilds
-what it needs on next launch (your work-item history goes with
+what it needs on next launch (your task history goes with
 the project state, though, so don't do it casually).

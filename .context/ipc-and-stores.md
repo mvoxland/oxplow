@@ -167,10 +167,10 @@ SQLite-indexed table (`file_snapshot`) plus an on-disk content-
 addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`. Snapshots
 are time-ordered and deduplicated on a `version_hash` (no parent
 chain). Rows returned by `listSnapshotsForStream` are pre-enriched
-with `label` + `label_kind` joined from `work_item_effort`, and
+with `label` + `label_kind` joined from `task_effort`, and
 exclude the first-ever baseline (nothing to diff against). Snapshots
 anchor to efforts via `file_snapshot.effort_id` (and the mirror
-columns `work_item_effort.start_snapshot_id` /
+columns `task_effort.start_snapshot_id` /
 `end_snapshot_id`). Unlike other stores it doesn't expose a `subscribe()`; the
 runtime publishes `file-snapshot.created` on the EventBus after each
 successful flush that actually inserted a row.
@@ -191,7 +191,7 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   the worktree file with the snapshot's content via the existing
   `writeWorkspaceFile` path (so the UI-echo filter and workspace
   event bus behave the same as a UI edit).
-- `listWorkItemEfforts(itemId)` — returns per-effort rows (one per
+- `listTaskEfforts(itemId)` — returns per-effort rows (one per
   `in_progress → human_check` cycle) with pre-joined start/end
   snapshot metadata, linked turn ids, and the changed-paths list
   computed from the pair summary. Used by the Plan modal's Efforts
@@ -206,7 +206,7 @@ UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 map keyed by `threadId`. It backs three orchestrator-only MCP tools —
 `oxplow__add_followup`, `oxplow__remove_followup`,
 `oxplow__list_followups` — and lets the agent stash a "I'll get back to
-that next" reminder mid-turn without filing a durable work item. No
+that next" reminder mid-turn without filing a durable task. No
 SQLite involvement, no migration, lost on runtime restart.
 
 Surfaces:
@@ -218,9 +218,9 @@ Surfaces:
 - `getThreadWorkState` (the main IPC for the Work panel) layers the
   thread's current followups onto its response inside the
   `followups` field, so PlanPane / WorkGroupList see them alongside
-  durable work items without a second round-trip. The work-item-api
+  durable tasks without a second round-trip. The task-api
   wrapper owns that overlay; the persistence-layer
-  `WorkItemStore.getState` always returns `followups: []`.
+  `taskstore.getState` always returns `followups: []`.
 - IPC: only one new method — `removeFollowup(threadId, id)` — used by
   the ✕ dismiss button on each follow-up row. Adds happen
   exclusively via the MCP tool surface; the UI never adds.
@@ -303,14 +303,14 @@ or `fail` in the new spot; events publish automatically.
 
 ## Work panel in_progress bucket is task-only
 
-The Work panel's in_progress bucket is driven purely by `work_item`
+The Work panel's in_progress bucket is driven purely by `task`
 rows (`status = 'in_progress'` for the active thread). There are no
 synthesized turn rows, no live-prompt overlay, and no IPC for
 listing open turns — `listAgentTurns`, `listOpenTurns`,
 `listRecentInactiveTurns`, `archiveAgentTurn`, and
 `subscribeTurnEvents` no longer exist, and there is no
 `TurnChangedEvent`. If you need a "what is the agent doing right
-now" signal, use the `work_item` rows themselves plus
+now" signal, use the `task` rows themselves plus
 `agent-status.changed` for the colored-dot working/waiting/idle
 state.
 
@@ -355,10 +355,10 @@ queries both work):
 
 - `wiki-note` → `handleOpenNote`
 - `editor-file` → `handleOpenFile`
-- `work-item` → `handleRequestEditWorkItem`
+- `task` → `handleRequestEditTask`
 
 The wiki-note rows currently feed `NotesPane`'s "Recently visited"
-section; editor-file and work-item rows are recorded but not yet
+section; editor-file and task rows are recorded but not yet
 surfaced in any UI — the architecture is ready, the consumer is the
 follow-up.
 
@@ -377,8 +377,8 @@ Append-only, no coalescing — analytics queries collapse as needed.
 IPC:
 
 - `recordPageVisit(input)` — called from `handleOpenPage` for every
-  ref except `agent`/`new-stream`/`new-work-item`. The label is
-  resolved from richer context first (work item title) and falls back
+  ref except `agent`/`new-stream`/`new-task`. The label is
+  resolved from richer context first (task title) and falls back
   to `deriveDefaultLabel(ref)` from
   `apps/desktop/src/components/RailHud/history.ts`.
 - `listRecentPageVisits({threadId,limit,dedupeByRef,excludeKinds})`
@@ -432,9 +432,9 @@ store, runtime, IPC, and UI are tool-agnostic.
 Most stores have a single writer per row. The unified
 cross-page-reference graph (`page_ref` table; see
 [data-model.md](./data-model.md)) is the exception: a single
-`(source_kind, source_id)` like `(work-item, wi-42)` accumulates
-rows from three different writers (the work-item store's body
-mentions, the link store's `work_item_link:*` edges, the effort
+`(source_kind, source_id)` like `(task, wi-42)` accumulates
+rows from three different writers (the task store's body
+mentions, the link store's `task_link:*` edges, the effort
 store's `touched_file` edges), each owning a slice keyed by
 `ref_type`.
 
@@ -444,7 +444,7 @@ each other:
 1. **Pure projections** (`crates/oxplow-db/src/page_ref_projections.rs`)
    turn each writer's domain rows into `Vec<PageRefEdge>`. Each
    helper also exposes a small list of the `ref_type`s it owns
-   (`work_item_body_ref_types()`, `work_item_link_ref_types()`,
+   (`task_body_ref_types()`, `task_link_ref_types()`,
    `effort_ref_types()`).
 2. **Slice-replace** at the store
    (`SqlitePageRefStore::replace_source_for_ref_types`) takes
@@ -466,7 +466,7 @@ To add a new source kind to the graph: add a projection helper, a
 ref-type-list helper, attach a `with_page_refs` to the owning
 store, and call the slice or full replace from its write methods.
 For body-text sources that should pick up the same wikilink rules
-the wiki + work-items use, route through
+the wiki + tasks use, route through
 `oxplow_domain::refs::extract` rather than re-implementing the
 parser.
 

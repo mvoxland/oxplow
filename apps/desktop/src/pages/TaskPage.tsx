@@ -21,7 +21,7 @@ import type { DiffSpec } from "../components/Diff/DiffPane.js";
 export interface WorkItemPageProps {
   stream: Stream | null;
   thread: Thread | null;
-  itemId: string;
+  itemId: number;
   /** Live snapshot of all work items in the current thread (used to find this one). */
   items: Task[];
   threadWork: ThreadWorkState | null;

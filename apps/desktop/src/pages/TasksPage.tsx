@@ -37,7 +37,7 @@ export type TasksPageProps =
     | "excludeStatuses"
   > & {
     onOpenPage(ref: TabRef): void;
-    onMoveBacklogItemToThread(itemId: string, toThreadId: string): Promise<void>;
+    onMoveBacklogItemToThread(itemId: number, toThreadId: string): Promise<void>;
     streams: Stream[];
     currentStreamId: string | null;
   };

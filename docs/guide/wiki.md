@@ -16,11 +16,11 @@ commit message.
   option A would have broken the migration."
 - **Context the agent should consult.** Wiki pages are
   first-class references — searchable by title and body,
-  linkable from work items, surfaced via backlinks.
+  linkable from tasks, surfaced via backlinks.
 
 They are *not* the right place for:
 
-- Acceptance criteria — those go on the work item.
+- Acceptance criteria — those go on the task.
 - Personal todos — that's the work queue.
 
 ## Wikilinks
@@ -42,14 +42,14 @@ backlinks and freshness work without any extra markup.
 
 ## Backlinks
 
-Every page (wiki page, work item, file, finding) has a
+Every page (wiki page, task, file, finding) has a
 Backlinks panel. It surfaces every other record that points at
-it — wiki pages that mention this file, work items whose
+it — wiki pages that mention this file, tasks whose
 touched-files list includes this file, findings that reference
 it, etc.
 
 The index is computed cross-kind from plain data slices (wiki
-bodies, work-item touched files, findings) — no manual upkeep.
+bodies, task touched files, findings) — no manual upkeep.
 
 ## Agent capture
 

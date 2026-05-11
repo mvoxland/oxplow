@@ -82,7 +82,7 @@ export function wikiPageRef(slug: string): TabRef {
   return { id: `wiki:${slug}`, kind: "wiki", payload: { slug } };
 }
 
-export function taskRef(itemId: string): TabRef {
+export function taskRef(itemId: number): TabRef {
   return { id: `wi:${itemId}`, kind: "task", payload: { itemId } };
 }
 
@@ -201,7 +201,7 @@ export function dashboardRef(variant: DashboardKind): TabRef {
 
 export interface NewWorkItemPayload {
   /** Optional pre-selected parent epic id. */
-  parentId?: string | null;
+  parentId?: number | null;
   /** Optional default category (carried forward by "Save and Another"). */
   initialCategory?: string | null;
   /** Optional default priority. */

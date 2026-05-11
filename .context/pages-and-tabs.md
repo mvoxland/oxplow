@@ -15,7 +15,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
   Switching threads restores its tab set; switching streams swaps to the
   selected thread of the new stream. The agent terminal is always
   available per thread and survives switches.
-- A **page** is anything addressable inside a tab body — file, work item,
+- A **page** is anything addressable inside a tab body — file, task,
   wiki page, finding, dashboard, settings, agent terminal. Pages share a
   common chrome (header + collapsible Backlinks panel).
 
@@ -25,11 +25,11 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 |---|---|
 | `apps/desktop/src/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
-| `apps/desktop/src/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `wikiPageRef(slug)`, `workItemRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
+| `apps/desktop/src/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `wikiPageRef(slug)`, `taskRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
 | `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. Reads only semantic CSS variables (skin via theme). |
 | `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks dropdown (popover). Mounted by `Page` when context or explicit `navBar` prop is present. |
 | `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. |
-| `apps/desktop/src/pages/FilePage.tsx` | Thin Page wrapper around `EditorPane`. Calls `usePageTitle(basename + ● dirty)` so the file's name flows into the shared chrome title, and `useBacklinks(fileRef(path))` so wiki pages, work-items, commits, and findings that reference the file appear in the nav-bar Backlinks dropdown. EditorPane keeps owning Monaco / blame / context menus; the wrapper only provides chrome above. |
+| `apps/desktop/src/pages/FilePage.tsx` | Thin Page wrapper around `EditorPane`. Calls `usePageTitle(basename + ● dirty)` so the file's name flows into the shared chrome title, and `useBacklinks(fileRef(path))` so wiki pages, tasks, commits, and findings that reference the file appear in the nav-bar Backlinks dropdown. EditorPane keeps owning Monaco / blame / context menus; the wrapper only provides chrome above. |
 | `apps/desktop/src/pages/DiffPage.tsx` | Thin Page wrapper around `DiffPane` for diff tabs. Calls `usePageTitle(basename + (label))`. |
 | `apps/desktop/src/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it. Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
 | `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: search trigger, active item, up next, **bookmarks** (when present), recent files, pages directory. Passive — never auto-opens tabs. Bookmark rows show a single-letter scope badge (T/S/G) and a per-row remove button. |
@@ -45,7 +45,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `apps/desktop/src/tabs/useBacklinks.ts` | React hook that calls the unified `list_backlinks` IPC for a `TabRef` and maps the returned `BacklinkEdge` rows into `BacklinkEntry`s. Used by every page kind including `FilePage` (which previously rendered nothing). The sibling `usePageOutbound` hook does the same for the inverse direction. |
 | `apps/desktop/src/tabs/backlinkTypes.ts` | Renderer-side `BacklinkEntry` interface (`{ ref, label, subtitle? }`). Decoupled from the SQLite `BacklinkEdge` shape. |
 | `apps/desktop/src/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
-| `apps/desktop/src/pages/WorkItemPage.tsx` | Single-record page for a work item — wraps `WorkItemDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
+| `apps/desktop/src/pages/TaskPage.tsx` | Single-record page for a task — wraps `TaskDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
 | `apps/desktop/src/pages/NotePage.tsx` | Single-record page for a wiki page — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get the unified chrome (title from `usePageTitle`, browser-style back/forward + star, Backlinks panel). `NoteTab` no longer renders its own header — freshness badge + Edit/Save/Revert/Delete/Create live in a thin secondary toolbar inside the body. In-tab wikilink-to-note clicks route through `PageNavigationContext.navigate(wikiPageRef)` so they participate in tab-level history. |
 | `apps/desktop/src/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
 | `apps/desktop/src/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
@@ -58,13 +58,13 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 `PageKind` (`tabState.ts`):
 
 ```
-"agent" | "file" | "diff" | "duplicate-block" | "note" | "work-item" | "finding"
+"agent" | "file" | "diff" | "duplicate-block" | "note" | "task" | "finding"
 | "tasks" | "done-work" | "backlog" | "archived"
 | "wiki-index" | "files" | "code-quality"
 | "local-history" | "git-history" | "git-dashboard" | "git-commit"
 | "uncommitted-changes" | "change-analysis" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
-| "new-stream" | "new-work-item"
+| "new-stream" | "new-task"
 | "stream-settings" | "thread-settings"
 | "op-error"
 | "external-url"
@@ -82,7 +82,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | diff | `diff:<path>\|<from>\|<to>\|<labelOverride>` | `diff:src/a.ts\|abc\|def\|` |
 | duplicate-block | `dup:<leftPath>:<lstart>-<lend>::<rightPath>:<rstart>-<rend>` | `dup:src/a.ts:10-40::src/b.ts:55-85` |
 | note | `note:<slug>` | `note:how-stop-hook-fires` |
-| work-item | `wi:<id>` | `wi:wi-142` |
+| task | `wi:<id>` | `wi:wi-142` |
 | finding | `finding:<id>` | `finding:f-7` |
 | `*-index` | the kind name | `code-quality`, `start`, `settings` |
 | git-dashboard | `git-dashboard` | `git-dashboard` |
@@ -91,7 +91,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | change-analysis | `change-analysis:<target>` (dashboard) or `change-analysis:<target>:<scopeKind>:<scopeValue>` (drilldown — `scopeKind` is `ext` / `dir` / `status`) | `change-analysis:working`, `change-analysis:abc1234:ext:rs` |
 | dashboard | `dashboard:<variant>` | `dashboard:planning` |
 | new-stream | `new-stream` | `new-stream` |
-| new-work-item | `new-work-item` | `new-work-item` |
+| new-task | `new-task` | `new-task` |
 | stream-settings | `stream-settings:<streamId>` | `stream-settings:s-7` |
 | thread-settings | `thread-settings:<threadId>` | `thread-settings:t-3` |
 | op-error | `op-error:<errorId>` | `op-error:oe-abc123` |
@@ -133,15 +133,15 @@ The full IA redesign ships in phases (see plan
   — the rail HUD is THE left chrome and pages are THE center surface
   (see "Left dock removed" / "Bottom dock removed" notes below).
 - ✅ Phase 4 — New pages + backlinks indexer:
-  `WorkItemPage`, `NotePage`, `FindingPage`, three `DashboardPage`
+  `TaskPage`, `NotePage`, `FindingPage`, three `DashboardPage`
   variants (Planning / Review / Quality), and the
   `computeBacklinks(target, ctx)` indexer. `FilePage` and `DiffPage`
   were intentionally skipped: file and diff tabs already render via
   `centerTabs` with their own chrome (Monaco editor, diff editor) and
   wrapping them in Page chrome would double-up the header. The
   legacy `note:` tab path now renders through `NotePage` so wiki
-  notes get a Backlinks panel; modal-based work-item edits still work
-  alongside `WorkItemPage` for callers that want the modal flow.
+  notes get a Backlinks panel; modal-based task edits still work
+  alongside `TaskPage` for callers that want the modal flow.
 - ✅ Phase 5 — Web-style interactions sweep (kill modals + right-click
   menus). 5a (`InlineConfirm` + `UndoToast` queue) and 5b (`InlineEdit`
   + `InlinePromptStrip` for new-X flows) shipped: `ConfirmDialog.tsx`
@@ -162,9 +162,9 @@ The full IA redesign ships in phases (see plan
   5e landed the per-stream and per-thread settings as
   `StreamSettingsPage` and `ThreadSettingsPage`, the inline-new-row
   that retired `CreateThreadModal`, and the new-stream / new-work-
-  item page-form replacements (`NewStreamPage`, `NewWorkItemPage` —
-  routed via `newStreamRef()` / `newWorkItemRef({...})`). The
-  `PlanPane` `NewWorkItemModal` only backs the edit-double-click
+  item page-form replacements (`NewStreamPage`, `NewTaskPage` —
+  routed via `newStreamRef()` / `newTaskRef({...})`). The
+  `PlanPane` `NewTaskModal` only backs the edit-double-click
   flow now; new flows route through pages.
 - ✅ Phase 6 — Selection action bar + drag-to-add-context polish.
   `SelectionActionBar` (`apps/desktop/src/components/Plan/SelectionActionBar.tsx`)
@@ -172,12 +172,12 @@ The full IA redesign ships in phases (see plan
   rows are marked. It owns no state; PlanPane reads its existing
   marked-set and routes Change status / Change priority / Add to
   agent context / Delete through the same paths used by single-row
-  kebabs. The agent terminal now accepts multi-row work-item drags
+  kebabs. The agent terminal now accepts multi-row task drags
   (decodes the `WORK_ITEM_DRAG_MIME` payload's `items` slice
   directly — see `.context/usability.md` "Add to agent context").
   Drag-to-add sources expanded: BacklinksList entries, RailHud
   recent-files / active item / up-next, CodeQualityPanel file group
-  rows, plus a "Add to agent context" item on every work-item kebab
+  rows, plus a "Add to agent context" item on every task kebab
   (single-row and group menus).
 - ✅ Phase 7 — Density + visual polish. Body font bumped to 14px;
   list rows (Plan / Files / Notes / Code quality / Snapshots /
@@ -203,7 +203,7 @@ rail HUD is THE persistent left chrome; the legacy `Plan` / `Project` /
 the work pages (`TasksPage` / `DoneWorkPage` / `BacklogPage` /
 `ArchivedPage`) / `FilesPage` / `NotesIndexPage` content and have
 been deleted along with the `leftDockActivate` plumbing. Menu
-commands that used to flip the dock (`commitFiles`, edit-work-item)
+commands that used to flip the dock (`commitFiles`, edit-task)
 now route through `handleOpenPage(indexRef("files"))` /
 `handleOpenPage(indexRef("tasks"))`. E2e probes that previously
 relied on `dock-tab-plan` / `dock-tab-project` / `dock-panel-*`
@@ -228,7 +228,7 @@ replaced by four focused pages so each has one job:
 - **Backlog** (`page-backlog`) — global (cross-stream) candidate
   pool with grooming affordances: free-text `category` bucket
   (default group-by), comma-separated `tags` (filter chips), and
-  promote-into-thread action. Items are `work_items` rows with
+  promote-into-thread action. Items are `tasks` rows with
   `thread_id IS NULL`; promote/demote flips `thread_id` without
   copying. The `backlogReadyCount` badge in the rail directory
   hangs off this entry.
@@ -295,7 +295,7 @@ them.
 ## Sibling navigation (list → page prev/next)
 
 When a page is opened from a list (notes index, file tree, backlinks,
-work-item list, …), `PageNavBar` renders **up/down sibling buttons**
+task list, …), `PageNavBar` renders **up/down sibling buttons**
 next to back/forward. They step through the originating list without
 touching back/forward — Back still goes to the page that listed the
 items, never to the previously-viewed sibling.
@@ -429,7 +429,7 @@ each thread's last active tab.
 ## Unified tab list — every tab holds a Page
 
 Every per-thread tab lives in `threadPageTabs[threadId]` as a
-`TabRef`, regardless of kind (`note`, `file`, `diff`, `work-item`,
+`TabRef`, regardless of kind (`note`, `file`, `diff`, `task`,
 `change-analysis`, `git-commit`, etc.). The page-tab loop in
 `centerTabs` builds the renderer by switching on `ref.kind` and
 wrapping each tab in a `PageNavigationContext` so in-tab navigation,
@@ -474,7 +474,7 @@ kinds slot in without re-discovering the layout.
 - **`threadPageTabs: Record<string, TabRef[]>`** — per-thread tab
   list, keyed by `threadId`. The single source of truth for "what
   tabs exist in this thread, in what order." Every tab kind
-  (`file`, `diff`, `note`, `work-item`, `change-analysis`,
+  (`file`, `diff`, `note`, `task`, `change-analysis`,
   `git-commit`, `tasks`, `git-history`, …) lives here. Mutated by
   `handleOpenPage`, `handleOpenFile`, `handleOpenDiff`,
   `handleNavigateInTab`, `handleStepSibling`, `closePageTab`. Read

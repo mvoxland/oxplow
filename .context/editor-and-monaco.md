@@ -82,7 +82,7 @@ merged per-line attribution via `localBlame(stream.id, filePath)` and
 renders an absolutely-positioned DOM overlay on the left gutter (the
 `BlameOverlay` sub-component). The merge is computed server-side in
 `crates/oxplow-git/src/blame.rs` (`computeLocalBlame`) — it walks closed
-work-item efforts newest-first (`WorkItemEffortStore.listEffortsForPath`),
+task efforts newest-first (`TaskEffortStore.listEffortsForPath`),
 diffs each effort's start/end snapshot content to figure out which lines
 the effort introduced, and falls back to `gitBlame` for any line the
 local walk can't attribute. Snapshots pruned by the 7-day retention
@@ -98,18 +98,18 @@ Layout details:
   `blameScrollTop` state.
 - Reads `monaco.editor.EditorOption.lineHeight` so each row aligns with
   the corresponding text line.
-- Two hue tracks share one overlay: **local** (work-item) lines use
+- Two hue tracks share one overlay: **local** (task) lines use
   `--blame-local-*` (warm amber age ramp) with a 2px
   `--blame-local-border` left stripe; **git** lines use `--blame-git-*`
   (cool blue age ramp) with a 2px `--blame-git-border` left stripe.
   Uncommitted lines render with `--blame-uncommitted` and a transparent
   border. All variables live in `public/index.html` — see
   `.context/theming.md`.
-- Labels: local rows show the truncated work-item title; git rows show
+- Labels: local rows show the truncated task title; git rows show
   `yyyy-mm-dd  author`; uncommitted rows are blank.
-- On click, local rows call `onRevealWorkItem(itemId)` (wired to
-  `handleRequestEditWorkItem` in `App.tsx` — pops the Plan pane and
-  opens the work-item edit modal). Git rows call
+- On click, local rows call `onRevealTask(itemId)` (wired to
+  `handleRequestEditTask` in `App.tsx` — pops the Plan pane and
+  opens the task edit modal). Git rows call
   `onRevealCommit(sha)` (same path as before: bumps `historyReveal`
   and `bottomActivate` tokens).
 - Right-click on a git row still opens the three-item menu (Copy SHA,

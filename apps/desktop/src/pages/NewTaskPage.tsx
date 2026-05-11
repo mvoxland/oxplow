@@ -26,12 +26,12 @@ const STATUS_OPTIONS: Array<Extract<TaskStatus, "ready" | "blocked">> = ["ready"
  * carry-forward logic.
  */
 export function resolveSaveAndAnotherDefaults(input: {
-  parentId?: string | null;
+  parentId?: number | null;
   initialCategory?: string | null;
   initialPriority?: string | null;
   lastCategory?: string | null;
   lastPriority?: string | null;
-} = {}): { parentId: string | null; initialCategory: string; initialPriority: string } {
+} = {}): { parentId: number | null; initialCategory: string; initialPriority: string } {
   return {
     parentId: input.parentId ?? null,
     initialCategory: input.lastCategory ?? input.initialCategory ?? "task",
@@ -42,7 +42,7 @@ export function resolveSaveAndAnotherDefaults(input: {
 export interface NewWorkItemPageProps {
   /** Defaults from the page-ref payload (incl. parentId for + Task on epic). */
   defaults?: {
-    parentId?: string | null;
+    parentId?: number | null;
     initialCategory?: string | null;
     initialPriority?: string | null;
   };
@@ -56,7 +56,7 @@ export interface NewWorkItemPageProps {
     title: string;
     description?: string;
     acceptanceCriteria?: string | null;
-    parentId?: string | null;
+    parentId?: number | null;
     status?: TaskStatus;
     priority?: TaskPriority;
   }): Promise<void>;

@@ -49,7 +49,7 @@ The notes surface in 0.1 was a placeholder. In 0.2 it's a proper subsystem:
 
 ## Agent loop, simplified
 
-0.1 had a four-state agent status (idle / thinking / waiting / blocked) and a `human_check` work-item state for "I think I'm done, please review." Both turned out to be busywork:
+0.1 had a four-state agent status (idle / thinking / waiting / blocked) and a `human_check` task state for "I think I'm done, please review." Both turned out to be busywork:
 
 - **Two states: working / waiting.** That's all the rail needs.
 - **`human_check` is gone.** Agents mark items `done` directly. The rail's Finished section is the review surface; the agent doesn't need a halfway state.

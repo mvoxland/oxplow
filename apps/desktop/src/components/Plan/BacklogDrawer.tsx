@@ -59,7 +59,7 @@ export function BacklogDrawer({
 }: {
   backlog: BacklogState | null;
   activeThreadId: string | null;
-  onPromote(itemId: string, toThreadId: string): Promise<void>;
+  onPromote(itemId: number, toThreadId: string): Promise<void>;
   onOpenBacklog(): void;
 }) {
   const [open, setOpen] = useState<boolean>(() => {

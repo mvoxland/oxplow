@@ -68,7 +68,7 @@ per region (e.g. `+ New stream`, `+ New thread`, Save). Secondary
 buttons use `--button-secondary-*` (transparent background, neutral
 text, lifts to a 4%-white wash on hover).
 
-### Status (semantic — work item / agent state)
+### Status (semantic — task / agent state)
 
 `--status-running` (blue), `--status-waiting` (amber),
 `--status-ready` (slate), `--status-human-check` (violet),
@@ -113,7 +113,7 @@ Metabase-grade rather than dense-IDE. The relevant numbers:
 - **Body font** is 14px (was 13px). Captions/metadata stay at 13px;
   IDs/timestamps that need column alignment use the `.oxplow-tabular`
   class (12px tabular-nums).
-- **List rows** (work items, file tree, notes, code-quality findings,
+- **List rows** (tasks, file tree, notes, code-quality findings,
   snapshots, commits) use `padding: 8–10px 12px` and target ~36–40px
   height — up from the prior ~24–28px.
 - **Section headers** use `padding: 10px 12px` and 11px uppercase
