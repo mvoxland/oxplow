@@ -27,16 +27,16 @@ import {
   applyStatusFilter,
   buildBacklogGroups,
   buildGroups,
-  classifytasks,
+  classifyTaskStatus,
   filterAutoAuthored,
   statusLabel,
   useCollapsedSections,
-  type tasksectionKind,
+  type TaskSectionKind,
 } from "./plan-utils.js";
 
 const STATUS_RANK: Record<string, number> = { inProgress: 0, ready: 1, blocked: 2, done: 3 };
 function statusOrderRank(status: TaskStatus): number {
-  return STATUS_RANK[classifytasks(status)] ?? 0;
+  return STATUS_RANK[classifyTaskStatus(status)] ?? 0;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -89,13 +89,13 @@ interface Props {
   /** Restrict the visible sections (Ready / Blocked / etc). Used by the
    *  page split: Plan Work shows ready+blocked+done previews,
    *  Done Work / Archived show only "done", etc. Default = all four. */
-  visibleSections?: tasksectionKind[];
+  visibleSections?: TaskSectionKind[];
   /** Cap the number of items rendered per section after sort. Used by
    *  Plan Work to render "last 5" previews of Done. */
-  sectionItemLimit?: Partial<Record<tasksectionKind, number>>;
+  sectionItemLimit?: Partial<Record<TaskSectionKind, number>>;
   /** Override the default section header label per kind. The Archived
    *  page uses this so the Done section reads "Archived". */
-  sectionLabelOverrides?: Partial<Record<tasksectionKind, string>>;
+  sectionLabelOverrides?: Partial<Record<TaskSectionKind, string>>;
   /** Filter raw items by status before grouping. Done Work passes
    *  `excludeStatuses: ["archived"]`; Archived passes
    *  `onlyStatuses: ["archived"]`. */
@@ -104,7 +104,7 @@ interface Props {
   /** Per-section header link nodes (right-aligned, after `sectionActions`).
    *  Used by Plan Work for "View all done →" links pointing at the
    *  dedicated Done Work / Archived pages. */
-  extraSectionLinks?: Partial<Record<tasksectionKind, React.ReactNode>>;
+  extraSectionLinks?: Partial<Record<TaskSectionKind, React.ReactNode>>;
   /** Pin the pane mode and disable the bottom-bar toggle. The Backlog
    *  page passes `"backlog"` so the pane renders the stream-global
    *  backlog full-pane. */
@@ -304,10 +304,10 @@ export function PlanPane({
         if (!selectedId) return;
         const selected = allItems.find((item) => item.id === selectedId);
         if (!selected) return;
-        const selSection = classifytasks(selected.status);
+        const selSection = classifyTaskStatus(selected.status);
         const sectionIds = navigableIds.filter((id) => {
           const item = allItems.find((i) => i.id === id);
-          return item ? classifytasks(item.status) === selSection : false;
+          return item ? classifyTaskStatus(item.status) === selSection : false;
         });
         const posInSection = sectionIds.indexOf(selectedId);
         const neighborPosInSection = key === "ArrowDown" ? posInSection + 1 : posInSection - 1;
@@ -536,11 +536,11 @@ export function PlanPane({
                 <SectionHeaderMenu items={readyMenuItems} testId="plan-ready-menu" />
               </span>
             );
-            const sectionActions: Partial<Record<tasksectionKind, React.ReactNode>> = {
+            const sectionActions: Partial<Record<TaskSectionKind, React.ReactNode>> = {
               ready: readyActions,
             };
             if (extraSectionLinks) {
-              for (const [k, node] of Object.entries(extraSectionLinks) as Array<[tasksectionKind, React.ReactNode]>) {
+              for (const [k, node] of Object.entries(extraSectionLinks) as Array<[TaskSectionKind, React.ReactNode]>) {
                 if (!node) continue;
                 const existing = sectionActions[k];
                 sectionActions[k] = existing ? (

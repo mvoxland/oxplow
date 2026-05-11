@@ -9,10 +9,10 @@ import type {
 } from "../../api.js";
 
 // Keys for collapsible sections in the Plan pane. Extends
-// tasksectionKind with the pseudo-sections that PlanPane injects
+// TaskSectionKind with the pseudo-sections that PlanPane injects
 // alongside the tasks sections (e.g. Recent answers). All share
 // a single collapsed-state Set so toggling works consistently.
-export type PlanSectionKey = tasksectionKind | "recentAnswers";
+export type PlanSectionKey = TaskSectionKind | "recentAnswers";
 
 /**
  * Hook: manages a Set of collapsed section keys, persisted to
@@ -46,30 +46,30 @@ export function useCollapsedSections(): {
   return { collapsed, toggle, isCollapsed };
 }
 
-export interface tasksGroup {
+export interface TaskGroup {
   epic: Task | null;
   items: Task[];
   epicChildren: Map<number, Task[]>;
 }
 
-export type tasksectionKind = "inProgress" | "ready" | "blocked" | "done";
+export type TaskSectionKind = "inProgress" | "ready" | "blocked" | "done";
 
-export interface tasksection {
-  kind: tasksectionKind;
+export interface TaskSection {
+  kind: TaskSectionKind;
   label: string;
   items: Task[];
 }
 
 // Fixed top-to-bottom order and labels. Always iterated in this order by the
 // renderer; empty sections are skipped there.
-const SECTION_ORDER: Array<{ kind: tasksectionKind; label: string }> = [
+const SECTION_ORDER: Array<{ kind: TaskSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
   { kind: "ready", label: "Ready" },
   { kind: "blocked", label: "Blocked" },
   { kind: "done", label: "Done" },
 ];
 
-export function classifytasks(status: TaskStatus): tasksectionKind {
+export function classifyTaskStatus(status: TaskStatus): TaskSectionKind {
   switch (status) {
     case "in_progress": return "inProgress";
     case "ready": return "ready";
@@ -98,8 +98,8 @@ export function classifytasks(status: TaskStatus): tasksectionKind {
  * Edge cases: an epic with no children falls back to its own literal
  * status; an empty epic that's `ready` goes to Ready, etc.
  */
-export function classifyEpic(epic: Task, children: Task[]): tasksectionKind {
-  if (children.length === 0) return classifytasks(epic.status);
+export function classifyEpic(epic: Task, children: Task[]): TaskSectionKind {
+  if (children.length === 0) return classifyTaskStatus(epic.status);
   let anyBlocked = false;
   let anyInProgress = false;
   let anyDone = false;
@@ -123,7 +123,7 @@ export function classifyEpic(epic: Task, children: Task[]): tasksectionKind {
 // Default landing status when a tasks is dragged *into* a section. Returns
 // null for inProgress: the agent owns that status, and in-progress items are
 // drag-locked anyway, so we don't let users promote items into it by drop.
-export function sectionDefaultStatus(section: tasksectionKind): TaskStatus | null {
+export function sectionDefaultStatus(section: TaskSectionKind): TaskStatus | null {
   switch (section) {
     case "inProgress": return null;
     case "ready": return "ready";
@@ -141,20 +141,20 @@ export function sectionDefaultStatus(section: tasksectionKind): TaskStatus | nul
 export function classifyRow(
   item: Task,
   epicChildrenMap: Map<number, Task[]>,
-): tasksectionKind {
+): TaskSectionKind {
   const children = epicChildrenMap.get(item.id);
   if (children && children.length > 0) {
     return classifyEpic(item, children);
   }
-  return classifytasks(item.status);
+  return classifyTaskStatus(item.status);
 }
 
-export function splitIntoSections(items: Task[]): tasksection[] {
-  const buckets: Record<tasksectionKind, Task[]> = {
+export function splitIntoSections(items: Task[]): TaskSection[] {
+  const buckets: Record<TaskSectionKind, Task[]> = {
     inProgress: [], ready: [], blocked: [], done: [],
   };
-  for (const item of items) buckets[classifytasks(item.status)].push(item);
-  const sections: tasksection[] = [];
+  for (const item of items) buckets[classifyTaskStatus(item.status)].push(item);
+  const sections: TaskSection[] = [];
   for (const { kind, label } of SECTION_ORDER) {
     if (buckets[kind].length === 0) continue;
     buckets[kind].sort((a, b) =>
@@ -215,7 +215,7 @@ export function finalizeReorderIds(
   return ids;
 }
 
-export function buildBacklogGroups(state: BacklogState | null): tasksGroup[] {
+export function buildBacklogGroups(state: BacklogState | null): TaskGroup[] {
   // Always yield exactly one root group, even when the backlog is empty or
   // `state` is still loading — the Plan pane renders the section chrome
   // (Ready / Done / etc. + the "⋯ New task" menu) through TaskGroupList,
@@ -242,7 +242,7 @@ export function buildBacklogGroups(state: BacklogState | null): tasksGroup[] {
  *
  * Pure — exported for tests.
  */
-export function filterAutoAuthored(groups: tasksGroup[]): tasksGroup[] {
+export function filterAutoAuthored(groups: TaskGroup[]): TaskGroup[] {
   return groups.map((group) => {
     const isParent = (id: number) => (group.epicChildren.get(id)?.length ?? 0) > 0;
     const items = group.items.filter((item) => isParent(item.id) || item.created_by !== "agent");
@@ -263,9 +263,9 @@ export function filterAutoAuthored(groups: tasksGroup[]): tasksGroup[] {
  * Pure — exported for tests.
  */
 export function applyStatusFilter(
-  groups: tasksGroup[],
+  groups: TaskGroup[],
   opts: { only?: TaskStatus[]; exclude?: TaskStatus[] },
-): tasksGroup[] {
+): TaskGroup[] {
   const onlySet = opts.only ? new Set(opts.only) : null;
   const excludeSet = opts.exclude ? new Set(opts.exclude) : null;
   const keep = (item: Task) => {
@@ -283,7 +283,7 @@ export function applyStatusFilter(
   });
 }
 
-export function buildGroups(threadWork: ThreadWorkState | null): tasksGroup[] {
+export function buildGroups(threadWork: ThreadWorkState | null): TaskGroup[] {
   if (!threadWork) return [];
   // ThreadWorkState splits items into bucketed lists by status:
   //   inProgress → InProgress, items → Ready, waiting → Blocked,

@@ -12,8 +12,8 @@ import {
   statusIcon,
   statusLabel,
   type PlanSectionKey,
-  type tasksGroup,
-  type tasksectionKind,
+  type TaskGroup,
+  type TaskSectionKind,
 } from "./plan-utils.js";
 import { PriorityIcon } from "./plan-icons.js";
 import type { TaskDetailChanges } from "./TaskDetail.js";
@@ -37,12 +37,12 @@ import type { MenuItem } from "../../menu.js";
 export type QueueRow = { kind: "work"; id: number; sortIndex: number; item: Task };
 
 interface SectionBucket {
-  kind: tasksectionKind;
+  kind: TaskSectionKind;
   label: string;
   rows: QueueRow[];
 }
 
-const SECTION_ORDER: Array<{ kind: tasksectionKind; label: string }> = [
+const SECTION_ORDER: Array<{ kind: TaskSectionKind; label: string }> = [
   { kind: "inProgress", label: "In progress" },
   { kind: "ready", label: "Ready" },
   { kind: "blocked", label: "Blocked" },
@@ -75,7 +75,7 @@ export function TaskGroupList({
   sectionLabelOverrides,
   hideArchiveToggle,
 }: {
-  group: tasksGroup;
+  group: TaskGroup;
   scopeThreadId: string | null;
   onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
   onReorderTasks: (orderedItemIds: number[]) => Promise<void>;
@@ -85,7 +85,7 @@ export function TaskGroupList({
    *  The PlanPane builds this map and threads it in — add new per-section
    *  commands here rather than in the header rendering. Done's built-in
    *  archive controls render alongside whatever's passed for `done`. */
-  sectionActions?: Partial<Record<tasksectionKind, React.ReactNode>>;
+  sectionActions?: Partial<Record<TaskSectionKind, React.ReactNode>>;
   selectedId?: number | null;
   markedIds?: ReadonlySet<number>;
   onSelect?(id: number, modifiers?: { toggle?: boolean; range?: boolean }): void;
@@ -112,14 +112,14 @@ export function TaskGroupList({
   /** When provided, only sections in this list render. Used by the
    *  page split (Plan Work / Done Work / Archived) to restrict the
    *  panel to a subset of the five buckets. Default = all. */
-  visibleSections?: tasksectionKind[];
+  visibleSections?: TaskSectionKind[];
   /** Cap rows per section after the in-section sort. Used by Plan
    *  Work to render previews of Done. Sections with no entry render
    *  fully. */
-  sectionItemLimit?: Partial<Record<tasksectionKind, number>>;
+  sectionItemLimit?: Partial<Record<TaskSectionKind, number>>;
   /** Override the default section header label per kind. Used by the
    *  Archived page so the (singular) Done section reads "Archived". */
-  sectionLabelOverrides?: Partial<Record<tasksectionKind, string>>;
+  sectionLabelOverrides?: Partial<Record<TaskSectionKind, string>>;
   /** Suppress the built-in "Show archived (N) / Archive all" controls
    *  on the Done section header. Plan Work, Done Work, and Archived
    *  all set this — those pages own their own archive flow (a
@@ -132,7 +132,7 @@ export function TaskGroupList({
   const lockInProgress = isActive !== false;
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
-  const [overSection, setOverSection] = useState<tasksectionKind | null>(null);
+  const [overSection, setOverSection] = useState<TaskSectionKind | null>(null);
   // Archived items fold into the Done section but are hidden by default — the
   // done-section header carries a "Show archived (N)" toggle and an
   // "Archive all" action.
@@ -143,7 +143,7 @@ export function TaskGroupList({
     const work: QueueRow[] = group.items.map((item) => ({
       kind: "work" as const, id: item.id, sortIndex: item.sort_index, item,
     }));
-    const buckets: Record<tasksectionKind, QueueRow[]> = {
+    const buckets: Record<TaskSectionKind, QueueRow[]> = {
       inProgress: [], ready: [], blocked: [], done: [],
     };
     for (const row of work) {
@@ -336,7 +336,7 @@ export function TaskGroupList({
     }
   };
 
-  const handleDropOnSection = (section: tasksectionKind) => {
+  const handleDropOnSection = (section: TaskSectionKind) => {
     if (!draggedTask) { resetDrag(); return; }
     const nextStatus = sectionDefaultStatus(section);
     resetDrag();

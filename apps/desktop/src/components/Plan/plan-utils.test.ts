@@ -6,7 +6,7 @@ import {
   buildGroups,
   classifyEpic,
   classifyRow,
-  classifytasks,
+  classifyTaskStatus,
   filterAutoAuthored,
   finalizeReorderIds,
   sectionDefaultStatus,
@@ -32,13 +32,13 @@ function item(id: number, status: TaskStatus, sort_index: number): Task {
   };
 }
 
-test("classifytasks buckets each status into exactly one section", () => {
-  expect(classifytasks("in_progress")).toBe("inProgress");
-  expect(classifytasks("ready")).toBe("ready");
-  expect(classifytasks("blocked")).toBe("blocked");
-  expect(classifytasks("done")).toBe("done");
-  expect(classifytasks("canceled")).toBe("done");
-  expect(classifytasks("archived")).toBe("done");
+test("classifyTaskStatus buckets each status into exactly one section", () => {
+  expect(classifyTaskStatus("in_progress")).toBe("inProgress");
+  expect(classifyTaskStatus("ready")).toBe("ready");
+  expect(classifyTaskStatus("blocked")).toBe("blocked");
+  expect(classifyTaskStatus("done")).toBe("done");
+  expect(classifyTaskStatus("canceled")).toBe("done");
+  expect(classifyTaskStatus("archived")).toBe("done");
 });
 
 test("splitIntoSections returns sections in fixed order: inProgress → ready → blocked → done", () => {
