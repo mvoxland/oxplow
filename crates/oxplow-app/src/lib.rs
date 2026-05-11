@@ -65,8 +65,8 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqlitePageRefStore,
     SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
-    SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskStore, SqliteThreadStore,
-    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore, SqliteTaskNoteStore,
+    SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
+    SqliteThreadStore, SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};

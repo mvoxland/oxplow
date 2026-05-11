@@ -20,8 +20,8 @@ pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
 pub use ids::{AgentTurnId, EffortId, HookEventId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 pub use stream::{Stream, StreamKind};
 pub use task::{
-    Task, TaskActorKind, TaskAuthor, TaskEvent, TaskLink, TaskLinkType, TaskPriority, TaskStatus,
-    TaskNote,
+    Task, TaskActorKind, TaskAuthor, TaskEvent, TaskLink, TaskLinkType, TaskNote, TaskPriority,
+    TaskStatus,
 };
 pub use thread::{Thread, ThreadStatus};
 pub use time::Timestamp;

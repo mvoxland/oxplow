@@ -29,7 +29,7 @@ through real work without them clobbering each other.
   commit mode replaces the commit-point queue with an every-stop
   default.
 - **Local History.** Every turn produces file snapshots. Efforts are
-  grouped per work item; the modal shows per-effort file-change
+  grouped per task; the modal shows per-effort file-change
   counts and lets you jump back to any end snapshot.
 - **Editor + file browser.** Monaco-based editor with blame overlay,
   diff tabs, and Git-aware decorations. Custom React file tree rather

@@ -448,6 +448,21 @@ mod tests {
         assert_eq!(pairs[0].stale_children.len(), 1);
     }
 
+    /// Childless `done` tasks must never produce a stale-children pair
+    /// — there are no children to be stale. The audit logic relies on
+    /// this so a regular completed task in the Done bucket doesn't get
+    /// surfaced as an epic to walk.
+    #[test]
+    fn find_stale_epic_children_pairs_skips_childless_done() {
+        let items = vec![
+            item(1, TaskStatus::Done, None),
+            item(2, TaskStatus::Blocked, None),
+            item(3, TaskStatus::Canceled, None),
+        ];
+        let pairs = find_stale_epic_children_pairs(&items);
+        assert!(pairs.is_empty(), "expected no pairs, got {pairs:?}");
+    }
+
     #[test]
     fn compute_audit_signature_stable_under_reordering() {
         let a = item(10, TaskStatus::InProgress, None);

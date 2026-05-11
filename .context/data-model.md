@@ -125,20 +125,27 @@ running an older DB get the columns/tables dropped on first launch with
 the new binary; existing rows are not migrated forward (no surface
 reads them).
 
-### `tasks` — `taskstore` (`crates/oxplow-db/src/task_store.rs`)
+### `task` — `SqliteTaskStore` (`crates/oxplow-db/src/task_store.rs`)
 
-The actual TODO list. Kinds: `epic`, `task`, `subtask`, `bug`, `note`.
+The actual TODO list. Singular table name, `id INTEGER PRIMARY KEY
+AUTOINCREMENT` — task ids are plain integers (no `wi-` prefix). The
+`kind` column was dropped: there is no `epic`/`subtask`/`bug`/`note`
+discriminator any more. An **epic is any task that has children** —
+i.e. any row that's a `parent_id` target. The IPC's
+`get_thread_work_state` computes this on read and the renderer reads
+`ThreadWorkState.epics` directly; there's no flag on the row itself.
+
 Statuses: `ready`, `in_progress`, `blocked`, `done`, `canceled`,
-`archived`. `archived` is a terminal state that hides the item
-from the default Work panel view — archived rows fold into the Done
+`archived`. `archived` is a terminal state that hides the item from
+the default Work panel view — archived rows fold into the Done
 section's bucketing but aren't rendered unless the user flips the "Show
 archived (N)" toggle in the Done section header. The same header carries
 an "Archive all" action that bulk-archives every visible Done/Canceled
-row. `listReady`'s blocker check treats archived the same as done/
-canceled. `parent_id` chains items under epics. `acceptance_criteria` is
-plain text (one criterion per line). task links express dependencies
-(`blocks`, `discovered_from`, `relates_to`, …) via the `task_links`
-join table.
+row. The orchestrator's `read_task_options` blocker check treats
+archived the same as done/canceled. `parent_id` chains items under
+epics. `acceptance_criteria` is plain text (one criterion per line).
+Task links express dependencies (`blocks`, `discovered_from`,
+`relates_to`, …) via the `task_link` join table.
 
 `thread_id` is nullable — items with `thread_id IS NULL` belong to the
 **backlog** (a global, stream-less queue). The store API uses the constant
@@ -156,7 +163,7 @@ the read path maps the legacy string to `null` so older terminal rows
 continue to load under the narrowed enum.
 
 `note_count` is a computed column added to every `Task` returned by the
-store (via COUNT subquery over `work_note`). It drives the note badge on
+store (via COUNT subquery over `task_note`). It drives the note badge on
 list rows and is always 0 when no notes exist.
 
 `category` and `tags` (migration v48, nullable TEXT) — grooming

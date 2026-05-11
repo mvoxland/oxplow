@@ -26,7 +26,7 @@ use oxplow_db::page_ref_projections::{
 use oxplow_db::TaskEffortStore as _;
 use oxplow_db::{
     SqliteCodeQualityStore, SqlitePageRefStore, SqliteTaskEffortStore, SqliteTaskLinkStore,
-    SqliteTaskStore, SqliteTaskNoteStore,
+    SqliteTaskNoteStore, SqliteTaskStore,
 };
 use oxplow_domain::stores::TaskLinkStore as _;
 

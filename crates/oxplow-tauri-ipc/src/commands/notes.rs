@@ -4,7 +4,7 @@
 //! task, so a separate note table for the same purpose was duplicative.
 
 use oxplow_domain::stores::{TaskEventStore, TaskNoteStore};
-use oxplow_domain::{NoteId, TaskEvent, TaskId, ThreadId, TaskNote};
+use oxplow_domain::{NoteId, TaskEvent, TaskId, TaskNote, ThreadId};
 
 use crate::error::IpcError;
 use crate::state::AppState;

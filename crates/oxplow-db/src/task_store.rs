@@ -350,7 +350,7 @@ impl TaskStore for SqliteTaskStore {
                         author = ?13,
                         category = ?14,
                         tags = ?15
-                     WHERE id = ?1",
+                     WHERE id = ?1 AND deleted_at IS NULL",
                     params![
                         item.id.value(),
                         item.thread_id.as_ref().map(|t| t.as_str()),
@@ -553,6 +553,38 @@ mod tests {
         let got = store.get(id).await.unwrap().unwrap();
         assert_eq!(got.title, "renamed");
         assert_eq!(got.status, TaskStatus::InProgress);
+    }
+
+    /// Updating a row that was never inserted (or one whose id never
+    /// matched anything) yields NotFound rather than silently doing
+    /// nothing — callers can distinguish "wrote 0 rows" from "wrote
+    /// 1 row" without an extra read.
+    #[tokio::test]
+    async fn update_missing_id_returns_not_found() {
+        let (store, tid) = fixture().await;
+        let mut it = item(Some(tid));
+        it.id = TaskId::new(999_999);
+        let err = store.update(&it).await.unwrap_err();
+        assert!(
+            matches!(err, DomainError::NotFound),
+            "expected NotFound for missing id, got {err:?}"
+        );
+    }
+
+    /// Soft-deleted rows are intentionally invisible to `update` —
+    /// the WHERE clause filters on `deleted_at IS NULL`. This stops
+    /// a malformed Task payload (with `deleted_at: None`) from
+    /// silently un-soft-deleting the row.
+    #[tokio::test]
+    async fn update_on_soft_deleted_returns_not_found() {
+        let (store, tid) = fixture().await;
+        let id = store.insert(&item(Some(tid))).await.unwrap();
+        store.soft_delete(id).await.unwrap();
+        let mut latest = item(Some(ThreadId::from("b-1")));
+        latest.id = id;
+        latest.title = "ressurected".into();
+        let err = store.update(&latest).await.unwrap_err();
+        assert!(matches!(err, DomainError::NotFound));
     }
 
     #[tokio::test]

@@ -48,7 +48,7 @@ pub async fn upsert_task(state: tauri::State<'_, AppState>, item: Task) -> Resul
             .task_store
             .get(id)
             .await?
-            .ok_or_else(|| IpcError::not_found())?
+            .ok_or_else(IpcError::not_found)?
     };
     state.events.emit(OxplowEvent::TasksChanged { thread_id });
     Ok(result)

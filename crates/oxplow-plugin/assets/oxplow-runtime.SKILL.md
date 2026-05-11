@@ -19,10 +19,9 @@ you want to:
 Pick by structure, not by whether the work was planned first. Plenty
 of plan-mode outputs describe a single task.
 
-- **`create_task` with `kind: "task"`** — one coherent change,
-  even if it touches a few files. Rename, bug fix, small feature in one
-  subsystem. Sequential chores (edit → typecheck → test) are still one
-  task, not sub-steps.
+- **`create_task`** — one coherent change, even if it touches a few
+  files. Rename, bug fix, small feature in one subsystem. Sequential
+  chores (edit → typecheck → test) are still one task, not sub-steps.
 - **`file_epic_with_children`** — ≥3 sub-steps a reviewer would
   naturally check off independently: distinct phases, clear handoffs,
   or separable subsystems (e.g. schema → runtime → IPC → UI → docs).
@@ -38,9 +37,10 @@ of plan-mode outputs describe a single task.
 - `title`: imperative, ≤60 chars (`Fix login redirect loop`).
 - `description`: what and why; keep it terse.
 - `acceptanceCriteria`: one observable criterion per line.
-- `kind`: `epic` only with children (use `file_epic_with_children`);
-  otherwise `task`.
 - `priority`: `medium` unless the user signalled otherwise.
+- Use `file_epic_with_children` (not `create_task`) when the work
+  should land as a parent + children — an "epic" is just any task
+  that ends up with children.
 
 ## One QA-separate concern per row
 

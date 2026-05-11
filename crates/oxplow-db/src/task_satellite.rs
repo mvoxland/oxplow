@@ -10,7 +10,7 @@ use rusqlite::params;
 use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, TaskNoteStore};
 use oxplow_domain::{
     DomainError, NoteId, TaskActorKind, TaskEvent, TaskId, TaskLink, TaskLinkId, TaskLinkType,
-    ThreadId, Timestamp, TaskNote,
+    TaskNote, ThreadId, Timestamp,
 };
 
 use crate::database::Database;

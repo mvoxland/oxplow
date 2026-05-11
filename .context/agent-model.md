@@ -291,7 +291,7 @@ The pipeline runs in priority order:
    change re-arms the audit. This stops the tight ack-loop where the
    agent answers "still in progress" → Stop fires → identical audit
    nudge → same answer, costing the user a wall of repeated lines and
-   model tokens. See wi-c468e8fc093d.
+   model tokens. See the original ticket history.
 2. **Filed-but-didn't-ship advisory.** Fires when the turn filed at
    least one new `ready` task, made zero project edits, and has
    nothing `in_progress` — the "user said do X, agent logged it as
@@ -417,23 +417,27 @@ not the legacy `mcp__oxplow__oxplow__create_task`. The long form
 still resolves on `tools/call` for back-compat.
 
 The default `kind` for `create_task` is `"task"` — omit it
-unless you specifically need an epic/subtask/bug/note. Forcing the
-field on every call produced a guaranteed first-call failure for
-trivial fixes.
+The `kind` discriminator (`epic`/`task`/`subtask`/`bug`/`note`) was
+removed end-to-end — `create_task` no longer accepts one and a task
+row no longer carries one. An "epic" is now just any task that has
+children; the bucketing is computed on read.
 
-**Id-kind validation at the boundary.** Every tool that takes an id
-string (`thread_id`, `stream_id`, `id`, `parent_id`, `from_id`, etc.)
-calls `expect_id_kind(tool, param, value, expected_kind)` before
-constructing the typed id. The check uses `oxplow_domain::classify_id`
-on the prefix segment (`s-` → stream, `b-` → thread, `wi-` → work
-item, `n-` → note, …). When a caller passes the wrong kind — e.g. a
+**Id-prefix validation at the boundary.** Every tool that takes a
+string id (`thread_id`, `stream_id`, `note_id`, `followup_id`, …) calls
+`expect_id_kind(tool, param, value, expected_prefix)` before
+constructing the typed id. The check confirms the string starts with
+the expected `<prefix>-` (`s-` → stream, `b-` → thread, `n-` → note,
+`fu-` → follow-up, …). When a caller passes the wrong kind — e.g. a
 stream id where a thread id was expected — the tool returns an
 `invalid_params` error that names the tool, the parameter, the value
-passed, the inferred kind, and the expected kind. This converts what
+passed, what it looks like, and what was expected. This converts what
 would otherwise surface as an opaque downstream `FOREIGN KEY
 constraint failed` into something actionable. Add the same call at
-the top of any new tool handler — see the `IdKind` enum in
-`crates/oxplow-domain/src/ids.rs` for the canonical list.
+the top of any new tool handler — see `IdPrefix` and the
+`ID_STREAM` / `ID_THREAD` / `ID_NOTE` / `ID_FOLLOWUP` constants in
+`crates/oxplow-mcp/src/lib.rs`. Task ids are integers, so the task
+parameter validator is the separate `parse_task_id` helper (digits
+only, returns `Some(TaskId)` or an `invalid_params` error).
 
 `update_task` accepts `blocked → in_progress` directly (deliberate
 unblock gesture; no separate hop through `ready` required). Only
@@ -493,16 +497,16 @@ directions of any edge:
 - `list_backlinks({ kind, id, limit? })` — pages pointing AT
   `(kind, id)`. Use this for cross-kind backlinks of any sort:
   "what tasks / commits / wiki pages reference src/foo.rs?",
-  "who links to wi-42?", "what mentions finding:fnd-1?".
+  "who links to task:42?", "what mentions finding:fnd-1?".
 - `list_outbound({ kind, id, limit? })` — what `(kind, id)` itself
   points at.
 
-Canonical id shapes: `wiki:<slug>` uses just the slug; `task`
-uses the full `wi-…` id; `file` uses the bare repo-relative path;
-`directory` the bare path with no trailing slash; `git-commit` the
-full sha; `finding` the rowid as a string. Each row carries
-`ref_type` so you can tell e.g. a commit's `touched_file` edge from
-a wiki body's `wikilink`.
+Canonical id shapes: `wiki:<slug>` uses just the slug; `task` uses
+the integer rowid as a string (e.g. `"42"`); `file` uses the bare
+repo-relative path; `directory` the bare path with no trailing
+slash; `git-commit` the full sha; `finding` the rowid as a string.
+Each row carries `ref_type` so you can tell e.g. a commit's
+`touched_file` edge from a wiki body's `wikilink`.
 
 `buildWikiPageMcpTools` (`crates/oxplow-mcp/src/lib.rs`) surfaces the
 per-project wiki (`wiki_page` table + `.oxplow/wiki/*.md` files — see
@@ -594,7 +598,7 @@ and it rebinds the port + lockfile (useful after a stale lockfile
 survives a crash). Full hot-reload would require either a child-
 process MCP model or a `bun --hot`-style process reload, both bigger
 changes than this dev convenience warrants. Tracked on
-wi-4c3a6289871f.
+the original ticket.
 
 Zero runtime cost when the env var is unset; the source-root probe
 doesn't run at all in that case.
@@ -608,7 +612,7 @@ every oxplow tool with full `inputSchema`; the harness picks which to
 eagerly inline vs defer. There is no MCP-spec annotation and no plugin
 config knob to declare a tool "always loaded". If this ever becomes
 tunable, the wiring is `crates/oxplow-mcp/src/lib.rs` `tools/list` response +
-`crates/oxplow-mcp/src/lib.rs` tool registrations (see wi-2998dfa502da).
+`crates/oxplow-mcp/src/lib.rs` tool registrations (see the historical task ledger).
 
 ## Harness-injected system-reminders (not ours)
 
@@ -619,7 +623,7 @@ oxplow hooks, and are **not suppressible** from the plugin side:
   `TaskCreate`/`TaskUpdate`. Noise in oxplow projects where tasks
   live in `mcp__oxplow__*` tools instead. No hook, env var, or plugin
   config lets us silence it; it fires on its own schedule. If a future
-  Claude Code release exposes a suppression hook, revisit wi-2a0262ae2ac2.
+  Claude Code release exposes a suppression hook, revisit the original ticket.
 - The file-in-IDE reminder ("The user opened the file X in the IDE.
   This may or may not be related to the current task.") — same story,
   harness-injected on IDE focus, not a oxplow hook. Revisit if Claude
@@ -749,7 +753,7 @@ while the count is >0, status stays `working` instead of flipping to
 `waiting`. Without this the tab icon would flip the moment the parent
 paused for a subagent, even though the subagent was still doing real
 work. The status flips to `waiting` once the final `Task` PostToolUse
-returns and a subsequent `stop` lands. See wi-593a50b62e22.
+returns and a subsequent `stop` lands. See the original ticket history.
 
 **ExitPlanMode-pending carve-out.** Claude Code's built-in
 `ExitPlanMode` tool fires `PreToolUse` when the agent asks the user
@@ -775,7 +779,7 @@ session. The reducer's `meta` branch treats `hookEventName ===
 `pendingTasks` is cleared. The synthesis only fires when the thread is
 currently `working` so a user idly tapping Escape at a prompt is a
 no-op. Multi-byte ESC sequences (arrow keys, etc.) are explicitly
-filtered out — only the bare interrupt byte counts. See wi-53c5f6e407fc.
+filtered out — only the bare interrupt byte counts. See the original ticket history.
 
 ## Snapshot tracking
 

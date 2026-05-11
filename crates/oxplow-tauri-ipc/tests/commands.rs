@@ -98,6 +98,97 @@ async fn list_tasks_for_thread_empty() {
     assert!(items.is_empty());
 }
 
+/// End-to-end: a task with at least one child lands in
+/// `ThreadWorkState.epics`, NOT in `items`. The frontend's
+/// `computeActiveEpicContext` relies on this bucketing — if a parent
+/// row drops into `items` instead, the rail's "Active epic" affordance
+/// silently goes away. Drive the IPC create_task path twice (parent
+/// + child) and read back the bucketed work state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
+    use oxplow_app::CreateTaskInput;
+    use oxplow_domain::stores::{StreamStore, ThreadStore};
+    use oxplow_domain::{Stream, StreamKind, Thread, ThreadStatus, Timestamp};
+    let app = TestApp::build();
+    // Seed a stream + active thread directly through the stores so the
+    // FK chain is satisfied; we're testing the bucketing IPC, not the
+    // stream/thread create surface.
+    let now = Timestamp::from_unix_ms(1_700_000_000_000);
+    let stream = Stream {
+        id: StreamId::from("s-1"),
+        kind: StreamKind::Primary,
+        title: "p".into(),
+        branch: "main".into(),
+        branch_ref: "refs/heads/main".into(),
+        branch_source: "main".into(),
+        worktree_path: app.state.layout.project_dir.to_string_lossy().into_owned(),
+        working_pane: String::new(),
+        talking_pane: String::new(),
+        working_session_id: String::new(),
+        talking_session_id: String::new(),
+        custom_prompt: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+    app.state.stream_store.upsert(&stream).await.unwrap();
+    let thread = Thread {
+        id: ThreadId::from("b-1"),
+        stream_id: stream.id.clone(),
+        title: "t".into(),
+        status: ThreadStatus::Active,
+        sort_index: 0,
+        pane_target: "working".into(),
+        resume_session_id: String::new(),
+        summary: String::new(),
+        summary_updated_at: None,
+        closed_at: None,
+        custom_prompt: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+    app.state.thread_store.upsert(&thread).await.unwrap();
+    let parent = commands::tasks::create_task(
+        app.state(),
+        commands::tasks::CreateTaskRequest {
+            thread_id: Some(thread.id.clone()),
+            input: CreateTaskInput {
+                title: "parent".into(),
+                ..Default::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let _child = commands::tasks::create_task(
+        app.state(),
+        commands::tasks::CreateTaskRequest {
+            thread_id: Some(thread.id.clone()),
+            input: CreateTaskInput {
+                title: "child".into(),
+                parent_id: Some(parent.id),
+                ..Default::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let work_state = commands::threads::get_thread_work_state(app.state(), thread.id.clone())
+        .await
+        .unwrap();
+    assert!(
+        work_state.epics.iter().any(|e| e.id == parent.id),
+        "parent should appear in epics: {:?}",
+        work_state.epics
+    );
+    assert!(
+        !work_state.items.iter().any(|i| i.id == parent.id),
+        "parent should NOT appear in items: {:?}",
+        work_state.items
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_wiki_pages_empty_for_fresh_project() {
     let app = TestApp::build();

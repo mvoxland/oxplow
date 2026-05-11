@@ -562,4 +562,36 @@ mod tests {
         assert!(r.wikis.is_empty());
         assert_eq!(r.tasks, vec![7]);
     }
+
+    #[test]
+    fn wikilink_task_zero_extracts() {
+        // `0` is a valid integer; the renderer is free to treat it as a
+        // dead link (since SQLite never assigns 0), but the extractor
+        // itself does not gatekeep — that's the renderer's job.
+        let r = extract("[[task:0]] inline task:0");
+        assert_eq!(r.tasks, vec![0]);
+    }
+
+    #[test]
+    fn wikilink_task_negative_rejected() {
+        // The wikilink grammar accepts only ASCII digits — the leading
+        // `-` makes the body fail the digit check.
+        let r = extract("[[task:-1]] inline task:-1");
+        assert!(r.tasks.is_empty());
+    }
+
+    #[test]
+    fn wikilink_task_overflow_rejected() {
+        // i64 overflows are dropped silently (parse::<i64>() returns
+        // None). We don't surface a parse error; the renderer just
+        // doesn't see the ref.
+        let r = extract("[[task:99999999999999999999]]");
+        assert!(r.tasks.is_empty());
+    }
+
+    #[test]
+    fn inline_task_overflow_rejected() {
+        let r = extract("see task:99999999999999999999 in passing");
+        assert!(r.tasks.is_empty());
+    }
 }

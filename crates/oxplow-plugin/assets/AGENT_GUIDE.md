@@ -3,19 +3,23 @@
 Reference catalog the agent can read on demand — you shouldn't need to
 quote this back, just use the right values when calling oxplow MCP tools.
 
-## task kinds
+## Tasks
 
-- **epic** — multi-step feature that decomposes into tasks / subtasks.
-- **task** — a concrete unit of work that ships end-to-end in one or a
-  few turns. The default for most user requests.
-- **subtask** — a small step inside a task; only create these when the
-  task itself is large enough that tracking sub-steps in the task
-  log would help the user review progress.
-- **bug** — a defect to fix, as distinct from new work. Titles should
-  read as an observation ("X doesn't do Y") not a prescription.
-- **note** — an observation that doesn't need execution (retrospective
-  findings, open questions, decisions to revisit). Appears in the
-  history panel but never enters the ready queue.
+Every unit of authored change is a `task`. There is **no `kind`
+field** — tasks aren't typed as epic/task/subtask/bug/note. The shape
+of the work falls out of the data:
+
+- **Epic** — a task that has at least one child (`parent_id` points
+  at it). Use `file_epic_with_children` when the change has ≥3
+  sub-steps a reviewer would naturally inspect separately; otherwise
+  file a single task.
+- **Sub-task** — any task whose `parent_id` is set. Use sparingly:
+  three siblings under a parent is a coordination win; one is just
+  bookkeeping.
+
+Bug/note categorization was intentionally dropped. If you need to
+record an observation without queueing execution, use a wiki page or a
+work-note attached to a thread.
 
 ## Link types (`oxplow__link_tasks`)
 
