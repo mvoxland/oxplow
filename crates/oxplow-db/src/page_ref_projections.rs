@@ -341,11 +341,22 @@ pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
     out
 }
 
-/// Touched-file edges for one effort.
-pub fn effort_touched_file_edges(task_id: &str, paths: &[String]) -> Vec<PageRefEdge> {
-    paths
+/// Touched-file edges for a task.
+///
+/// `entries` is `(path, change_kind)` — the change_kind is one of
+/// the `task_effort_file.change_kind` values (`created` / `updated`
+/// / `deleted`) and is carried through `source_extra` as
+/// `{"change_kind":"..."}` so the renderer can display "created"
+/// / "modified" / "deleted" instead of a single "touched" label.
+/// The renderer normalizes `updated` → "modified" for display.
+pub fn effort_touched_file_edges(task_id: &str, entries: &[(String, String)]) -> Vec<PageRefEdge> {
+    entries
         .iter()
-        .map(|p| PageRefEdge::new(KIND_TASK, task_id, KIND_FILE, p.clone(), RT_TOUCHED_FILE))
+        .map(|(path, change_kind)| {
+            let extra = serde_json::json!({ "change_kind": change_kind }).to_string();
+            PageRefEdge::new(KIND_TASK, task_id, KIND_FILE, path.clone(), RT_TOUCHED_FILE)
+                .with_extra(extra)
+        })
         .collect()
 }
 
@@ -527,10 +538,27 @@ mod tests {
 
     #[test]
     fn effort_touched_file_edges_one_per_path() {
-        let edges = effort_touched_file_edges("7", &["a.rs".into(), "b.rs".into()]);
-        assert_eq!(edges.len(), 2);
+        let entries = vec![
+            ("a.rs".to_string(), "created".to_string()),
+            ("b.rs".to_string(), "updated".to_string()),
+            ("c.rs".to_string(), "deleted".to_string()),
+        ];
+        let edges = effort_touched_file_edges("7", &entries);
+        assert_eq!(edges.len(), 3);
         assert_eq!(edges[0].source_id, "7");
         assert_eq!(edges[0].ref_type, "touched_file");
+        assert!(edges[0]
+            .source_extra
+            .as_deref()
+            .is_some_and(|s| s.contains("created")));
+        assert!(edges[1]
+            .source_extra
+            .as_deref()
+            .is_some_and(|s| s.contains("updated")));
+        assert!(edges[2]
+            .source_extra
+            .as_deref()
+            .is_some_and(|s| s.contains("deleted")));
     }
 
     #[test]

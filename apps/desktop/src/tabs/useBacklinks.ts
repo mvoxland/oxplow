@@ -125,6 +125,15 @@ export function canonicalIdForTarget(ref: TabRef): string | null {
   }
 }
 
+/**
+ * Exported for unit tests. Internal call sites all go through
+ * `edgeToInboundEntry` / `edgeToOutboundEntry`, which already invoke
+ * this helper.
+ */
+export function humanRefTypeForTest(refType: string, sourceExtra: string | null): string {
+  return humanRefType(refType, sourceExtra);
+}
+
 /** Convert one inbound edge (source -> me) into a renderer entry. */
 function edgeToInboundEntry(edge: BacklinkEdge): BacklinkEntry | null {
   const ref = refFor(edge.source_kind, edge.source_id);
@@ -243,9 +252,29 @@ function refFor(kind: string, id: string): TabRef | null {
 
 /**
  * Short label for the relationship type, used as the row's
- * subtitle. For `impact` edges the `source_extra` JSON carries the
- * declared action verb (`{"action":"created"}`) — surface it as
- * `"impact (created)"` so the user can tell what kind of impact.
+ * subtitle.
+ *
+ * Three buckets:
+ *
+ *  - **mention** — every body-mention ref_type collapses to this
+ *    single label. They all mean "the target was named in some
+ *    body text" (description / AC / summary / wiki page), and the
+ *    user doesn't care which body parser found it.
+ *
+ *  - **action verb** (`created` / `modified` / `deleted` /
+ *    `referenced` / `resolved` / `completed` / `reopened`, …) —
+ *    rendered for any edge that represents a change. `touched_file`
+ *    edges carry the `task_effort_file.change_kind` through
+ *    `source_extra.change_kind`; `impact` edges carry the declared
+ *    action through `source_extra.action`. Both paths normalize
+ *    `updated` to `modified` for display.
+ *
+ *  - **typed link** — `task_link:<sub>` becomes the sub-type with
+ *    underscores swapped for spaces (e.g. `blocks`, `relates to`).
+ *
+ *  Plus a `found in` fallback for `finding_path`, and the raw
+ *  ref_type for anything unrecognized so a new ref_type never
+ *  crashes the renderer.
  */
 function humanRefType(refType: string, sourceExtra: string | null): string {
   if (refType.startsWith("task_link:")) {
@@ -254,50 +283,50 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
   }
   switch (refType) {
     case "wiki_file_ref":
-      return "wiki link";
     case "wiki_dir_ref":
-      return "wiki link";
     case "wikilink":
-      return "wiki link";
     case "summary_wikilink":
-      return "wiki link";
     case "summary_file_ref":
-      return "wiki link";
     case "summary_dir_ref":
-      return "wiki link";
     case "task_body_mention":
-      return "mention";
     case "summary_task_mention":
-      return "mention";
     case "finding_mention":
-      return "mention";
     case "summary_finding_mention":
-      return "mention";
     case "commit_mention":
-      return "mention";
     case "summary_commit_mention":
       return "mention";
     case "touched_file":
-      return "touched";
+      return normalizeAction(parseExtraField(sourceExtra, "change_kind")) ?? "modified";
     case "finding_path":
       return "found in";
-    case "impact": {
-      const action = parseImpactAction(sourceExtra);
-      return action ? `impact (${action})` : "impact";
-    }
+    case "impact":
+      return normalizeAction(parseExtraField(sourceExtra, "action")) ?? "impact";
     default:
       return refType;
   }
 }
 
-function parseImpactAction(sourceExtra: string | null): string | null {
+/** Pull a string field out of the `source_extra` JSON blob. */
+function parseExtraField(sourceExtra: string | null, field: string): string | null {
   if (!sourceExtra) return null;
   try {
-    const parsed = JSON.parse(sourceExtra) as { action?: unknown };
-    return typeof parsed.action === "string" && parsed.action.length > 0
-      ? parsed.action
-      : null;
+    const parsed = JSON.parse(sourceExtra) as Record<string, unknown>;
+    const value = parsed[field];
+    return typeof value === "string" && value.length > 0 ? value : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Normalize the action vocabulary the backend stores
+ * (`created`/`updated`/`deleted` from `task_effort_file`, plus the
+ * looser impact verbs the agent declares) into the labels the
+ * renderer surfaces. Notably: `updated` → "modified" everywhere so
+ * a file-change row and a wiki-page-change row read the same way.
+ */
+function normalizeAction(action: string | null): string | null {
+  if (!action) return null;
+  if (action === "updated") return "modified";
+  return action;
 }

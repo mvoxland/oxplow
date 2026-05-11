@@ -67,11 +67,19 @@ pub async fn run(
             }
             counts.tasks += 1;
             // Effort-owned slice = touched-file union ∪ parsed
-            // refs from every summary body.
-            let mut paths: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            // refs from every summary body. For touched files, the
+            // most-recent effort's `change_kind` wins per path so
+            // the renderer can display "created"/"modified"/
+            // "deleted" rather than a flat "touched".
+            use std::collections::BTreeMap;
+            let mut paths: BTreeMap<String, String> = BTreeMap::new();
             let mut summaries: Vec<String> = Vec::new();
             if let Ok(item_efforts) = efforts.list_for_item(item.id).await {
-                for ef in item_efforts {
+                // list_for_item is sorted started_at DESC; walking
+                // in reverse gives oldest-first so the latest write
+                // wins via plain `insert`.
+                let efforts_oldest_first: Vec<_> = item_efforts.into_iter().rev().collect();
+                for ef in efforts_oldest_first {
                     if let Some(s) = &ef.summary {
                         if !s.trim().is_empty() {
                             summaries.push(s.clone());
@@ -79,12 +87,17 @@ pub async fn run(
                     }
                     if let Ok(rows) = efforts.list_files(&ef.id).await {
                         for r in rows {
-                            paths.insert(r.path);
+                            let kind_str = match r.change {
+                                oxplow_db::EffortFileChange::Created => "created",
+                                oxplow_db::EffortFileChange::Updated => "updated",
+                                oxplow_db::EffortFileChange::Deleted => "deleted",
+                            };
+                            paths.insert(r.path, kind_str.to_string());
                         }
                     }
                 }
             }
-            let path_vec: Vec<String> = paths.into_iter().collect();
+            let path_vec: Vec<(String, String)> = paths.into_iter().collect();
             let mut edges = effort_touched_file_edges(&id_str, &path_vec);
             edges.extend(effort_summary_edges(&id_str, &summaries));
             let had_payload = !path_vec.is_empty() || !summaries.is_empty();

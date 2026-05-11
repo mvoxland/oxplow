@@ -173,17 +173,31 @@ impl SqliteTaskEffortStore {
             return Ok(());
         };
         let db = self.db.clone();
-        type SliceRows = (Vec<String>, Vec<String>, Vec<String>);
+        type SliceRows = (Vec<(String, String)>, Vec<String>, Vec<String>);
         let (paths, summaries, impact_jsons): SliceRows = tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
+                // Pick the most-recent `change_kind` per path across
+                // every effort on this task. "Most recent" = the
+                // effort with the latest `started_at`. The window
+                // function isolates rn=1 so each path appears once.
                 let mut path_stmt = conn.prepare(
-                    "SELECT DISTINCT f.path FROM task_effort_file f
+                    "SELECT path, change_kind FROM (
+                       SELECT f.path, f.change_kind,
+                              ROW_NUMBER() OVER (
+                                PARTITION BY f.path
+                                ORDER BY e.started_at DESC
+                              ) AS rn
+                       FROM task_effort_file f
                        JOIN task_effort e ON e.id = f.effort_id
-                      WHERE e.task_id = ?1
-                      ORDER BY f.path",
+                       WHERE e.task_id = ?1
+                     )
+                     WHERE rn = 1
+                     ORDER BY path",
                 )?;
-                let paths: Vec<String> = path_stmt
-                    .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
+                let paths: Vec<(String, String)> = path_stmt
+                    .query_map(params![task_id.value()], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 let mut sum_stmt = conn.prepare(
                     "SELECT summary FROM task_effort
