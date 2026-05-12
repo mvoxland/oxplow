@@ -638,6 +638,13 @@ export function MarkdownView({
         const pre = code.parentElement;
         if (pre && pre.tagName === "PRE") pre.replaceWith(host);
         sweepStrayMermaidNodes();
+        // Track the host so the next body re-render can drop it.
+        // pre.replaceWith() removed the React-managed <pre>, so React
+        // has no record of the host — without this cleanup the host
+        // (and any leftover error div from a prior failed parse) leak
+        // across body updates, producing "new diagram + old error
+        // text" simultaneously.
+        cleanups.push(() => host.remove());
         const cleanup = await attachPanZoom(host);
         if (cancelled) {
           cleanup?.();
@@ -653,6 +660,11 @@ export function MarkdownView({
           err.style.fontSize = "12px";
           err.textContent = `Mermaid parse error: ${String(error)}`;
           pre.after(err);
+          // Same reason as the success-path cleanup: this div is a
+          // sibling of a React-managed <pre>, so ReactMarkdown's
+          // child reconciliation on body change leaves it stranded
+          // unless we tear it down explicitly.
+          cleanups.push(() => err.remove());
         }
       }
     });
