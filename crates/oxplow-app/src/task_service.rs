@@ -101,6 +101,15 @@ pub struct UpdateTaskChanges {
 #[derive(Clone)]
 pub struct TaskService {
     store: Arc<SqliteTaskStore>,
+    /// Optional. When set, `update()` opens/closes an effort row on
+    /// `in_progress` entry/exit. Held as an `Option` so test paths
+    /// that construct a TaskService without the full Services boot
+    /// still work — they just skip the lifecycle effort.
+    effort_store: Option<Arc<SqliteTaskEffortStore>>,
+    /// Optional. When set alongside `effort_store`, `update()` calls
+    /// `request_snapshot()` on in_progress transitions and stamps
+    /// the returned id onto the effort row.
+    snapshot_capture: Option<Arc<crate::snapshot_capture::SnapshotCaptureService>>,
 }
 
 /// Returns true iff any item in `items` has this id as its parent_id.
@@ -110,7 +119,31 @@ fn is_epic(item: &Task, items: &[Task]) -> bool {
 
 impl TaskService {
     pub fn new(store: Arc<SqliteTaskStore>) -> Self {
-        Self { store }
+        Self {
+            store,
+            effort_store: None,
+            snapshot_capture: None,
+        }
+    }
+
+    /// Attach the effort store. Required (together with
+    /// `with_snapshot_capture`) for automatic effort lifecycle on
+    /// in_progress transitions.
+    pub fn with_effort_store(mut self, store: Arc<SqliteTaskEffortStore>) -> Self {
+        self.effort_store = Some(store);
+        self
+    }
+
+    /// Attach the snapshot manager. When present alongside
+    /// `effort_store`, `update()` triggers `request_snapshot()` on
+    /// in_progress entry / exit and stamps the result onto the
+    /// effort row.
+    pub fn with_snapshot_capture(
+        mut self,
+        svc: Arc<crate::snapshot_capture::SnapshotCaptureService>,
+    ) -> Self {
+        self.snapshot_capture = Some(svc);
+        self
     }
 
     /// Create a task attached to `thread` (or to the backlog if

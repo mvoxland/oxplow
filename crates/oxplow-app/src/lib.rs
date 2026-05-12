@@ -131,6 +131,10 @@ pub struct Services {
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
     pub snapshot_store: Arc<SqliteSnapshotStore>,
+    /// Capture manager used by both the boot-time fs-watcher loop
+    /// and by TaskService's effort lifecycle (start/end snapshots on
+    /// in_progress transitions). See `snapshot_capture.rs`.
+    pub snapshot_capture: Arc<snapshot_capture::SnapshotCaptureService>,
     pub hook_event_store: Arc<dyn HookEventStore>,
     pub agent_status_store: Arc<dyn AgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
@@ -249,6 +253,32 @@ impl Services {
             event_bus.clone(),
         );
 
+        // Snapshot capture singleton — owned here so anything in
+        // Services can request snapshots (e.g. TaskService stamps
+        // start/end ids on the effort row when a task transitions
+        // through in_progress). The fs-watcher, startup sweep, and
+        // cleanup loop are spawned by the host binary (main.rs).
+        let max_bytes = {
+            let g = config_arc.read();
+            g.as_ref()
+                .map(|c| c.snapshot_max_file_bytes)
+                .unwrap_or(5 * 1024 * 1024)
+        };
+        let snapshot_capture = Arc::new(
+            snapshot_capture::SnapshotCaptureService::new(
+                snapshot_store.clone(),
+                blobs.clone(),
+                layout.project_dir.clone(),
+                None,
+                max_bytes,
+            )
+            .with_events(event_bus.clone())
+            .with_git(git.clone()),
+        );
+        let tasks = tasks
+            .with_effort_store(effort_store.clone())
+            .with_snapshot_capture(snapshot_capture.clone());
+
         let background_tasks = BackgroundTaskStore::new();
         bridge_background_task_events(&background_tasks, &event_bus);
 
@@ -259,6 +289,7 @@ impl Services {
             streams,
             threads,
             tasks,
+            snapshot_capture,
             stream_store,
             thread_store,
             task_store,
@@ -370,6 +401,20 @@ impl Services {
             stream_store.clone(),
             event_bus.clone(),
         );
+        let snapshot_capture = Arc::new(
+            snapshot_capture::SnapshotCaptureService::new(
+                snapshot_store.clone(),
+                blobs.clone(),
+                layout.project_dir.clone(),
+                None,
+                5 * 1024 * 1024,
+            )
+            .with_events(event_bus.clone())
+            .with_git(git.clone()),
+        );
+        let tasks = tasks
+            .with_effort_store(effort_store.clone())
+            .with_snapshot_capture(snapshot_capture.clone());
         Ok(Self {
             config: config_arc,
             db,
@@ -388,6 +433,7 @@ impl Services {
             usage_store,
             code_quality_store,
             snapshot_store,
+            snapshot_capture,
             hook_event_store,
             agent_status_store,
             agent_turn_store,

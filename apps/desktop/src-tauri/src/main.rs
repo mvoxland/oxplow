@@ -65,29 +65,12 @@ fn main() {
         }
     });
 
-    // Start the file-snapshot manager. The fs-watch listener
-    // accumulates dirty paths in an in-memory set; rows only land in
-    // the `file_snapshot` table when something calls
-    // `request_snapshot()`. The startup sweep is triggered below;
-    // task-effort lifecycle callers can request additional captures
-    // at known boundaries.
-    let snap_store = state.snapshot_store.clone();
+    // Start the file-snapshot manager's watcher loop. The service
+    // itself is constructed inside Services::boot so TaskService can
+    // request snapshots on `in_progress` transitions; here we only
+    // wire the fs-watch listener + the boot-time sweep + cleanup.
+    let snapshot_svc = (*state.snapshot_capture).clone();
     let project_dir = state.layout.project_dir.clone();
-    let max_bytes = state
-        .config
-        .read()
-        .map(|c| c.snapshot_max_file_bytes)
-        .unwrap_or(5 * 1024 * 1024);
-    let blobs = state.blobs.clone();
-    let snapshot_svc = oxplow_app::snapshot_capture::SnapshotCaptureService::new(
-        snap_store,
-        blobs,
-        project_dir.clone(),
-        None,
-        max_bytes,
-    )
-    .with_events(event_bus.clone())
-    .with_git(state.git.clone());
     snapshot_svc.spawn_watcher();
     // Startup sweep: any file whose current content doesn't match
     // the latest snapshot row (or was never snapshotted) gets
