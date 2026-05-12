@@ -110,12 +110,28 @@ items the agent didn't touch during the turn.
 
 ## Talking about items in chat
 
-When you mention a task to the user, refer to it by its quoted
-title (e.g. `"Fix login redirect loop"`), **never** by its `id`
-id. The id is an internal handle for tool calls; the user doesn't see
-it in their UI and won't know what you're pointing at. This applies
-everywhere: confirming a fix, asking whether to proceed, summarizing
-what shipped, naming the item you just reopened, etc.
+When you mention a task to the user, refer to it by its **quoted
+title** — not by id, not by "#N", not by "the last task", not by
+"the in_progress one". The id is an internal handle for tool
+calls; users don't see ids in their UI and can't map "#14" to
+anything they recognize.
+
+- ❌ `Shipped task #14.`
+- ❌ `Task 14 is now in_progress.`
+- ❌ `Closing the previous one.`
+- ✅ `Shipped task "Surface hidden tabs from the overflow dropdown".`
+- ✅ `Task "Fix login redirect loop" is now in_progress.`
+- ✅ `Closing task "Render wiki page links by title".`
+
+This rule applies everywhere you reference a task in user-facing
+prose: confirming a fix, asking whether to proceed, summarizing
+what shipped, naming the item you just reopened, commit body
+prose, status updates, follow-up prompts. The only place `#N` /
+ids are appropriate is in tool-call arguments and code identifiers
+— never in the conversation surface.
+
+If you slip and use `#N`, restate with the title in the same turn;
+don't leave a half-anonymous reference for the user to decode.
 
 ## Wikilink every reference in body text
 

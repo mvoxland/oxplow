@@ -296,6 +296,29 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
             anchorRef={overflowButtonRef}
             onActivate={(id) => {
               setOverflowOpen(false);
+              // If the user picked a tab that was hidden from the
+              // strip (cut off), surface it by reordering it to the
+              // front of its reorderGroup. Pinned tabs (the agent
+              // tab, anything without a reorderGroup) stay where
+              // they are, so the moved tab lands just to the right
+              // of them.
+              if (onReorder && hiddenInStripIds.has(id)) {
+                const moved = tabs.find((t) => t.id === id);
+                if (moved?.reorderGroup) {
+                  const ids = tabs.map((t) => t.id);
+                  const firstInGroupIdx = ids.findIndex((tid) => {
+                    const t = tabs.find((tt) => tt.id === tid);
+                    return t?.reorderGroup === moved.reorderGroup;
+                  });
+                  const fromIdx = ids.indexOf(id);
+                  if (firstInGroupIdx >= 0 && fromIdx !== firstInGroupIdx) {
+                    const next = ids.slice();
+                    next.splice(fromIdx, 1);
+                    next.splice(firstInGroupIdx, 0, id);
+                    onReorder(next);
+                  }
+                }
+              }
               onActivate(id);
             }}
             onClose={onClose}
