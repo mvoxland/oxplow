@@ -848,6 +848,17 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     })
 }
 
+/// Parent `snapshot` row — one per `request_snapshot()` call that
+/// had dirty files. Groups the `file_snapshot` rows captured in
+/// that batch. See [[crates/oxplow-db/migrations/V13__snapshot_parent.sql]].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct ParentSnapshot {
+    pub id: i64,
+    pub stream_id: Option<StreamId>,
+    pub created_at: Timestamp,
+    pub file_count: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FileSnapshot {
     pub id: i64,
@@ -944,6 +955,50 @@ impl SqliteSnapshotStore {
                     .optional()?
                 };
                 Ok(row)
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Parent snapshot rows for a stream, newest first.
+    pub async fn list_parent_snapshots_for_stream(
+        &self,
+        stream_id: &str,
+        limit: usize,
+    ) -> Result<Vec<ParentSnapshot>, DomainError> {
+        let db = self.db.clone();
+        let stream_id = stream_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT s.id, s.stream_id, s.created_at,
+                            (SELECT COUNT(*) FROM file_snapshot f
+                             WHERE f.snapshot_id = s.id) AS file_count
+                     FROM snapshot s
+                     WHERE s.stream_id = ?1
+                     ORDER BY s.created_at DESC, s.id DESC LIMIT ?2",
+                )?;
+                let rows = stmt.query_map(params![stream_id, limit as i64], |row| {
+                    let id: i64 = row.get(0)?;
+                    let stream_id: Option<String> = row.get(1)?;
+                    let created_at: String = row.get(2)?;
+                    let file_count: i64 = row.get(3)?;
+                    let map_err = |e: DomainError| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    };
+                    Ok(ParentSnapshot {
+                        id,
+                        stream_id: stream_id.map(StreamId::from),
+                        created_at: string_to_ts(&created_at).map_err(map_err)?,
+                        file_count,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
         .await

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_db::FileSnapshot;
+use oxplow_db::{FileSnapshot, ParentSnapshot};
 use oxplow_domain::StreamId;
 
 use crate::error::IpcError;
@@ -26,6 +26,35 @@ pub async fn list_snapshots_for_stream(
     Ok(state
         .snapshot_store
         .list_for_stream(stream_id.as_str(), limit.unwrap_or(200))
+        .await?)
+}
+
+/// Parent `snapshot` rows for a stream — one entry per
+/// `request_snapshot()` call that captured anything. Newest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_parent_snapshots_for_stream(
+    state: tauri::State<'_, AppState>,
+    stream_id: StreamId,
+    limit: Option<usize>,
+) -> Result<Vec<ParentSnapshot>, IpcError> {
+    Ok(state
+        .snapshot_store
+        .list_parent_snapshots_for_stream(stream_id.as_str(), limit.unwrap_or(200))
+        .await?)
+}
+
+/// Every `file_snapshot` row captured under a single parent
+/// snapshot id (i.e. one batch of `request_snapshot()`).
+#[tauri::command]
+#[specta::specta]
+pub async fn list_files_for_snapshot(
+    state: tauri::State<'_, AppState>,
+    snapshot_id: i64,
+) -> Result<Vec<FileSnapshot>, IpcError> {
+    Ok(state
+        .snapshot_store
+        .list_files_for_snapshot(snapshot_id)
         .await?)
 }
 

@@ -316,6 +316,16 @@ export const commands = {
 	analyzeFunctionsAtRefs: (files: AnalyzeFileSpec[]) => typedError<AnalyzeFunctionsResult, IpcError>(__TAURI_INVOKE("analyze_functions_at_refs", { files })),
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
 	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
+	/**
+	 *  Parent `snapshot` rows for a stream — one entry per
+	 *  `request_snapshot()` call that captured anything. Newest first.
+	 */
+	listParentSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<ParentSnapshot[], IpcError>(__TAURI_INVOKE("list_parent_snapshots_for_stream", { streamId, limit })),
+	/**
+	 *  Every `file_snapshot` row captured under a single parent
+	 *  snapshot id (i.e. one batch of `request_snapshot()`).
+	 */
+	listFilesForSnapshot: (snapshotId: number) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
 	getSnapshot: (id: number) => typedError<{
 	id: number,
 	stream_id: StreamId | null,
@@ -1169,6 +1179,18 @@ export type PageVisitDay = {
 };
 
 export type PaneKindArg = "working" | "talking";
+
+/**
+ *  Parent `snapshot` row — one per `request_snapshot()` call that
+ *  had dirty files. Groups the `file_snapshot` rows captured in
+ *  that batch. See [[crates/oxplow-db/migrations/V13__snapshot_parent.sql]].
+ */
+export type ParentSnapshot = {
+	id: number,
+	stream_id: StreamId | null,
+	created_at: Timestamp,
+	file_count: number,
+};
 
 export type RefKind = "local" | "remote" | "tag" | "head";
 

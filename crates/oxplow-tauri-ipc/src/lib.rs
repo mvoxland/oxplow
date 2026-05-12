@@ -112,6 +112,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // snapshots
         commands::snapshot::list_snapshots,
         commands::snapshot::list_snapshots_for_stream,
+        commands::snapshot::list_parent_snapshots_for_stream,
+        commands::snapshot::list_files_for_snapshot,
         commands::snapshot::get_snapshot,
         commands::snapshot::get_snapshot_pair_diff,
         commands::snapshot::get_snapshot_summary,
