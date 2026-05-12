@@ -121,6 +121,36 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   useEffect(() => {
     if (!hasOverflow && overflowOpen) setOverflowOpen(false);
   }, [hasOverflow, overflowOpen]);
+
+  // Promote a hidden tab into the reorderable region (just after the
+  // agent tab and any other pinned non-reorderable tabs). Returns true
+  // when a reorder was dispatched.
+  const promoteHiddenIntoStrip = (id: string): boolean => {
+    if (!onReorder) return false;
+    if (!hiddenInStripIds.has(id)) return false;
+    const ids = tabs.map((t) => t.id);
+    const fromIdx = ids.indexOf(id);
+    let insertIdx = tabs.findIndex((t) => !!t.reorderGroup);
+    if (insertIdx < 0) insertIdx = Math.min(1, tabs.length);
+    if (fromIdx < 0 || fromIdx === insertIdx) return false;
+    const next = ids.slice();
+    const [moved] = next.splice(fromIdx, 1);
+    const adjusted = fromIdx < insertIdx ? insertIdx - 1 : insertIdx;
+    next.splice(adjusted, 0, moved);
+    onReorder(next);
+    return true;
+  };
+
+  // Any activation that lands on a tab currently cut off from the strip
+  // (left nav click, palette, programmatic switch, etc.) should surface
+  // the tab by reordering it just past the pinned agent tab. The
+  // overflow-panel click path uses the same helper inline.
+  useEffect(() => {
+    if (!activeId) return;
+    if (!hiddenInStripIds.has(activeId)) return;
+    promoteHiddenIntoStrip(activeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, hiddenInStripIds]);
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <div ref={outerBarRef} style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-tab-inactive)", minHeight: 36, position: "relative" }}>
@@ -296,31 +326,10 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
             anchorRef={overflowButtonRef}
             onActivate={(id) => {
               setOverflowOpen(false);
-              // If the user picked a tab that was hidden from the
-              // strip (cut off), surface it by reordering it
-              // just past the leading pinned tabs (the agent
-              // tab and anything else without a reorderGroup).
-              // The clicked tab lands at the front of the
-              // reorderable region, which is "right after the
-              // agent tab" in practice.
-              if (onReorder && hiddenInStripIds.has(id)) {
-                const ids = tabs.map((t) => t.id);
-                const fromIdx = ids.indexOf(id);
-                // First index whose tab IS reorderable (has a
-                // reorderGroup). If no such tab exists, fall back to
-                // 1 so we still land just after the agent tab.
-                let insertIdx = tabs.findIndex((t) => !!t.reorderGroup);
-                if (insertIdx < 0) insertIdx = Math.min(1, tabs.length);
-                if (fromIdx >= 0 && fromIdx !== insertIdx) {
-                  const next = ids.slice();
-                  const [moved] = next.splice(fromIdx, 1);
-                  // After removing the source, the insert index
-                  // may have shifted by one if source was before it.
-                  const adjusted = fromIdx < insertIdx ? insertIdx - 1 : insertIdx;
-                  next.splice(adjusted, 0, moved);
-                  onReorder(next);
-                }
-              }
+              // Promotion also runs via the activeId effect below,
+              // but doing it here keeps the click→reorder→activate
+              // sequence in a single React batch.
+              promoteHiddenIntoStrip(id);
               onActivate(id);
             }}
             onClose={onClose}
