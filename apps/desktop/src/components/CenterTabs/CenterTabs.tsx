@@ -297,26 +297,28 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
             onActivate={(id) => {
               setOverflowOpen(false);
               // If the user picked a tab that was hidden from the
-              // strip (cut off), surface it by reordering it to the
-              // front of its reorderGroup. Pinned tabs (the agent
-              // tab, anything without a reorderGroup) stay where
-              // they are, so the moved tab lands just to the right
-              // of them.
+              // strip (cut off), surface it by reordering it
+              // just past the leading pinned tabs (the agent
+              // tab and anything else without a reorderGroup).
+              // The clicked tab lands at the front of the
+              // reorderable region, which is "right after the
+              // agent tab" in practice.
               if (onReorder && hiddenInStripIds.has(id)) {
-                const moved = tabs.find((t) => t.id === id);
-                if (moved?.reorderGroup) {
-                  const ids = tabs.map((t) => t.id);
-                  const firstInGroupIdx = ids.findIndex((tid) => {
-                    const t = tabs.find((tt) => tt.id === tid);
-                    return t?.reorderGroup === moved.reorderGroup;
-                  });
-                  const fromIdx = ids.indexOf(id);
-                  if (firstInGroupIdx >= 0 && fromIdx !== firstInGroupIdx) {
-                    const next = ids.slice();
-                    next.splice(fromIdx, 1);
-                    next.splice(firstInGroupIdx, 0, id);
-                    onReorder(next);
-                  }
+                const ids = tabs.map((t) => t.id);
+                const fromIdx = ids.indexOf(id);
+                // First index whose tab IS reorderable (has a
+                // reorderGroup). If no such tab exists, fall back to
+                // 1 so we still land just after the agent tab.
+                let insertIdx = tabs.findIndex((t) => !!t.reorderGroup);
+                if (insertIdx < 0) insertIdx = Math.min(1, tabs.length);
+                if (fromIdx >= 0 && fromIdx !== insertIdx) {
+                  const next = ids.slice();
+                  const [moved] = next.splice(fromIdx, 1);
+                  // After removing the source, the insert index
+                  // may have shifted by one if source was before it.
+                  const adjusted = fromIdx < insertIdx ? insertIdx - 1 : insertIdx;
+                  next.splice(adjusted, 0, moved);
+                  onReorder(next);
                 }
               }
               onActivate(id);
