@@ -910,6 +910,7 @@ mod tests {
                 captured_at: now,
                 oversize: false,
                 snapshot_id: None,
+                mtime_ms: None,
             })
             .await
             .unwrap();
@@ -923,6 +924,7 @@ mod tests {
                 captured_at: now,
                 oversize: false,
                 snapshot_id: None,
+                mtime_ms: None,
             })
             .await
             .unwrap();

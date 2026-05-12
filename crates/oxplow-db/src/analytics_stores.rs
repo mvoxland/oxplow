@@ -829,10 +829,11 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     let size_bytes: i64 = row.get(4)?;
     let captured_at: String = row.get(5)?;
     let oversize: i32 = row.get(6)?;
-    // snapshot_id only present when the SELECT asked for it (V13+);
-    // older callers select 7 columns and we treat the missing column
-    // as None.
+    // snapshot_id / mtime_ms only present when the SELECT asks for
+    // them (V13 / V15+); older 7-column callers see them as missing
+    // and we treat that as None.
     let snapshot_id: Option<i64> = row.get(7).ok().flatten();
+    let mtime_ms: Option<i64> = row.get(8).ok().flatten();
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -845,6 +846,7 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
         captured_at: string_to_ts(&captured_at).map_err(map_err)?,
         oversize: oversize != 0,
         snapshot_id,
+        mtime_ms,
     })
 }
 
@@ -865,6 +867,16 @@ pub struct ParentSnapshot {
     pub git_commit: Option<String>,
 }
 
+/// Most-recent stat (hash + size + mtime) for a single path. The
+/// startup sweep uses this to short-circuit the read+hash pass when
+/// `(size_bytes, mtime_ms)` match the file on disk.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LatestStat {
+    pub blob_hash: Option<String>,
+    pub size_bytes: i64,
+    pub mtime_ms: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FileSnapshot {
     pub id: i64,
@@ -877,6 +889,12 @@ pub struct FileSnapshot {
     /// Parent `snapshot.id` this row was captured under, or `None`
     /// for pre-V13 rows that predate the parent table.
     pub snapshot_id: Option<i64>,
+    /// File mtime in unix milliseconds at capture time. NULL for
+    /// rows written before V15 added the column. The startup sweep
+    /// uses `(size_bytes, mtime_ms)` as a fast equality check: if
+    /// both match the current stat, the file is presumed unchanged
+    /// and the bytes aren't re-read or re-hashed.
+    pub mtime_ms: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -895,8 +913,9 @@ impl SqliteSnapshotStore {
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT INTO file_snapshot
-                       (stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                       (stream_id, path, blob_hash, size_bytes, captured_at, oversize,
+                        snapshot_id, mtime_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         snap.stream_id.as_ref().map(|s| s.as_str()),
                         snap.path,
@@ -905,6 +924,7 @@ impl SqliteSnapshotStore {
                         ts_to_string(snap.captured_at),
                         if snap.oversize { 1 } else { 0 },
                         snap.snapshot_id,
+                        snap.mtime_ms,
                     ],
                 )?;
                 Ok(conn.last_insert_rowid())
@@ -1084,7 +1104,7 @@ impl SqliteSnapshotStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE id = ?1",
                 )?;
                 let mut rows = stmt.query_map(params![id], row_to_snapshot)?;
@@ -1105,7 +1125,7 @@ impl SqliteSnapshotStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE stream_id = ?1
                      ORDER BY captured_at DESC LIMIT ?2",
                 )?;
@@ -1117,23 +1137,19 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// Most recent `blob_hash` per path across the whole table.
-    /// Returns one entry per path; the value is `None` when the
-    /// latest capture was a deletion / oversize row. Used by the
-    /// startup sweep to decide which files have changed since the
-    /// last snapshot was written.
-    pub async fn latest_hash_per_path(
+    /// Most recent `(blob_hash, size_bytes, mtime_ms)` per path
+    /// across the whole table. Used by the startup sweep: when the
+    /// current file's `(size, mtime)` matches the stored values, the
+    /// bytes are presumed identical and we skip the read + hash.
+    /// `mtime_ms` is `None` for pre-V15 rows that predate the column.
+    pub async fn latest_stat_per_path(
         &self,
-    ) -> Result<std::collections::HashMap<String, Option<String>>, DomainError> {
+    ) -> Result<std::collections::HashMap<String, LatestStat>, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                // The inner query picks the highest id per path
-                // (id is monotonically increasing, so it's a stand-in
-                // for newest-by-insert-order — matches captured_at DESC
-                // for any single path).
                 let mut stmt = conn.prepare(
-                    "SELECT s.path, s.blob_hash
+                    "SELECT s.path, s.blob_hash, s.size_bytes, s.mtime_ms
                      FROM file_snapshot s
                      JOIN (
                        SELECT path, MAX(id) AS max_id
@@ -1143,12 +1159,21 @@ impl SqliteSnapshotStore {
                 let rows = stmt.query_map([], |row| {
                     let path: String = row.get(0)?;
                     let hash: Option<String> = row.get(1)?;
-                    Ok((path, hash))
+                    let size: i64 = row.get(2)?;
+                    let mtime: Option<i64> = row.get(3)?;
+                    Ok((
+                        path,
+                        LatestStat {
+                            blob_hash: hash,
+                            size_bytes: size,
+                            mtime_ms: mtime,
+                        },
+                    ))
                 })?;
                 let mut out = std::collections::HashMap::new();
                 for row in rows {
-                    let (p, h) = row?;
-                    out.insert(p, h);
+                    let (p, stat) = row?;
+                    out.insert(p, stat);
                 }
                 Ok(out)
             })
@@ -1228,7 +1253,7 @@ impl SqliteSnapshotStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id, mtime_ms
                      FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC",
                 )?;
                 let rows = stmt.query_map(params![path], row_to_snapshot)?;
@@ -1457,6 +1482,7 @@ mod tests {
                 captured_at: Timestamp::now(),
                 oversize: false,
                 snapshot_id: None,
+                mtime_ms: None,
             })
             .await
             .unwrap();

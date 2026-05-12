@@ -24,7 +24,20 @@ use std::time::Duration;
 
 use tracing::{debug, warn};
 
+use std::time::UNIX_EPOCH;
+
 use oxplow_db::{FileSnapshot, SqliteSnapshotStore};
+
+/// Extract `mtime` from a `Metadata` and convert to unix
+/// milliseconds. Returns `None` when the platform / filesystem
+/// doesn't expose mtime (rare) — callers fall back to hashing.
+fn mtime_to_unix_ms(m: &std::fs::Metadata) -> Option<i64> {
+    m.modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as i64)
+}
 use oxplow_domain::{StreamId, Timestamp};
 use oxplow_fs_watch::{should_ignore_workspace_watch_path, FsWatcher};
 
@@ -239,11 +252,15 @@ impl SnapshotCaptureService {
     pub async fn enqueue_startup_diff(
         &self,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        let mut latest = self.inner.store.latest_hash_per_path().await?;
+        let mut latest = self.inner.store.latest_stat_per_path().await?;
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
 
-        // Walk + hash off the async runtime — it's all blocking I/O.
+        // Walk + stat off the async runtime — it's all blocking I/O.
+        // Fast path: if `(size, mtime_ms)` match the latest snapshot,
+        // skip the file entirely (no read, no hash). Only when stat
+        // disagrees or there's no prior row do we fall back to
+        // hashing.
         let queued = tokio::task::spawn_blocking(move || -> Vec<PathBuf> {
             let mut to_capture = Vec::new();
             for entry in walkdir::WalkDir::new(&project_dir)
@@ -271,12 +288,24 @@ impl SnapshotCaptureService {
                     Ok(m) => m,
                     Err(_) => continue,
                 };
-                let size = metadata.len();
+                let size = metadata.len() as i64;
+                let mtime_ms = mtime_to_unix_ms(&metadata);
+                // Fast equality check: when both size and mtime match
+                // and we have an mtime to compare against (pre-V15
+                // rows have None), the file hasn't been touched
+                // since the last capture. Skip the read+hash entirely.
+                if let Some(p) = prior.as_ref() {
+                    if let (Some(prior_mtime), Some(cur_mtime)) = (p.mtime_ms, mtime_ms) {
+                        if p.size_bytes == size && prior_mtime == cur_mtime {
+                            continue;
+                        }
+                    }
+                }
                 // Oversize files are tracked by metadata-only rows,
                 // so we can't hash-compare. Capture only when there's
                 // no prior row at all — otherwise the row would be
                 // identical to the existing one.
-                if size > max_bytes {
+                if size as u64 > max_bytes {
                     if prior.is_none() {
                         to_capture.push(entry.path().to_path_buf());
                     }
@@ -287,8 +316,8 @@ impl SnapshotCaptureService {
                     Err(_) => continue,
                 };
                 let hash = BlobStore::hash(&bytes);
-                match prior {
-                    Some(Some(prior_hash)) if prior_hash == hash => {
+                match prior.and_then(|s| s.blob_hash) {
+                    Some(prior_hash) if prior_hash == hash => {
                         // Unchanged — skip.
                     }
                     _ => to_capture.push(entry.path().to_path_buf()),
@@ -297,8 +326,8 @@ impl SnapshotCaptureService {
             // Any paths still in `latest` had a snapshot but no file
             // on disk now. Re-record deletions only for those whose
             // latest row wasn't already a deletion.
-            for (path, prior_hash) in latest {
-                if prior_hash.is_some() {
+            for (path, stat) in latest {
+                if stat.blob_hash.is_some() {
                     to_capture.push(project_dir.join(path));
                 }
             }
@@ -405,6 +434,7 @@ impl SnapshotCaptureService {
             return Ok(None);
         }
         let size = metadata.len();
+        let mtime_ms = mtime_to_unix_ms(&metadata);
         let oversize = size > self.inner.max_file_bytes;
         let blob_hash = if oversize {
             None
@@ -426,6 +456,7 @@ impl SnapshotCaptureService {
             captured_at: Timestamp::now(),
             oversize,
             snapshot_id: Some(parent_id),
+            mtime_ms,
         };
         let row_id = self.inner.store.capture(snap).await?;
         self.emit_event(row_id, source);
@@ -452,6 +483,7 @@ impl SnapshotCaptureService {
             captured_at: Timestamp::now(),
             oversize: false,
             snapshot_id: Some(parent_id),
+            mtime_ms: None,
         };
         let id = self.inner.store.capture(snap).await?;
         self.emit_event(id, source);
@@ -696,6 +728,31 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert!(rows[0].blob_hash.is_none());
         assert_eq!(rows[0].size_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn startup_sweep_short_circuits_when_size_and_mtime_match() {
+        let project = tempdir().unwrap();
+        let file = project.path().join("a.txt");
+        std::fs::write(&file, "v1").unwrap();
+        let (svc, store) = svc_for(project.path());
+
+        // Prime: capture once so a baseline row exists with mtime.
+        svc.mark_dirty(file.clone());
+        svc.request_snapshot(SnapshotSourceKind::Startup).await.unwrap();
+        let rows = store.list_for_path("a.txt").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].mtime_ms.is_some(), "mtime should be recorded");
+
+        // No changes at all → sweep queues nothing.
+        let queued = svc.enqueue_startup_diff().await.unwrap();
+        assert_eq!(queued, 0);
+
+        // Real change: write longer content. Size mismatches → falls
+        // through to the read+hash path and queues the file.
+        std::fs::write(&file, "v3-much-longer").unwrap();
+        let queued = svc.enqueue_startup_diff().await.unwrap();
+        assert_eq!(queued, 1);
     }
 
     #[tokio::test]

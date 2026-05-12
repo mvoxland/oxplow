@@ -339,6 +339,14 @@ export const commands = {
 	 *  for pre-V13 rows that predate the parent table.
 	 */
 	snapshot_id: number | null,
+	/**
+	 *  File mtime in unix milliseconds at capture time. NULL for
+	 *  rows written before V15 added the column. The startup sweep
+	 *  uses `(size_bytes, mtime_ms)` as a fast equality check: if
+	 *  both match the current stat, the file is presumed unchanged
+	 *  and the bytes aren't re-read or re-hashed.
+	 */
+	mtime_ms: number | null,
 } | null, IpcError>(__TAURI_INVOKE("get_snapshot", { id })),
 	/**
 	 *  Compare two captures of the same path. The renderer surfaces this
@@ -920,6 +928,14 @@ export type FileSnapshot = {
 	 *  for pre-V13 rows that predate the parent table.
 	 */
 	snapshot_id: number | null,
+	/**
+	 *  File mtime in unix milliseconds at capture time. NULL for
+	 *  rows written before V15 added the column. The startup sweep
+	 *  uses `(size_bytes, mtime_ms)` as a fast equality check: if
+	 *  both match the current stat, the file is presumed unchanged
+	 *  and the bytes aren't re-read or re-hashed.
+	 */
+	mtime_ms: number | null,
 };
 
 /**
