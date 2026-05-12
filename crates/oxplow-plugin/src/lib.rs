@@ -78,6 +78,7 @@ pub struct PluginPaths {
     pub runtime_skill: PathBuf,
     pub subagent_skill: PathBuf,
     pub wiki_capture_skill: PathBuf,
+    pub mermaid_skill: PathBuf,
     pub work_next_command: PathBuf,
 }
 
@@ -104,6 +105,7 @@ pub fn write_plugin(
     fs::create_dir_all(skills_dir.join("oxplow-runtime"))?;
     fs::create_dir_all(skills_dir.join("oxplow-subagent-work-protocol"))?;
     fs::create_dir_all(skills_dir.join("oxplow-wiki-capture"))?;
+    fs::create_dir_all(skills_dir.join("oxplow-mermaid"))?;
 
     let manifest = manifest_dir.join("plugin.json");
     let manifest_body = json!({
@@ -144,6 +146,12 @@ pub fn write_plugin(
         include_str!("../assets/oxplow-wiki-capture.SKILL.md"),
     )?;
 
+    let mermaid_skill = skills_dir.join("oxplow-mermaid").join("SKILL.md");
+    fs::write(
+        &mermaid_skill,
+        include_str!("../assets/oxplow-mermaid.SKILL.md"),
+    )?;
+
     let work_next_command = commands_dir.join("work-next.md");
     fs::write(&work_next_command, include_str!("../assets/work-next.md"))?;
 
@@ -156,6 +164,7 @@ pub fn write_plugin(
         runtime_skill,
         subagent_skill,
         wiki_capture_skill,
+        mermaid_skill,
         work_next_command,
     })
 }
@@ -236,6 +245,7 @@ mod tests {
         assert!(paths.runtime_skill.exists());
         assert!(paths.subagent_skill.exists());
         assert!(paths.wiki_capture_skill.exists());
+        assert!(paths.mermaid_skill.exists());
         assert!(paths.work_next_command.exists());
         assert!(paths.agent_guide.exists());
     }
