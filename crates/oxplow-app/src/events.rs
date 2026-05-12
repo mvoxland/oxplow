@@ -31,7 +31,7 @@ pub enum WorkspaceChangeKind {
 
 /// Snapshot trigger source. The renderer renders these differently in
 /// the Snapshots panel ("startup" rows are dimmer than "task-end").
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum SnapshotSourceKind {
     TaskStart,

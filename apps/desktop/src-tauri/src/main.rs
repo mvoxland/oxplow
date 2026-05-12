@@ -65,10 +65,12 @@ fn main() {
         }
     });
 
-    // Start the periodic file-snapshot capture loop against the
-    // project root. Runs for the lifetime of the daemon; events
-    // funnel into the file_snapshot table so cross-turn diffs are
-    // available even before content-addressed blob storage lands.
+    // Start the file-snapshot manager. The fs-watch listener
+    // accumulates dirty paths in an in-memory set; rows only land in
+    // the `file_snapshot` table when something calls
+    // `request_snapshot()`. The startup sweep is triggered below;
+    // task-effort lifecycle callers can request additional captures
+    // at known boundaries.
     let snap_store = state.snapshot_store.clone();
     let project_dir = state.layout.project_dir.clone();
     let max_bytes = state
@@ -77,15 +79,15 @@ fn main() {
         .map(|c| c.snapshot_max_file_bytes)
         .unwrap_or(5 * 1024 * 1024);
     let blobs = state.blobs.clone();
-    oxplow_app::snapshot_capture::SnapshotCaptureService::new(
+    let snapshot_svc = oxplow_app::snapshot_capture::SnapshotCaptureService::new(
         snap_store,
         blobs,
         project_dir.clone(),
         None,
         max_bytes,
     )
-    .with_events(event_bus.clone())
-    .spawn();
+    .with_events(event_bus.clone());
+    snapshot_svc.spawn_watcher();
 
     // Per-stream fs + .git/refs watchers — bridges file changes onto
     // the EventBus so the renderer's QuickOpen, project panel, history,
