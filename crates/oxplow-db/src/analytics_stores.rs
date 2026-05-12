@@ -4,7 +4,7 @@
 //! getting its own file.
 
 use async_trait::async_trait;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -829,6 +829,10 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     let size_bytes: i64 = row.get(4)?;
     let captured_at: String = row.get(5)?;
     let oversize: i32 = row.get(6)?;
+    // snapshot_id only present when the SELECT asked for it (V13+);
+    // older callers select 7 columns and we treat the missing column
+    // as None.
+    let snapshot_id: Option<i64> = row.get(7).ok().flatten();
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -840,6 +844,7 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
         size_bytes,
         captured_at: string_to_ts(&captured_at).map_err(map_err)?,
         oversize: oversize != 0,
+        snapshot_id,
     })
 }
 
@@ -852,6 +857,9 @@ pub struct FileSnapshot {
     pub size_bytes: i64,
     pub captured_at: Timestamp,
     pub oversize: bool,
+    /// Parent `snapshot.id` this row was captured under, or `None`
+    /// for pre-V13 rows that predate the parent table.
+    pub snapshot_id: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -870,8 +878,8 @@ impl SqliteSnapshotStore {
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT INTO file_snapshot
-                       (stream_id, path, blob_hash, size_bytes, captured_at, oversize)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                       (stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         snap.stream_id.as_ref().map(|s| s.as_str()),
                         snap.path,
@@ -879,9 +887,85 @@ impl SqliteSnapshotStore {
                         snap.size_bytes,
                         ts_to_string(snap.captured_at),
                         if snap.oversize { 1 } else { 0 },
+                        snap.snapshot_id,
                     ],
                 )?;
                 Ok(conn.last_insert_rowid())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Insert a new `snapshot` parent row and return its id. Callers
+    /// (e.g. `SnapshotCaptureService::request_snapshot`) only do this
+    /// when they have dirty files to capture — empty requests reuse
+    /// `latest_snapshot_id_for_stream`.
+    pub async fn create_snapshot(&self, stream_id: Option<StreamId>) -> Result<i64, DomainError> {
+        let db = self.db.clone();
+        let now = ts_to_string(Timestamp::now());
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO snapshot (stream_id, created_at) VALUES (?1, ?2)",
+                    params![stream_id.as_ref().map(|s| s.as_str()), now],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Most recent `snapshot.id` for the stream (or globally if
+    /// `stream_id` is `None`). Returns `None` when no snapshots exist.
+    pub async fn latest_snapshot_id_for_stream(
+        &self,
+        stream_id: Option<StreamId>,
+    ) -> Result<Option<i64>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let row: Option<i64> = if let Some(s) = stream_id {
+                    conn.query_row(
+                        "SELECT id FROM snapshot WHERE stream_id = ?1
+                         ORDER BY created_at DESC, id DESC LIMIT 1",
+                        params![s.as_str()],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                } else {
+                    conn.query_row(
+                        "SELECT id FROM snapshot WHERE stream_id IS NULL
+                         ORDER BY created_at DESC, id DESC LIMIT 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                };
+                Ok(row)
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// File rows captured under a single parent snapshot, oldest first
+    /// (insertion order within the capture loop).
+    pub async fn list_files_for_snapshot(
+        &self,
+        snapshot_id: i64,
+    ) -> Result<Vec<FileSnapshot>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize,
+                            snapshot_id
+                     FROM file_snapshot WHERE snapshot_id = ?1 ORDER BY id ASC",
+                )?;
+                let rows = stmt.query_map(params![snapshot_id], row_to_snapshot)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
         .await
@@ -893,7 +977,7 @@ impl SqliteSnapshotStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id
                      FROM file_snapshot WHERE id = ?1",
                 )?;
                 let mut rows = stmt.query_map(params![id], row_to_snapshot)?;
@@ -914,7 +998,7 @@ impl SqliteSnapshotStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id
                      FROM file_snapshot WHERE stream_id = ?1
                      ORDER BY captured_at DESC LIMIT ?2",
                 )?;
@@ -1037,7 +1121,7 @@ impl SqliteSnapshotStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, oversize, snapshot_id
                      FROM file_snapshot WHERE path = ?1 ORDER BY captured_at DESC",
                 )?;
                 let rows = stmt.query_map(params![path], row_to_snapshot)?;
@@ -1265,6 +1349,7 @@ mod tests {
                 size_bytes: 42,
                 captured_at: Timestamp::now(),
                 oversize: false,
+                snapshot_id: None,
             })
             .await
             .unwrap();

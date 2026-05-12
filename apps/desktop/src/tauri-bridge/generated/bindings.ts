@@ -324,6 +324,11 @@ export const commands = {
 	size_bytes: number,
 	captured_at: Timestamp,
 	oversize: boolean,
+	/**
+	 *  Parent `snapshot.id` this row was captured under, or `None`
+	 *  for pre-V13 rows that predate the parent table.
+	 */
+	snapshot_id: number | null,
 } | null, IpcError>(__TAURI_INVOKE("get_snapshot", { id })),
 	/**
 	 *  Compare two captures of the same path. The renderer surfaces this
@@ -900,6 +905,11 @@ export type FileSnapshot = {
 	size_bytes: number,
 	captured_at: Timestamp,
 	oversize: boolean,
+	/**
+	 *  Parent `snapshot.id` this row was captured under, or `None`
+	 *  for pre-V13 rows that predate the parent table.
+	 */
+	snapshot_id: number | null,
 };
 
 /**

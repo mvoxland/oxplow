@@ -160,6 +160,7 @@ mod tests {
             "code_quality_scan",
             "code_quality_finding",
             "file_snapshot",
+            "snapshot",
             "task",
             "task_link",
             "task_event",

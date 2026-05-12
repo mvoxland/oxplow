@@ -300,29 +300,45 @@ impl SnapshotCaptureService {
     /// Capture every path currently in the dirty set. Drains the
     /// set first so concurrent fs-events landing during the capture
     /// loop accumulate for the next request rather than being lost
-    /// or double-captured. Returns the inserted snapshot ids.
+    /// or double-captured.
+    ///
+    /// Returns the **parent `snapshot.id`** that groups every
+    /// `file_snapshot` row written by this call. When the dirty set
+    /// is empty, no new parent row is inserted; the most recent
+    /// existing snapshot id for this stream is returned instead (or
+    /// `None` if no snapshot has ever been taken for the stream).
     pub async fn request_snapshot(
         &self,
         source: SnapshotSourceKind,
-    ) -> Result<Vec<i64>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
         let drained: Vec<PathBuf> = {
             let mut set = self.inner.dirty.lock().unwrap();
             set.drain().collect()
         };
-        let mut ids = Vec::with_capacity(drained.len());
+        if drained.is_empty() {
+            return Ok(self
+                .inner
+                .store
+                .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
+                .await?);
+        }
+        let parent_id = self
+            .inner
+            .store
+            .create_snapshot(self.inner.stream_id.clone())
+            .await?;
         for path in drained {
-            match self.capture_path(&path, source).await {
-                Ok(Some(id)) => ids.push(id),
-                Ok(None) => {}
-                Err(e) => debug!(?path, error = %e, "snapshot capture: skipped"),
+            if let Err(e) = self.capture_path(&path, parent_id, source).await {
+                debug!(?path, error = %e, "snapshot capture: skipped");
             }
         }
-        Ok(ids)
+        Ok(Some(parent_id))
     }
 
     async fn capture_path(
         &self,
         path: &Path,
+        parent_id: i64,
         source: SnapshotSourceKind,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
         let metadata = match std::fs::metadata(path) {
@@ -330,7 +346,10 @@ impl SnapshotCaptureService {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // File deleted between dirty-set entry and capture —
                 // record a deletion row (blob_hash = NULL, size = 0).
-                return self.record_deletion(path, source).await.map(Some);
+                return self
+                    .record_deletion(path, parent_id, source)
+                    .await
+                    .map(Some);
             }
             Err(e) => return Err(Box::new(e)),
         };
@@ -358,15 +377,17 @@ impl SnapshotCaptureService {
             size_bytes: size as i64,
             captured_at: Timestamp::now(),
             oversize,
+            snapshot_id: Some(parent_id),
         };
-        let snapshot_id = self.inner.store.capture(snap).await?;
-        self.emit_event(snapshot_id, source);
-        Ok(Some(snapshot_id))
+        let row_id = self.inner.store.capture(snap).await?;
+        self.emit_event(row_id, source);
+        Ok(Some(row_id))
     }
 
     async fn record_deletion(
         &self,
         path: &Path,
+        parent_id: i64,
         source: SnapshotSourceKind,
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
         let rel = path
@@ -382,6 +403,7 @@ impl SnapshotCaptureService {
             size_bytes: 0,
             captured_at: Timestamp::now(),
             oversize: false,
+            snapshot_id: Some(parent_id),
         };
         let id = self.inner.store.capture(snap).await?;
         self.emit_event(id, source);
@@ -432,18 +454,23 @@ mod tests {
         svc.mark_dirty(a.clone());
         svc.mark_dirty(b.clone());
 
-        let ids = svc
+        let parent = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
-            .unwrap();
-        assert_eq!(ids.len(), 2);
+            .unwrap()
+            .expect("parent id");
+        // Both file rows point at the same parent.
+        let files = store.list_files_for_snapshot(parent).await.unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|f| f.snapshot_id == Some(parent)));
 
-        // Second request: dirty set was drained, nothing to capture.
+        // Second request: dirty set was drained, nothing to capture —
+        // returns the same parent id (no new row inserted).
         let again = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
-        assert!(again.is_empty());
+        assert_eq!(again, Some(parent));
 
         assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
         assert_eq!(store.list_for_path("b.txt").await.unwrap().len(), 1);
@@ -458,12 +485,56 @@ mod tests {
         for _ in 0..10 {
             svc.mark_dirty(file.clone());
         }
-        let ids = svc
+        let parent = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .expect("parent id");
+        assert_eq!(
+            store.list_files_for_snapshot(parent).await.unwrap().len(),
+            1
+        );
+        assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn empty_request_returns_latest_snapshot_id() {
+        let project = tempdir().unwrap();
+        let (svc, store) = svc_for(project.path());
+
+        // No snapshots yet — request with empty dirty set returns None.
+        let first = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
-        assert_eq!(ids.len(), 1);
-        assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
+        assert!(first.is_none());
+
+        // Take a real snapshot.
+        let file = project.path().join("a.txt");
+        std::fs::write(&file, "hi").unwrap();
+        svc.mark_dirty(file);
+        let parent = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .expect("parent id");
+
+        // Subsequent empty requests reuse the same parent — no new
+        // parent row is inserted.
+        for _ in 0..3 {
+            let again = svc
+                .request_snapshot(SnapshotSourceKind::Startup)
+                .await
+                .unwrap();
+            assert_eq!(again, Some(parent));
+        }
+        // Only one parent row exists.
+        let latest = store
+            .latest_snapshot_id_for_stream(None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest, parent);
     }
 
     #[tokio::test]
@@ -474,11 +545,15 @@ mod tests {
         // Never created on disk — mark_dirty + request_snapshot
         // should still record a deletion row.
         svc.mark_dirty(file);
-        let ids = svc
+        let parent = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
-            .unwrap();
-        assert_eq!(ids.len(), 1);
+            .unwrap()
+            .expect("parent id");
+        assert_eq!(
+            store.list_files_for_snapshot(parent).await.unwrap().len(),
+            1
+        );
         let rows = store.list_for_path("ghost.txt").await.unwrap();
         assert_eq!(rows.len(), 1);
         assert!(rows[0].blob_hash.is_none());

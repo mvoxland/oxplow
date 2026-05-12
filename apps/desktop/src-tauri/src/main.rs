@@ -121,8 +121,8 @@ fn main() {
                         .request_snapshot(oxplow_app::events::SnapshotSourceKind::Startup)
                         .await
                     {
-                        Ok(ids) => {
-                            bts.complete(&task_id, Some(serde_json::json!({"captured": ids.len()})))
+                        Ok(parent) => {
+                            bts.complete(&task_id, Some(serde_json::json!({"snapshotId": parent})))
                         }
                         Err(e) => {
                             tracing::warn!(error = %e, "startup snapshot sweep: capture failed");

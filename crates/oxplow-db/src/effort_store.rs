@@ -840,6 +840,7 @@ mod tests {
                 size_bytes: 1,
                 captured_at: now,
                 oversize: false,
+                snapshot_id: None,
             })
             .await
             .unwrap();
@@ -852,6 +853,7 @@ mod tests {
                 size_bytes: 2,
                 captured_at: now,
                 oversize: false,
+                snapshot_id: None,
             })
             .await
             .unwrap();
