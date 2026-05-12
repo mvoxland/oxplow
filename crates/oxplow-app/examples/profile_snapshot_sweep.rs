@@ -4,18 +4,20 @@
 //!     cargo run --example profile_snapshot_sweep --release -- <project_dir>
 //!
 //! Reports time spent on (a) the directory walk + filter, (b) per-file
-//! stat, and (c) per-file read+sha for the files that fell through the
-//! mtime+size short-circuit. Prints how many files reached each
+//! stat, and (c) parallel read+xxh3-128 for the files that fell through
+//! the mtime+size short-circuit. Prints how many files reached each
 //! phase + cumulative bytes hashed.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, UNIX_EPOCH};
 
 use oxplow_app::blob_store::BlobStore;
 use oxplow_db::{Database, SqliteSnapshotStore};
 use oxplow_fs_watch::should_ignore_workspace_watch_path;
-use sha2::{Digest, Sha256};
+use rayon::prelude::*;
+use xxhash_rust::xxh3::Xxh3;
 
 fn mtime_to_unix_ms(m: &std::fs::Metadata) -> Option<i64> {
     m.modified()
@@ -87,18 +89,13 @@ async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs
 
     let project_dir_owned = project_dir.to_path_buf();
     let project_dir = project_dir_owned.clone();
+    let blobs_for_pass = blobs.clone();
     let report = tokio::task::spawn_blocking(move || {
         let mut entries_seen = 0u64;
         let mut files_seen = 0u64;
         let mut shortcircuit_hits = 0u64;
         let mut oversize_skipped = 0u64;
-        let mut hashed_count = 0u64;
-        let mut hashed_bytes = 0u64;
-        let mut walk_ms = 0u128;
         let mut stat_ms = 0u128;
-        let mut read_ms = 0u128;
-        let mut hash_ms = 0u128;
-        let store_writes = 0u64;
         let mut latest = latest;
 
         let walk_started = Instant::now();
@@ -117,11 +114,15 @@ async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs
             entries_seen += 1;
             entries.push(entry);
         }
-        walk_ms += walk_started.elapsed().as_millis();
+        let walk_ms = walk_started.elapsed().as_millis();
 
         // Max-file-bytes mirrors the default the daemon uses.
         let max_bytes: u64 = 5 * 1024 * 1024;
 
+        // Phase 1 (sequential): stat each file, run the
+        // mtime+size short-circuit. Files that fall through queue
+        // up for the parallel read+hash phase.
+        let mut needs_hash: Vec<PathBuf> = Vec::new();
         for entry in entries {
             if !entry.file_type().is_file() {
                 continue;
@@ -157,33 +158,29 @@ async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs
                 oversize_skipped += 1;
                 continue;
             }
-
-            let t_read = Instant::now();
-            let bytes = match std::fs::read(entry.path()) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
-            read_ms += t_read.elapsed().as_micros();
-            hashed_bytes += bytes.len() as u64;
-
-            let t_hash = Instant::now();
-            let mut h = Sha256::new();
-            h.update(&bytes);
-            let _hash = format!("{:x}", h.finalize());
-            hash_ms += t_hash.elapsed().as_micros();
-            hashed_count += 1;
-            // Simulate writing the blob, since pass 1 needs blobs on
-            // disk for any second-stage logic. Idempotent.
-            let _ = blobs.write(&bytes);
-            // And simulate the row insert so pass 2 has stat data.
-            let _ = store_writes; // (kept for parity with snapshot capture costs)
+            needs_hash.push(entry.path().to_path_buf());
         }
 
-        // Insert rows that pass 1 would have written so pass 2 sees
-        // a populated `latest_stat_per_path`. We do this synchronously
-        // outside the blocking span. (Actual snapshot capture writes
-        // these via SqliteSnapshotStore::capture — we approximate.)
-        let _ = store_writes;
+        // Phase 2 (parallel via rayon): read + xxh3-128 hash. Wall
+        // time covers both read and hash; per-file split is no
+        // longer meaningful (workers overlap).
+        let hashed_bytes_atomic = AtomicU64::new(0);
+        let hashed_count_atomic = AtomicU64::new(0);
+        let parallel_started = Instant::now();
+        needs_hash.par_iter().for_each(|path| {
+            let Ok(bytes) = std::fs::read(path) else {
+                return;
+            };
+            hashed_bytes_atomic.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            let mut h = Xxh3::new();
+            h.update(&bytes);
+            let _hash = format!("{:032x}", h.digest128());
+            hashed_count_atomic.fetch_add(1, Ordering::Relaxed);
+            let _ = blobs_for_pass.write(&bytes);
+        });
+        let parallel_ms = parallel_started.elapsed().as_millis();
+        let hashed_count = hashed_count_atomic.load(Ordering::Relaxed);
+        let hashed_bytes = hashed_bytes_atomic.load(Ordering::Relaxed);
 
         SweepReport {
             entries_seen,
@@ -194,8 +191,7 @@ async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs
             hashed_bytes,
             walk_ms,
             stat_us: stat_ms,
-            read_us: read_ms,
-            hash_us: hash_ms,
+            parallel_ms,
         }
     })
     .await
@@ -215,7 +211,7 @@ async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs
         report.hashed_bytes as f64 / 1_048_576.0
     );
     eprintln!(
-        "  stat total: {:.1} ms  ({:.1} us / file)",
+        "  stat total : {:.1} ms  ({:.1} us / file)",
         report.stat_us as f64 / 1000.0,
         if report.files_seen == 0 {
             0.0
@@ -224,21 +220,12 @@ async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs
         }
     );
     eprintln!(
-        "  read total: {:.1} ms  ({:.1} us / hashed file)",
-        report.read_us as f64 / 1000.0,
-        if report.hashed_count == 0 {
+        "  parallel read+hash: {} ms wall ({:.1} MB/s effective)",
+        report.parallel_ms,
+        if report.parallel_ms == 0 {
             0.0
         } else {
-            report.read_us as f64 / report.hashed_count as f64
-        }
-    );
-    eprintln!(
-        "  hash total: {:.1} ms  ({:.1} us / hashed file)",
-        report.hash_us as f64 / 1000.0,
-        if report.hashed_count == 0 {
-            0.0
-        } else {
-            report.hash_us as f64 / report.hashed_count as f64
+            (report.hashed_bytes as f64 / 1_048_576.0) / (report.parallel_ms as f64 / 1000.0)
         }
     );
 
@@ -263,8 +250,8 @@ struct SweepReport {
     hashed_bytes: u64,
     walk_ms: u128,
     stat_us: u128,
-    read_us: u128,
-    hash_us: u128,
+    /// Wall-clock time spent on the rayon-parallel read+hash phase.
+    parallel_ms: u128,
 }
 
 /// After pass 1's measurement loop, capture rows so the shared store
@@ -308,9 +295,9 @@ async fn seed_latest_stat(project_dir: &Path, store: &SqliteSnapshotStore) {
                 let Ok(bytes) = std::fs::read(entry.path()) else {
                     continue;
                 };
-                let mut h = Sha256::new();
+                let mut h = Xxh3::new();
                 h.update(&bytes);
-                let hash = format!("{:x}", h.finalize());
+                let hash = format!("{:032x}", h.digest128());
                 out.push((rel, metadata, Some(hash)));
             }
             out

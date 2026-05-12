@@ -1,15 +1,22 @@
 //! Content-addressed blob store for snapshot bytes.
 //!
-//! Keyed by lowercase-hex SHA-256. Files land under
+//! Keyed by lowercase-hex xxh3-128. Files land under
 //! `<root>/<aa>/<full-hash>` (two-character shard prefix to keep
 //! directory entry counts manageable on filesystems that don't
 //! love huge flat dirs). Writes are idempotent — if the blob
 //! already exists the bytes aren't rewritten.
+//!
+//! xxh3-128 was picked over SHA-256 / blake3 because the blob store
+//! is a local content-addressed dedup cache for the user's own files
+//! — there's no adversary crafting collisions, so we don't need
+//! cryptographic guarantees. 128-bit output keeps non-adversarial
+//! collision risk at "won't happen in practice," and the hash runs
+//! 30-50× faster than SHA-256 on Apple silicon.
 
 use std::path::PathBuf;
 
-use sha2::{Digest, Sha256};
 use thiserror::Error;
+use xxhash_rust::xxh3::Xxh3;
 
 #[derive(Debug, Error)]
 pub enum BlobStoreError {
@@ -31,12 +38,13 @@ impl BlobStore {
         Self { root }
     }
 
-    /// Hex SHA-256 of `bytes`. Public so callers can compute a
-    /// blob id without going through `write`.
+    /// Hex xxh3-128 of `bytes`. Public so callers can compute a
+    /// blob id without going through `write`. Returns 32 lowercase
+    /// hex chars; the leading two form the shard directory.
     pub fn hash(bytes: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        format!("{:x}", hasher.finalize())
+        let mut h = Xxh3::new();
+        h.update(bytes);
+        format!("{:032x}", h.digest128())
     }
 
     fn path_for(&self, hash: &str) -> PathBuf {

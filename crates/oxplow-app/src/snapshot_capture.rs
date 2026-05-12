@@ -266,12 +266,23 @@ impl SnapshotCaptureService {
         let max_bytes = self.inner.max_file_bytes;
 
         // Walk + stat off the async runtime — it's all blocking I/O.
-        // Fast path: if `(size, mtime_ms)` match the latest snapshot,
-        // skip the file entirely (no read, no hash). Only when stat
-        // disagrees or there's no prior row do we fall back to
-        // hashing.
+        // The walk + per-file stat-shortcircuit stays single-threaded
+        // (cheap; ~50 ms / ~17k files). The expensive read+hash for
+        // paths that fall through is fanned out across the rayon
+        // thread pool — embarrassingly parallel and CPU-bound (xxh3
+        // hashes saturate memory bandwidth, not CPU, so the gain
+        // comes mostly from parallel I/O).
         let queued = tokio::task::spawn_blocking(move || -> Vec<PathBuf> {
-            let mut to_capture = Vec::new();
+            use rayon::prelude::*;
+
+            // Phase 1 (sequential): walk, stat each file, decide
+            // which paths need a read+hash. Outputs three buckets:
+            //   - `to_capture`: immediate enqueues (oversize-new,
+            //     reverse-deletions). No read needed.
+            //   - `needs_hash`: paths whose (size, mtime) didn't
+            //     match the stored stat — fall through to phase 2.
+            let mut to_capture: Vec<PathBuf> = Vec::new();
+            let mut needs_hash: Vec<(PathBuf, Option<String>)> = Vec::new();
             for entry in walkdir::WalkDir::new(&project_dir)
                 .into_iter()
                 .filter_entry(|e| {
@@ -299,10 +310,10 @@ impl SnapshotCaptureService {
                 };
                 let size = metadata.len() as i64;
                 let mtime_ms = mtime_to_unix_ms(&metadata);
-                // Fast equality check: when both size and mtime match
-                // and we have an mtime to compare against (pre-V15
-                // rows have None), the file hasn't been touched
-                // since the last capture. Skip the read+hash entirely.
+                // Fast equality check: when both size and mtime
+                // match (and we have an mtime to compare against —
+                // pre-V15 rows have None), the file hasn't been
+                // touched since the last capture. Skip read+hash.
                 if let Some(p) = prior.as_ref() {
                     if let (Some(prior_mtime), Some(cur_mtime)) = (p.mtime_ms, mtime_ms) {
                         if p.size_bytes == size && prior_mtime == cur_mtime {
@@ -320,18 +331,26 @@ impl SnapshotCaptureService {
                     }
                     continue;
                 }
-                let bytes = match std::fs::read(entry.path()) {
-                    Ok(b) => b,
-                    Err(_) => continue,
-                };
-                let hash = BlobStore::hash(&bytes);
-                match prior.and_then(|s| s.blob_hash) {
-                    Some(prior_hash) if prior_hash == hash => {
-                        // Unchanged — skip.
-                    }
-                    _ => to_capture.push(entry.path().to_path_buf()),
-                }
+                needs_hash.push((entry.path().to_path_buf(), prior.and_then(|s| s.blob_hash)));
             }
+
+            // Phase 2 (parallel): read + hash the fall-through set
+            // across the rayon pool. Each worker is independent —
+            // we only emit a path when the new hash differs from the
+            // stored one (or there was no stored hash).
+            let hashed: Vec<PathBuf> = needs_hash
+                .into_par_iter()
+                .filter_map(|(path, prior_hash)| {
+                    let bytes = std::fs::read(&path).ok()?;
+                    let hash = BlobStore::hash(&bytes);
+                    match prior_hash {
+                        Some(prior) if prior == hash => None,
+                        _ => Some(path),
+                    }
+                })
+                .collect();
+            to_capture.extend(hashed);
+
             // Any paths still in `latest` had a snapshot but no file
             // on disk now. Re-record deletions only for those whose
             // latest row wasn't already a deletion.
