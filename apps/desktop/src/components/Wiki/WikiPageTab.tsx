@@ -63,27 +63,42 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
   // wiki-page body. Falls back to the slug until the summary loads.
   usePageTitle(summary?.title ?? slug);
 
-  // Persist scroll position across restart. The scroll container is
-  // the body-area div below; we track its scrollTop on every scroll
-  // event (cheap, no debounce needed because writes are batched at
-  // the snapshot layer's localStorage level).
+  // Persist scroll position across restart. We track scrollTop in a
+  // ref (not state) so onScroll doesn't re-render the page — and,
+  // critically, so the restore effect can't fight the user's active
+  // scrolling. State-driven snap-back created an onScroll → setState
+  // → effect → el.scrollTop = stale_value → onScroll loop that
+  // visibly flickered the page while the wheel was moving.
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
-  const [scrollY, setScrollY] = useState(0);
+  const scrollYRef = useRef(0);
+  const pendingRestoreRef = useRef<number | null>(null);
   usePageSnapshot<{ scrollY: number }>({
-    serialize: () => ({ scrollY }),
+    serialize: () => ({ scrollY: scrollYRef.current }),
     restore: (snap) => {
-      if (typeof snap.scrollY === "number") setScrollY(snap.scrollY);
+      if (typeof snap.scrollY === "number") {
+        scrollYRef.current = snap.scrollY;
+        pendingRestoreRef.current = snap.scrollY;
+      }
     },
-    deps: [scrollY],
+    // Re-serialize whenever the body changes (so the latest scroll
+    // position is captured at the moment the markdown updates) and
+    // when the user navigates away (closePageTab triggers this via
+    // the surrounding context unmount). We don't tick on every
+    // scroll event — the ref already holds the latest value and the
+    // snapshot layer reads it on dep change.
+    deps: [body],
   });
-  // Apply the restored scrollY when the body becomes available. We
-  // re-apply whenever `body` changes too because the markdown re-
-  // renders may shift offsets briefly during load.
+  // Apply the restored / pending scroll position only when the body
+  // changes (initial load + markdown re-renders that may shift
+  // offsets briefly). Never as a reaction to the user's own scroll.
   useEffect(() => {
     const el = scrollHostRef.current;
     if (!el) return;
-    if (Math.abs(el.scrollTop - scrollY) > 1) el.scrollTop = scrollY;
-  }, [scrollY, body]);
+    const target = pendingRestoreRef.current;
+    if (target == null) return;
+    if (Math.abs(el.scrollTop - target) > 1) el.scrollTop = target;
+    pendingRestoreRef.current = null;
+  }, [body]);
 
   const refresh = useCallback(async () => {
     try {
@@ -113,7 +128,19 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
     setEditing(false);
   }, [refresh]);
 
-  useEffect(() => subscribeWikiPageEvents(() => { void refresh(); }), [refresh]);
+  // Stable subscription: hold the latest refresh in a ref and
+  // subscribe once. The earlier `[refresh]` dependency tore the
+  // subscription down + re-installed it whenever the callback's
+  // identity changed (e.g. on slug change inside the same tab). The
+  // teardown synchronously sets `stopped = true` on the bridge, but
+  // the matching Tauri `listen()` cleanup is awaited from a Promise
+  // — so between teardown and the new `listen()` resolving, any
+  // `WikiPagesChanged` event the backend emitted was dropped on the
+  // floor, leaving the page stuck on the prior body until the user
+  // closed and reopened the tab.
+  const refreshRef = useRef(refresh);
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+  useEffect(() => subscribeWikiPageEvents(() => { void refreshRef.current(); }), []);
 
   const [draftInitialized, setDraftInitialized] = useState(false);
 
@@ -233,7 +260,7 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
       </div>
       <div
         ref={scrollHostRef}
-        onScroll={(e) => setScrollY((e.currentTarget as HTMLDivElement).scrollTop)}
+        onScroll={(e) => { scrollYRef.current = (e.currentTarget as HTMLDivElement).scrollTop; }}
         style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}
       >
         {notFound ? (
