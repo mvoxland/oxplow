@@ -1190,6 +1190,14 @@ export type ParentSnapshot = {
 	stream_id: StreamId | null,
 	created_at: Timestamp,
 	file_count: number,
+	/**
+	 *  40-char git sha that the worktree was pinned to at capture
+	 *  time. Populated only when the worktree was clean (no
+	 *  tracked-file changes, no non-ignored untracked files);
+	 *  `None` when the tree was dirty or the directory isn't a git
+	 *  repo at all.
+	 */
+	git_commit: string | null,
 };
 
 export type RefKind = "local" | "remote" | "tag" | "head";

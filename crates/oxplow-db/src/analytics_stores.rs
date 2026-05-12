@@ -857,6 +857,12 @@ pub struct ParentSnapshot {
     pub stream_id: Option<StreamId>,
     pub created_at: Timestamp,
     pub file_count: i64,
+    /// 40-char git sha that the worktree was pinned to at capture
+    /// time. Populated only when the worktree was clean (no
+    /// tracked-file changes, no non-ignored untracked files);
+    /// `None` when the tree was dirty or the directory isn't a git
+    /// repo at all.
+    pub git_commit: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -928,6 +934,49 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
+    /// Read the `git_commit` column for a parent snapshot, if pinned.
+    pub async fn get_snapshot_git_commit(
+        &self,
+        snapshot_id: i64,
+    ) -> Result<Option<String>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.query_row(
+                    "SELECT git_commit FROM snapshot WHERE id = ?1",
+                    params![snapshot_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map(|opt| opt.flatten())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Pin a parent snapshot to a git commit sha. Called by the
+    /// capture layer immediately after `create_snapshot` when the
+    /// worktree was clean.
+    pub async fn set_snapshot_git_commit(
+        &self,
+        snapshot_id: i64,
+        sha: String,
+    ) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
+                    params![sha, snapshot_id],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     /// Most recent `snapshot.id` for the stream (or globally if
     /// `stream_id` is `None`). Returns `None` when no snapshots exist.
     pub async fn latest_snapshot_id_for_stream(
@@ -974,7 +1023,8 @@ impl SqliteSnapshotStore {
                 let mut stmt = conn.prepare(
                     "SELECT s.id, s.stream_id, s.created_at,
                             (SELECT COUNT(*) FROM file_snapshot f
-                             WHERE f.snapshot_id = s.id) AS file_count
+                             WHERE f.snapshot_id = s.id) AS file_count,
+                            s.git_commit
                      FROM snapshot s
                      WHERE s.stream_id = ?1
                      ORDER BY s.created_at DESC, s.id DESC LIMIT ?2",
@@ -984,6 +1034,7 @@ impl SqliteSnapshotStore {
                     let stream_id: Option<String> = row.get(1)?;
                     let created_at: String = row.get(2)?;
                     let file_count: i64 = row.get(3)?;
+                    let git_commit: Option<String> = row.get(4)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -996,6 +1047,7 @@ impl SqliteSnapshotStore {
                         stream_id: stream_id.map(StreamId::from),
                         created_at: string_to_ts(&created_at).map_err(map_err)?,
                         file_count,
+                        git_commit,
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()

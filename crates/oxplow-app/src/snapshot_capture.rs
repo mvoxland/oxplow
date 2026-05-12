@@ -332,6 +332,31 @@ impl SnapshotCaptureService {
                 debug!(?path, error = %e, "snapshot capture: skipped");
             }
         }
+        // After capture, pin to the current git commit if (and only
+        // if) the worktree is clean — gitignored files don't count.
+        // The check happens AFTER capture so any in-flight edits
+        // were already drained into this snapshot's file rows.
+        let project_dir = self.inner.project_dir.clone();
+        let sha = tokio::task::spawn_blocking(move || {
+            if oxplow_git::is_worktree_clean(&project_dir) {
+                oxplow_git::head_commit_sha(&project_dir)
+            } else {
+                None
+            }
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(sha) = sha {
+            if let Err(e) = self
+                .inner
+                .store
+                .set_snapshot_git_commit(parent_id, sha)
+                .await
+            {
+                debug!(error = %e, "snapshot: failed to pin git commit");
+            }
+        }
         Ok(Some(parent_id))
     }
 
@@ -495,6 +520,88 @@ mod tests {
             1
         );
         assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn clean_worktree_pins_snapshot_to_head_commit() {
+        let project = tempdir().unwrap();
+        let repo = git2::Repository::init(project.path()).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "t").unwrap();
+        cfg.set_str("user.email", "t@example.com").unwrap();
+        // Real projects gitignore `.oxplow/` so the snapshot
+        // manager's own writes don't dirty the worktree. Mirror that
+        // here.
+        std::fs::write(project.path().join(".gitignore"), ".oxplow\n").unwrap();
+        let tracked = project.path().join("tracked.txt");
+        std::fs::write(&tracked, "v1").unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        idx.add_path(std::path::Path::new(".gitignore")).unwrap();
+        idx.write().unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        let head_sha = head_oid.to_string();
+
+        let (svc, store) = svc_for(project.path());
+
+        // Clean tree → snapshot pinned to HEAD.
+        svc.mark_dirty(tracked.clone());
+        let clean_id = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store.get_snapshot_git_commit(clean_id).await.unwrap(),
+            Some(head_sha.clone())
+        );
+
+        // Mutate the tracked file → worktree now dirty. The next
+        // snapshot must NOT carry a git_commit.
+        std::fs::write(&tracked, "v2").unwrap();
+        svc.mark_dirty(tracked.clone());
+        let dirty_id = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(store
+            .get_snapshot_git_commit(dirty_id)
+            .await
+            .unwrap()
+            .is_none());
+
+        // Gitignored files don't affect cleanliness. Reset the
+        // tracked file, then extend .gitignore to also cover junk.log
+        // and commit that change so the tree is clean.
+        std::fs::write(&tracked, "v1").unwrap();
+        std::fs::write(project.path().join(".gitignore"), ".oxplow\njunk.log\n").unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new(".gitignore")).unwrap();
+        idx.write().unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let parent = repo.find_commit(head_oid).unwrap();
+        let head_oid2 = repo
+            .commit(Some("HEAD"), &sig, &sig, "ignore", &tree, &[&parent])
+            .unwrap();
+        // Create an ignored file — should not break cleanliness.
+        std::fs::write(project.path().join("junk.log"), "noise").unwrap();
+        svc.mark_dirty(tracked.clone());
+        let with_ignored = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store.get_snapshot_git_commit(with_ignored).await.unwrap(),
+            Some(head_oid2.to_string())
+        );
     }
 
     #[tokio::test]
