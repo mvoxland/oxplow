@@ -50,21 +50,66 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   const draggingTab = draggingId ? tabs.find((t) => t.id === draggingId) ?? null : null;
   const stripScrollRef = useRef<HTMLDivElement>(null);
   const overflowButtonRef = useRef<HTMLButtonElement>(null);
-  const [hasOverflow, setHasOverflow] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // Tabs whose natural right edge would extend past the strip's
+  // visible area. We render them `display: none` in the strip so the
+  // user never sees a half-clipped chip — they're still listed in the
+  // overflow panel. Tab widths are cached so a freshly-hidden tab
+  // doesn't lose its width when re-measurement runs (its offsetWidth
+  // becomes 0 once display:none).
+  const widthCacheRef = useRef<Map<string, number>>(new Map());
+  const [hiddenInStripIds, setHiddenInStripIds] = useState<Set<string>>(new Set());
+  const hasOverflow = hiddenInStripIds.size > 0;
 
   useLayoutEffect(() => {
     const el = stripScrollRef.current;
     if (!el) return;
+    const OVERFLOW_BUTTON_RESERVE = 36; // matches button minWidth below
     const measure = () => {
-      setHasOverflow(el.scrollWidth > el.clientWidth + 1);
+      // Update width cache from currently-visible tab chips.
+      const children = Array.from(el.children) as HTMLElement[];
+      for (const child of children) {
+        const id = child.dataset.tabId;
+        if (!id) continue;
+        const w = child.offsetWidth;
+        if (w > 0) widthCacheRef.current.set(id, w);
+      }
+      // Drop cache entries for tabs that no longer exist.
+      const liveIds = new Set(stripTabs.map((t) => t.id));
+      for (const id of widthCacheRef.current.keys()) {
+        if (!liveIds.has(id)) widthCacheRef.current.delete(id);
+      }
+      // Two-pass fit: first without reserving the overflow-button
+      // slot. If everything fits, no button needed. Otherwise retry
+      // with the reserve so the button has room.
+      const computeHidden = (reserve: number): Set<string> => {
+        const avail = el.clientWidth - reserve;
+        const hidden = new Set<string>();
+        let used = 0;
+        for (const tab of stripTabs) {
+          const w = widthCacheRef.current.get(tab.id);
+          if (w == null) continue; // not yet measured — assume fits
+          if (used + w > avail) {
+            hidden.add(tab.id);
+          } else {
+            used += w;
+          }
+        }
+        return hidden;
+      };
+      let next = computeHidden(0);
+      if (next.size > 0) next = computeHidden(OVERFLOW_BUTTON_RESERVE);
+      setHiddenInStripIds((prev) => {
+        if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev;
+        return next;
+      });
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     for (const child of Array.from(el.children)) ro.observe(child);
     return () => ro.disconnect();
-  }, [stripTabs.length]);
+  }, [stripTabs]);
 
   useEffect(() => {
     if (!hasOverflow && overflowOpen) setOverflowOpen(false);
@@ -72,7 +117,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <div style={{ display: "flex", borderBottom: "1px solid var(--border-strong)", background: "var(--surface-tab-inactive)", minHeight: 36, position: "relative" }}>
-        <div ref={stripScrollRef} style={{ display: "flex", flex: 1, minWidth: 0, overflow: "hidden" }}>
+        <div ref={stripScrollRef} style={{ display: "flex", flex: "0 0 auto", maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>
         {stripTabs.map((tab) => {
           const isActive = tab.id === active?.id;
           const isHover = !isActive && hoverId === tab.id;
@@ -83,10 +128,12 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
             tab.reorderGroup === draggingTab.reorderGroup &&
             overId === tab.id &&
             draggingId !== tab.id;
+          const hiddenInStrip = hiddenInStripIds.has(tab.id);
           return (
             <div
               key={tab.id}
               data-testid={`center-tab-${tab.id}`}
+              data-tab-id={tab.id}
               draggable={canDrag}
               onClick={() => onActivate(tab.id)}
               onMouseEnter={() => setHoverId(tab.id)}
@@ -150,7 +197,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 cursor: canDrag ? "grab" : "pointer",
                 fontSize: 13,
                 fontWeight: isActive ? 600 : 400,
-                display: "inline-flex",
+                display: hiddenInStrip ? "none" : "inline-flex",
                 alignItems: "center",
                 gap: 6,
               }}
@@ -216,7 +263,8 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               setOverflowOpen((v) => !v);
             }}
             style={{
-              flex: "0 0 auto",
+              flex: "1 1 auto",
+              minWidth: 36,
               alignSelf: "stretch",
               padding: "0 10px",
               border: "none",
@@ -228,6 +276,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               lineHeight: 1,
               display: "inline-flex",
               alignItems: "center",
+              justifyContent: "flex-start",
             }}
           >
             ▾
