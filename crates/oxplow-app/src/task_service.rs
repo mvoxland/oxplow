@@ -357,7 +357,16 @@ impl TaskService {
         impacts: &[TaskImpact],
         worktree_root: Option<&Path>,
     ) -> Result<(), TaskServiceError> {
-        let effort = effort_store.start(item, thread, None).await?;
+        // Attach to the most-recent effort row for this task — that's
+        // the lifecycle effort that `update()` opened on in_progress
+        // entry and (typically) closed on exit. If none exists (e.g.
+        // a task filed directly into `done` with touched_files), open
+        // a fresh atomic effort.
+        let existing = effort_store.most_recent_for_task(item).await?;
+        let effort = match existing {
+            Some(e) => e,
+            None => effort_store.start(item, thread, None).await?,
+        };
         for path in touched_files {
             if path.is_empty() {
                 continue;
@@ -368,7 +377,17 @@ impl TaskService {
         if !impacts.is_empty() {
             effort_store.set_impacts(&effort.id, impacts).await?;
         }
-        effort_store.finish(&effort.id, None, summary).await?;
+        if effort.ended_at.is_none() {
+            // Still open (no lifecycle close happened, or this is
+            // the freshly-started fallback). Close it now with the
+            // summary; end_snapshot_id stays NULL because record_effort
+            // is summary/files attribution, not a status transition.
+            effort_store.finish(&effort.id, None, summary).await?;
+        } else if summary.is_some() {
+            // Lifecycle finish already closed the row but left
+            // summary NULL — backfill it.
+            effort_store.set_summary(&effort.id, summary).await?;
+        }
         Ok(())
     }
 
@@ -608,8 +627,12 @@ mod tests {
         (TaskService::new(store), t.id)
     }
 
-    async fn fixture_with_lifecycle(
-    ) -> (TaskService, ThreadId, Arc<SqliteTaskEffortStore>, tempfile::TempDir) {
+    async fn fixture_with_lifecycle() -> (
+        TaskService,
+        ThreadId,
+        Arc<SqliteTaskEffortStore>,
+        tempfile::TempDir,
+    ) {
         let project = tempfile::tempdir().unwrap();
         let db = Database::in_memory();
         let streams = SqliteStreamStore::new(db.clone());
@@ -735,6 +758,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn record_effort_merges_into_lifecycle_effort() {
+        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid.clone()),
+                CreateTaskInput {
+                    title: "merge".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        // Open the lifecycle effort.
+        let _ = svc
+            .update(
+                item.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        // Close it.
+        let _ = svc
+            .update(
+                item.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        // Now record_effort comes in with touched files + summary.
+        // It should attach to the already-closed lifecycle effort,
+        // NOT create a second row.
+        svc.record_effort(
+            &effort_store,
+            item.id,
+            &tid,
+            &["src/x.rs".to_string()],
+            Some("did the thing".into()),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        assert_eq!(efforts.len(), 1, "should still be a single effort row");
+        let row = &efforts[0];
+        assert_eq!(row.summary.as_deref(), Some("did the thing"));
+        let files = effort_store.list_files(&row.id).await.unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "src/x.rs");
+    }
+
+    #[tokio::test]
+    async fn record_effort_creates_fresh_effort_when_no_lifecycle() {
+        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid.clone()),
+                CreateTaskInput {
+                    title: "direct".into(),
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        // No lifecycle ran — task filed directly as done.
+        svc.record_effort(
+            &effort_store,
+            item.id,
+            &tid,
+            &["a.rs".to_string()],
+            Some("retro".into()),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        assert_eq!(efforts.len(), 1);
+        assert!(efforts[0].ended_at.is_some());
+        assert_eq!(efforts[0].summary.as_deref(), Some("retro"));
+    }
+
+    #[tokio::test]
     async fn non_in_progress_transitions_skip_effort_lifecycle() {
         let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
         let item = svc
@@ -758,7 +871,11 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(effort_store.list_for_item(item.id).await.unwrap().is_empty());
+        assert!(effort_store
+            .list_for_item(item.id)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
