@@ -1834,6 +1834,19 @@ mod tests {
 
     fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
         let project = tempfile::tempdir().unwrap();
+        // ensure_primary requires a real git repo.
+        let repo = git2::Repository::init(project.path()).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "test").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        let sig = repo.signature().unwrap();
+        let tree_id = {
+            let mut idx = repo.index().unwrap();
+            idx.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
         let services = Arc::new(Services::in_memory(project.path()).unwrap());
         let server = OxplowMcp::new(services.clone());
         (project, services, server)
@@ -1901,14 +1914,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_streams_returns_empty_for_fresh_project() {
-        // ensure_primary requires a real git repo; the in_memory
-        // service uses a tempdir that isn't one, so we exercise the
-        // empty path. Production startup wires through a real repo.
+    async fn list_streams_returns_primary_for_fresh_project() {
+        // Boot ensures the primary stream exists (snapshot capture is
+        // stream-scoped and must always have one), so a freshly booted
+        // services has exactly one primary stream.
         let (_proj, _services, server) = boot();
         let r = server.list_streams().await.unwrap();
         let body = text_payload(r);
-        assert_eq!(body.trim(), "[]");
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["kind"], "primary");
     }
 
     #[tokio::test]

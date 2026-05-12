@@ -903,7 +903,7 @@ mod tests {
         let snap1 = snap_store
             .capture(crate::FileSnapshot {
                 id: 0,
-                stream_id: Some(s.id.clone()),
+                stream_id: s.id.clone(),
                 path: "a.txt".into(),
                 blob_hash: Some("h1".into()),
                 size_bytes: 1,
@@ -917,7 +917,7 @@ mod tests {
         let snap2 = snap_store
             .capture(crate::FileSnapshot {
                 id: 0,
-                stream_id: Some(s.id.clone()),
+                stream_id: s.id.clone(),
                 path: "a.txt".into(),
                 blob_hash: Some("h2".into()),
                 size_bytes: 2,

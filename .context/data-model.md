@@ -271,6 +271,13 @@ Time-ordered, self-contained snapshots. `file_snapshot` columns:
 effort_id`. `snapshot_entry` holds the per-path rows: `path, hash,
 mtime_ms, size, state`.
 
+**`stream_id` is NOT NULL** (V16). Every captured row belongs to a
+specific stream's worktree — different streams have independent
+histories, and `listSnapshotsForStream` queries `WHERE stream_id =
+?`. `SnapshotCaptureService` is built per-boot with the primary
+stream id; the Services constructor calls `ensure_primary` before
+wiring the service so the id is always available.
+
 `effort_id` (nullable, FK → `task_effort.id` ON DELETE SET NULL)
 ties `task-start` / `task-end` rows back to the effort that produced
 them. `startup` snapshots leave it null. The mirror columns on the

@@ -264,12 +264,16 @@ impl Services {
                 .map(|c| c.snapshot_max_file_bytes)
                 .unwrap_or(5 * 1024 * 1024)
         };
+        // Snapshot capture is stream-scoped (a worktree belongs to a
+        // single stream), so ensure the project's primary stream
+        // exists before wiring the service.
+        let primary_stream = futures::executor::block_on(streams.ensure_primary())?;
         let snapshot_capture = Arc::new(
             snapshot_capture::SnapshotCaptureService::new(
                 snapshot_store.clone(),
                 blobs.clone(),
                 layout.project_dir.clone(),
-                None,
+                primary_stream.id.clone(),
                 max_bytes,
             )
             .with_events(event_bus.clone())
@@ -401,12 +405,13 @@ impl Services {
             stream_store.clone(),
             event_bus.clone(),
         );
+        let primary_stream = futures::executor::block_on(streams.ensure_primary())?;
         let snapshot_capture = Arc::new(
             snapshot_capture::SnapshotCaptureService::new(
                 snapshot_store.clone(),
                 blobs.clone(),
                 layout.project_dir.clone(),
-                None,
+                primary_stream.id.clone(),
                 5 * 1024 * 1024,
             )
             .with_events(event_bus.clone())
@@ -523,6 +528,19 @@ mod tests {
     #[tokio::test]
     async fn in_memory_does_not_touch_disk_db() {
         let project = tempdir().unwrap();
+        // ensure_primary refuses non-git dirs, so init a repo first.
+        let repo = git2::Repository::init(project.path()).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "test").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        let sig = repo.signature().unwrap();
+        let tree_id = {
+            let mut idx = repo.index().unwrap();
+            idx.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
         let services = Services::in_memory(project.path()).unwrap();
         // The state dir is created (config load needs it for fallback
         // basename) but the DB is in-memory.

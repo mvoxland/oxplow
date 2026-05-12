@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
+use tokio::sync::Mutex as AsyncMutex;
+
 use tracing::{debug, warn};
 
 use std::time::UNIX_EPOCH;
@@ -53,7 +55,7 @@ struct Inner {
     store: Arc<SqliteSnapshotStore>,
     blobs: BlobStore,
     project_dir: PathBuf,
-    stream_id: Option<StreamId>,
+    stream_id: StreamId,
     /// Files larger than this skip blob hashing and are flagged
     /// `oversize`. Pulled from `OxplowConfig::snapshot_max_file_bytes`.
     max_file_bytes: u64,
@@ -66,6 +68,12 @@ struct Inner {
     /// drains it. A HashSet collapses repeated edits to the same
     /// file between requests into a single capture.
     dirty: Mutex<HashSet<PathBuf>>,
+    /// Gate that serializes `request_snapshot` so at most one
+    /// capture runs at a time. When a second call arrives while a
+    /// capture is in flight, `try_lock` fails and the caller returns
+    /// without draining the dirty set — its paths get picked up by
+    /// the next call after the in-flight one finishes.
+    in_flight: AsyncMutex<()>,
     /// Optional handle to the singleton GitService. When set,
     /// `request_snapshot()` uses it to check worktree cleanliness
     /// and look up HEAD — both reads pull from GitService's cache
@@ -80,7 +88,7 @@ impl SnapshotCaptureService {
         store: Arc<SqliteSnapshotStore>,
         blobs: BlobStore,
         project_dir: PathBuf,
-        stream_id: Option<StreamId>,
+        stream_id: StreamId,
         max_file_bytes: u64,
     ) -> Self {
         Self {
@@ -92,6 +100,7 @@ impl SnapshotCaptureService {
                 max_file_bytes,
                 events: RwLock::new(None),
                 dirty: Mutex::new(HashSet::new()),
+                in_flight: AsyncMutex::new(()),
                 git: RwLock::new(None),
             }),
         }
@@ -352,10 +361,30 @@ impl SnapshotCaptureService {
     /// is empty, no new parent row is inserted; the most recent
     /// existing snapshot id for this stream is returned instead (or
     /// `None` if no snapshot has ever been taken for the stream).
+    ///
+    /// Captures are serialized: if a call arrives while another is
+    /// already in flight it coalesces — the dirty set stays intact
+    /// and the latest existing snapshot id is returned. The pending
+    /// paths get captured by the next call after the in-flight one
+    /// finishes.
     pub async fn request_snapshot(
         &self,
         source: SnapshotSourceKind,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        // Coalesce concurrent callers: if a capture is already in
+        // flight, return the latest existing snapshot id and leave
+        // the dirty set untouched so its paths are picked up by the
+        // next call after this one finishes.
+        let _guard = match self.inner.in_flight.try_lock() {
+            Ok(g) => g,
+            Err(_) => {
+                return Ok(self
+                    .inner
+                    .store
+                    .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
+                    .await?);
+            }
+        };
         let drained: Vec<PathBuf> = {
             let mut set = self.inner.dirty.lock().unwrap();
             set.drain().collect()
@@ -389,12 +418,7 @@ impl SnapshotCaptureService {
         // pinning is skipped.
         let git = self.inner.git.read().unwrap().clone();
         if let Some(git) = git {
-            let stream = self
-                .inner
-                .stream_id
-                .as_ref()
-                .map(|s| s.as_str().to_string());
-            let stream_ref = stream.as_deref();
+            let stream_ref = Some(self.inner.stream_id.as_str());
             let statuses = git.statuses(stream_ref).await;
             if statuses.is_empty() {
                 if let Some(sha) = git.head_commit_sha(stream_ref).await {
@@ -494,7 +518,7 @@ impl SnapshotCaptureService {
         let guard = self.inner.events.read().unwrap();
         if let Some(bus) = guard.as_ref() {
             bus.emit(OxplowEvent::FileSnapshotCreated {
-                stream_id: self.inner.stream_id.clone(),
+                stream_id: Some(self.inner.stream_id.clone()),
                 snapshot_id,
                 source,
                 effort_id: None,
@@ -510,14 +534,45 @@ mod tests {
     use oxplow_db::Database;
     use tempfile::tempdir;
 
-    fn svc_for(project: &std::path::Path) -> (SnapshotCaptureService, Arc<SqliteSnapshotStore>) {
-        let store = Arc::new(SqliteSnapshotStore::new(Database::in_memory()));
+    const TEST_STREAM: &str = "s-test";
+
+    async fn seed_stream(db: &Database) {
+        use oxplow_domain::stores::StreamStore;
+        let streams = oxplow_db::SqliteStreamStore::new(db.clone());
+        streams
+            .upsert(&oxplow_domain::Stream {
+                id: StreamId::from(TEST_STREAM),
+                kind: oxplow_domain::StreamKind::Primary,
+                title: "t".into(),
+                branch: "main".into(),
+                branch_ref: "refs/heads/main".into(),
+                branch_source: "main".into(),
+                worktree_path: "/r".into(),
+                working_pane: String::new(),
+                talking_pane: String::new(),
+                working_session_id: String::new(),
+                talking_session_id: String::new(),
+                custom_prompt: None,
+                created_at: Timestamp::from_unix_ms(0),
+                updated_at: Timestamp::from_unix_ms(0),
+                archived_at: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn svc_for(
+        project: &std::path::Path,
+    ) -> (SnapshotCaptureService, Arc<SqliteSnapshotStore>) {
+        let db = Database::in_memory();
+        seed_stream(&db).await;
+        let store = Arc::new(SqliteSnapshotStore::new(db));
         let blobs = BlobStore::new(project.join(".oxplow/snapshots"));
         let svc = SnapshotCaptureService::new(
             store.clone(),
             blobs,
             project.to_path_buf(),
-            None,
+            StreamId::from(TEST_STREAM),
             1_000_000,
         );
         (svc, store)
@@ -530,7 +585,7 @@ mod tests {
         let b = project.path().join("b.txt");
         std::fs::write(&a, "hello").unwrap();
         std::fs::write(&b, "world").unwrap();
-        let (svc, store) = svc_for(project.path());
+        let (svc, store) = svc_for(project.path()).await;
         svc.mark_dirty(a.clone());
         svc.mark_dirty(b.clone());
 
@@ -557,11 +612,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_snapshot_coalesces_when_already_in_flight() {
+        let project = tempdir().unwrap();
+        let file = project.path().join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        let (svc, _store) = svc_for(project.path()).await;
+        svc.mark_dirty(file);
+
+        // Simulate an in-flight capture by holding the gate.
+        let held = svc.inner.in_flight.lock().await;
+        let result = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        // No snapshot exists yet, and we didn't run one → None.
+        assert!(result.is_none());
+        // Dirty set was NOT drained; the path is still queued.
+        assert_eq!(svc.inner.dirty.lock().unwrap().len(), 1);
+        drop(held);
+
+        // Once the gate is released, a follow-up call captures the
+        // pending path.
+        let parent = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        assert!(parent.is_some());
+        assert_eq!(svc.inner.dirty.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
     async fn request_snapshot_collapses_repeated_dirty_marks() {
         let project = tempdir().unwrap();
         let file = project.path().join("a.txt");
         std::fs::write(&file, "x").unwrap();
-        let (svc, store) = svc_for(project.path());
+        let (svc, store) = svc_for(project.path()).await;
         for _ in 0..10 {
             svc.mark_dirty(file.clone());
         }
@@ -609,7 +694,7 @@ mod tests {
             .unwrap();
         let head_sha = head_oid.to_string();
 
-        let (svc, store) = svc_for(project.path());
+        let (svc, store) = svc_for(project.path()).await;
         let svc = svc.with_git(git_service_for(project.path()));
 
         // Clean tree → snapshot pinned to HEAD.
@@ -670,7 +755,7 @@ mod tests {
     #[tokio::test]
     async fn empty_request_returns_latest_snapshot_id() {
         let project = tempdir().unwrap();
-        let (svc, store) = svc_for(project.path());
+        let (svc, store) = svc_for(project.path()).await;
 
         // No snapshots yet — request with empty dirty set returns None.
         let first = svc
@@ -700,7 +785,7 @@ mod tests {
         }
         // Only one parent row exists.
         let latest = store
-            .latest_snapshot_id_for_stream(None)
+            .latest_snapshot_id_for_stream(StreamId::from(TEST_STREAM))
             .await
             .unwrap()
             .unwrap();
@@ -711,7 +796,7 @@ mod tests {
     async fn deleted_file_records_a_deletion_row() {
         let project = tempdir().unwrap();
         let file = project.path().join("ghost.txt");
-        let (svc, store) = svc_for(project.path());
+        let (svc, store) = svc_for(project.path()).await;
         // Never created on disk — mark_dirty + request_snapshot
         // should still record a deletion row.
         svc.mark_dirty(file);
@@ -735,11 +820,13 @@ mod tests {
         let project = tempdir().unwrap();
         let file = project.path().join("a.txt");
         std::fs::write(&file, "v1").unwrap();
-        let (svc, store) = svc_for(project.path());
+        let (svc, store) = svc_for(project.path()).await;
 
         // Prime: capture once so a baseline row exists with mtime.
         svc.mark_dirty(file.clone());
-        svc.request_snapshot(SnapshotSourceKind::Startup).await.unwrap();
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
         let rows = store.list_for_path("a.txt").await.unwrap();
         assert_eq!(rows.len(), 1);
         assert!(rows[0].mtime_ms.is_some(), "mtime should be recorded");
@@ -764,7 +851,7 @@ mod tests {
         std::fs::write(&a, "one").unwrap();
         std::fs::write(&b, "two").unwrap();
         std::fs::write(&c, "three").unwrap();
-        let (svc, store) = svc_for(project.path());
+        let (svc, store) = svc_for(project.path()).await;
 
         // Prime: capture all three so they have a baseline row.
         svc.mark_dirty(a.clone());
@@ -797,7 +884,7 @@ mod tests {
     async fn cleanup_prunes_old_rows_and_gcs_orphan_blobs() {
         let project = tempdir().unwrap();
         let file = project.path().join("a.txt");
-        let (svc, store) = svc_for(project.path());
+        let (svc, store) = svc_for(project.path()).await;
 
         // First capture — content "v1".
         std::fs::write(&file, "v1").unwrap();
@@ -841,13 +928,15 @@ mod tests {
         let project = tempdir().unwrap();
         let file = project.path().join("big.bin");
         std::fs::write(&file, vec![0u8; 1024]).unwrap();
-        let store = Arc::new(SqliteSnapshotStore::new(Database::in_memory()));
+        let db = Database::in_memory();
+        seed_stream(&db).await;
+        let store = Arc::new(SqliteSnapshotStore::new(db));
         let blobs = BlobStore::new(project.path().join(".oxplow/snapshots"));
         let svc = SnapshotCaptureService::new(
             store.clone(),
             blobs,
             project.path().to_path_buf(),
-            None,
+            StreamId::from(TEST_STREAM),
             512, // 512 byte cap → 1KB is oversize
         );
         svc.mark_dirty(file);

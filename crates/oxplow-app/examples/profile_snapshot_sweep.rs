@@ -43,6 +43,28 @@ async fn main() {
     //      mtime+size short-circuit should fire on every file;
     //      measures the steady-state cost.
     let db = Database::in_memory();
+    use oxplow_domain::stores::StreamStore;
+    let stream_store = oxplow_db::SqliteStreamStore::new(db.clone());
+    stream_store
+        .upsert(&oxplow_domain::Stream {
+            id: oxplow_domain::StreamId::from("s-profile"),
+            kind: oxplow_domain::StreamKind::Primary,
+            title: "p".into(),
+            branch: "main".into(),
+            branch_ref: "refs/heads/main".into(),
+            branch_source: "main".into(),
+            worktree_path: "/r".into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: oxplow_domain::Timestamp::from_unix_ms(0),
+            updated_at: oxplow_domain::Timestamp::from_unix_ms(0),
+            archived_at: None,
+        })
+        .await
+        .unwrap();
     let store = Arc::new(SqliteSnapshotStore::new(db));
     let blobs = BlobStore::new(std::env::temp_dir().join("oxplow-profile-blobs"));
 
@@ -53,16 +75,15 @@ async fn main() {
     profile_pass(&project_dir, store.clone(), blobs.clone()).await;
 }
 
-async fn profile_pass(
-    project_dir: &Path,
-    store: Arc<SqliteSnapshotStore>,
-    blobs: BlobStore,
-) {
+async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs: BlobStore) {
     // Load the latest stat map (drives the short-circuit).
     let t_db = Instant::now();
     let latest = store.latest_stat_per_path().await.expect("latest_stat");
     let db_ms = t_db.elapsed().as_millis();
-    eprintln!("  load latest_stat_per_path: {db_ms} ms ({} rows)", latest.len());
+    eprintln!(
+        "  load latest_stat_per_path: {db_ms} ms ({} rows)",
+        latest.len()
+    );
 
     let project_dir_owned = project_dir.to_path_buf();
     let project_dir = project_dir_owned.clone();
@@ -186,10 +207,7 @@ async fn profile_pass(
     );
     eprintln!(
         "  files     : {} seen | {} short-circuited | {} oversize | {} hashed",
-        report.files_seen,
-        report.shortcircuit_hits,
-        report.oversize_skipped,
-        report.hashed_count,
+        report.files_seen, report.shortcircuit_hits, report.oversize_skipped, report.hashed_count,
     );
     eprintln!(
         "  hashed    : {} bytes ({:.1} MB)",
@@ -199,17 +217,29 @@ async fn profile_pass(
     eprintln!(
         "  stat total: {:.1} ms  ({:.1} us / file)",
         report.stat_us as f64 / 1000.0,
-        if report.files_seen == 0 { 0.0 } else { report.stat_us as f64 / report.files_seen as f64 }
+        if report.files_seen == 0 {
+            0.0
+        } else {
+            report.stat_us as f64 / report.files_seen as f64
+        }
     );
     eprintln!(
         "  read total: {:.1} ms  ({:.1} us / hashed file)",
         report.read_us as f64 / 1000.0,
-        if report.hashed_count == 0 { 0.0 } else { report.read_us as f64 / report.hashed_count as f64 }
+        if report.hashed_count == 0 {
+            0.0
+        } else {
+            report.read_us as f64 / report.hashed_count as f64
+        }
     );
     eprintln!(
         "  hash total: {:.1} ms  ({:.1} us / hashed file)",
         report.hash_us as f64 / 1000.0,
-        if report.hashed_count == 0 { 0.0 } else { report.hash_us as f64 / report.hashed_count as f64 }
+        if report.hashed_count == 0 {
+            0.0
+        } else {
+            report.hash_us as f64 / report.hashed_count as f64
+        }
     );
 
     // After pass 1, populate the in-memory DB so pass 2 sees the
@@ -294,7 +324,7 @@ async fn seed_latest_stat(project_dir: &Path, store: &SqliteSnapshotStore) {
         let _ = store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: None,
+                stream_id: oxplow_domain::StreamId::from("s-profile"),
                 path: rel,
                 blob_hash: hash,
                 size_bytes: size,

@@ -641,13 +641,6 @@ mod tests {
         let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
         let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
         let blobs = crate::blob_store::BlobStore::new(project.path().join(".oxplow/snapshots"));
-        let snapshot_svc = Arc::new(crate::snapshot_capture::SnapshotCaptureService::new(
-            snapshot_store,
-            blobs,
-            project.path().to_path_buf(),
-            None,
-            1_000_000,
-        ));
         let s = Stream {
             id: StreamId::from("s-1"),
             kind: StreamKind::Primary,
@@ -666,6 +659,13 @@ mod tests {
             archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
+        let snapshot_svc = Arc::new(crate::snapshot_capture::SnapshotCaptureService::new(
+            snapshot_store,
+            blobs,
+            project.path().to_path_buf(),
+            s.id.clone(),
+            1_000_000,
+        ));
         let t = Thread {
             id: ThreadId::from("b-life"),
             stream_id: s.id.clone(),

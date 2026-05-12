@@ -27,6 +27,21 @@ pub struct TestApp {
 impl TestApp {
     pub fn build() -> Self {
         let tmp = TempDir::new().expect("tmp project dir");
+        // Services::in_memory now calls ensure_primary, which requires
+        // the project_dir to be a git repo. Init one with a single
+        // empty commit so the tests have a valid stream context.
+        let repo = git2::Repository::init(tmp.path()).expect("git init");
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "test").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        let sig = repo.signature().unwrap();
+        let tree_id = {
+            let mut idx = repo.index().unwrap();
+            idx.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
         let services = Services::in_memory(tmp.path()).expect("services in_memory");
         let state: AppState = Arc::new(services);
         let app = mock_builder()

@@ -328,7 +328,7 @@ export const commands = {
 	listFilesForSnapshot: (snapshotId: number) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
 	getSnapshot: (id: number) => typedError<{
 	id: number,
-	stream_id: StreamId | null,
+	stream_id: StreamId,
 	path: string,
 	blob_hash: string | null,
 	size_bytes: number,
@@ -917,7 +917,7 @@ export type FileFilterSpec = { kind: "all" } | { kind: "explicit"; paths: string
 
 export type FileSnapshot = {
 	id: number,
-	stream_id: StreamId | null,
+	stream_id: StreamId,
 	path: string,
 	blob_hash: string | null,
 	size_bytes: number,
@@ -1203,7 +1203,7 @@ export type PaneKindArg = "working" | "talking";
  */
 export type ParentSnapshot = {
 	id: number,
-	stream_id: StreamId | null,
+	stream_id: StreamId,
 	created_at: Timestamp,
 	file_count: number,
 	/**

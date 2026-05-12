@@ -3040,6 +3040,7 @@ name = "oxplow-mcp"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "git2",
  "oxplow-app",
  "oxplow-domain",
  "rmcp",
@@ -3120,6 +3121,7 @@ dependencies = [
 name = "oxplow-tauri-ipc"
 version = "0.3.0"
 dependencies = [
+ "git2",
  "oxplow-app",
  "oxplow-code-metrics",
  "oxplow-config",

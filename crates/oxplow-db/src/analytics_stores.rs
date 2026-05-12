@@ -823,7 +823,7 @@ impl SqliteCodeQualityStore {
 
 fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     let id: i64 = row.get(0)?;
-    let stream_id: Option<String> = row.get(1)?;
+    let stream_id: String = row.get(1)?;
     let path: String = row.get(2)?;
     let blob_hash: Option<String> = row.get(3)?;
     let size_bytes: i64 = row.get(4)?;
@@ -839,7 +839,7 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     };
     Ok(FileSnapshot {
         id,
-        stream_id: stream_id.map(StreamId::from),
+        stream_id: StreamId::from(stream_id),
         path,
         blob_hash,
         size_bytes,
@@ -856,7 +856,7 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct ParentSnapshot {
     pub id: i64,
-    pub stream_id: Option<StreamId>,
+    pub stream_id: StreamId,
     pub created_at: Timestamp,
     pub file_count: i64,
     /// 40-char git sha that the worktree was pinned to at capture
@@ -880,7 +880,7 @@ pub struct LatestStat {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FileSnapshot {
     pub id: i64,
-    pub stream_id: Option<StreamId>,
+    pub stream_id: StreamId,
     pub path: String,
     pub blob_hash: Option<String>,
     pub size_bytes: i64,
@@ -917,7 +917,7 @@ impl SqliteSnapshotStore {
                         snapshot_id, mtime_ms)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
-                        snap.stream_id.as_ref().map(|s| s.as_str()),
+                        snap.stream_id.as_str(),
                         snap.path,
                         snap.blob_hash,
                         snap.size_bytes,
@@ -938,14 +938,14 @@ impl SqliteSnapshotStore {
     /// (e.g. `SnapshotCaptureService::request_snapshot`) only do this
     /// when they have dirty files to capture — empty requests reuse
     /// `latest_snapshot_id_for_stream`.
-    pub async fn create_snapshot(&self, stream_id: Option<StreamId>) -> Result<i64, DomainError> {
+    pub async fn create_snapshot(&self, stream_id: StreamId) -> Result<i64, DomainError> {
         let db = self.db.clone();
         let now = ts_to_string(Timestamp::now());
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT INTO snapshot (stream_id, created_at) VALUES (?1, ?2)",
-                    params![stream_id.as_ref().map(|s| s.as_str()), now],
+                    params![stream_id.as_str(), now],
                 )?;
                 Ok(conn.last_insert_rowid())
             })
@@ -997,32 +997,23 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// Most recent `snapshot.id` for the stream (or globally if
-    /// `stream_id` is `None`). Returns `None` when no snapshots exist.
+    /// Most recent `snapshot.id` for the stream. Returns `None` when
+    /// no snapshots exist yet for the stream.
     pub async fn latest_snapshot_id_for_stream(
         &self,
-        stream_id: Option<StreamId>,
+        stream_id: StreamId,
     ) -> Result<Option<i64>, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                let row: Option<i64> = if let Some(s) = stream_id {
-                    conn.query_row(
+                let row: Option<i64> = conn
+                    .query_row(
                         "SELECT id FROM snapshot WHERE stream_id = ?1
                          ORDER BY created_at DESC, id DESC LIMIT 1",
-                        params![s.as_str()],
+                        params![stream_id.as_str()],
                         |row| row.get(0),
                     )
-                    .optional()?
-                } else {
-                    conn.query_row(
-                        "SELECT id FROM snapshot WHERE stream_id IS NULL
-                         ORDER BY created_at DESC, id DESC LIMIT 1",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                };
+                    .optional()?;
                 Ok(row)
             })
         })
@@ -1051,7 +1042,7 @@ impl SqliteSnapshotStore {
                 )?;
                 let rows = stmt.query_map(params![stream_id, limit as i64], |row| {
                     let id: i64 = row.get(0)?;
-                    let stream_id: Option<String> = row.get(1)?;
+                    let stream_id: String = row.get(1)?;
                     let created_at: String = row.get(2)?;
                     let file_count: i64 = row.get(3)?;
                     let git_commit: Option<String> = row.get(4)?;
@@ -1064,7 +1055,7 @@ impl SqliteSnapshotStore {
                     };
                     Ok(ParentSnapshot {
                         id,
-                        stream_id: stream_id.map(StreamId::from),
+                        stream_id: StreamId::from(stream_id),
                         created_at: string_to_ts(&created_at).map_err(map_err)?,
                         file_count,
                         git_commit,
@@ -1471,11 +1462,13 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_capture_then_list() {
-        let store = SqliteSnapshotStore::new(Database::in_memory());
+        let db = Database::in_memory();
+        seed_stream(&db, "s-test");
+        let store = SqliteSnapshotStore::new(db);
         store
             .capture(FileSnapshot {
                 id: 0,
-                stream_id: None,
+                stream_id: StreamId::from("s-test"),
                 path: "src/foo.rs".into(),
                 blob_hash: Some("abc".into()),
                 size_bytes: 42,
@@ -1489,5 +1482,14 @@ mod tests {
         let list = store.list_for_path("src/foo.rs").await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].size_bytes, 42);
+    }
+
+    fn seed_stream(db: &Database, id: &str) {
+        let conn = db.conn().unwrap();
+        conn.execute(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+             VALUES (?1, 'primary', 't', 'main', 'refs/heads/main', 'main', '/r', '2026-01-01', '2026-01-01')",
+            params![id],
+        ).unwrap();
     }
 }

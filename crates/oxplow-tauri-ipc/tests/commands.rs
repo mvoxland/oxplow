@@ -40,10 +40,14 @@ async fn log_ui_accepts_a_record() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_streams_empty_for_fresh_project() {
+async fn list_streams_returns_primary_for_fresh_project() {
+    // TestApp boots Services::in_memory, which now calls
+    // ensure_primary so the snapshot capture singleton has a stream
+    // to bind to. A fresh project therefore has exactly one stream.
     let app = TestApp::build();
     let streams = commands::streams::list_streams(app.state()).await.unwrap();
-    assert!(streams.is_empty());
+    assert_eq!(streams.len(), 1);
+    assert_eq!(streams[0].kind, oxplow_domain::StreamKind::Primary);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -108,47 +112,20 @@ async fn list_tasks_for_thread_empty() {
 async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
     use oxplow_app::CreateTaskInput;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamKind, Thread, ThreadStatus, Timestamp};
     let app = TestApp::build();
-    // Seed a stream + active thread directly through the stores so the
-    // FK chain is satisfied; we're testing the bucketing IPC, not the
-    // stream/thread create surface.
-    let now = Timestamp::from_unix_ms(1_700_000_000_000);
-    let stream = Stream {
-        id: StreamId::from("s-1"),
-        kind: StreamKind::Primary,
-        title: "p".into(),
-        branch: "main".into(),
-        branch_ref: "refs/heads/main".into(),
-        branch_source: "main".into(),
-        worktree_path: app.state.layout.project_dir.to_string_lossy().into_owned(),
-        working_pane: String::new(),
-        talking_pane: String::new(),
-        working_session_id: String::new(),
-        talking_session_id: String::new(),
-        custom_prompt: None,
-        created_at: now,
-        updated_at: now,
-        archived_at: None,
-    };
-    app.state.stream_store.upsert(&stream).await.unwrap();
-    let thread = Thread {
-        id: ThreadId::from("b-1"),
-        stream_id: stream.id.clone(),
-        title: "t".into(),
-        status: ThreadStatus::Active,
-        sort_index: 0,
-        pane_target: "working".into(),
-        resume_session_id: String::new(),
-        summary: String::new(),
-        summary_updated_at: None,
-        closed_at: None,
-        custom_prompt: None,
-        created_at: now,
-        updated_at: now,
-        archived_at: None,
-    };
-    app.state.thread_store.upsert(&thread).await.unwrap();
+    // The boot wires up a primary stream + its default active thread
+    // via ensure_primary. Reuse them rather than insert a second
+    // primary (the unique partial index would reject it).
+    let stream = app.state.stream_store.primary().await.unwrap().unwrap();
+    let thread = app
+        .state
+        .thread_store
+        .list_for_stream(&stream.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("primary stream should have a default thread");
     let parent = commands::tasks::create_task(
         app.state(),
         commands::tasks::CreateTaskRequest {
