@@ -138,6 +138,94 @@ impl SnapshotCaptureService {
         self.inner.dirty.lock().unwrap().insert(path);
     }
 
+    /// Walk the worktree and mark every file whose current content
+    /// differs from the most recent snapshot. Also marks paths that
+    /// had a non-deleted latest snapshot but are no longer on disk —
+    /// those get a deletion row when the dirty set is captured.
+    ///
+    /// Honors `should_ignore_workspace_watch_path`, so build dirs
+    /// and `.oxplow/` internals are skipped (wiki pages pass through
+    /// because the filter explicitly allows `.oxplow/wiki/`).
+    ///
+    /// Doesn't write anything itself — call `request_snapshot` after
+    /// to flush the dirty set.
+    pub async fn enqueue_startup_diff(
+        &self,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let mut latest = self.inner.store.latest_hash_per_path().await?;
+        let project_dir = self.inner.project_dir.clone();
+        let max_bytes = self.inner.max_file_bytes;
+
+        // Walk + hash off the async runtime — it's all blocking I/O.
+        let queued = tokio::task::spawn_blocking(move || -> Vec<PathBuf> {
+            let mut to_capture = Vec::new();
+            for entry in walkdir::WalkDir::new(&project_dir)
+                .into_iter()
+                .filter_entry(|e| {
+                    if e.depth() == 0 {
+                        return true;
+                    }
+                    let rel = e.path().strip_prefix(&project_dir).unwrap_or(e.path());
+                    !should_ignore_workspace_watch_path(rel)
+                })
+                .filter_map(Result::ok)
+            {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let rel = entry
+                    .path()
+                    .strip_prefix(&project_dir)
+                    .unwrap_or(entry.path())
+                    .to_string_lossy()
+                    .into_owned();
+                let prior = latest.remove(&rel);
+                let metadata = match entry.metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let size = metadata.len();
+                // Oversize files are tracked by metadata-only rows,
+                // so we can't hash-compare. Capture only when there's
+                // no prior row at all — otherwise the row would be
+                // identical to the existing one.
+                if size > max_bytes {
+                    if prior.is_none() {
+                        to_capture.push(entry.path().to_path_buf());
+                    }
+                    continue;
+                }
+                let bytes = match std::fs::read(entry.path()) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                let hash = BlobStore::hash(&bytes);
+                match prior {
+                    Some(Some(prior_hash)) if prior_hash == hash => {
+                        // Unchanged — skip.
+                    }
+                    _ => to_capture.push(entry.path().to_path_buf()),
+                }
+            }
+            // Any paths still in `latest` had a snapshot but no file
+            // on disk now. Re-record deletions only for those whose
+            // latest row wasn't already a deletion.
+            for (path, prior_hash) in latest {
+                if prior_hash.is_some() {
+                    to_capture.push(project_dir.join(path));
+                }
+            }
+            to_capture
+        })
+        .await?;
+
+        let count = queued.len();
+        for path in queued {
+            self.mark_dirty(path);
+        }
+        Ok(count)
+    }
+
     /// Capture every path currently in the dirty set. Drains the
     /// set first so concurrent fs-events landing during the capture
     /// loop accumulate for the next request rather than being lost
@@ -324,6 +412,44 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert!(rows[0].blob_hash.is_none());
         assert_eq!(rows[0].size_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn startup_sweep_captures_only_changed_files() {
+        let project = tempdir().unwrap();
+        let a = project.path().join("a.txt");
+        let b = project.path().join("b.txt");
+        let c = project.path().join("c.txt");
+        std::fs::write(&a, "one").unwrap();
+        std::fs::write(&b, "two").unwrap();
+        std::fs::write(&c, "three").unwrap();
+        let (svc, store) = svc_for(project.path());
+
+        // Prime: capture all three so they have a baseline row.
+        svc.mark_dirty(a.clone());
+        svc.mark_dirty(b.clone());
+        svc.mark_dirty(c.clone());
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
+
+        // Mutate `a`, leave `b` alone, delete `c`.
+        std::fs::write(&a, "one!").unwrap();
+        std::fs::remove_file(&c).unwrap();
+
+        let queued = svc.enqueue_startup_diff().await.unwrap();
+        assert_eq!(queued, 2);
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+
+        // `a` got a new row, `c` got a deletion row, `b` is unchanged.
+        assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 2);
+        assert_eq!(store.list_for_path("b.txt").await.unwrap().len(), 1);
+        let c_rows = store.list_for_path("c.txt").await.unwrap();
+        assert_eq!(c_rows.len(), 2);
+        assert!(c_rows[0].blob_hash.is_none());
     }
 
     #[tokio::test]

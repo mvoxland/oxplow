@@ -926,6 +926,46 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
+    /// Most recent `blob_hash` per path across the whole table.
+    /// Returns one entry per path; the value is `None` when the
+    /// latest capture was a deletion / oversize row. Used by the
+    /// startup sweep to decide which files have changed since the
+    /// last snapshot was written.
+    pub async fn latest_hash_per_path(
+        &self,
+    ) -> Result<std::collections::HashMap<String, Option<String>>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                // The inner query picks the highest id per path
+                // (id is monotonically increasing, so it's a stand-in
+                // for newest-by-insert-order — matches captured_at DESC
+                // for any single path).
+                let mut stmt = conn.prepare(
+                    "SELECT s.path, s.blob_hash
+                     FROM file_snapshot s
+                     JOIN (
+                       SELECT path, MAX(id) AS max_id
+                       FROM file_snapshot GROUP BY path
+                     ) m ON m.path = s.path AND m.max_id = s.id",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    let path: String = row.get(0)?;
+                    let hash: Option<String> = row.get(1)?;
+                    Ok((path, hash))
+                })?;
+                let mut out = std::collections::HashMap::new();
+                for row in rows {
+                    let (p, h) = row?;
+                    out.insert(p, h);
+                }
+                Ok(out)
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     pub async fn list_for_path(&self, path: &str) -> Result<Vec<FileSnapshot>, DomainError> {
         let db = self.db.clone();
         let path = path.to_string();

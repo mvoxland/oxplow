@@ -88,6 +88,29 @@ fn main() {
     )
     .with_events(event_bus.clone());
     snapshot_svc.spawn_watcher();
+    // Startup sweep: any file whose current content doesn't match
+    // the latest snapshot row (or was never snapshotted) gets
+    // queued + captured now. Backfills changes that landed while
+    // the daemon wasn't running. Spawned off the boot path because
+    // hashing a large worktree can take a few seconds.
+    {
+        let svc = snapshot_svc.clone();
+        boot_runtime.spawn(async move {
+            match svc.enqueue_startup_diff().await {
+                Ok(0) => tracing::debug!("startup snapshot sweep: nothing to capture"),
+                Ok(n) => {
+                    tracing::info!(queued = n, "startup snapshot sweep: queued files");
+                    if let Err(e) = svc
+                        .request_snapshot(oxplow_app::events::SnapshotSourceKind::Startup)
+                        .await
+                    {
+                        tracing::warn!(error = %e, "startup snapshot sweep: capture failed");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "startup snapshot sweep: walk failed"),
+            }
+        });
+    }
 
     // Per-stream fs + .git/refs watchers — bridges file changes onto
     // the EventBus so the renderer's QuickOpen, project panel, history,
