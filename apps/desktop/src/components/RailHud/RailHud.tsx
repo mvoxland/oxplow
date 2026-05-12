@@ -11,7 +11,9 @@ import type { OpError } from "../opErrorsStore.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import {
   listRecentPageVisits,
+  listWikiPages,
   subscribePageVisitEvents,
+  subscribeWikiPageEvents,
   topVisitedPages,
   type PageVisitApi,
   type TopVisitedRowApi,
@@ -932,6 +934,12 @@ function HistorySection({
   const [mode, setMode] = useState<"recent" | "top">("recent");
   const [recent, setRecent] = useState<PageVisitApi[]>([]);
   const [top, setTop] = useState<TopVisitedRowApi[]>([]);
+  // Wiki visit rows carry the title that was current when the page
+  // was activated. That snapshot can be stale ("" for pages activated
+  // before their summary loaded; outdated when titles change later).
+  // Resolve fresh slug → title here and prefer it over `e.label`
+  // whenever the entry is a wiki page.
+  const [wikiTitles, setWikiTitles] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -961,6 +969,27 @@ function HistorySection({
       off();
     };
   }, [threadId]);
+
+  // Maintain the slug → title map, refreshed on wiki-page events
+  // (creation, title rename, deletion) so a renamed page updates in
+  // the history list without waiting for the next visit.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void listWikiPages("").then((pages) => {
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const p of pages) map[p.slug] = p.title;
+        setWikiTitles(map);
+      });
+    };
+    refresh();
+    const off = subscribeWikiPageEvents(refresh);
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
 
   // Hide the entire section when there is nothing to show in either
   // mode — no header, no toggle, no flicker. If the user has data in
@@ -1019,18 +1048,25 @@ function HistorySection({
         {entries.map((e) => {
           const ref: TabRef = { id: e.refId, kind: e.refKind as TabRef["kind"], payload: e.payload };
           const trailing = effectiveMode === "top" ? (e as TopVisitedRowApi).count : null;
+          // Wiki: prefer the live title over the stored visit label.
+          // Falls back to a non-empty stored label, then to the slug,
+          // so the row always renders something.
+          const liveWikiTitle =
+            ref.kind === "wiki" ? wikiTitles[e.refId]?.trim() : null;
+          const display =
+            liveWikiTitle || (e.label?.trim() ?? "") || e.refId;
           return (
             <button
               key={e.refId}
               type="button"
               data-testid={`rail-history-${e.refId}`}
-              title={e.label}
+              title={display}
               onClick={() => onOpenPage(ref)}
               style={rowHoverStyle()}
             >
               <PageKindIcon kind={ref.kind} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {e.label}
+                {display}
               </span>
               {trailing != null ? (
                 <span
