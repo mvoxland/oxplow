@@ -189,6 +189,7 @@ impl TaskService {
         changes: UpdateTaskChanges,
     ) -> Result<Task, TaskServiceError> {
         let mut item = self.load(id).await?;
+        let prior_status = item.status;
         if let Some(t) = changes.title {
             item.title = t;
         }
@@ -221,7 +222,71 @@ impl TaskService {
         }
         item.updated_at = Timestamp::now();
         self.store.update(&item).await?;
+
+        // Effort lifecycle: when a task crosses the `in_progress`
+        // boundary, request a snapshot and open/close an effort row
+        // pinned to it. The snapshot+store hooks are optional so
+        // bare TaskService tests (no Services boot) skip this path.
+        let crossed_in =
+            prior_status != TaskStatus::InProgress && item.status == TaskStatus::InProgress;
+        let crossed_out =
+            prior_status == TaskStatus::InProgress && item.status != TaskStatus::InProgress;
+        if crossed_in || crossed_out {
+            self.apply_lifecycle_snapshot(&item, crossed_in).await;
+        }
         Ok(item)
+    }
+
+    /// Triggered from `update()` when the task just crossed the
+    /// in_progress boundary. On entry: request a snapshot and open
+    /// a new effort row anchored to it. On exit: request a snapshot,
+    /// find the still-open effort for this task, and finish it with
+    /// the end snapshot id. All errors are logged + swallowed —
+    /// status persistence already succeeded and we don't want a
+    /// snapshot failure to roll that back.
+    async fn apply_lifecycle_snapshot(&self, item: &Task, entering: bool) {
+        let (Some(snapshot), Some(effort_store)) =
+            (self.snapshot_capture.as_ref(), self.effort_store.as_ref())
+        else {
+            return;
+        };
+        // Lifecycle efforts need a thread to attach to; tasks on
+        // the project-wide backlog skip snapshot pinning.
+        let Some(thread_id) = item.thread_id.clone() else {
+            return;
+        };
+        let source = if entering {
+            crate::events::SnapshotSourceKind::TaskStart
+        } else {
+            crate::events::SnapshotSourceKind::TaskEnd
+        };
+        let snap_id = match snapshot.request_snapshot(source).await {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(error = %e, task = %item.id, "effort lifecycle: snapshot failed");
+                return;
+            }
+        };
+        if entering {
+            if let Err(e) = effort_store.start(item.id, &thread_id, snap_id).await {
+                tracing::warn!(error = %e, task = %item.id, "effort lifecycle: start failed");
+            }
+        } else {
+            let open = match effort_store.find_open_for_task(item.id).await {
+                Ok(open) => open,
+                Err(e) => {
+                    tracing::warn!(error = %e, task = %item.id, "effort lifecycle: open lookup failed");
+                    return;
+                }
+            };
+            if let Some(open) = open {
+                if let Err(e) = effort_store.finish(&open.id, snap_id, None).await {
+                    tracing::warn!(error = %e, task = %item.id, "effort lifecycle: finish failed");
+                }
+            } else {
+                tracing::debug!(task = %item.id, "effort lifecycle: no open effort to finish");
+            }
+        }
     }
 
     /// Rewrite sort_index across the items in `thread` (or backlog if
@@ -541,6 +606,159 @@ mod tests {
         };
         threads.upsert(&t).await.unwrap();
         (TaskService::new(store), t.id)
+    }
+
+    async fn fixture_with_lifecycle(
+    ) -> (TaskService, ThreadId, Arc<SqliteTaskEffortStore>, tempfile::TempDir) {
+        let project = tempfile::tempdir().unwrap();
+        let db = Database::in_memory();
+        let streams = SqliteStreamStore::new(db.clone());
+        let threads = SqliteThreadStore::new(db.clone());
+        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
+        let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
+        let blobs = crate::blob_store::BlobStore::new(project.path().join(".oxplow/snapshots"));
+        let snapshot_svc = Arc::new(crate::snapshot_capture::SnapshotCaptureService::new(
+            snapshot_store,
+            blobs,
+            project.path().to_path_buf(),
+            None,
+            1_000_000,
+        ));
+        let s = Stream {
+            id: StreamId::from("s-1"),
+            kind: StreamKind::Primary,
+            title: "p".into(),
+            branch: "main".into(),
+            branch_ref: "refs/heads/main".into(),
+            branch_source: "main".into(),
+            worktree_path: project.path().to_string_lossy().into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(1),
+            updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
+        };
+        streams.upsert(&s).await.unwrap();
+        let t = Thread {
+            id: ThreadId::from("b-life"),
+            stream_id: s.id.clone(),
+            title: "t".into(),
+            status: ThreadStatus::Active,
+            sort_index: 0,
+            pane_target: "working".into(),
+            resume_session_id: String::new(),
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(1),
+            updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
+        };
+        threads.upsert(&t).await.unwrap();
+        let svc = TaskService::new(task_store)
+            .with_effort_store(effort_store.clone())
+            .with_snapshot_capture(snapshot_svc);
+        (svc, t.id, effort_store, project)
+    }
+
+    #[tokio::test]
+    async fn in_progress_transition_opens_effort_with_start_snapshot() {
+        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid.clone()),
+                CreateTaskInput {
+                    title: "lifecycle".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        // Ready → InProgress: opens an effort with start_snapshot_id.
+        let _ = svc
+            .update(
+                item.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let open = effort_store
+            .find_open_for_task(item.id)
+            .await
+            .unwrap()
+            .expect("effort should be open");
+        // Dirty set is empty in tests (no actual fs writes), so the
+        // first snapshot returns None. The effort still opens but
+        // start_snapshot_id is None — that's the "nothing to pin"
+        // case and is fine. To verify the snapshot path actually
+        // ran, write a file first.
+        assert!(open.ended_at.is_none());
+        assert!(open.start_snapshot_id.is_none());
+
+        // Mark a file dirty so the next request_snapshot produces
+        // a non-empty result.
+        let svc_for_dirty = svc.snapshot_capture.as_ref().unwrap().clone();
+        std::fs::write(_project.path().join("a.txt"), "v").unwrap();
+        svc_for_dirty.mark_dirty(_project.path().join("a.txt"));
+
+        // InProgress → Done: closes the open effort with end_snapshot_id.
+        let _ = svc
+            .update(
+                item.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        assert_eq!(efforts.len(), 1);
+        let closed = &efforts[0];
+        assert!(closed.ended_at.is_some());
+        assert!(closed.end_snapshot_id.is_some());
+        // And no new effort was opened.
+        assert!(effort_store
+            .find_open_for_task(item.id)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn non_in_progress_transitions_skip_effort_lifecycle() {
+        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid.clone()),
+                CreateTaskInput {
+                    title: "skip".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        // Ready → Blocked: no effort row.
+        let _ = svc
+            .update(
+                item.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::Blocked),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(effort_store.list_for_item(item.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]

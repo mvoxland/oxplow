@@ -128,6 +128,20 @@ pub trait TaskEffortStore: Send + Sync {
     /// `page_ref` immediately.
     async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError>;
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEffort>, DomainError>;
+    /// Open effort (`ended_at IS NULL`) for `task`, if any. Used by
+    /// the lifecycle path that opens an effort on in_progress entry
+    /// and finishes it on exit, and by `record_effort` to merge
+    /// touched-files into the lifecycle row instead of creating a
+    /// duplicate.
+    async fn find_open_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError>;
+    /// Most-recent effort for `task` regardless of state, or `None`
+    /// when the task has never had one. Used by `record_effort` to
+    /// reattach files to a just-closed lifecycle effort.
+    async fn most_recent_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError>;
+    /// Overwrite the summary on an already-finished effort. Used
+    /// when `record_effort` runs after the lifecycle finish has
+    /// already closed the row.
+    async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
     async fn list_impacts(&self, id: &EffortId) -> Result<Vec<TaskImpact>, DomainError>;
     async fn record_file(
@@ -329,6 +343,61 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         .await
         .unwrap()?;
         if summary_has_body && self.page_refs.is_some() {
+            if let Some(tid) = self.task_for_effort(id).await? {
+                self.project_effort_slice(tid).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn find_open_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task_effort
+                     WHERE task_id = ?1 AND ended_at IS NULL
+                     ORDER BY started_at DESC LIMIT 1",
+                )?;
+                let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
+                rows.next().transpose()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn most_recent_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task_effort WHERE task_id = ?1
+                     ORDER BY started_at DESC LIMIT 1",
+                )?;
+                let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
+                rows.next().transpose()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn set_summary(&self, id: &EffortId, summary: Option<String>) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id_for_sql = id.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE task_effort SET summary = ?2 WHERE id = ?1",
+                    params![id_for_sql.as_str(), summary],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()?;
+        if self.page_refs.is_some() {
             if let Some(tid) = self.task_for_effort(id).await? {
                 self.project_effort_slice(tid).await?;
             }
