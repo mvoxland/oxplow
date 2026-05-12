@@ -78,6 +78,40 @@ impl BlobStore {
     pub fn has(&self, hash: &str) -> bool {
         self.path_for(hash).exists()
     }
+
+    /// Delete every blob whose hash isn't in `keep`. Returns the
+    /// number of files removed. Tolerant of a missing root dir
+    /// (returns 0) and of individual file removal failures (logged
+    /// + counted separately).
+    pub fn gc(&self, keep: &std::collections::HashSet<String>) -> Result<u64, BlobStoreError> {
+        if !self.root.exists() {
+            return Ok(0);
+        }
+        let mut removed = 0u64;
+        for shard in std::fs::read_dir(&self.root)? {
+            let shard = shard?;
+            if !shard.file_type()?.is_dir() {
+                continue;
+            }
+            for entry in std::fs::read_dir(shard.path())? {
+                let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                // Skip stray .tmp leftovers from a crashed write.
+                if name.ends_with(".tmp") {
+                    let _ = std::fs::remove_file(entry.path());
+                    continue;
+                }
+                if !keep.contains(name.as_ref()) && std::fs::remove_file(entry.path()).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        Ok(removed)
+    }
 }
 
 #[cfg(test)]

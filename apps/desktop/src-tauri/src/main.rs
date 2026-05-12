@@ -111,6 +111,17 @@ fn main() {
             }
         });
     }
+    // Snapshot cleanup loop — prunes rows older than the configured
+    // retention window (keeping the most-recent row per path) and
+    // GC's orphaned blob files. Runs ~60s after boot and every 24h.
+    {
+        let retention_days = state
+            .config
+            .read()
+            .map(|c| c.snapshot_retention_days)
+            .unwrap_or(7);
+        snapshot_svc.spawn_cleanup_loop(retention_days);
+    }
 
     // Per-stream fs + .git/refs watchers — bridges file changes onto
     // the EventBus so the renderer's QuickOpen, project panel, history,

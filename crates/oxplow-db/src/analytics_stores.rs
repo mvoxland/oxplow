@@ -966,6 +966,71 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
+    /// Distinct non-null `blob_hash` values referenced by any row.
+    /// Used by blob GC to decide which on-disk content is still live.
+    pub async fn referenced_blob_hashes(
+        &self,
+    ) -> Result<std::collections::HashSet<String>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT blob_hash FROM file_snapshot WHERE blob_hash IS NOT NULL",
+                )?;
+                let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Test-only: rewrite the oldest row for `path` to a given
+    /// `captured_at`. Lets cleanup tests construct rows that fall
+    /// outside a retention window without time-traveling the clock.
+    #[doc(hidden)]
+    pub async fn backdate_for_test(self: std::sync::Arc<Self>, path: &str, ts: Timestamp) {
+        let db = self.db.clone();
+        let path = path.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| -> rusqlite::Result<()> {
+                conn.execute(
+                    "UPDATE file_snapshot SET captured_at = ?1
+                     WHERE id = (SELECT MIN(id) FROM file_snapshot WHERE path = ?2)",
+                    params![ts_to_string(ts), path],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    /// Delete snapshot rows whose `captured_at` is older than
+    /// `cutoff`, except the most-recent row per path (so every
+    /// file keeps at least one history entry no matter how old).
+    /// Returns the number of rows deleted.
+    pub async fn prune_older_than(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
+        let db = self.db.clone();
+        let cutoff_str = ts_to_string(cutoff);
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let n = conn.execute(
+                    "DELETE FROM file_snapshot
+                     WHERE captured_at < ?1
+                       AND id NOT IN (
+                         SELECT MAX(id) FROM file_snapshot GROUP BY path
+                       )",
+                    params![cutoff_str],
+                )?;
+                Ok(n as u64)
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     pub async fn list_for_path(&self, path: &str) -> Result<Vec<FileSnapshot>, DomainError> {
         let db = self.db.clone();
         let path = path.to_string();

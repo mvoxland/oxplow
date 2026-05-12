@@ -138,6 +138,50 @@ impl SnapshotCaptureService {
         self.inner.dirty.lock().unwrap().insert(path);
     }
 
+    /// Prune snapshot rows older than `retention_days` (keeping the
+    /// most-recent row per path) and GC any on-disk blobs no longer
+    /// referenced. Returns `(rows_pruned, blobs_removed)`.
+    pub async fn run_cleanup(
+        &self,
+        retention_days: u32,
+    ) -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
+        let cutoff = Timestamp::from_unix_ms(
+            Timestamp::now().unix_ms() - (retention_days as i64) * 86_400_000,
+        );
+        let pruned = self.inner.store.prune_older_than(cutoff).await?;
+        let referenced = self.inner.store.referenced_blob_hashes().await?;
+        let blobs = self.inner.blobs.clone();
+        let removed = tokio::task::spawn_blocking(move || blobs.gc(&referenced)).await??;
+        Ok((pruned, removed))
+    }
+
+    /// Spawn a long-running cleanup loop: runs once shortly after
+    /// boot, then every 24h.
+    pub fn spawn_cleanup_loop(&self, retention_days: u32) -> tokio::task::JoinHandle<()> {
+        let this = self.clone();
+        tokio::spawn(async move {
+            // Brief delay so we don't pile cleanup on top of the
+            // startup sweep's hashing work.
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            loop {
+                match this.run_cleanup(retention_days).await {
+                    Ok((rows, blobs)) => {
+                        if rows > 0 || blobs > 0 {
+                            tracing::info!(
+                                rows_pruned = rows,
+                                blobs_removed = blobs,
+                                retention_days,
+                                "snapshot cleanup",
+                            );
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "snapshot cleanup failed"),
+                }
+                tokio::time::sleep(Duration::from_secs(24 * 60 * 60)).await;
+            }
+        })
+    }
+
     /// Walk the worktree and mark every file whose current content
     /// differs from the most recent snapshot. Also marks paths that
     /// had a non-deleted latest snapshot but are no longer on disk —
@@ -450,6 +494,49 @@ mod tests {
         let c_rows = store.list_for_path("c.txt").await.unwrap();
         assert_eq!(c_rows.len(), 2);
         assert!(c_rows[0].blob_hash.is_none());
+    }
+
+    #[tokio::test]
+    async fn cleanup_prunes_old_rows_and_gcs_orphan_blobs() {
+        let project = tempdir().unwrap();
+        let file = project.path().join("a.txt");
+        let (svc, store) = svc_for(project.path());
+
+        // First capture — content "v1".
+        std::fs::write(&file, "v1").unwrap();
+        svc.mark_dirty(file.clone());
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+
+        // Mutate and capture again — content "v2".
+        std::fs::write(&file, "v2").unwrap();
+        svc.mark_dirty(file.clone());
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 2);
+
+        // Backdate the older row so it falls outside any positive
+        // retention window. Then run cleanup with 1 day retention —
+        // the older row should be pruned but the newest kept.
+        oxplow_db::SqliteSnapshotStore::backdate_for_test(
+            store.clone(),
+            "a.txt",
+            Timestamp::from_unix_ms(0),
+        )
+        .await;
+        let (rows, blobs) = svc.run_cleanup(1).await.unwrap();
+        assert_eq!(rows, 1, "old row should be pruned");
+        // The pruned row's blob is no longer referenced → GC removes
+        // it. The kept row's blob stays.
+        assert_eq!(blobs, 1, "orphan blob should be removed");
+        let remaining = store.list_for_path("a.txt").await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(svc
+            .inner
+            .blobs
+            .has(remaining[0].blob_hash.as_ref().unwrap()));
     }
 
     #[tokio::test]
