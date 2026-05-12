@@ -603,15 +603,41 @@ export function MarkdownView({
     blocks.forEach(async (code, idx) => {
       const source = code.textContent ?? "";
       const id = `mermaid-${Date.now()}-${idx}`;
+      const sweepStrayMermaidNodes = () => {
+        // Mermaid v11 sometimes appends a temp container to
+        // `document.body` with our id (or `d<id>`) and, on parse
+        // failure, may inject its default error renderer (the
+        // "Syntax error in text" bomb SVG) into that container.
+        // Sweep both shapes so the bomb doesn't linger outside our
+        // inline error in the markdown view.
+        for (const stray of document.querySelectorAll(
+          `#${CSS.escape(id)}, #d${CSS.escape(id)}`,
+        )) {
+          // Don't yank the diagram we just successfully spliced into
+          // the markdown view — that one lives under our `root`.
+          if (stray.closest(".mermaid-rendered")) continue;
+          if (root.contains(stray)) continue;
+          stray.remove();
+        }
+      };
       try {
         const mermaid = await loadMermaid();
+        // Validate first; parse() has no DOM side effects, so a
+        // syntax error throws before render() can drop its bomb into
+        // document.body. `suppressErrors: true` would return false
+        // instead of throwing, but we want the message in our catch.
+        await mermaid.parse(source);
         const { svg } = await mermaid.render(id, source);
-        if (cancelled) return;
+        if (cancelled) {
+          sweepStrayMermaidNodes();
+          return;
+        }
         const host = document.createElement("div");
         host.className = "mermaid-rendered";
         host.innerHTML = svg;
         const pre = code.parentElement;
         if (pre && pre.tagName === "PRE") pre.replaceWith(host);
+        sweepStrayMermaidNodes();
         const cleanup = await attachPanZoom(host);
         if (cancelled) {
           cleanup?.();
@@ -619,6 +645,7 @@ export function MarkdownView({
         }
         if (cleanup) cleanups.push(cleanup);
       } catch (error) {
+        sweepStrayMermaidNodes();
         const pre = code.parentElement;
         if (pre && pre.tagName === "PRE") {
           const err = document.createElement("div");
