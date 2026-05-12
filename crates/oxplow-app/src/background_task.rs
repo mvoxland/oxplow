@@ -28,6 +28,7 @@ pub enum BackgroundTaskKind {
     CodeQuality,
     Lsp,
     NotesResync,
+    Snapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]

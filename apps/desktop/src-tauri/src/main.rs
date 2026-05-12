@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use oxplow_app::{AppLayout, BackgroundTaskKind, Services, StartInput};
+use oxplow_app::{AppLayout, BackgroundTaskKind, Services, StartInput, UpdateInput};
 use oxplow_tauri_ipc::{
     specta_builder, AppState, PluginRuntime, PluginRuntimeState, OXPLOW_EVENT_CHANNEL,
 };
@@ -95,19 +95,45 @@ fn main() {
     // hashing a large worktree can take a few seconds.
     {
         let svc = snapshot_svc.clone();
+        let bts = state.background_tasks.clone();
+        let task = bts.start(StartInput {
+            kind: BackgroundTaskKind::Snapshot,
+            label: "Scanning worktree for snapshot changes".into(),
+            ..Default::default()
+        });
+        let task_id = task.id.clone();
         boot_runtime.spawn(async move {
             match svc.enqueue_startup_diff().await {
-                Ok(0) => tracing::debug!("startup snapshot sweep: nothing to capture"),
+                Ok(0) => {
+                    tracing::debug!("startup snapshot sweep: nothing to capture");
+                    bts.complete(&task_id, Some(serde_json::json!({"captured": 0})));
+                }
                 Ok(n) => {
                     tracing::info!(queued = n, "startup snapshot sweep: queued files");
-                    if let Err(e) = svc
+                    bts.update(
+                        &task_id,
+                        UpdateInput {
+                            label: Some(format!("Capturing {n} changed files")),
+                            ..Default::default()
+                        },
+                    );
+                    match svc
                         .request_snapshot(oxplow_app::events::SnapshotSourceKind::Startup)
                         .await
                     {
-                        tracing::warn!(error = %e, "startup snapshot sweep: capture failed");
+                        Ok(ids) => {
+                            bts.complete(&task_id, Some(serde_json::json!({"captured": ids.len()})))
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "startup snapshot sweep: capture failed");
+                            bts.fail(&task_id, e.to_string(), None);
+                        }
                     }
                 }
-                Err(e) => tracing::warn!(error = %e, "startup snapshot sweep: walk failed"),
+                Err(e) => {
+                    tracing::warn!(error = %e, "startup snapshot sweep: walk failed");
+                    bts.fail(&task_id, e.to_string(), None);
+                }
             }
         });
     }
@@ -120,7 +146,7 @@ fn main() {
             .read()
             .map(|c| c.snapshot_retention_days)
             .unwrap_or(7);
-        snapshot_svc.spawn_cleanup_loop(retention_days);
+        snapshot_svc.spawn_cleanup_loop(retention_days, Some(state.background_tasks.clone()));
     }
 
     // Per-stream fs + .git/refs watchers — bridges file changes onto

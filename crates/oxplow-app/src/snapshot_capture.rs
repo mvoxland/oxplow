@@ -156,14 +156,27 @@ impl SnapshotCaptureService {
     }
 
     /// Spawn a long-running cleanup loop: runs once shortly after
-    /// boot, then every 24h.
-    pub fn spawn_cleanup_loop(&self, retention_days: u32) -> tokio::task::JoinHandle<()> {
+    /// boot, then every 24h. When `bts` is provided, each iteration
+    /// surfaces as a row in the BackgroundTask HUD.
+    pub fn spawn_cleanup_loop(
+        &self,
+        retention_days: u32,
+        bts: Option<crate::background_task::BackgroundTaskStore>,
+    ) -> tokio::task::JoinHandle<()> {
         let this = self.clone();
         tokio::spawn(async move {
             // Brief delay so we don't pile cleanup on top of the
             // startup sweep's hashing work.
             tokio::time::sleep(Duration::from_secs(60)).await;
             loop {
+                let task = bts.as_ref().map(|s| {
+                    s.start(crate::background_task::StartInput {
+                        kind: crate::background_task::BackgroundTaskKind::Snapshot,
+                        label: "Pruning snapshot history".into(),
+                        detail: None,
+                        progress: None,
+                    })
+                });
                 match this.run_cleanup(retention_days).await {
                     Ok((rows, blobs)) => {
                         if rows > 0 || blobs > 0 {
@@ -174,8 +187,22 @@ impl SnapshotCaptureService {
                                 "snapshot cleanup",
                             );
                         }
+                        if let (Some(s), Some(t)) = (bts.as_ref(), task.as_ref()) {
+                            s.complete(
+                                &t.id,
+                                Some(serde_json::json!({
+                                    "rowsPruned": rows,
+                                    "blobsRemoved": blobs,
+                                })),
+                            );
+                        }
                     }
-                    Err(e) => tracing::warn!(error = %e, "snapshot cleanup failed"),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "snapshot cleanup failed");
+                        if let (Some(s), Some(t)) = (bts.as_ref(), task.as_ref()) {
+                            s.fail(&t.id, e.to_string(), None);
+                        }
+                    }
                 }
                 tokio::time::sleep(Duration::from_secs(24 * 60 * 60)).await;
             }

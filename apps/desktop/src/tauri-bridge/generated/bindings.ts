@@ -684,7 +684,7 @@ export type BackgroundTask = {
 	result_json: string | null,
 };
 
-export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync";
+export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync" | "snapshot";
 
 export type BackgroundTaskStatus = "running" | "done" | "failed";
 
