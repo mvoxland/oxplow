@@ -636,15 +636,21 @@ export function MarkdownView({
         host.className = "mermaid-rendered";
         host.innerHTML = svg;
         const pre = code.parentElement;
-        if (pre && pre.tagName === "PRE") pre.replaceWith(host);
+        if (pre && pre.tagName === "PRE") {
+          // Insert host as a sibling and hide the <pre>, instead of
+          // replacing it. ReactMarkdown still owns the <pre> node;
+          // yanking it with replaceWith() leaves React's fiber tree
+          // pointing at a detached node, so the next commit crashes
+          // in removeChild ("object can not be found here").
+          const prevDisplay = (pre as HTMLElement).style.display;
+          (pre as HTMLElement).style.display = "none";
+          pre.after(host);
+          cleanups.push(() => {
+            host.remove();
+            (pre as HTMLElement).style.display = prevDisplay;
+          });
+        }
         sweepStrayMermaidNodes();
-        // Track the host so the next body re-render can drop it.
-        // pre.replaceWith() removed the React-managed <pre>, so React
-        // has no record of the host — without this cleanup the host
-        // (and any leftover error div from a prior failed parse) leak
-        // across body updates, producing "new diagram + old error
-        // text" simultaneously.
-        cleanups.push(() => host.remove());
         const cleanup = await attachPanZoom(host);
         if (cancelled) {
           cleanup?.();
