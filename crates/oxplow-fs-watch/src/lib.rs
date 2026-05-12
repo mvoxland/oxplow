@@ -139,15 +139,39 @@ const IGNORED_WORKSPACE_SEGMENTS: &[&str] = &[
 /// the workspace root; absolute paths still work but match conserva-
 /// tively against the same segment list (`.git/...` anywhere in the
 /// chain is treated as ignored).
+///
+/// Exception: paths under `.oxplow/wiki/` pass through. Wiki pages
+/// are authored content and the snapshot system tracks their
+/// history alongside source files. The rest of `.oxplow/`
+/// (`snapshots/`, `state.sqlite*`, `runtime/`, etc.) remains
+/// ignored — those churn fast and are oxplow's own internal state.
 pub fn should_ignore_workspace_watch_path(path: &Path) -> bool {
     use std::path::Component;
-    path.components().any(|c| match c {
-        Component::Normal(seg) => seg
-            .to_str()
-            .map(|s| IGNORED_WORKSPACE_SEGMENTS.contains(&s))
-            .unwrap_or(false),
-        _ => false,
-    })
+    let mut comps = path.components().peekable();
+    while let Some(c) = comps.next() {
+        if let Component::Normal(seg) = c {
+            let s = match seg.to_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            if s == ".oxplow" {
+                // Allow `.oxplow/wiki/...` through; ignore everything
+                // else under `.oxplow/`.
+                let next = comps.peek().and_then(|c| match c {
+                    Component::Normal(n) => n.to_str(),
+                    _ => None,
+                });
+                if next == Some("wiki") {
+                    return false;
+                }
+                return true;
+            }
+            if IGNORED_WORKSPACE_SEGMENTS.contains(&s) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -297,7 +321,15 @@ mod tests {
     #[test]
     fn should_ignore_filters_oxplow_git_and_build_dirs() {
         assert!(should_ignore_workspace_watch_path(Path::new(
-            ".oxplow/blobs/aa/foo.tmp"
+            ".oxplow/snapshots/aa/foo.tmp"
+        )));
+        // Wiki pages under .oxplow/wiki/ are tracked, not ignored.
+        assert!(!should_ignore_workspace_watch_path(Path::new(
+            ".oxplow/wiki/local-snapshots.md"
+        )));
+        // Other .oxplow/* paths stay ignored.
+        assert!(should_ignore_workspace_watch_path(Path::new(
+            ".oxplow/state.sqlite"
         )));
         assert!(should_ignore_workspace_watch_path(Path::new(
             ".git/index.lock"

@@ -242,7 +242,7 @@ impl Services {
         let lsp_clients = lsp_clients::LspClientRegistry::new(config_arc.clone());
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
-        let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
+        let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
         let git = git_service::GitService::spawn(
             layout.project_dir.clone(),
             stream_store.clone(),
@@ -364,7 +364,7 @@ impl Services {
         let lsp_clients = lsp_clients::LspClientRegistry::new(config_arc.clone());
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), tmux.clone());
-        let blobs = blob_store::BlobStore::new(layout.state_dir.join("blobs"));
+        let blobs = blob_store::BlobStore::new(layout.state_dir.join("snapshots"));
         let git = git_service::GitService::spawn(
             layout.project_dir.clone(),
             stream_store.clone(),

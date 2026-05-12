@@ -3,7 +3,7 @@
 //! Subscribes to `oxplow_fs_watch` events for the project worktree
 //! and captures a `file_snapshot` row whenever a file changes. Bytes
 //! are persisted to a content-addressed blob store under
-//! `<project>/.oxplow/blobs/<aa>/<aaaa...>`, keyed by the SHA-256
+//! `<project>/.oxplow/snapshots/<aa>/<aaaa...>`, keyed by the SHA-256
 //! hash. The `local_blame` overlay and `restore_file_from_snapshot`
 //! both read through `BlobStore::read` to recover past file content.
 //!
@@ -166,7 +166,7 @@ mod tests {
         let file = project.path().join("a.txt");
         std::fs::write(&file, "hello").unwrap();
         let store = Arc::new(SqliteSnapshotStore::new(Database::in_memory()));
-        let blobs = BlobStore::new(project.path().join(".oxplow/blobs"));
+        let blobs = BlobStore::new(project.path().join(".oxplow/snapshots"));
         let svc = SnapshotCaptureService::new(
             store.clone(),
             blobs.clone(),
@@ -189,7 +189,7 @@ mod tests {
         let file = project.path().join("big.bin");
         std::fs::write(&file, vec![0u8; 1024]).unwrap();
         let store = Arc::new(SqliteSnapshotStore::new(Database::in_memory()));
-        let blobs = BlobStore::new(project.path().join(".oxplow/blobs"));
+        let blobs = BlobStore::new(project.path().join(".oxplow/snapshots"));
         let svc = SnapshotCaptureService::new(
             store.clone(),
             blobs,
