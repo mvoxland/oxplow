@@ -86,7 +86,8 @@ fn main() {
         None,
         max_bytes,
     )
-    .with_events(event_bus.clone());
+    .with_events(event_bus.clone())
+    .with_git(state.git.clone());
     snapshot_svc.spawn_watcher();
     // Startup sweep: any file whose current content doesn't match
     // the latest snapshot row (or was never snapshotted) gets

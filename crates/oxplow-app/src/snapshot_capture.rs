@@ -53,6 +53,13 @@ struct Inner {
     /// drains it. A HashSet collapses repeated edits to the same
     /// file between requests into a single capture.
     dirty: Mutex<HashSet<PathBuf>>,
+    /// Optional handle to the singleton GitService. When set,
+    /// `request_snapshot()` uses it to check worktree cleanliness
+    /// and look up HEAD — both reads pull from GitService's cache
+    /// so we don't re-stat the worktree on every capture. When None
+    /// (test paths without a wired-up service), git-commit pinning
+    /// is skipped.
+    git: RwLock<Option<Arc<crate::git_service::GitService>>>,
 }
 
 impl SnapshotCaptureService {
@@ -72,6 +79,7 @@ impl SnapshotCaptureService {
                 max_file_bytes,
                 events: RwLock::new(None),
                 dirty: Mutex::new(HashSet::new()),
+                git: RwLock::new(None),
             }),
         }
     }
@@ -80,6 +88,14 @@ impl SnapshotCaptureService {
     /// after each successful insert.
     pub fn with_events(self, events: EventBus) -> Self {
         *self.inner.events.write().unwrap() = Some(events);
+        self
+    }
+
+    /// Attach the singleton `GitService`. Enables git-commit pinning
+    /// on `request_snapshot()` (uses the service's cached status
+    /// map rather than re-scanning the worktree).
+    pub fn with_git(self, git: Arc<crate::git_service::GitService>) -> Self {
+        *self.inner.git.write().unwrap() = Some(git);
         self
     }
 
@@ -336,25 +352,32 @@ impl SnapshotCaptureService {
         // if) the worktree is clean — gitignored files don't count.
         // The check happens AFTER capture so any in-flight edits
         // were already drained into this snapshot's file rows.
-        let project_dir = self.inner.project_dir.clone();
-        let sha = tokio::task::spawn_blocking(move || {
-            if oxplow_git::is_worktree_clean(&project_dir) {
-                oxplow_git::head_commit_sha(&project_dir)
-            } else {
-                None
-            }
-        })
-        .await
-        .ok()
-        .flatten();
-        if let Some(sha) = sha {
-            if let Err(e) = self
+        //
+        // All git reads go through GitService so we use its cached
+        // status map (invalidated on fs-watch / refs events) rather
+        // than re-scanning the worktree each capture. When the
+        // service hasn't been attached (test paths without one),
+        // pinning is skipped.
+        let git = self.inner.git.read().unwrap().clone();
+        if let Some(git) = git {
+            let stream = self
                 .inner
-                .store
-                .set_snapshot_git_commit(parent_id, sha)
-                .await
-            {
-                debug!(error = %e, "snapshot: failed to pin git commit");
+                .stream_id
+                .as_ref()
+                .map(|s| s.as_str().to_string());
+            let stream_ref = stream.as_deref();
+            let statuses = git.statuses(stream_ref).await;
+            if statuses.is_empty() {
+                if let Some(sha) = git.head_commit_sha(stream_ref).await {
+                    if let Err(e) = self
+                        .inner
+                        .store
+                        .set_snapshot_git_commit(parent_id, sha)
+                        .await
+                    {
+                        debug!(error = %e, "snapshot: failed to pin git commit");
+                    }
+                }
             }
         }
         Ok(Some(parent_id))
@@ -522,6 +545,13 @@ mod tests {
         assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
     }
 
+    fn git_service_for(project: &std::path::Path) -> Arc<crate::git_service::GitService> {
+        let db = Database::in_memory();
+        let streams = Arc::new(oxplow_db::SqliteStreamStore::new(db));
+        let bus = crate::events::EventBus::new();
+        crate::git_service::GitService::spawn(project.to_path_buf(), streams, bus)
+    }
+
     #[tokio::test]
     async fn clean_worktree_pins_snapshot_to_head_commit() {
         let project = tempdir().unwrap();
@@ -548,6 +578,7 @@ mod tests {
         let head_sha = head_oid.to_string();
 
         let (svc, store) = svc_for(project.path());
+        let svc = svc.with_git(git_service_for(project.path()));
 
         // Clean tree → snapshot pinned to HEAD.
         svc.mark_dirty(tracked.clone());

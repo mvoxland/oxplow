@@ -688,6 +688,18 @@ impl GitService {
         result
     }
 
+    /// Resolved 40-char sha for HEAD in `stream_id`'s worktree.
+    /// Returns `None` when the directory isn't a git repo or HEAD
+    /// is unborn. Pass-through; no caching yet (refs can change
+    /// arbitrarily often relative to other cached state).
+    pub async fn head_commit_sha(&self, stream_id: Option<&str>) -> Option<String> {
+        let path = self.resolve_repo_dir(stream_id).await;
+        tokio::task::spawn_blocking(move || oxplow_git::head_commit_sha(&path))
+            .await
+            .ok()
+            .flatten()
+    }
+
     pub async fn change_scopes(&self, stream_id: Option<&str>) -> ChangeScopes {
         let path = self.resolve_repo_dir(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_change_scopes(&path))

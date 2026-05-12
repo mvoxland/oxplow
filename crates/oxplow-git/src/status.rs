@@ -57,28 +57,6 @@ pub fn status_for_path(repo_path: &Path, target: &str) -> Option<GitFileStatus> 
     list_git_statuses(repo_path).get(target).copied()
 }
 
-/// True when the worktree has no tracked-file changes and no
-/// non-ignored untracked files. Gitignored files are intentionally
-/// excluded — they're allowed to exist without making the tree
-/// "dirty" for snapshot-pinning purposes.
-///
-/// Returns `false` when the directory isn't a git repo at all
-/// (nothing to pin).
-pub fn is_worktree_clean(repo_path: &Path) -> bool {
-    let Ok(repo) = git2::Repository::open(repo_path) else {
-        return false;
-    };
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(true)
-        .include_ignored(false)
-        .include_unmodified(false);
-    let clean = match repo.statuses(Some(&mut opts)) {
-        Ok(statuses) => statuses.is_empty(),
-        Err(_) => false,
-    };
-    clean
-}
-
 /// Resolved 40-char sha for `HEAD`. `None` when not a git repo or
 /// when HEAD is unborn / detached at no commit.
 pub fn head_commit_sha(repo_path: &Path) -> Option<String> {
