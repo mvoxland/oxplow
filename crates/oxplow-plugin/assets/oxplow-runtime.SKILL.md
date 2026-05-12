@@ -117,6 +117,51 @@ it in their UI and won't know what you're pointing at. This applies
 everywhere: confirming a fix, asking whether to proceed, summarizing
 what shipped, naming the item you just reopened, etc.
 
+## Wikilink every reference in body text
+
+Task descriptions, acceptance criteria, effort summaries, thread
+notes, and wiki pages all render through the same markdown
+pipeline. Anywhere you name a real entity that has a page, write
+it as a `[[…]]` wikilink instead of inline code or a bare path —
+the renderer turns wikilinks into clickable, icon-bearing links
+with proper navigation, and the unified `page_ref` graph picks
+them up as outbound references so the target's backlinks list
+this item without needing summary-body parsing.
+
+Cheat sheet (every form is `[[…]]`; supply `|label` to override
+display text):
+
+- `[[src/foo.ts]]` — file by repo-relative path
+- `[[src/foo.ts:42]]` — file + line
+- `[[src/foo.ts@HEAD]]` / `[[src/foo.ts@<sha>]]` / `[[src/foo.ts@disk]]`
+  — pin a version (required inside wiki page bodies; optional
+  elsewhere)
+- `[[dir:src/components]]` — directory (the `dir:` prefix is what
+  distinguishes a directory from a file — without it, a path
+  with no extension would be parsed as a wiki slug)
+- `[[some-slug]]` — wiki page by slug; renderer displays the
+  page's title, not the slug
+- `[[abc1234]]` or `[[git:abc1234]]` — git commit by SHA
+- `[[#42]]` — another task by id (when supported by the renderer)
+
+What this replaces:
+
+- ❌ `` `.context/data-model.md` `` (inline code — not clickable,
+  not in the graph)
+- ❌ ``See `src/foo.ts` for the helper`` (same problem)
+- ✅ `[[.context/data-model.md]]`
+- ✅ `See [[src/foo.ts|the foo helper]] for the helper.`
+
+Reserve inline code (`` `…` ``) for things that aren't real
+entities: identifiers, snippets, command fragments, env vars.
+If it has a page in oxplow, it deserves a wikilink.
+
+The [[oxplow-wiki-capture]] skill has the full version-pinning
+rules for file wikilinks inside wiki page bodies — those are
+stricter (every file wikilink must declare `@version`). In task
+summaries and descriptions the bare `[[path]]` form is fine; the
+renderer falls back to working-tree.
+
 ## Redos on a just-shipped item
 
 When the user pushes back on work you just closed to `done`
