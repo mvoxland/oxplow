@@ -21,6 +21,7 @@ import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
 import { DISK, type FileVersion } from "../../file-version.js";
+import { useWikiTitle } from "../../wikiTitleCache.js";
 
 // Mermaid is loaded lazily so this module is safe to import in
 // non-DOM test environments (parseMarkdownLink is the main reason
@@ -362,6 +363,65 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
   }).join("");
 }
 
+/**
+ * Inline anchor wrapper that owns the wiki-title swap. Lives as its
+ * own component so `useWikiTitle` (a hook) can be called per-link
+ * without violating rules-of-hooks in the parent's render-prop.
+ */
+function WikiLinkSpan({
+  anchorProps,
+  handleLinkClick,
+  items,
+  iconKind,
+  internalSlug,
+}: {
+  anchorProps: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
+  handleLinkClick: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  items: MenuItem[];
+  iconKind: string | null;
+  internalSlug: string | null;
+}) {
+  const title = useWikiTitle(internalSlug);
+  const { children, ...rest } = anchorProps;
+  // The link text is the page title when:
+  //  - this is an internal wiki link, AND
+  //  - the rendered text equals the slug (i.e., authored as
+  //    `[[slug]]` with no `|label`), AND
+  //  - the cache resolved the slug to a real title.
+  // Otherwise preserve the original children verbatim — that
+  // includes author-supplied labels (`[[slug|Custom]]`) and
+  // unknown / not-yet-loaded slugs (fall back to the slug).
+  const childrenText = flattenChildrenText(children);
+  const overrideText =
+    internalSlug && title && childrenText === internalSlug ? title : null;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }} className="oxplow-md-link">
+      {iconKind ? (
+        <PageKindIcon
+          kind={iconKind}
+          size={12}
+          style={{ color: "var(--text-secondary)", flexShrink: 0, verticalAlign: "middle" }}
+        />
+      ) : null}
+      <a {...rest} onClick={handleLinkClick} onAuxClick={handleLinkClick}>
+        {overrideText ?? children}
+      </a>
+      {items.length > 0 ? (
+        <span className="oxplow-md-link-kebab" style={{ display: "inline-flex" }}>
+          <Kebab items={items} size={12} label="Link actions" />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function flattenChildrenText(children: React.ReactNode): string {
+  if (typeof children === "string") return children;
+  if (typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(flattenChildrenText).join("");
+  return "";
+}
+
 export interface MarkdownViewProps {
   body: string;
   /** Optional internal link handler (WikiPageTab routes to wiki history). */
@@ -600,22 +660,19 @@ export function MarkdownView({
             }
             const items = buildLinkMenu(href);
             const iconKind = parsedLinkIconKind(parsed.kind);
+            // For internal wiki links written as bare `[[slug]]` (no
+            // `|label`), swap the rendered text from the slug to the
+            // page title so readers see "Local Snapshots" not
+            // `local-snapshots`. Author-supplied labels are preserved.
+            const internalSlug = parsed.kind === "internal" ? parsed.slug : null;
             return (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }} className="oxplow-md-link">
-                {iconKind ? (
-                  <PageKindIcon
-                    kind={iconKind}
-                    size={12}
-                    style={{ color: "var(--text-secondary)", flexShrink: 0, verticalAlign: "middle" }}
-                  />
-                ) : null}
-                <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />
-                {items.length > 0 ? (
-                  <span className="oxplow-md-link-kebab" style={{ display: "inline-flex" }}>
-                    <Kebab items={items} size={12} label="Link actions" />
-                  </span>
-                ) : null}
-              </span>
+              <WikiLinkSpan
+                anchorProps={props}
+                handleLinkClick={handleLinkClick}
+                items={items}
+                iconKind={iconKind}
+                internalSlug={internalSlug}
+              />
             );
           },
         }}
