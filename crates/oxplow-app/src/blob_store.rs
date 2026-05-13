@@ -103,6 +103,42 @@ impl BlobStore {
         self.path_for(hash).exists()
     }
 
+    /// Sum of every blob file's size under `<root>/`. Tolerant of a
+    /// missing root dir (returns 0). Skips `.tmp` leftovers so a
+    /// crashed write doesn't inflate the reported number.
+    ///
+    /// Walks two levels (shard dir → blob file). Cheap enough to call
+    /// on a dashboard page-load — at ~50k blobs the stat calls take a
+    /// handful of ms on SSD.
+    pub fn total_bytes(&self) -> Result<u64, BlobStoreError> {
+        if !self.root.exists() {
+            return Ok(0);
+        }
+        let mut total: u64 = 0;
+        for shard in std::fs::read_dir(&self.root)? {
+            let shard = shard?;
+            if !shard.file_type()?.is_dir() {
+                continue;
+            }
+            for entry in std::fs::read_dir(shard.path())? {
+                let entry = entry?;
+                let metadata = match entry.metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if !metadata.is_file() {
+                    continue;
+                }
+                let name = entry.file_name();
+                if name.to_string_lossy().ends_with(".tmp") {
+                    continue;
+                }
+                total = total.saturating_add(metadata.len());
+            }
+        }
+        Ok(total)
+    }
+
     /// Delete every blob whose hash isn't in `keep`. Returns the
     /// number of files removed. Tolerant of a missing root dir
     /// (returns 0) and of individual file removal failures (logged

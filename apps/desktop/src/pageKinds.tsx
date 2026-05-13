@@ -84,7 +84,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "uncommitted-changes":
       return GitBranch;
 
-    // Non-tab kinds used as backlink rows.
+    // Snapshot detail page — Local History dashboard drill-in.
+    // (Same `Layers` icon previously used only for backlink rows.)
     case "snapshot":
       return Layers;
 
@@ -169,6 +170,8 @@ export function pageKindLabel(kind: string): string {
       return "wiki page";
     case "git-commit":
       return "commit";
+    case "snapshot":
+      return "snapshot";
     case "new-task":
       return "new task";
     case "new-stream":

@@ -11,12 +11,10 @@ import {
 import { miniButtonStyle } from "../components/Plan/plan-utils.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, taskRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
 import { ActivityTimeline, TaskDetail } from "../components/Plan/TaskDetail.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
-import { SnapshotDetailSlideover } from "../components/Snapshots/SnapshotDetailSlideover.js";
-import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
 export interface TaskPageProps {
   stream: Stream | null;
@@ -28,9 +26,6 @@ export interface TaskPageProps {
   onOpenPage(ref: TabRef): void;
   onOpenFile?(path: string): void;
   onShowInHistory?(snapshotId: string): void;
-  /** Forwarded to the embedded SnapshotDetailSlideover so its file rows
-   *  can ask the host to open a diff editor. */
-  onOpenDiff?(spec: DiffSpec): void;
 }
 
 /**
@@ -52,7 +47,6 @@ export function TaskPage({
   onOpenPage,
   onOpenFile,
   onShowInHistory,
-  onOpenDiff,
 }: TaskPageProps) {
   // Fallback for items not in the current thread's loaded buckets — backlog
   // rows and items owned by another thread won't appear in `items`. Fetch
@@ -63,18 +57,10 @@ export function TaskPage({
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
   const [efforts, setEfforts] = useState<EffortDetail[]>([]);
-  // Slideover state lives on this host page (the brief calls for it).
-  // Single instance — opening another snapshot replaces the current one.
-  const [slideoverSnapshot, setSlideoverSnapshot] = useState<{
-    snapshotId: string;
-    label: string | null;
-    source: string;
-    tasksId: number | null;
-  } | null>(null);
   // Synthesize snapshot backlinks from this item's efforts. Each completed
   // effort's `end_snapshot_id` becomes a clickable row that opens the
-  // SnapshotDetailSlideover. Skipped when no end snapshot (effort still
-  // in progress) so the row never lands without a target.
+  // SnapshotDetailPage in a new tab. Skipped when no end snapshot
+  // (effort still in progress) so the row never lands without a target.
   const snapshotBacklinks = useMemo<SnapshotBacklinkEntry[]>(() => {
     return efforts
       .filter((d) => !!d.effort.end_snapshot_id)
@@ -96,12 +82,10 @@ export function TaskPage({
         entries={backlinkEntries}
         snapshotEntries={snapshotBacklinks}
         onOpenPage={onOpenPage}
-        onOpenSnapshot={(payload) => setSlideoverSnapshot({
-          snapshotId: payload.snapshotId,
-          label: payload.label ?? null,
-          source: payload.source ?? "",
-          tasksId: payload.tasksId ?? null,
-        })}
+        onOpenSnapshot={(payload) => {
+          const id = Number(payload.snapshotId);
+          if (Number.isFinite(id)) onOpenPage(snapshotRef(id));
+        }}
         onOpenCommit={(payload) => onOpenPage(gitCommitRef(payload.sha))}
       />
     ),
@@ -193,27 +177,12 @@ export function TaskPage({
     return null;
   })();
 
-  const slideover = (
-    <SnapshotDetailSlideover
-      open={!!slideoverSnapshot}
-      onClose={() => setSlideoverSnapshot(null)}
-      stream={stream}
-      snapshotId={slideoverSnapshot?.snapshotId ?? null}
-      snapshotLabel={slideoverSnapshot?.label ?? null}
-      snapshotSource={slideoverSnapshot?.source ?? ""}
-      tasksId={slideoverSnapshot?.tasksId ?? null}
-      onOpenDiff={onOpenDiff}
-      onOpenTask={(targetId) => onOpenPage(taskRef(targetId))}
-    />
-  );
-
   if (!item) {
     return (
       <Page testId="page-tasks" title={`task:${itemId}`} kind="task" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
           Loading tasks…
         </div>
-        {slideover}
       </Page>
     );
   }
@@ -254,7 +223,6 @@ export function TaskPage({
           />
         </div>
       </div>
-      {slideover}
     </Page>
   );
 }

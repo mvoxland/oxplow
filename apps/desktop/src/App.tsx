@@ -97,7 +97,8 @@ import { useBookmarksStore } from "./tabs/useBookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { CodeQualityPage } from "./pages/CodeQualityPage.js";
-import { LocalHistoryPage } from "./pages/LocalHistoryPage.js";
+import { LocalHistoryDashboardPage } from "./pages/LocalHistoryDashboardPage.js";
+import { SnapshotDetailPage } from "./pages/SnapshotDetailPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
@@ -123,7 +124,7 @@ import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
-import { closedThreadsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newTaskRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newTaskRef, snapshotRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -434,7 +435,6 @@ export function App() {
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
-  const [snapshotsReveal, setSnapshotsReveal] = useState<{ snapshotId: string; token: number } | null>(null);
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [threadCreateRequest, setThreadCreateRequest] = useState(0);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
@@ -1859,9 +1859,9 @@ export function App() {
   };
 
   const handleShowSnapshotInHistory = (snapshotId: string) => {
-    const token = Date.now();
-    setSnapshotsReveal({ snapshotId, token });
-    handleOpenPage(indexRef("local-history"));
+    const id = Number(snapshotId);
+    if (!Number.isFinite(id)) return;
+    handleOpenPage(snapshotRef(id));
   };
 
   const closeDiffTab = (id: string) => {
@@ -2077,6 +2077,7 @@ export function App() {
       case "git-history":
       case "git-dashboard":
       case "git-commit":
+      case "snapshot":
       case "uncommitted-changes":
       case "hook-events":
       case "files":
@@ -2661,11 +2662,25 @@ export function App() {
           label: "Local History",
           closable: true,
           render: () => (
-            <LocalHistoryPage
+            <LocalHistoryDashboardPage
               stream={stream}
+              onOpenPage={navOpen}
+            />
+          ),
+        });
+      } else if (ref.kind === "snapshot") {
+        const payload = (ref.payload as { snapshotId?: number } | null) ?? null;
+        const snapshotId = payload?.snapshotId ?? 0;
+        tabs.push({
+          id: ref.id,
+          label: `Snapshot ${snapshotId}`,
+          closable: true,
+          render: () => (
+            <SnapshotDetailPage
+              stream={stream}
+              snapshotId={snapshotId}
               onOpenDiff={navOpenDiff}
-              revealSnapshotId={snapshotsReveal}
-              onRequestEditTask={handleRequestEditTask}
+              onOpenPage={navOpen}
             />
           ),
         });
@@ -2950,7 +2965,6 @@ export function App() {
               onOpenPage={navOpen}
               onOpenFile={(p) => navOpenFile(p)}
               onShowInHistory={handleShowSnapshotInHistory}
-              onOpenDiff={navOpenDiff}
             />
           ),
         });
@@ -3173,7 +3187,6 @@ export function App() {
     pageTitles,
     setPageTitle,
     bookmarksStore,
-    snapshotsReveal,
     workspaceContext.gitEnabled,
     selectedFilePath,
     generatedDirs,

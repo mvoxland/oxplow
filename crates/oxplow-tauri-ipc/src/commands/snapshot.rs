@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_db::{FileSnapshot, ParentSnapshot};
+use oxplow_db::{FileSnapshot, ParentSnapshot, SnapshotParentSummary};
 use oxplow_domain::StreamId;
 
 use crate::error::IpcError;
@@ -42,6 +42,30 @@ pub async fn list_parent_snapshots_for_stream(
         .snapshot_store
         .list_parent_snapshots_for_stream(stream_id.as_str(), limit.unwrap_or(200))
         .await?)
+}
+
+/// Created/modified/deleted counts for a parent snapshot. Powers
+/// the Local History dashboard's per-snapshot stats column.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_parent_snapshot_summary(
+    state: tauri::State<'_, AppState>,
+    snapshot_id: i64,
+) -> Result<SnapshotParentSummary, IpcError> {
+    Ok(state.snapshot_store.summary_for_parent(snapshot_id).await?)
+}
+
+/// Total on-disk size of every blob in the content-addressed store.
+/// Used by the Local History dashboard's Storage card.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_blob_storage_bytes(state: tauri::State<'_, AppState>) -> Result<i64, IpcError> {
+    let blobs = state.blobs.clone();
+    let total = tokio::task::spawn_blocking(move || blobs.total_bytes())
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?
+        .map_err(|e| IpcError::internal(e.to_string()))?;
+    Ok(total as i64)
 }
 
 /// Every `file_snapshot` row captured under a single parent

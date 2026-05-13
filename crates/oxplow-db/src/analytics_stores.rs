@@ -850,6 +850,19 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     })
 }
 
+/// Aggregate created/modified/deleted counts for the file rows
+/// captured under one parent snapshot. Derived by comparing each
+/// child row's `blob_hash` to the most-recent prior row for the
+/// same `(stream_id, path)`. Powers the Local History dashboard's
+/// per-snapshot stats column.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+pub struct SnapshotParentSummary {
+    pub created: i64,
+    pub modified: i64,
+    pub deleted: i64,
+    pub total: i64,
+}
+
 /// Parent `snapshot` row — one per `request_snapshot()` call that
 /// had dirty files. Groups the `file_snapshot` rows captured in
 /// that batch. See [[crates/oxplow-db/migrations/V13__snapshot_parent.sql]].
@@ -1098,6 +1111,51 @@ impl SqliteSnapshotStore {
 
     /// File rows captured under a single parent snapshot, oldest first
     /// (insertion order within the capture loop).
+    /// Aggregate counts of created/modified/deleted files in a parent
+    /// snapshot — derived by comparing each child row's `blob_hash`
+    /// to the most-recent prior row for the same `(stream_id, path)`.
+    /// The `idx_file_snapshot_stream_path` index covers the prior-row
+    /// lookup so this stays cheap even with multi-million-row history.
+    pub async fn summary_for_parent(
+        &self,
+        snapshot_id: i64,
+    ) -> Result<SnapshotParentSummary, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.query_row(
+                    "SELECT
+                       COALESCE(SUM(CASE WHEN fs.blob_hash IS NULL THEN 1 ELSE 0 END), 0) AS deleted,
+                       COALESCE(SUM(CASE WHEN fs.blob_hash IS NOT NULL AND prev_hash IS NULL THEN 1 ELSE 0 END), 0) AS created,
+                       COALESCE(SUM(CASE WHEN fs.blob_hash IS NOT NULL AND prev_hash IS NOT NULL THEN 1 ELSE 0 END), 0) AS modified,
+                       COUNT(*) AS total
+                     FROM (
+                       SELECT
+                         f.blob_hash,
+                         (SELECT p.blob_hash FROM file_snapshot p
+                          WHERE p.stream_id = f.stream_id
+                            AND p.path = f.path
+                            AND p.id < f.id
+                          ORDER BY p.id DESC LIMIT 1) AS prev_hash
+                       FROM file_snapshot f
+                       WHERE f.snapshot_id = ?1
+                     ) fs",
+                    params![snapshot_id],
+                    |row| {
+                        Ok(SnapshotParentSummary {
+                            deleted: row.get(0)?,
+                            created: row.get(1)?,
+                            modified: row.get(2)?,
+                            total: row.get(3)?,
+                        })
+                    },
+                )
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     pub async fn list_files_for_snapshot(
         &self,
         snapshot_id: i64,
@@ -1510,6 +1568,92 @@ mod tests {
         let list = store.list_for_path("src/foo.rs").await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].size_bytes, 42);
+    }
+
+    #[tokio::test]
+    async fn summary_for_parent_classifies_created_modified_deleted() {
+        let db = Database::in_memory();
+        seed_stream(&db, "s-test");
+        let store = SqliteSnapshotStore::new(db);
+        let stream = StreamId::from("s-test");
+
+        // Parent 1: baseline of three paths.
+        let p1 = store.create_snapshot(stream.clone()).await.unwrap();
+        for path in ["a.txt", "b.txt", "c.txt"] {
+            store
+                .capture(FileSnapshot {
+                    id: 0,
+                    stream_id: stream.clone(),
+                    path: path.into(),
+                    blob_hash: Some(format!("h-{path}-v1")),
+                    size_bytes: 10,
+                    captured_at: Timestamp::now(),
+                    oversize: false,
+                    snapshot_id: Some(p1),
+                    mtime_ms: None,
+                })
+                .await
+                .unwrap();
+        }
+
+        // Parent 2: a modified, b unchanged-but-recaptured (modified by
+        // the rule, since the row exists at all), c deleted, d created.
+        let p2 = store.create_snapshot(stream.clone()).await.unwrap();
+        store
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: stream.clone(),
+                path: "a.txt".into(),
+                blob_hash: Some("h-a.txt-v2".into()),
+                size_bytes: 20,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(p2),
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+        store
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: stream.clone(),
+                path: "c.txt".into(),
+                blob_hash: None,
+                size_bytes: 0,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(p2),
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+        store
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: stream.clone(),
+                path: "d.txt".into(),
+                blob_hash: Some("h-d.txt-v1".into()),
+                size_bytes: 5,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(p2),
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+
+        let summary = store.summary_for_parent(p2).await.unwrap();
+        assert_eq!(summary.created, 1, "d.txt is new");
+        assert_eq!(summary.modified, 1, "a.txt had a prior hash");
+        assert_eq!(summary.deleted, 1, "c.txt has no blob");
+        assert_eq!(summary.total, 3);
+
+        // p1 itself: three created rows, nothing else.
+        let p1_summary = store.summary_for_parent(p1).await.unwrap();
+        assert_eq!(p1_summary.created, 3);
+        assert_eq!(p1_summary.modified, 0);
+        assert_eq!(p1_summary.deleted, 0);
+        assert_eq!(p1_summary.total, 3);
     }
 
     fn seed_stream(db: &Database, id: &str) {

@@ -1421,6 +1421,92 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<F
   ) as unknown as FileSnapshot[];
 }
 
+/** Parent snapshot row — one per `request_snapshot()` call that
+ *  captured anything. Local History dashboard surfaces this list. */
+export interface ParentSnapshot {
+  id: number;
+  streamId: string;
+  createdAt: string;
+  fileCount: number;
+  gitCommit: string | null;
+}
+
+/** List parent snapshot rows for a stream, newest first. */
+export async function listParentSnapshots(
+  streamId: string,
+  limit?: number,
+): Promise<ParentSnapshot[]> {
+  const rows = unwrap(
+    await commands.listParentSnapshotsForStream(streamId, limit ?? null),
+  ) as unknown as Array<{
+    id: number;
+    stream_id: string;
+    created_at: string;
+    file_count: number;
+    git_commit: string | null;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    streamId: r.stream_id,
+    createdAt: r.created_at,
+    fileCount: r.file_count,
+    gitCommit: r.git_commit,
+  }));
+}
+
+/** Aggregate created/modified/deleted counts for a parent snapshot. */
+export async function getParentSnapshotSummary(snapshotId: number): Promise<{
+  created: number;
+  modified: number;
+  deleted: number;
+  total: number;
+}> {
+  const raw = unwrap(await commands.getParentSnapshotSummary(snapshotId)) as unknown as {
+    created: number;
+    modified: number;
+    deleted: number;
+    total: number;
+  };
+  return raw;
+}
+
+/** Total on-disk size of the content-addressed blob store. */
+export async function getBlobStorageBytes(): Promise<number> {
+  return unwrap(await commands.getBlobStorageBytes()) as unknown as number;
+}
+
+/** Detail-page file row for a parent snapshot — one per captured file. */
+export interface ParentSnapshotFile {
+  id: number;
+  path: string;
+  blobHash: string | null;
+  sizeBytes: number;
+  oversize: boolean;
+  mtimeMs: number | null;
+}
+
+/** Every captured file for one parent snapshot. */
+export async function listFilesForSnapshot(snapshotId: number): Promise<ParentSnapshotFile[]> {
+  const rows = unwrap(
+    await commands.listFilesForSnapshot(snapshotId),
+  ) as unknown as Array<{
+    id: number;
+    path: string;
+    blob_hash: string | null;
+    size_bytes: number;
+    oversize: boolean;
+    mtime_ms: number | null;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    path: r.path,
+    blobHash: r.blob_hash,
+    sizeBytes: r.size_bytes,
+    oversize: r.oversize,
+    mtimeMs: r.mtime_ms,
+  }));
+}
+
 export async function getSnapshotSummary(
   snapshotId: string,
   _previousSnapshotId?: string | null,

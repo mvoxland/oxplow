@@ -367,6 +367,16 @@ export const commands = {
 	counts: SnapshotSummaryCounts,
 } | null, IpcError>(__TAURI_INVOKE("get_snapshot_summary", { snapshotId })),
 	/**
+	 *  Created/modified/deleted counts for a parent snapshot. Powers
+	 *  the Local History dashboard's per-snapshot stats column.
+	 */
+	getParentSnapshotSummary: (snapshotId: number) => typedError<SnapshotParentSummary, IpcError>(__TAURI_INVOKE("get_parent_snapshot_summary", { snapshotId })),
+	/**
+	 *  Total on-disk size of every blob in the content-addressed store.
+	 *  Used by the Local History dashboard's Storage card.
+	 */
+	getBlobStorageBytes: () => typedError<number, IpcError>(__TAURI_INVOKE("get_blob_storage_bytes")),
+	/**
 	 *  Restore a file's contents from a snapshot. Reads the bytes from
 	 *  the content-addressed blob store using the snapshot's `blob_hash`
 	 *  and writes them back to the snapshot's path inside the workspace.
@@ -1302,6 +1312,20 @@ export type SnapshotPairDiff = {
 	 *  changed between them). Always false when either side is None.
 	 */
 	changed: boolean,
+};
+
+/**
+ *  Aggregate created/modified/deleted counts for the file rows
+ *  captured under one parent snapshot. Derived by comparing each
+ *  child row's `blob_hash` to the most-recent prior row for the
+ *  same `(stream_id, path)`. Powers the Local History dashboard's
+ *  per-snapshot stats column.
+ */
+export type SnapshotParentSummary = {
+	created: number,
+	modified: number,
+	deleted: number,
+	total: number,
 };
 
 export type SnapshotSummary = {
