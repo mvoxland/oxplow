@@ -130,13 +130,6 @@ struct Inner {
     /// after the running capture publishes its result, so the next
     /// call starts fresh.
     in_flight: Mutex<Option<tokio::sync::watch::Receiver<Option<SharedSnapshotResult>>>>,
-    /// Optional handle to the singleton GitService. When set,
-    /// `request_snapshot()` uses it to check worktree cleanliness
-    /// and look up HEAD — both reads pull from GitService's cache
-    /// so we don't re-stat the worktree on every capture. When None
-    /// (test paths without a wired-up service), git-commit pinning
-    /// is skipped.
-    git: RwLock<Option<Arc<crate::git_service::GitService>>>,
 }
 
 impl SnapshotCaptureService {
@@ -158,7 +151,6 @@ impl SnapshotCaptureService {
                 dirty: Mutex::new(HashMap::new()),
                 settle_duration: DEFAULT_SETTLE_DURATION,
                 in_flight: Mutex::new(None),
-                git: RwLock::new(None),
             }),
         }
     }
@@ -182,14 +174,6 @@ impl SnapshotCaptureService {
     /// after each successful insert.
     pub fn with_events(self, events: EventBus) -> Self {
         *self.inner.events.write().unwrap() = Some(events);
-        self
-    }
-
-    /// Attach the singleton `GitService`. Enables git-commit pinning
-    /// on `request_snapshot()` (uses the service's cached status
-    /// map rather than re-scanning the worktree).
-    pub fn with_git(self, git: Arc<crate::git_service::GitService>) -> Self {
-        *self.inner.git.write().unwrap() = Some(git);
         self
     }
 
@@ -262,18 +246,31 @@ impl SnapshotCaptureService {
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
         let after_drain = self.request_snapshot(SnapshotSourceKind::GitRefs).await?;
 
-        let git = self.inner.git.read().unwrap().clone();
-        let Some(git) = git else {
-            return Ok(after_drain);
-        };
-        let stream_ref = Some(self.inner.stream_id.as_str());
-        let statuses = git.statuses(stream_ref).await;
+        // Deliberately bypass GitService's status / HEAD caches here:
+        // GitService subscribes to the same `GitRefsChanged` event we
+        // do, and its cache-invalidation hop runs concurrently with
+        // this task. If we read `git.statuses(...)` we can see the
+        // pre-event cache and incorrectly conclude the worktree is
+        // dirty (skipping the re-stamp) or stamp the old HEAD.
+        let project_dir = self.inner.project_dir.clone();
+        let statuses = tokio::task::spawn_blocking({
+            let p = project_dir.clone();
+            move || oxplow_git::list_git_statuses(&p)
+        })
+        .await
+        .unwrap_or_default();
         if !statuses.is_empty() {
             // Worktree dirty — the next normal capture will record
             // the commit when things settle.
             return Ok(after_drain);
         }
-        let Some(head_sha) = git.head_commit_sha(stream_ref).await else {
+        let Some(head_sha) = tokio::task::spawn_blocking({
+            let p = project_dir.clone();
+            move || oxplow_git::head_commit_sha(&p)
+        })
+        .await
+        .ok()
+        .flatten() else {
             return Ok(after_drain);
         };
         let Some(latest_id) = self
@@ -294,6 +291,10 @@ impl SnapshotCaptureService {
             .store
             .set_snapshot_git_commit(latest_id, head_sha)
             .await?;
+        // Emit a 0-file batch event so renderer surfaces subscribed
+        // to snapshot events (Local History dashboard, ChangeAnalysis)
+        // refetch and pick up the new `git_commit` value.
+        self.emit_batch_event(latest_id, 0, SnapshotSourceKind::GitRefs);
         info!(
             snapshot_id = latest_id,
             "snapshot: re-stamped latest snapshot with new HEAD (no file changes)",
@@ -1009,36 +1010,45 @@ impl SnapshotCaptureService {
         // The check happens AFTER capture so any in-flight edits
         // were already drained into this snapshot's file rows.
         //
-        // All git reads go through GitService so we use its cached
-        // status map (invalidated on fs-watch / refs events) rather
-        // than re-scanning the worktree each capture. When the
-        // service hasn't been attached (test paths without one),
-        // the commit record step is skipped.
-        let git = self.inner.git.read().unwrap().clone();
-        if let Some(git) = git {
-            let commit_record_started = Instant::now();
-            let stream_ref = Some(self.inner.stream_id.as_str());
-            let statuses = git.statuses(stream_ref).await;
-            let clean = statuses.is_empty();
-            if clean {
-                if let Some(sha) = git.head_commit_sha(stream_ref).await {
-                    if let Err(e) = self
-                        .inner
-                        .store
-                        .set_snapshot_git_commit(snapshot_id, sha)
-                        .await
-                    {
-                        debug!(error = %e, "snapshot: failed to record git commit");
-                    }
+        // Bypass GitService caches here — we may be running on the
+        // same `GitRefsChanged` event GitService is busy invalidating
+        // on. A live `git status` + HEAD read is cheap and avoids
+        // recording the pre-event commit by mistake. Skipped when
+        // the project dir isn't a git repo at all.
+        let project_dir = self.inner.project_dir.clone();
+        let commit_record_started = Instant::now();
+        let statuses = tokio::task::spawn_blocking({
+            let p = project_dir.clone();
+            move || oxplow_git::list_git_statuses(&p)
+        })
+        .await
+        .unwrap_or_default();
+        let clean = statuses.is_empty();
+        if clean {
+            let sha = tokio::task::spawn_blocking({
+                let p = project_dir.clone();
+                move || oxplow_git::head_commit_sha(&p)
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(sha) = sha {
+                if let Err(e) = self
+                    .inner
+                    .store
+                    .set_snapshot_git_commit(snapshot_id, sha)
+                    .await
+                {
+                    debug!(error = %e, "snapshot: failed to record git commit");
                 }
             }
-            info!(
-                snapshot_id,
-                clean,
-                git_commit_record_ms = commit_record_started.elapsed().as_millis() as u64,
-                "snapshot request: git commit record step",
-            );
         }
+        info!(
+            snapshot_id,
+            clean,
+            git_commit_record_ms = commit_record_started.elapsed().as_millis() as u64,
+            "snapshot request: git commit record step",
+        );
         Ok(Some(snapshot_id))
     }
 
@@ -1207,13 +1217,6 @@ mod tests {
         assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
     }
 
-    fn git_service_for(project: &std::path::Path) -> Arc<crate::git_service::GitService> {
-        let db = Database::in_memory();
-        let streams = Arc::new(oxplow_db::SqliteStreamStore::new(db));
-        let bus = crate::events::EventBus::new();
-        crate::git_service::GitService::spawn(project.to_path_buf(), streams, bus)
-    }
-
     #[tokio::test]
     async fn clean_worktree_pins_snapshot_to_head_commit() {
         let project = tempdir().unwrap();
@@ -1240,7 +1243,6 @@ mod tests {
         let head_sha = head_oid.to_string();
 
         let (svc, store) = svc_for(project.path()).await;
-        let svc = svc.with_git(git_service_for(project.path()));
 
         // Clean tree → snapshot records HEAD.
         svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
@@ -1319,7 +1321,6 @@ mod tests {
             .unwrap();
 
         let (svc, store) = svc_for(project.path()).await;
-        let svc = svc.with_git(git_service_for(project.path()));
 
         // Initial snapshot — captures the tracked file and records the
         // first commit.

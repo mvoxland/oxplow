@@ -363,6 +363,18 @@ representation of disk; it just now also corresponds to a new commit
 (common after `git commit`, `git commit --amend`, or a fast-forward
 pull that moves HEAD without altering the working tree).
 
+Both the re-stamp path and `capture_inner`'s post-capture commit-record
+step **bypass GitService's status/HEAD caches** and shell out to
+`oxplow_git::list_git_statuses` / `head_commit_sha` directly. Reason:
+GitService subscribes to the same `GitRefsChanged` event and its
+cache invalidation runs concurrently with the snapshot listener.
+Reading the cache risks seeing pre-event statuses and either skipping
+the re-stamp (cache still shows the worktree as dirty) or recording
+the old HEAD. After the re-stamp the service emits a 0-file
+`FileSnapshotsBatchCreated` event so renderer subscribers (Local
+History dashboard, change analysis) refetch and pick up the new
+`git_commit`.
+
 ## Related
 
 - [data-model.md](./data-model.md) — schema overview, including the

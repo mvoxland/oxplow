@@ -276,8 +276,7 @@ impl Services {
                 primary_stream.id.clone(),
                 max_bytes,
             )
-            .with_events(event_bus.clone())
-            .with_git(git.clone()),
+            .with_events(event_bus.clone()),
         );
         let tasks = tasks
             .with_effort_store(effort_store.clone())
@@ -414,8 +413,7 @@ impl Services {
                 primary_stream.id.clone(),
                 5 * 1024 * 1024,
             )
-            .with_events(event_bus.clone())
-            .with_git(git.clone()),
+            .with_events(event_bus.clone()),
         );
         let tasks = tasks
             .with_effort_store(effort_store.clone())
