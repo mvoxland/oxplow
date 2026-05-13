@@ -648,7 +648,7 @@ function BrailleSpinner() {
   return (
     <span
       aria-hidden="true"
-      style={{ display: "inline-block", fontFamily: "monospace", width: "1ch", color: "var(--accent)" }}
+      style={{ display: "inline-block", fontFamily: "var(--font-mono)", width: "1ch", color: "var(--accent)" }}
     >
       {BRAILLE_FRAMES[frame]}
     </span>

@@ -30,7 +30,7 @@ export function FileStatusCounts({
       style={{
         color: "var(--text-muted)",
         fontSize: 12,
-        fontFamily: "var(--mono, monospace)",
+        fontFamily: "var(--font-mono)",
         display: "inline-flex",
         gap: 6,
         whiteSpace: "pre",

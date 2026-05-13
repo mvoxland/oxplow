@@ -129,6 +129,61 @@ Metabase-grade rather than dense-IDE. The relevant numbers:
 When adding a new list surface, match these numbers — the
 "Metabase-clean" feel relies on them being consistent across panels.
 
+## Typography
+
+Three font faces, one shared size/leading/weight scale. All defined as
+tokens on `:root` in `apps/desktop/index.html`; components must read
+the tokens, never inline a font stack.
+
+| Variable        | Used for                                                          |
+|-----------------|-------------------------------------------------------------------|
+| `--font-ui`     | UI chrome — buttons, menus, labels, tabs, panel headers, sidebars |
+| `--font-prose`  | Long-form body content — `.oxplow-md` (wiki bodies, task descriptions, effort summaries, anywhere `MarkdownView` renders) |
+| `--font-mono`   | Code-shaped surfaces — Monaco, xterm, code blocks, blame columns, file-path chips, tabular IDs, stacktraces |
+
+The prose-vs-UI-vs-mono split mirrors Wikipedia / Metabase: sans for
+chrome, serif for article-style content, mono only for code. UI chrome
+size scale (`--text-base: 14px`) is unchanged from the phase-7 density
+tune-up — adding tokens is purely additive.
+
+Size scale: `--text-xs` (12px) → `--text-sm` (13px) → `--text-base`
+(14px, UI default) → `--text-md` (15px, prose default) → `--text-lg`
+(17px) → `--text-xl` (20px) → `--text-2xl` (24px) → `--text-3xl`
+(28px).
+
+Line-heights: `--leading-tight` (1.25, headings), `--leading-snug`
+(1.4, dense UI rows — body default), `--leading-prose` (1.6,
+long-form body).
+
+Weights: `--weight-regular` (400), `--weight-medium` (500),
+`--weight-bold` (700).
+
+`--mono` is kept as a legacy alias for `--font-mono` so any older
+references continue to resolve; new code should use `--font-mono`.
+
+### `.oxplow-md` — the prose surface
+
+Every `MarkdownView` is rendered inside an `.oxplow-md` wrapper. The
+class caps width to 78ch (centered), switches the body to
+`--font-prose` at `--text-md` / `--leading-prose`, applies a
+restrained sans-serif heading scale with an H2 underline, and
+restyles `code` / `pre` / `blockquote` / `hr` against the surface
+tokens. Code surfaces inside prose stay on `--font-mono` —
+prose-vs-code contrast is the whole point. Rules live in
+`apps/desktop/index.html` next to the GFM-table rules.
+
+### xterm and Monaco
+
+xterm's `fontFamily` is a one-shot constructor option, so
+`TerminalPane.tsx` resolves `--font-mono` once at mount via
+`getComputedStyle(document.body)` and passes the resolved string to
+`new Terminal({ ... })`. If the token swaps, remount the terminal to
+pick it up — there is no live binding. Monaco does not set
+`fontFamily` explicitly; it uses its internal default mono stack,
+which is metrically identical to `--font-mono`. If a future change
+needs Monaco to follow a custom face, do the same `getComputedStyle`
+trick in `EditorPane.tsx` before `monaco.editor.create`.
+
 ## Monaco and xterm
 
 Both embedded editors are dark-only. `EditorPane.tsx` and

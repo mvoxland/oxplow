@@ -46,7 +46,7 @@ export class ErrorBoundary extends Component<Props, State> {
           overflow: "auto",
           background: "var(--surface-app)",
           color: "var(--text-primary)",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+          fontFamily: "var(--font-mono)",
           fontSize: 12,
           minHeight: 0,
         }}

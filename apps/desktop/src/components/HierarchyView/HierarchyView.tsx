@@ -578,7 +578,7 @@ const addColStyle: React.CSSProperties = {
   width: 44,
   textAlign: "right",
   fontSize: 11,
-  fontFamily: "ui-monospace, monospace",
+  fontFamily: "var(--font-mono)",
   flexShrink: 0,
 };
 const delColStyle: React.CSSProperties = {
@@ -586,7 +586,7 @@ const delColStyle: React.CSSProperties = {
   width: 44,
   textAlign: "right",
   fontSize: 11,
-  fontFamily: "ui-monospace, monospace",
+  fontFamily: "var(--font-mono)",
   flexShrink: 0,
 };
 const badgeStyle = (cfg: { fg: string; bg: string }): React.CSSProperties => ({
