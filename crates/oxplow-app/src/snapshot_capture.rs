@@ -23,7 +23,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use tokio::sync::Mutex as AsyncMutex;
+/// Cloneable result of an in-flight snapshot capture, published to
+/// concurrent waiters via `tokio::sync::watch`. The error is collapsed
+/// to an `Arc<str>` because `Box<dyn Error + Send + Sync>` isn't
+/// `Clone`; concurrent waiters reconstruct an error from the message.
+type SharedSnapshotResult = Result<Option<i64>, Arc<str>>;
 
 use tracing::{debug, info, warn};
 
@@ -93,12 +97,14 @@ struct Inner {
     /// those paths go through the full parallel-process pipeline in
     /// `request_snapshot`.
     dirty: Mutex<HashMap<PathBuf, Option<CaptureStaging>>>,
-    /// Gate that serializes `request_snapshot` so at most one
-    /// capture runs at a time. When a second call arrives while a
-    /// capture is in flight, `try_lock` fails and the caller returns
-    /// without draining the dirty set — its paths get picked up by
-    /// the next call after the in-flight one finishes.
-    in_flight: AsyncMutex<()>,
+    /// Single-flight slot for `request_snapshot`. When a capture is
+    /// running, this holds a `watch` receiver that publishes the
+    /// eventual result. Concurrent callers clone the receiver and
+    /// await the same result — they neither drain the dirty set nor
+    /// start a second capture. The slot is cleared back to `None`
+    /// after the running capture publishes its result, so the next
+    /// call starts fresh.
+    in_flight: Mutex<Option<tokio::sync::watch::Receiver<Option<SharedSnapshotResult>>>>,
     /// Optional handle to the singleton GitService. When set,
     /// `request_snapshot()` uses it to check worktree cleanliness
     /// and look up HEAD — both reads pull from GitService's cache
@@ -125,7 +131,7 @@ impl SnapshotCaptureService {
                 max_file_bytes,
                 events: RwLock::new(None),
                 dirty: Mutex::new(HashMap::new()),
-                in_flight: AsyncMutex::new(()),
+                in_flight: Mutex::new(None),
                 git: RwLock::new(None),
             }),
         }
@@ -525,28 +531,66 @@ impl SnapshotCaptureService {
     /// `None` if no snapshot has ever been taken for the stream).
     ///
     /// Captures are serialized: if a call arrives while another is
-    /// already in flight it coalesces — the dirty set stays intact
-    /// and the latest existing snapshot id is returned. The pending
-    /// paths get captured by the next call after the in-flight one
-    /// finishes.
+    /// already in flight, it awaits the in-flight capture and returns
+    /// the same snapshot id. The dirty set is not drained twice; new
+    /// paths that land during the wait get picked up by a subsequent
+    /// explicit call.
     pub async fn request_snapshot(
         &self,
         source: SnapshotSourceKind,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        // Coalesce concurrent callers: if a capture is already in
-        // flight, return the latest existing snapshot id and leave
-        // the dirty set untouched so its paths are picked up by the
-        // next call after this one finishes.
-        let _guard = match self.inner.in_flight.try_lock() {
-            Ok(g) => g,
-            Err(_) => {
-                return Ok(self
-                    .inner
-                    .store
-                    .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
-                    .await?);
+        enum SlotAction {
+            Wait(tokio::sync::watch::Receiver<Option<SharedSnapshotResult>>),
+            Run(tokio::sync::watch::Sender<Option<SharedSnapshotResult>>),
+        }
+
+        let action = {
+            let mut slot = self.inner.in_flight.lock().unwrap();
+            if let Some(rx) = slot.as_ref() {
+                SlotAction::Wait(rx.clone())
+            } else {
+                let (tx, rx) = tokio::sync::watch::channel(None);
+                *slot = Some(rx);
+                SlotAction::Run(tx)
             }
         };
+
+        match action {
+            SlotAction::Wait(mut rx) => loop {
+                if let Some(shared) = rx.borrow().clone() {
+                    return shared.map_err(|msg| -> Box<dyn std::error::Error + Send + Sync> {
+                        msg.to_string().into()
+                    });
+                }
+                if rx.changed().await.is_err() {
+                    return Err(
+                        "in-flight snapshot capture was dropped without publishing a result".into(),
+                    );
+                }
+            },
+            SlotAction::Run(tx) => {
+                let result = self.capture_inner(source).await;
+                let shared: SharedSnapshotResult = match &result {
+                    Ok(v) => Ok(*v),
+                    Err(e) => Err(Arc::from(e.to_string())),
+                };
+                let _ = tx.send(Some(shared));
+                {
+                    let mut slot = self.inner.in_flight.lock().unwrap();
+                    *slot = None;
+                }
+                result
+            }
+        }
+    }
+
+    /// Body of `request_snapshot` — runs the actual drain → blob.write
+    /// → DB-insert → git-pin pipeline. Callers are expected to have
+    /// already taken the single-flight slot in `request_snapshot`.
+    async fn capture_inner(
+        &self,
+        source: SnapshotSourceKind,
+    ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
         let drained: Vec<(PathBuf, Option<CaptureStaging>)> = {
             let mut set = self.inner.dirty.lock().unwrap();
             set.drain().collect()
@@ -835,32 +879,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_snapshot_coalesces_when_already_in_flight() {
+    async fn request_snapshot_concurrent_callers_share_result() {
         let project = tempdir().unwrap();
-        let file = project.path().join("a.txt");
-        std::fs::write(&file, "x").unwrap();
-        let (svc, _store) = svc_for(project.path()).await;
-        svc.mark_dirty(file);
+        // Seed enough files that the capture takes long enough for a
+        // racing caller to land on the in-flight slot.
+        for i in 0..50 {
+            let p = project.path().join(format!("f{i}.txt"));
+            std::fs::write(&p, format!("contents-{i}")).unwrap();
+        }
+        let (svc, store) = svc_for(project.path()).await;
+        for i in 0..50 {
+            svc.mark_dirty(project.path().join(format!("f{i}.txt")));
+        }
 
-        // Simulate an in-flight capture by holding the gate.
-        let held = svc.inner.in_flight.lock().await;
-        let result = svc
-            .request_snapshot(SnapshotSourceKind::Startup)
+        let svc_a = svc.clone();
+        let svc_b = svc.clone();
+        let (a, b) = tokio::join!(
+            tokio::spawn(async move { svc_a.request_snapshot(SnapshotSourceKind::Startup).await }),
+            tokio::spawn(async move { svc_b.request_snapshot(SnapshotSourceKind::Startup).await }),
+        );
+        let parent_a = a.unwrap().unwrap().expect("parent id a");
+        let parent_b = b.unwrap().unwrap().expect("parent id b");
+        // Both callers see the same snapshot id.
+        assert_eq!(parent_a, parent_b);
+        // Only one snapshot row was created — the second caller did
+        // not start a fresh capture.
+        let all = store
+            .list_parent_snapshots_for_stream(TEST_STREAM, 100)
             .await
             .unwrap();
-        // No snapshot exists yet, and we didn't run one → None.
-        assert!(result.is_none());
-        // Dirty set was NOT drained; the path is still queued.
-        assert_eq!(svc.inner.dirty.lock().unwrap().len(), 1);
-        drop(held);
-
-        // Once the gate is released, a follow-up call captures the
-        // pending path.
-        let parent = svc
-            .request_snapshot(SnapshotSourceKind::Startup)
-            .await
-            .unwrap();
-        assert!(parent.is_some());
+        assert_eq!(
+            all.len(),
+            1,
+            "expected exactly one snapshot row, got {}",
+            all.len()
+        );
+        // Dirty set was drained exactly once.
         assert_eq!(svc.inner.dirty.lock().unwrap().len(), 0);
     }
 
