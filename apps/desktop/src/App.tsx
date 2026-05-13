@@ -2680,7 +2680,9 @@ export function App() {
               stream={stream}
               snapshotId={snapshotId}
               onOpenDiff={navOpenDiff}
+              onOpenDiffInTab={navOpenDiff}
               onOpenPage={navOpen}
+              onOpenFile={navOpenFile}
             />
           ),
         });

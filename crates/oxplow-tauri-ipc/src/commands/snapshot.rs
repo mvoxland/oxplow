@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_db::{FileSnapshot, ParentSnapshot, SnapshotParentSummary};
+use oxplow_db::{FileSnapshot, ParentSnapshot, SnapshotChangeEntry, SnapshotParentSummary};
 use oxplow_domain::StreamId;
 
 use crate::error::IpcError;
@@ -53,6 +53,52 @@ pub async fn get_parent_snapshot_summary(
     snapshot_id: i64,
 ) -> Result<SnapshotParentSummary, IpcError> {
     Ok(state.snapshot_store.summary_for_parent(snapshot_id).await?)
+}
+
+/// Per-file change entries for one parent snapshot, in the shape
+/// the renderer's `useSnapshotChangeAnalysis` hook expects so it
+/// can feed the same SummaryCard / ChangeAnalysisPanel components
+/// the Git pages use.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_snapshot_change_entries(
+    state: tauri::State<'_, AppState>,
+    snapshot_id: i64,
+) -> Result<Vec<SnapshotChangeEntry>, IpcError> {
+    Ok(state
+        .snapshot_store
+        .list_changes_for_parent(snapshot_id)
+        .await?)
+}
+
+/// Read a `file_snapshot` row's blob content as a UTF-8 string.
+/// Returns `None` when:
+/// - the row id doesn't exist,
+/// - the row has no blob hash (deletion row or oversize-tracked),
+/// - the blob has been pruned from disk.
+///
+/// Binary bytes pass through as UTF-8 lossy — the renderer's diff /
+/// function-analysis pipeline treats the result as text either way.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_snapshot_file_content(
+    state: tauri::State<'_, AppState>,
+    file_snapshot_id: i64,
+) -> Result<Option<String>, IpcError> {
+    let Some(snap) = state.snapshot_store.get(file_snapshot_id).await? else {
+        return Ok(None);
+    };
+    let Some(hash) = snap.blob_hash.clone() else {
+        return Ok(None);
+    };
+    let blobs = state.blobs.clone();
+    let bytes = tokio::task::spawn_blocking(move || blobs.read(&hash))
+        .await
+        .map_err(|e| IpcError::internal(e.to_string()))?;
+    match bytes {
+        Ok(b) => Ok(Some(String::from_utf8_lossy(&b).into_owned())),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Total on-disk size of every blob in the content-addressed store.

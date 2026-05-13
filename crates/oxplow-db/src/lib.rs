@@ -20,8 +20,9 @@ pub mod wiki_page_thread_updates;
 pub use agent_stores::SqliteAgentTurnStore;
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
-    PageVisitStore, ParentSnapshot, SnapshotParentSummary, SqliteCodeQualityStore,
-    SqlitePageVisitStore, SqliteSnapshotStore, SqliteUsageStore, UsageEvent, UsageRollup,
+    PageVisitStore, ParentSnapshot, SnapshotChangeEntry, SnapshotParentSummary,
+    SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore, SqliteUsageStore,
+    UsageEvent, UsageRollup,
 };
 pub use database::{Database, DbInitError};
 pub use effort_store::{

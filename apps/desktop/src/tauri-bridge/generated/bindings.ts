@@ -372,6 +372,24 @@ export const commands = {
 	 */
 	getParentSnapshotSummary: (snapshotId: number) => typedError<SnapshotParentSummary, IpcError>(__TAURI_INVOKE("get_parent_snapshot_summary", { snapshotId })),
 	/**
+	 *  Per-file change entries for one parent snapshot, in the shape
+	 *  the renderer's `useSnapshotChangeAnalysis` hook expects so it
+	 *  can feed the same SummaryCard / ChangeAnalysisPanel components
+	 *  the Git pages use.
+	 */
+	listSnapshotChangeEntries: (snapshotId: number) => typedError<SnapshotChangeEntry[], IpcError>(__TAURI_INVOKE("list_snapshot_change_entries", { snapshotId })),
+	/**
+	 *  Read a `file_snapshot` row's blob content as a UTF-8 string.
+	 *  Returns `None` when:
+	 *  - the row id doesn't exist,
+	 *  - the row has no blob hash (deletion row or oversize-tracked),
+	 *  - the blob has been pruned from disk.
+	 * 
+	 *  Binary bytes pass through as UTF-8 lossy — the renderer's diff /
+	 *  function-analysis pipeline treats the result as text either way.
+	 */
+	readSnapshotFileContent: (fileSnapshotId: number) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_snapshot_file_content", { fileSnapshotId })),
+	/**
 	 *  Total on-disk size of every blob in the content-addressed store.
 	 *  Used by the Local History dashboard's Storage card.
 	 */
@@ -1281,6 +1299,24 @@ export type SetStreamPromptRequest = {
 export type SetThreadPromptRequest = {
 	id: ThreadId,
 	prompt: string | null,
+};
+
+/**
+ *  One row per file captured under a parent snapshot, in the shape
+ *  the renderer's change-analysis pipeline expects. `status` mirrors
+ *  `BranchChangeEntry`'s set (`added`/`modified`/`deleted`) so the
+ *  shared SummaryCard / ChangeAnalysisPanel can render snapshot
+ *  changes alongside git ones. `current_file_id` is the row in
+ *  `file_snapshot` captured for this parent; `prior_file_id` is the
+ *  most recent prior capture of the same `(stream_id, path)`, used
+ *  to pull the "before" blob bytes for diff + function analysis.
+ */
+export type SnapshotChangeEntry = {
+	path: string,
+	status: string,
+	current_file_id: number,
+	prior_file_id: number | null,
+	oversize: boolean,
 };
 
 export type SnapshotEntry = {

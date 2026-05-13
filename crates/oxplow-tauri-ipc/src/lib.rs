@@ -118,6 +118,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::snapshot::get_snapshot_pair_diff,
         commands::snapshot::get_snapshot_summary,
         commands::snapshot::get_parent_snapshot_summary,
+        commands::snapshot::list_snapshot_change_entries,
+        commands::snapshot::read_snapshot_file_content,
         commands::snapshot::get_blob_storage_bytes,
         commands::snapshot::restore_file_from_snapshot,
         // branch

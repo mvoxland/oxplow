@@ -7,6 +7,7 @@ import {
   readWorkspaceFile,
   subscribeCodeQualityEvents,
   subscribeGitRefsEvents,
+  subscribeSnapshotEvents,
   subscribeWorkspaceEvents,
 } from "../../api.js";
 import type {
@@ -121,10 +122,25 @@ const EMPTY_PIVOTS: FilePivots = {
 };
 
 /**
+ * Snapshot-mode targets are encoded as `"snapshot:<parentSnapshotId>"`.
+ * Targets that match this prefix route through the snapshot-source
+ * path instead of git refs.
+ */
+const SNAPSHOT_TARGET_PREFIX = "snapshot:";
+
+export function parseSnapshotTarget(target: string): number | null {
+  if (!target.startsWith(SNAPSHOT_TARGET_PREFIX)) return null;
+  const n = Number(target.slice(SNAPSHOT_TARGET_PREFIX.length));
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Resolve the (baseRef, headRef) pair for the requested target. For
  * the working-tree variant `headRef` is null — the hook reads workspace
  * file content directly. For a commit SHA, base is the parent SHA and
- * head is the commit itself.
+ * head is the commit itself. Snapshot targets short-circuit with
+ * placeholder refs (the content reader keys off snapshot file ids
+ * rather than refs).
  */
 async function resolveRefs(
   streamId: string,
@@ -132,6 +148,13 @@ async function resolveRefs(
 ): Promise<{ baseRef: string; headRef: string | null } | { error: string }> {
   if (target === "working") {
     return { baseRef: "HEAD", headRef: null };
+  }
+  if (parseSnapshotTarget(target) !== null) {
+    // Snapshot-mode refs are sentinels — the snapshot source reads
+    // file content by FileSnapshot row id, not by ref name. The
+    // strings just need to be non-empty so downstream checks don't
+    // misinterpret them as "no base".
+    return { baseRef: "snapshot-prev", headRef: target };
   }
   try {
     const detail = await getCommitDetail(streamId, target);
@@ -145,11 +168,43 @@ async function resolveRefs(
   }
 }
 
+/** Snapshot-mode entries cached during the current fetch so the
+ *  function-analyzer pass can look up the prior/current FileSnapshot
+ *  ids per path without a second IPC round-trip. */
+let snapshotEntriesCache: { snapshotId: number; entries: Map<string, { currentFileId: number; priorFileId: number | null }> } | null = null;
+
 async function fetchFiles(
   streamId: string,
   baseRef: string,
   target: string,
 ): Promise<BranchChangeEntry[]> {
+  const snapshotId = parseSnapshotTarget(target);
+  if (snapshotId !== null) {
+    const entries = await commands.listSnapshotChangeEntries(snapshotId);
+    if (entries.status === "error") return [];
+    const cache = new Map<string, { currentFileId: number; priorFileId: number | null }>();
+    const out: BranchChangeEntry[] = [];
+    for (const e of entries.data) {
+      cache.set(e.path, {
+        currentFileId: e.current_file_id,
+        priorFileId: e.prior_file_id ?? null,
+      });
+      out.push({
+        path: e.path,
+        // Snapshot status uses the same set of strings as
+        // BranchChangeEntry — added/modified/deleted — so the
+        // downstream pivots / SummaryCard work unchanged.
+        status: e.status as BranchChangeEntry["status"],
+        // Line counts aren't computed; the SummaryCard renders 0s.
+        // Function-level churn comes from the analyzer pass on raw
+        // content, so the dashboard still gets useful data.
+        additions: null,
+        deletions: null,
+      });
+    }
+    snapshotEntriesCache = { snapshotId, entries: cache };
+    return out;
+  }
   // For both working and commit targets, getBranchChanges over baseRef
   // yields the right diff: HEAD vs working tree, or parent vs commit.
   const branchChanges = await getBranchChanges(streamId, baseRef);
@@ -222,8 +277,25 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
       // through analyze_functions_at_refs so add/delete buckets work.)
       const limit = 200; // hard cap to keep large changesets tractable
       const analyzable = fileList.slice(0, limit);
+      const snapshotId = parseSnapshotTarget(target);
       const specs = await Promise.all(
         analyzable.map(async (entry) => {
+          if (snapshotId !== null) {
+            const ids = snapshotEntriesCache?.entries.get(entry.path);
+            const baseContent =
+              entry.status === "added" || ids?.priorFileId == null
+                ? null
+                : await safeReadSnapshotContent(ids.priorFileId);
+            const headContent =
+              entry.status === "deleted" || ids?.currentFileId == null
+                ? null
+                : await safeReadSnapshotContent(ids.currentFileId);
+            return {
+              path: entry.path,
+              base_content: baseContent,
+              head_content: headContent,
+            };
+          }
           const baseContent = entry.status === "added" || entry.status === "untracked"
             ? null
             : await safeReadAtRef(streamId, refs.baseRef, entry.path);
@@ -272,6 +344,17 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
         attachChurn(buckets, churnRows);
         setFunctions(buckets);
         setFunctionChurn(churnRows);
+      }
+
+      // Duplication: snapshot-mode skips this entirely. The scan
+      // store is keyed on git refs / DISK; snapshot pairs have no
+      // matching TreeVersion, so the lookup would always miss and
+      // the trigger button has no useful tree to scan against.
+      if (snapshotId !== null) {
+        if (reqId === reqIdRef.current) {
+          setDuplication({ findings: [], scanAgeMs: null, hasScan: false });
+        }
+        return;
       }
 
       // Duplication: look up the latest `done` scan for THIS exact
@@ -323,7 +406,8 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   }, [refresh]);
 
   // Live refresh when the working tree or refs change (working-tree
-  // variant only — a commit SHA is immutable).
+  // variant only — a commit SHA is immutable, and a snapshot id
+  // names an already-frozen capture).
   useEffect(() => {
     if (!streamId || target !== "working") return;
     const a = subscribeGitRefsEvents(streamId, () => void refresh());
@@ -332,6 +416,15 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
       a();
       b();
     };
+  }, [streamId, target, refresh]);
+
+  // Snapshot-mode refresh: a new request_snapshot() may have written
+  // a row that supersedes this one's prior-pointer, so re-run when
+  // a fresh batch lands. Cheap because the rebuilt list is small.
+  useEffect(() => {
+    if (!streamId) return;
+    if (parseSnapshotTarget(target) === null) return;
+    return subscribeSnapshotEvents(streamId, () => void refresh());
   }, [streamId, target, refresh]);
 
   // Re-pull duplication when a code-quality scan completes.
@@ -488,6 +581,16 @@ async function safeReadAtRef(
   try {
     const result = await readFileAtRef(streamId, ref, path);
     return result.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function safeReadSnapshotContent(fileSnapshotId: number): Promise<string | null> {
+  try {
+    const result = await commands.readSnapshotFileContent(fileSnapshotId);
+    if (result.status === "error") return null;
+    return result.data ?? null;
   } catch {
     return null;
   }

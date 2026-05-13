@@ -863,6 +863,23 @@ pub struct SnapshotParentSummary {
     pub total: i64,
 }
 
+/// One row per file captured under a parent snapshot, in the shape
+/// the renderer's change-analysis pipeline expects. `status` mirrors
+/// `BranchChangeEntry`'s set (`added`/`modified`/`deleted`) so the
+/// shared SummaryCard / ChangeAnalysisPanel can render snapshot
+/// changes alongside git ones. `current_file_id` is the row in
+/// `file_snapshot` captured for this parent; `prior_file_id` is the
+/// most recent prior capture of the same `(stream_id, path)`, used
+/// to pull the "before" blob bytes for diff + function analysis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct SnapshotChangeEntry {
+    pub path: String,
+    pub status: String,
+    pub current_file_id: i64,
+    pub prior_file_id: Option<i64>,
+    pub oversize: bool,
+}
+
 /// Parent `snapshot` row — one per `request_snapshot()` call that
 /// had dirty files. Groups the `file_snapshot` rows captured in
 /// that batch. See [[crates/oxplow-db/migrations/V13__snapshot_parent.sql]].
@@ -1150,6 +1167,63 @@ impl SqliteSnapshotStore {
                         })
                     },
                 )
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// `SnapshotChangeEntry` rows for one parent snapshot. Pairs
+    /// every child row with its most-recent prior `(stream_id, path)`
+    /// row and labels the status (`added`/`modified`/`deleted`) so the
+    /// renderer can feed the same shape into the shared change-
+    /// analysis pipeline used by Git commits.
+    pub async fn list_changes_for_parent(
+        &self,
+        snapshot_id: i64,
+    ) -> Result<Vec<SnapshotChangeEntry>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT
+                       f.id, f.path, f.blob_hash, f.oversize,
+                       (SELECT p.id FROM file_snapshot p
+                        WHERE p.stream_id = f.stream_id
+                          AND p.path = f.path
+                          AND p.id < f.id
+                        ORDER BY p.id DESC LIMIT 1) AS prior_id,
+                       (SELECT p.blob_hash FROM file_snapshot p
+                        WHERE p.stream_id = f.stream_id
+                          AND p.path = f.path
+                          AND p.id < f.id
+                        ORDER BY p.id DESC LIMIT 1) AS prior_hash
+                     FROM file_snapshot f
+                     WHERE f.snapshot_id = ?1
+                     ORDER BY f.path ASC",
+                )?;
+                let rows = stmt.query_map(params![snapshot_id], |row| {
+                    let current_file_id: i64 = row.get(0)?;
+                    let path: String = row.get(1)?;
+                    let blob_hash: Option<String> = row.get(2)?;
+                    let oversize: i32 = row.get(3)?;
+                    let prior_file_id: Option<i64> = row.get(4)?;
+                    let prior_hash: Option<String> = row.get(5)?;
+                    let status = match (&blob_hash, &prior_hash) {
+                        (None, _) => "deleted",
+                        (Some(_), None) => "added",
+                        (Some(_), Some(_)) => "modified",
+                    }
+                    .to_string();
+                    Ok(SnapshotChangeEntry {
+                        path,
+                        status,
+                        current_file_id,
+                        prior_file_id,
+                        oversize: oversize != 0,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
         .await
@@ -1654,6 +1728,95 @@ mod tests {
         assert_eq!(p1_summary.modified, 0);
         assert_eq!(p1_summary.deleted, 0);
         assert_eq!(p1_summary.total, 3);
+    }
+
+    #[tokio::test]
+    async fn list_changes_for_parent_carries_status_and_prior_id() {
+        let db = Database::in_memory();
+        seed_stream(&db, "s-test");
+        let store = SqliteSnapshotStore::new(db);
+        let stream = StreamId::from("s-test");
+
+        // p1: a and b baselined.
+        let p1 = store.create_snapshot(stream.clone()).await.unwrap();
+        let a1 = store
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: stream.clone(),
+                path: "a.txt".into(),
+                blob_hash: Some("h-a-v1".into()),
+                size_bytes: 1,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(p1),
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+        store
+            .capture(FileSnapshot {
+                id: 0,
+                stream_id: stream.clone(),
+                path: "b.txt".into(),
+                blob_hash: Some("h-b-v1".into()),
+                size_bytes: 1,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(p1),
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+
+        // p2: a modified, c added, b deleted.
+        let p2 = store.create_snapshot(stream.clone()).await.unwrap();
+        for snap in [
+            FileSnapshot {
+                id: 0,
+                stream_id: stream.clone(),
+                path: "a.txt".into(),
+                blob_hash: Some("h-a-v2".into()),
+                size_bytes: 1,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(p2),
+                mtime_ms: None,
+            },
+            FileSnapshot {
+                id: 0,
+                stream_id: stream.clone(),
+                path: "c.txt".into(),
+                blob_hash: Some("h-c-v1".into()),
+                size_bytes: 1,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(p2),
+                mtime_ms: None,
+            },
+            FileSnapshot {
+                id: 0,
+                stream_id: stream.clone(),
+                path: "b.txt".into(),
+                blob_hash: None,
+                size_bytes: 0,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(p2),
+                mtime_ms: None,
+            },
+        ] {
+            store.capture(snap).await.unwrap();
+        }
+
+        let entries = store.list_changes_for_parent(p2).await.unwrap();
+        let by_path: std::collections::HashMap<_, _> =
+            entries.iter().map(|e| (e.path.clone(), e)).collect();
+        assert_eq!(by_path["a.txt"].status, "modified");
+        assert_eq!(by_path["a.txt"].prior_file_id, Some(a1));
+        assert_eq!(by_path["c.txt"].status, "added");
+        assert_eq!(by_path["c.txt"].prior_file_id, None);
+        assert_eq!(by_path["b.txt"].status, "deleted");
+        assert!(by_path["b.txt"].prior_file_id.is_some());
     }
 
     fn seed_stream(db: &Database, id: &str) {
