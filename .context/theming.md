@@ -146,6 +146,21 @@ chrome, serif for article-style content, mono only for code. UI chrome
 size scale (`--text-base: 14px`) is unchanged from the phase-7 density
 tune-up — adding tokens is purely additive.
 
+The three faces are **locally bundled** as variable woff2s under
+`apps/desktop/public/fonts/` (served from `/fonts/` at runtime) and
+declared via `@font-face` rules at the top of `apps/desktop/index.html`:
+
+- **Inter** (`InterVariable.woff2` + `-Italic.woff2`) — UI face.
+- **Source Serif 4** (`SourceSerif4Variable-Roman.woff2` + `-Italic.woff2`) — prose face.
+- **JetBrains Mono** (`JetBrainsMonoVariable.woff2` + `-Italic.woff2`) — mono face.
+
+All six are variable fonts (single file per style covers the full
+weight axis) and ship Latin / Cyrillic / Greek / Vietnamese glyph
+coverage out of the box. Total bundle weight is ~1.7 MB. Each
+`--font-*` token lists the local family first then falls through to a
+system stack as a safety net while the woff2 is still loading or if a
+file goes missing.
+
 Size scale: `--text-xs` (12px) → `--text-sm` (13px) → `--text-base`
 (14px, UI default) → `--text-md` (15px, prose default) → `--text-lg`
 (17px) → `--text-xl` (20px) → `--text-2xl` (24px) → `--text-3xl`
