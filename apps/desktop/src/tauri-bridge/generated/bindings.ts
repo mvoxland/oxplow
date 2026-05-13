@@ -315,12 +315,12 @@ export const commands = {
 	 */
 	analyzeFunctionsAtRefs: (files: AnalyzeFileSpec[]) => typedError<AnalyzeFunctionsResult, IpcError>(__TAURI_INVOKE("analyze_functions_at_refs", { files })),
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
-	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
+	listFileSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_file_snapshots_for_stream", { streamId, limit })),
 	/**
-	 *  Parent `snapshot` rows for a stream — one entry per
-	 *  `request_snapshot()` call that captured anything. Newest first.
+	 *  `snapshot` rows for a stream — one entry per `request_snapshot()`
+	 *  call that captured anything. Newest first.
 	 */
-	listParentSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<ParentSnapshot[], IpcError>(__TAURI_INVOKE("list_parent_snapshots_for_stream", { streamId, limit })),
+	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<Snapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
 	/**
 	 *  Every `file_snapshot` row captured under a single parent
 	 *  snapshot id (i.e. one batch of `request_snapshot()`).
@@ -335,8 +335,8 @@ export const commands = {
 	captured_at: Timestamp,
 	oversize: boolean,
 	/**
-	 *  Parent `snapshot.id` this row was captured under, or `None`
-	 *  for pre-V13 rows that predate the parent table.
+	 *  `snapshot.id` this row was captured under, or `None` for
+	 *  pre-V13 rows that predate the snapshot grouping table.
 	 */
 	snapshot_id: number | null,
 	/**
@@ -367,15 +367,15 @@ export const commands = {
 	counts: SnapshotSummaryCounts,
 } | null, IpcError>(__TAURI_INVOKE("get_snapshot_summary", { snapshotId })),
 	/**
-	 *  Created/modified/deleted counts for a parent snapshot. Powers
-	 *  the Local History dashboard's per-snapshot stats column.
+	 *  Created/modified/deleted counts for a snapshot. Powers the Local
+	 *  History dashboard's per-snapshot stats column.
 	 */
-	getParentSnapshotSummary: (snapshotId: number) => typedError<SnapshotParentSummary, IpcError>(__TAURI_INVOKE("get_parent_snapshot_summary", { snapshotId })),
+	getSnapshotStats: (snapshotId: number) => typedError<SnapshotStats, IpcError>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
 	/**
-	 *  Per-file change entries for one parent snapshot, in the shape
-	 *  the renderer's `useSnapshotChangeAnalysis` hook expects so it
-	 *  can feed the same SummaryCard / ChangeAnalysisPanel components
-	 *  the Git pages use.
+	 *  Per-file change entries for one snapshot, in the shape the
+	 *  renderer's `useSnapshotChangeAnalysis` hook expects so it can
+	 *  feed the same SummaryCard / ChangeAnalysisPanel components the
+	 *  Git pages use.
 	 */
 	listSnapshotChangeEntries: (snapshotId: number) => typedError<SnapshotChangeEntry[], IpcError>(__TAURI_INVOKE("list_snapshot_change_entries", { snapshotId })),
 	/**
@@ -424,7 +424,7 @@ export const commands = {
 	listAllRefs: () => typedError<GroupedGitRefs, IpcError>(__TAURI_INVOKE("list_all_refs")),
 	/**
 	 *  Map commit SHAs to a single user-facing branch/tag label. Used by
-	 *  the Local History dashboard to chip each parent snapshot with its
+	 *  the Local History dashboard to chip each snapshot with its
 	 *  pinned commit's branch/tag name; SHAs that match no ref are absent
 	 *  from the result (caller renders a short-sha fallback).
 	 */
@@ -966,8 +966,8 @@ export type FileSnapshot = {
 	captured_at: Timestamp,
 	oversize: boolean,
 	/**
-	 *  Parent `snapshot.id` this row was captured under, or `None`
-	 *  for pre-V13 rows that predate the parent table.
+	 *  `snapshot.id` this row was captured under, or `None` for
+	 *  pre-V13 rows that predate the snapshot grouping table.
 	 */
 	snapshot_id: number | null,
 	/**
@@ -1238,26 +1238,6 @@ export type PageVisitDay = {
 
 export type PaneKindArg = "working" | "talking";
 
-/**
- *  Parent `snapshot` row — one per `request_snapshot()` call that
- *  had dirty files. Groups the `file_snapshot` rows captured in
- *  that batch. See [[crates/oxplow-db/migrations/V13__snapshot_parent.sql]].
- */
-export type ParentSnapshot = {
-	id: number,
-	stream_id: StreamId,
-	created_at: Timestamp,
-	file_count: number,
-	/**
-	 *  40-char git sha that the worktree was pinned to at capture
-	 *  time. Populated only when the worktree was clean (no
-	 *  tracked-file changes, no non-ignored untracked files);
-	 *  `None` when the tree was dirty or the directory isn't a git
-	 *  repo at all.
-	 */
-	git_commit: string | null,
-};
-
 export type RefKind = "local" | "remote" | "tag" | "head";
 
 export type RefOption = {
@@ -1316,14 +1296,35 @@ export type SetThreadPromptRequest = {
 };
 
 /**
- *  One row per file captured under a parent snapshot, in the shape
- *  the renderer's change-analysis pipeline expects. `status` mirrors
+ *  `snapshot` row — one per `request_snapshot()` call that had
+ *  dirty files. Groups the `file_snapshot` rows captured in that
+ *  batch. See [[crates/oxplow-db/migrations/V13__snapshot.sql]].
+ */
+export type Snapshot = {
+	id: number,
+	stream_id: StreamId,
+	created_at: Timestamp,
+	file_count: number,
+	/**
+	 *  40-char git sha that the worktree was pinned to at capture
+	 *  time. Populated only when the worktree was clean (no
+	 *  tracked-file changes, no non-ignored untracked files);
+	 *  `None` when the tree was dirty or the directory isn't a git
+	 *  repo at all.
+	 */
+	git_commit: string | null,
+};
+
+/**
+ *  One row per file captured under a snapshot, in the shape the
+ *  renderer's change-analysis pipeline expects. `status` mirrors
  *  `BranchChangeEntry`'s set (`added`/`modified`/`deleted`) so the
  *  shared SummaryCard / ChangeAnalysisPanel can render snapshot
  *  changes alongside git ones. `current_file_id` is the row in
- *  `file_snapshot` captured for this parent; `prior_file_id` is the
- *  most recent prior capture of the same `(stream_id, path)`, used
- *  to pull the "before" blob bytes for diff + function analysis.
+ *  `file_snapshot` captured for this snapshot; `prior_file_id` is
+ *  the most recent prior capture of the same `(stream_id, path)`,
+ *  used to pull the "before" blob bytes for diff + function
+ *  analysis.
  */
 export type SnapshotChangeEntry = {
 	path: string,
@@ -1366,12 +1367,12 @@ export type SnapshotPairDiff = {
 
 /**
  *  Aggregate created/modified/deleted counts for the file rows
- *  captured under one parent snapshot. Derived by comparing each
- *  child row's `blob_hash` to the most-recent prior row for the
- *  same `(stream_id, path)`. Powers the Local History dashboard's
+ *  captured under one snapshot. Derived by comparing each child
+ *  row's `blob_hash` to the most-recent prior row for the same
+ *  `(stream_id, path)`. Powers the Local History dashboard's
  *  per-snapshot stats column.
  */
-export type SnapshotParentSummary = {
+export type SnapshotStats = {
 	created: number,
 	modified: number,
 	deleted: number,

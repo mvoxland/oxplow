@@ -305,17 +305,18 @@ existing snapshot for the stream, it returns `{ created: false, id:
 <existing> }` instead of inserting a new row. `dirtyPaths` is an
 optimizer hint — when null the entire worktree is walked.
 
-**No parent chain.** Snapshots have no `parent_snapshot_id`; the
-"previous" snapshot for diff purposes is just the most recent
-`file_snapshot` row with `created_at < target.created_at` for the same
-stream. `getSnapshotSummary(id, previousId?)` returns created/updated/
-deleted counts relative to that previous snapshot (or an explicit one
-if provided); `getSnapshotPairDiff(beforeId, afterId, path)` serves
-arbitrary pair diffs.
+**No ancestry link.** Snapshots have no parent/child column — each
+is independent. The "previous" snapshot for diff purposes is just
+the most recent `file_snapshot` row with `created_at <
+target.created_at` for the same stream. `getSnapshotSummary(id,
+previousId?)` returns created/updated/deleted counts relative to
+that previous snapshot (or an explicit one if provided);
+`getSnapshotPairDiff(beforeId, afterId, path)` serves arbitrary pair
+diffs.
 
 **Baseline is hidden from Local History.** The first snapshot per
 stream has no predecessor, so there's nothing to diff against and
-nothing meaningful to show. `listSnapshotsForStream` excludes it
+nothing meaningful to show. `listFileSnapshotsForStream` excludes it
 (subsequent snapshots use it as their "previous" via
 `getSnapshotSummary`). The baseline still lives in the DB — only the
 UI list skips it.

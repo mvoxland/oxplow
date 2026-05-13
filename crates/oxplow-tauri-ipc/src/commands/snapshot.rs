@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_db::{FileSnapshot, ParentSnapshot, SnapshotChangeEntry, SnapshotParentSummary};
+use oxplow_db::{FileSnapshot, Snapshot, SnapshotChangeEntry, SnapshotStats};
 use oxplow_domain::StreamId;
 
 use crate::error::IpcError;
@@ -18,7 +18,7 @@ pub async fn list_snapshots(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_snapshots_for_stream(
+pub async fn list_file_snapshots_for_stream(
     state: tauri::State<'_, AppState>,
     stream_id: StreamId,
     limit: Option<usize>,
@@ -29,36 +29,36 @@ pub async fn list_snapshots_for_stream(
         .await?)
 }
 
-/// Parent `snapshot` rows for a stream — one entry per
-/// `request_snapshot()` call that captured anything. Newest first.
+/// `snapshot` rows for a stream — one entry per `request_snapshot()`
+/// call that captured anything. Newest first.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_parent_snapshots_for_stream(
+pub async fn list_snapshots_for_stream(
     state: tauri::State<'_, AppState>,
     stream_id: StreamId,
     limit: Option<usize>,
-) -> Result<Vec<ParentSnapshot>, IpcError> {
+) -> Result<Vec<Snapshot>, IpcError> {
     Ok(state
         .snapshot_store
-        .list_parent_snapshots_for_stream(stream_id.as_str(), limit.unwrap_or(200))
+        .list_snapshots_for_stream(stream_id.as_str(), limit.unwrap_or(200))
         .await?)
 }
 
-/// Created/modified/deleted counts for a parent snapshot. Powers
-/// the Local History dashboard's per-snapshot stats column.
+/// Created/modified/deleted counts for a snapshot. Powers the Local
+/// History dashboard's per-snapshot stats column.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_parent_snapshot_summary(
+pub async fn get_snapshot_stats(
     state: tauri::State<'_, AppState>,
     snapshot_id: i64,
-) -> Result<SnapshotParentSummary, IpcError> {
-    Ok(state.snapshot_store.summary_for_parent(snapshot_id).await?)
+) -> Result<SnapshotStats, IpcError> {
+    Ok(state.snapshot_store.stats_for_snapshot(snapshot_id).await?)
 }
 
-/// Per-file change entries for one parent snapshot, in the shape
-/// the renderer's `useSnapshotChangeAnalysis` hook expects so it
-/// can feed the same SummaryCard / ChangeAnalysisPanel components
-/// the Git pages use.
+/// Per-file change entries for one snapshot, in the shape the
+/// renderer's `useSnapshotChangeAnalysis` hook expects so it can
+/// feed the same SummaryCard / ChangeAnalysisPanel components the
+/// Git pages use.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_snapshot_change_entries(
@@ -67,7 +67,7 @@ pub async fn list_snapshot_change_entries(
 ) -> Result<Vec<SnapshotChangeEntry>, IpcError> {
     Ok(state
         .snapshot_store
-        .list_changes_for_parent(snapshot_id)
+        .list_changes_for_snapshot(snapshot_id)
         .await?)
 }
 

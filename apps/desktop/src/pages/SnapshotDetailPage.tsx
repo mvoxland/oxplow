@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ParentSnapshot, Stream } from "../api.js";
-import { listParentSnapshots } from "../api.js";
+import type { Snapshot, Stream } from "../api.js";
+import { listSnapshots } from "../api.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page } from "../tabs/Page.js";
@@ -27,7 +27,7 @@ export interface SnapshotDetailPageProps {
 }
 
 /**
- * Single parent-snapshot page — drilled into from the Local History
+ * Single snapshot page — drilled into from the Local History
  * dashboard's Recent Snapshots card. Mirrors GitCommitPage: a
  * SummaryCard on the right, snapshot metadata on the left, and the
  * shared ChangeAnalysisPanel below for the file list + function /
@@ -46,8 +46,8 @@ export function SnapshotDetailPage({
   onOpenPage,
   onOpenFile,
 }: SnapshotDetailPageProps) {
-  const [parent, setParent] = useState<ParentSnapshot | null>(null);
-  const [loadingParent, setLoadingParent] = useState(false);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [loadingSnapshot, setLoadingSnapshot] = useState(false);
   const refForGraph = snapshotRef(snapshotId);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
@@ -84,23 +84,23 @@ export function SnapshotDetailPage({
 
   useEffect(() => {
     if (!stream) {
-      setParent(null);
+      setSnapshot(null);
       return;
     }
     let cancelled = false;
-    setLoadingParent(true);
-    // No "get one parent" IPC; pull the recent window and pick our id.
+    setLoadingSnapshot(true);
+    // No "get one snapshot" IPC; pull the recent window and pick our id.
     // Cheap (~500 rows) — acceptable for a page-load fetch.
-    void listParentSnapshots(stream.id, 500)
+    void listSnapshots(stream.id, 500)
       .then((rows) => {
         if (cancelled) return;
-        setParent(rows.find((r) => r.id === snapshotId) ?? null);
-        setLoadingParent(false);
+        setSnapshot(rows.find((r) => r.id === snapshotId) ?? null);
+        setLoadingSnapshot(false);
       })
       .catch((err) => {
         if (cancelled) return;
-        logUi("warn", "snapshot parent fetch failed", { error: String(err) });
-        setLoadingParent(false);
+        logUi("warn", "snapshot fetch failed", { error: String(err) });
+        setLoadingSnapshot(false);
       });
     return () => {
       cancelled = true;
@@ -108,9 +108,9 @@ export function SnapshotDetailPage({
   }, [stream?.id, snapshotId]);
 
   const headerTitle = useMemo(() => {
-    if (!parent) return `Snapshot ${snapshotId}`;
-    return `Snapshot ${snapshotId} · ${formatFullDateTime(parent.createdAt)}`;
-  }, [parent, snapshotId]);
+    if (!snapshot) return `Snapshot ${snapshotId}`;
+    return `Snapshot ${snapshotId} · ${formatFullDateTime(snapshot.createdAt)}`;
+  }, [snapshot, snapshotId]);
 
   return (
     <Page testId="page-snapshot-detail" title={headerTitle} kind="snapshot" backlinks={backlinks} outbound={outbound}>
@@ -124,20 +124,20 @@ export function SnapshotDetailPage({
           }}
         >
           <div style={{ minWidth: 0 }}>
-            {loadingParent && !parent ? (
+            {loadingSnapshot && !snapshot ? (
               <div style={muted}>Loading…</div>
-            ) : !parent ? (
+            ) : !snapshot ? (
               <div style={muted}>Snapshot not found.</div>
             ) : (
               <SnapshotMeta
-                parent={parent}
+                snapshot={snapshot}
                 collapsedMaxHeight={summaryHeight}
                 onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))}
               />
             )}
           </div>
           <div style={{ minWidth: 0 }} ref={summaryRef}>
-            {parent && stream && analysis.files.length > 0 ? (
+            {snapshot && stream && analysis.files.length > 0 ? (
               <SummaryCard
                 fileCount={analysis.files.length}
                 additions={analysis.totals.additions}
@@ -151,7 +151,7 @@ export function SnapshotDetailPage({
           </div>
         </div>
 
-        {parent && stream && onOpenFile ? (
+        {snapshot && stream && onOpenFile ? (
           <ChangeAnalysisPanel
             analysis={analysis}
             target={target}
@@ -168,15 +168,15 @@ export function SnapshotDetailPage({
 }
 
 interface SnapshotMetaProps {
-  parent: ParentSnapshot;
+  snapshot: Snapshot;
   /** Pixel height the SummaryCard alongside this panel renders at —
    *  the panel collapses to roughly that height. `null` lets it grow. */
   collapsedMaxHeight: number | null;
   onOpenCommit(sha: string): void;
 }
 
-function SnapshotMeta({ parent, collapsedMaxHeight, onOpenCommit }: SnapshotMetaProps) {
-  const captured = formatFullDateTime(parent.createdAt);
+function SnapshotMeta({ snapshot, collapsedMaxHeight, onOpenCommit }: SnapshotMetaProps) {
+  const captured = formatFullDateTime(snapshot.createdAt);
   return (
     <section
       style={{
@@ -191,10 +191,10 @@ function SnapshotMeta({ parent, collapsedMaxHeight, onOpenCommit }: SnapshotMeta
         </div>
         <div>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            Snapshot {parent.id}
+            Snapshot {snapshot.id}
           </div>
           <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
-            {parent.fileCount} files captured under this parent.
+            {snapshot.fileCount} files captured in this snapshot.
           </div>
         </div>
         <div
@@ -208,13 +208,13 @@ function SnapshotMeta({ parent, collapsedMaxHeight, onOpenCommit }: SnapshotMeta
         >
           <span>Pinned commit</span>
           <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--text-primary)" }}>
-            {parent.gitCommit ? (
+            {snapshot.gitCommit ? (
               <button
                 type="button"
-                onClick={() => onOpenCommit(parent.gitCommit!)}
+                onClick={() => onOpenCommit(snapshot.gitCommit!)}
                 style={linkButton}
               >
-                {parent.gitCommit.slice(0, 7)}
+                {snapshot.gitCommit.slice(0, 7)}
               </button>
             ) : (
               <span style={{ color: "var(--text-secondary)" }}>—</span>

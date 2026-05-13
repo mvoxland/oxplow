@@ -600,9 +600,9 @@ impl SnapshotCaptureService {
     /// loop accumulate for the next request rather than being lost
     /// or double-captured.
     ///
-    /// Returns the **parent `snapshot.id`** that groups every
+    /// Returns the **`snapshot.id`** that groups every
     /// `file_snapshot` row written by this call. When the dirty set
-    /// is empty, no new parent row is inserted; the most recent
+    /// is empty, no new snapshot row is inserted; the most recent
     /// existing snapshot id for this stream is returned instead (or
     /// `None` if no snapshot has ever been taken for the stream).
     ///
@@ -866,8 +866,8 @@ impl SnapshotCaptureService {
         }
 
         // The rayon worker left `snapshot_id = None` because the
-        // parent_id wasn't known yet. We only create the parent row
-        // once we know there's actually something to insert, so a
+        // snapshot_id wasn't known yet. We only create the snapshot
+        // row once we know there's actually something to insert, so a
         // drain that resolves entirely to "defer" or "drop" doesn't
         // leak an empty snapshot.
         if rows.is_empty() {
@@ -886,25 +886,25 @@ impl SnapshotCaptureService {
                 .await?);
         }
 
-        let parent_id = self
+        let snapshot_id = self
             .inner
             .store
             .create_snapshot(self.inner.stream_id.clone())
             .await?;
-        // Fill in the real parent_id now that the row exists.
+        // Fill in the real snapshot_id now that the row exists.
         let mut rows = rows;
         for row in &mut rows {
-            row.snapshot_id = Some(parent_id);
+            row.snapshot_id = Some(snapshot_id);
         }
 
         let assembled = rows.len() as u64;
         let insert_started = Instant::now();
         let ids = self.inner.store.capture_batch(rows).await?;
         let insert_ms = insert_started.elapsed().as_millis() as u64;
-        self.emit_batch_event(parent_id, ids.len() as u32, source);
+        self.emit_batch_event(snapshot_id, ids.len() as u32, source);
         let capture_ms = capture_started.elapsed().as_millis() as u64;
         info!(
-            parent_id,
+            snapshot_id,
             drained = drained_count as u64,
             staged = staged_count,
             unstaged = unstaged_count,
@@ -936,7 +936,7 @@ impl SnapshotCaptureService {
                     if let Err(e) = self
                         .inner
                         .store
-                        .set_snapshot_git_commit(parent_id, sha)
+                        .set_snapshot_git_commit(snapshot_id, sha)
                         .await
                     {
                         debug!(error = %e, "snapshot: failed to pin git commit");
@@ -944,13 +944,13 @@ impl SnapshotCaptureService {
                 }
             }
             info!(
-                parent_id,
+                snapshot_id,
                 clean,
                 git_pin_ms = pin_started.elapsed().as_millis() as u64,
                 "snapshot request: git pin step",
             );
         }
-        Ok(Some(parent_id))
+        Ok(Some(snapshot_id))
     }
 
     fn emit_batch_event(&self, snapshot_id: i64, file_count: u32, source: SnapshotSourceKind) {
@@ -1077,14 +1077,14 @@ mod tests {
             tokio::spawn(async move { svc_a.request_snapshot(SnapshotSourceKind::Startup).await }),
             tokio::spawn(async move { svc_b.request_snapshot(SnapshotSourceKind::Startup).await }),
         );
-        let parent_a = a.unwrap().unwrap().expect("parent id a");
-        let parent_b = b.unwrap().unwrap().expect("parent id b");
+        let snapshot_a = a.unwrap().unwrap().expect("snapshot id a");
+        let snapshot_b = b.unwrap().unwrap().expect("snapshot id b");
         // Both callers see the same snapshot id.
-        assert_eq!(parent_a, parent_b);
+        assert_eq!(snapshot_a, snapshot_b);
         // Only one snapshot row was created — the second caller did
         // not start a fresh capture.
         let all = store
-            .list_parent_snapshots_for_stream(TEST_STREAM, 100)
+            .list_snapshots_for_stream(TEST_STREAM, 100)
             .await
             .unwrap();
         assert_eq!(
@@ -1230,8 +1230,8 @@ mod tests {
             .unwrap()
             .expect("parent id");
 
-        // Subsequent empty requests reuse the same parent — no new
-        // parent row is inserted.
+        // Subsequent empty requests reuse the same snapshot — no new
+        // snapshot row is inserted.
         for _ in 0..3 {
             let again = svc
                 .request_snapshot(SnapshotSourceKind::Startup)
@@ -1239,7 +1239,7 @@ mod tests {
                 .unwrap();
             assert_eq!(again, Some(parent));
         }
-        // Only one parent row exists.
+        // Only one snapshot row exists.
         let latest = store
             .latest_snapshot_id_for_stream(StreamId::from(TEST_STREAM))
             .await
@@ -1292,8 +1292,8 @@ mod tests {
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
-        // No rows written; no parent snapshot created either.
-        assert!(snap.is_none(), "no parent should be created");
+        // No rows written; no snapshot created either.
+        assert!(snap.is_none(), "no snapshot should be created");
         let rows = store.list_for_path("ghost.txt").await.unwrap();
         assert!(rows.is_empty());
     }
@@ -1523,7 +1523,7 @@ mod tests {
     async fn request_snapshot_handles_mixed_staged_and_unstaged() {
         // Half the dirty set is pre-staged; the other half is raw
         // paths that still need stat+read+hash+blob.write. Both must
-        // land in the same parent snapshot and produce real rows.
+        // land in the same snapshot and produce real rows.
         let project = tempdir().unwrap();
         let (svc, store) = svc_for(project.path()).await;
 

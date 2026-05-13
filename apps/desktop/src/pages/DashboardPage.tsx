@@ -4,7 +4,7 @@ import type { BacklogState, CodeQualityFindingRow, CountByDayRowApi, FileSnapsho
 import {
   countPageVisitsByDay,
   listCodeQualityFindings,
-  listSnapshots,
+  listFileSnapshots,
   listWikiPages,
   subscribePageVisitEvents,
   topVisitedPages,
@@ -190,7 +190,7 @@ function useRecentSnapshots(stream: Stream | null) {
       return;
     }
     let cancelled = false;
-    void listSnapshots(stream.id).then((rows) => {
+    void listFileSnapshots(stream.id).then((rows) => {
       if (!cancelled) {
         const sorted = [...rows].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
         setSnaps(sorted.slice(0, 10));

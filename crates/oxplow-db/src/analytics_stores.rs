@@ -851,26 +851,27 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
 }
 
 /// Aggregate created/modified/deleted counts for the file rows
-/// captured under one parent snapshot. Derived by comparing each
-/// child row's `blob_hash` to the most-recent prior row for the
-/// same `(stream_id, path)`. Powers the Local History dashboard's
+/// captured under one snapshot. Derived by comparing each child
+/// row's `blob_hash` to the most-recent prior row for the same
+/// `(stream_id, path)`. Powers the Local History dashboard's
 /// per-snapshot stats column.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
-pub struct SnapshotParentSummary {
+pub struct SnapshotStats {
     pub created: i64,
     pub modified: i64,
     pub deleted: i64,
     pub total: i64,
 }
 
-/// One row per file captured under a parent snapshot, in the shape
-/// the renderer's change-analysis pipeline expects. `status` mirrors
+/// One row per file captured under a snapshot, in the shape the
+/// renderer's change-analysis pipeline expects. `status` mirrors
 /// `BranchChangeEntry`'s set (`added`/`modified`/`deleted`) so the
 /// shared SummaryCard / ChangeAnalysisPanel can render snapshot
 /// changes alongside git ones. `current_file_id` is the row in
-/// `file_snapshot` captured for this parent; `prior_file_id` is the
-/// most recent prior capture of the same `(stream_id, path)`, used
-/// to pull the "before" blob bytes for diff + function analysis.
+/// `file_snapshot` captured for this snapshot; `prior_file_id` is
+/// the most recent prior capture of the same `(stream_id, path)`,
+/// used to pull the "before" blob bytes for diff + function
+/// analysis.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SnapshotChangeEntry {
     pub path: String,
@@ -880,11 +881,11 @@ pub struct SnapshotChangeEntry {
     pub oversize: bool,
 }
 
-/// Parent `snapshot` row — one per `request_snapshot()` call that
-/// had dirty files. Groups the `file_snapshot` rows captured in
-/// that batch. See [[crates/oxplow-db/migrations/V13__snapshot_parent.sql]].
+/// `snapshot` row — one per `request_snapshot()` call that had
+/// dirty files. Groups the `file_snapshot` rows captured in that
+/// batch. See [[crates/oxplow-db/migrations/V13__snapshot.sql]].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct ParentSnapshot {
+pub struct Snapshot {
     pub id: i64,
     pub stream_id: StreamId,
     pub created_at: Timestamp,
@@ -916,8 +917,8 @@ pub struct FileSnapshot {
     pub size_bytes: i64,
     pub captured_at: Timestamp,
     pub oversize: bool,
-    /// Parent `snapshot.id` this row was captured under, or `None`
-    /// for pre-V13 rows that predate the parent table.
+    /// `snapshot.id` this row was captured under, or `None` for
+    /// pre-V13 rows that predate the snapshot grouping table.
     pub snapshot_id: Option<i64>,
     /// File mtime in unix milliseconds at capture time. NULL for
     /// rows written before V15 added the column. The startup sweep
@@ -992,9 +993,9 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// Insert a new `snapshot` parent row and return its id. Callers
-    /// (e.g. `SnapshotCaptureService::request_snapshot`) only do this
-    /// when they have dirty files to capture — empty requests reuse
+    /// Insert a new `snapshot` row and return its id. Callers (e.g.
+    /// `SnapshotCaptureService::request_snapshot`) only do this when
+    /// they have dirty files to capture — empty requests reuse
     /// `latest_snapshot_id_for_stream`.
     pub async fn create_snapshot(&self, stream_id: StreamId) -> Result<i64, DomainError> {
         let db = self.db.clone();
@@ -1012,7 +1013,7 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// Read the `git_commit` column for a parent snapshot, if pinned.
+    /// Read the `git_commit` column for a snapshot, if pinned.
     pub async fn get_snapshot_git_commit(
         &self,
         snapshot_id: i64,
@@ -1033,9 +1034,9 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// Pin a parent snapshot to a git commit sha. Called by the
-    /// capture layer immediately after `create_snapshot` when the
-    /// worktree was clean.
+    /// Pin a snapshot to a git commit sha. Called by the capture
+    /// layer immediately after `create_snapshot` when the worktree
+    /// was clean.
     pub async fn set_snapshot_git_commit(
         &self,
         snapshot_id: i64,
@@ -1079,12 +1080,12 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// Parent snapshot rows for a stream, newest first.
-    pub async fn list_parent_snapshots_for_stream(
+    /// Snapshot rows for a stream, newest first.
+    pub async fn list_snapshots_for_stream(
         &self,
         stream_id: &str,
         limit: usize,
-    ) -> Result<Vec<ParentSnapshot>, DomainError> {
+    ) -> Result<Vec<Snapshot>, DomainError> {
         let db = self.db.clone();
         let stream_id = stream_id.to_string();
         tokio::task::spawn_blocking(move || {
@@ -1111,7 +1112,7 @@ impl SqliteSnapshotStore {
                             Box::new(e),
                         )
                     };
-                    Ok(ParentSnapshot {
+                    Ok(Snapshot {
                         id,
                         stream_id: StreamId::from(stream_id),
                         created_at: string_to_ts(&created_at).map_err(map_err)?,
@@ -1126,17 +1127,12 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// File rows captured under a single parent snapshot, oldest first
-    /// (insertion order within the capture loop).
-    /// Aggregate counts of created/modified/deleted files in a parent
+    /// Aggregate counts of created/modified/deleted files in a
     /// snapshot — derived by comparing each child row's `blob_hash`
     /// to the most-recent prior row for the same `(stream_id, path)`.
     /// The `idx_file_snapshot_stream_path` index covers the prior-row
     /// lookup so this stays cheap even with multi-million-row history.
-    pub async fn summary_for_parent(
-        &self,
-        snapshot_id: i64,
-    ) -> Result<SnapshotParentSummary, DomainError> {
+    pub async fn stats_for_snapshot(&self, snapshot_id: i64) -> Result<SnapshotStats, DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
@@ -1159,7 +1155,7 @@ impl SqliteSnapshotStore {
                      ) fs",
                     params![snapshot_id],
                     |row| {
-                        Ok(SnapshotParentSummary {
+                        Ok(SnapshotStats {
                             deleted: row.get(0)?,
                             created: row.get(1)?,
                             modified: row.get(2)?,
@@ -1173,12 +1169,12 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// `SnapshotChangeEntry` rows for one parent snapshot. Pairs
-    /// every child row with its most-recent prior `(stream_id, path)`
-    /// row and labels the status (`added`/`modified`/`deleted`) so the
+    /// `SnapshotChangeEntry` rows for one snapshot. Pairs every
+    /// child row with its most-recent prior `(stream_id, path)` row
+    /// and labels the status (`added`/`modified`/`deleted`) so the
     /// renderer can feed the same shape into the shared change-
     /// analysis pipeline used by Git commits.
-    pub async fn list_changes_for_parent(
+    pub async fn list_changes_for_snapshot(
         &self,
         snapshot_id: i64,
     ) -> Result<Vec<SnapshotChangeEntry>, DomainError> {
@@ -1645,7 +1641,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn summary_for_parent_classifies_created_modified_deleted() {
+    async fn stats_for_snapshot_classifies_created_modified_deleted() {
         let db = Database::in_memory();
         seed_stream(&db, "s-test");
         let store = SqliteSnapshotStore::new(db);
@@ -1716,14 +1712,14 @@ mod tests {
             .await
             .unwrap();
 
-        let summary = store.summary_for_parent(p2).await.unwrap();
+        let summary = store.stats_for_snapshot(p2).await.unwrap();
         assert_eq!(summary.created, 1, "d.txt is new");
         assert_eq!(summary.modified, 1, "a.txt had a prior hash");
         assert_eq!(summary.deleted, 1, "c.txt has no blob");
         assert_eq!(summary.total, 3);
 
         // p1 itself: three created rows, nothing else.
-        let p1_summary = store.summary_for_parent(p1).await.unwrap();
+        let p1_summary = store.stats_for_snapshot(p1).await.unwrap();
         assert_eq!(p1_summary.created, 3);
         assert_eq!(p1_summary.modified, 0);
         assert_eq!(p1_summary.deleted, 0);
@@ -1731,7 +1727,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_changes_for_parent_carries_status_and_prior_id() {
+    async fn list_changes_for_snapshot_carries_status_and_prior_id() {
         let db = Database::in_memory();
         seed_stream(&db, "s-test");
         let store = SqliteSnapshotStore::new(db);
@@ -1808,7 +1804,7 @@ mod tests {
             store.capture(snap).await.unwrap();
         }
 
-        let entries = store.list_changes_for_parent(p2).await.unwrap();
+        let entries = store.list_changes_for_snapshot(p2).await.unwrap();
         let by_path: std::collections::HashMap<_, _> =
             entries.iter().map(|e| (e.path.clone(), e)).collect();
         assert_eq!(by_path["a.txt"].status, "modified");

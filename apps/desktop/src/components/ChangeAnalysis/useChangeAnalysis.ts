@@ -122,7 +122,7 @@ const EMPTY_PIVOTS: FilePivots = {
 };
 
 /**
- * Snapshot-mode targets are encoded as `"snapshot:<parentSnapshotId>"`.
+ * Snapshot-mode targets are encoded as `"snapshot:<snapshotId>"`.
  * Targets that match this prefix route through the snapshot-source
  * path instead of git refs.
  */

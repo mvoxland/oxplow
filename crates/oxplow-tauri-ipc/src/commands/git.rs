@@ -198,7 +198,7 @@ pub async fn list_all_refs(state: tauri::State<'_, AppState>) -> Result<GroupedG
 }
 
 /// Map commit SHAs to a single user-facing branch/tag label. Used by
-/// the Local History dashboard to chip each parent snapshot with its
+/// the Local History dashboard to chip each snapshot with its
 /// pinned commit's branch/tag name; SHAs that match no ref are absent
 /// from the result (caller renders a short-sha fallback).
 #[tauri::command]

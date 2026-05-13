@@ -128,8 +128,8 @@ export function gitDashboardRef(): TabRef {
   return { id: "git-dashboard", kind: "git-dashboard", payload: null };
 }
 
-/** Detail page for a single parent snapshot (drill-in from the
- *  Local History dashboard's Recent Snapshots card). */
+/** Detail page for a single snapshot (drill-in from the Local
+ *  History dashboard's Recent Snapshots card). */
 export function snapshotRef(snapshotId: number): TabRef {
   return {
     id: `snapshot:${snapshotId}`,

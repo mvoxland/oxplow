@@ -1427,15 +1427,18 @@ export async function listTaskEfforts(itemId: number): Promise<EffortDetail[]> {
   }));
 }
 
-export async function listSnapshots(streamId: string, limit?: number): Promise<FileSnapshot[]> {
+export async function listFileSnapshots(
+  streamId: string,
+  limit?: number,
+): Promise<FileSnapshot[]> {
   return unwrap(
-    await commands.listSnapshotsForStream(streamId, limit ?? null),
+    await commands.listFileSnapshotsForStream(streamId, limit ?? null),
   ) as unknown as FileSnapshot[];
 }
 
-/** Parent snapshot row — one per `request_snapshot()` call that
- *  captured anything. Local History dashboard surfaces this list. */
-export interface ParentSnapshot {
+/** Snapshot row — one per `request_snapshot()` call that captured
+ *  anything. Local History dashboard surfaces this list. */
+export interface Snapshot {
   id: number;
   streamId: string;
   createdAt: string;
@@ -1443,13 +1446,10 @@ export interface ParentSnapshot {
   gitCommit: string | null;
 }
 
-/** List parent snapshot rows for a stream, newest first. */
-export async function listParentSnapshots(
-  streamId: string,
-  limit?: number,
-): Promise<ParentSnapshot[]> {
+/** List snapshot rows for a stream, newest first. */
+export async function listSnapshots(streamId: string, limit?: number): Promise<Snapshot[]> {
   const rows = unwrap(
-    await commands.listParentSnapshotsForStream(streamId, limit ?? null),
+    await commands.listSnapshotsForStream(streamId, limit ?? null),
   ) as unknown as Array<{
     id: number;
     stream_id: string;
@@ -1466,14 +1466,14 @@ export async function listParentSnapshots(
   }));
 }
 
-/** Aggregate created/modified/deleted counts for a parent snapshot. */
-export async function getParentSnapshotSummary(snapshotId: number): Promise<{
+/** Aggregate created/modified/deleted counts for a snapshot. */
+export async function getSnapshotStats(snapshotId: number): Promise<{
   created: number;
   modified: number;
   deleted: number;
   total: number;
 }> {
-  const raw = unwrap(await commands.getParentSnapshotSummary(snapshotId)) as unknown as {
+  const raw = unwrap(await commands.getSnapshotStats(snapshotId)) as unknown as {
     created: number;
     modified: number;
     deleted: number;
@@ -1487,8 +1487,8 @@ export async function getBlobStorageBytes(): Promise<number> {
   return unwrap(await commands.getBlobStorageBytes()) as unknown as number;
 }
 
-/** Detail-page file row for a parent snapshot — one per captured file. */
-export interface ParentSnapshotFile {
+/** Detail-page file row for a snapshot — one per captured file. */
+export interface SnapshotFile {
   id: number;
   path: string;
   blobHash: string | null;
@@ -1497,8 +1497,8 @@ export interface ParentSnapshotFile {
   mtimeMs: number | null;
 }
 
-/** Every captured file for one parent snapshot. */
-export async function listFilesForSnapshot(snapshotId: number): Promise<ParentSnapshotFile[]> {
+/** Every captured file for one snapshot. */
+export async function listFilesForSnapshot(snapshotId: number): Promise<SnapshotFile[]> {
   const rows = unwrap(
     await commands.listFilesForSnapshot(snapshotId),
   ) as unknown as Array<{
@@ -1548,7 +1548,7 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
 }
 
 /** Flat efforts whose end snapshot matched one of the requested
- *  parent snapshot ids. Callers group by `endSnapshotId` themselves
+ *  snapshot ids. Callers group by `endSnapshotId` themselves
  *  — the IPC only carries effort columns (no task title), so any
  *  display label has to be resolved via `getTaskSummaries`. */
 export interface EndingEffort {
