@@ -369,21 +369,30 @@ fn find_inline_paths(body: &str) -> Vec<String> {
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
+        // Treat a leading `~/` as the start of a candidate (home-
+        // relative path). The renderer / IPC layer is responsible for
+        // expanding the tilde when opening; the ref graph just stores
+        // it verbatim so the link is round-trippable.
+        let tilde_start = c == b'~'
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'/'
+            && !is_path_join_prev(bytes, i);
         let path_char =
             c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.' || c == b'/';
-        if !path_char {
+        if !path_char && !tilde_start {
             i += 1;
             continue;
         }
-        // Don't extract if preceded by alnum or `/` (already a URL tail or join).
-        if i > 0 {
-            let p = bytes[i - 1];
-            if p.is_ascii_alphanumeric() || p == b'/' {
-                i += 1;
-                continue;
-            }
+        if !tilde_start && is_path_join_prev(bytes, i) {
+            i += 1;
+            continue;
         }
         let start = i;
+        if tilde_start {
+            // Consume the `~` then fall through to the standard
+            // path-char loop for the rest of the run.
+            i += 1;
+        }
         while i < bytes.len() {
             let c = bytes[i];
             if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.' || c == b'/' {
@@ -399,6 +408,17 @@ fn find_inline_paths(body: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// True if `bytes[i-1]` is a char that would extend a path token —
+/// alnum or `/`. Used to reject extraction in the middle of a URL
+/// tail or a join. Returns false at BOF.
+fn is_path_join_prev(bytes: &[u8], i: usize) -> bool {
+    if i == 0 {
+        return false;
+    }
+    let p = bytes[i - 1];
+    p.is_ascii_alphanumeric() || p == b'/'
 }
 
 fn find_inline_tasks(body: &str) -> Vec<i64> {
@@ -593,5 +613,38 @@ mod tests {
     fn inline_task_overflow_rejected() {
         let r = extract("see task:99999999999999999999 in passing");
         assert!(r.tasks.is_empty());
+    }
+
+    #[test]
+    fn inline_tilde_path_captured_with_leading_tilde() {
+        let r = extract("see ~/.claude/plans/yes-plan-a-good-harmonic-floyd.md for details");
+        assert_eq!(
+            r.files,
+            vec!["~/.claude/plans/yes-plan-a-good-harmonic-floyd.md"]
+        );
+    }
+
+    #[test]
+    fn inline_tilde_path_in_parens() {
+        let r = extract("docs (~/notes/things.md) cover that");
+        assert_eq!(r.files, vec!["~/notes/things.md"]);
+    }
+
+    #[test]
+    fn bare_tilde_without_slash_is_not_a_path() {
+        let r = extract("approximately ~5 items");
+        assert!(r.files.is_empty(), "got {:?}", r.files);
+    }
+
+    #[test]
+    fn tilde_after_alnum_is_not_a_path_start() {
+        // `foo~/bar.md` shouldn't trigger — the tilde isn't at a word
+        // boundary so it's not a home-relative path.
+        let r = extract("foo~/bar.md");
+        assert!(
+            !r.files.iter().any(|p| p.starts_with('~')),
+            "got {:?}",
+            r.files,
+        );
     }
 }
