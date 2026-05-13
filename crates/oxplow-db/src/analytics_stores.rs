@@ -890,11 +890,13 @@ pub struct Snapshot {
     pub stream_id: StreamId,
     pub created_at: Timestamp,
     pub file_count: i64,
-    /// 40-char git sha that the worktree was pinned to at capture
-    /// time. Populated only when the worktree was clean (no
-    /// tracked-file changes, no non-ignored untracked files);
-    /// `None` when the tree was dirty or the directory isn't a git
-    /// repo at all.
+    /// 40-char git sha corresponding to this snapshot's worktree
+    /// state. Populated only when the worktree was clean at capture
+    /// time (no tracked-file changes, no non-ignored untracked
+    /// files); `None` when the tree was dirty or the directory isn't
+    /// a git repo at all. Not unique — multiple snapshots can share
+    /// the same commit when local history captures files git doesn't
+    /// track.
     pub git_commit: Option<String>,
 }
 
@@ -1013,7 +1015,7 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
-    /// Read the `git_commit` column for a snapshot, if pinned.
+    /// Read the `git_commit` column for a snapshot, if recorded.
     pub async fn get_snapshot_git_commit(
         &self,
         snapshot_id: i64,

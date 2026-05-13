@@ -661,8 +661,9 @@ impl SnapshotCaptureService {
     }
 
     /// Body of `request_snapshot` — runs the actual drain → blob.write
-    /// → DB-insert → git-pin pipeline. Callers are expected to have
-    /// already taken the single-flight slot in `request_snapshot`.
+    /// → DB-insert → git-commit-record pipeline. Callers are expected
+    /// to have already taken the single-flight slot in
+    /// `request_snapshot`.
     async fn capture_inner(
         &self,
         source: SnapshotSourceKind,
@@ -915,7 +916,7 @@ impl SnapshotCaptureService {
             source = ?source,
             "snapshot request: captured drained set",
         );
-        // After capture, pin to the current git commit if (and only
+        // After capture, record the current git commit if (and only
         // if) the worktree is clean — gitignored files don't count.
         // The check happens AFTER capture so any in-flight edits
         // were already drained into this snapshot's file rows.
@@ -924,10 +925,10 @@ impl SnapshotCaptureService {
         // status map (invalidated on fs-watch / refs events) rather
         // than re-scanning the worktree each capture. When the
         // service hasn't been attached (test paths without one),
-        // pinning is skipped.
+        // the commit record step is skipped.
         let git = self.inner.git.read().unwrap().clone();
         if let Some(git) = git {
-            let pin_started = Instant::now();
+            let commit_record_started = Instant::now();
             let stream_ref = Some(self.inner.stream_id.as_str());
             let statuses = git.statuses(stream_ref).await;
             let clean = statuses.is_empty();
@@ -939,15 +940,15 @@ impl SnapshotCaptureService {
                         .set_snapshot_git_commit(snapshot_id, sha)
                         .await
                     {
-                        debug!(error = %e, "snapshot: failed to pin git commit");
+                        debug!(error = %e, "snapshot: failed to record git commit");
                     }
                 }
             }
             info!(
                 snapshot_id,
                 clean,
-                git_pin_ms = pin_started.elapsed().as_millis() as u64,
-                "snapshot request: git pin step",
+                git_commit_record_ms = commit_record_started.elapsed().as_millis() as u64,
+                "snapshot request: git commit record step",
             );
         }
         Ok(Some(snapshot_id))
@@ -1153,7 +1154,7 @@ mod tests {
         let (svc, store) = svc_for(project.path()).await;
         let svc = svc.with_git(git_service_for(project.path()));
 
-        // Clean tree → snapshot pinned to HEAD.
+        // Clean tree → snapshot records HEAD.
         svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
         let clean_id = svc
             .request_snapshot(SnapshotSourceKind::Startup)

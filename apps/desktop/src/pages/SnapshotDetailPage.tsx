@@ -206,7 +206,7 @@ function SnapshotMeta({ snapshot, collapsedMaxHeight, onOpenCommit }: SnapshotMe
             fontSize: 11,
           }}
         >
-          <span>Pinned commit</span>
+          <span>Git commit</span>
           <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--text-primary)" }}>
             {snapshot.gitCommit ? (
               <button

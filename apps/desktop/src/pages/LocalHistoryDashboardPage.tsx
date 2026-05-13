@@ -15,13 +15,14 @@ import { formatShortDateTime } from "../components/format.js";
 import { logUi } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
+import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext.js";
 import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
 
 const RECENT_LIMIT = 20;
 
 export interface LocalHistoryDashboardPageProps {
   stream: Stream | null;
-  onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
+  onOpenPage(ref: TabRef, opts?: { newTab?: boolean; siblings?: NavSiblings }): void;
 }
 
 interface SnapshotRowEffort {
@@ -34,12 +35,29 @@ interface SnapshotRow {
   snapshot: Snapshot;
   summary: { created: number; modified: number; deleted: number; total: number } | null;
   efforts: SnapshotRowEffort[];
+  /** True when this is the very first snapshot recorded for the
+   *  stream — rendered as "Initial Snapshot" rather than the
+   *  catch-all "External change" label. We can only assert this
+   *  when the window we fetched is smaller than RECENT_LIMIT (i.e.
+   *  no older snapshots scrolled off). */
+  isInitial: boolean;
+}
+
+/** Pure label resolver for the snapshot row subject text. Extracted
+ *  so the if/else logic is testable without a Card render. */
+export function formatSnapshotSubject(
+  efforts: ReadonlyArray<{ title: string }>,
+  isInitial: boolean,
+): string {
+  if (efforts.length > 0) return efforts.map((e) => e.title).join(" · ");
+  if (isInitial) return "Initial Snapshot";
+  return "External change";
 }
 
 interface DashboardData {
   rows: SnapshotRow[];
-  /** All branch+tag labels per pinned commit sha. Absent shas fall
-   *  back to a short-sha chip. */
+  /** All branch+tag labels per snapshot's git commit sha. Absent shas
+   *  fall back to a short-sha chip. */
   refLabels: Record<string, CommitRefLabel[]>;
 }
 
@@ -112,15 +130,24 @@ export function LocalHistoryDashboardPage({
         });
         effortsBySnapshot.set(e.endSnapshotId, list);
       }
+      // The earliest snapshot in our window is the stream's first
+      // snapshot only when we've fetched the entire history (no
+      // older rows scrolled past RECENT_LIMIT). Without that guard
+      // we'd falsely label the oldest visible row as "Initial".
+      const sawFullHistory = snapshots.length < RECENT_LIMIT;
+      const earliestId = sawFullHistory && snapshots.length > 0
+        ? snapshots.reduce((min, s) => (s.id < min ? s.id : min), snapshots[0].id)
+        : null;
       const rows: SnapshotRow[] = snapshots.map((snapshot) => ({
         snapshot,
         summary: summaryById.get(snapshot.id) ?? null,
         efforts: effortsBySnapshot.get(snapshot.id) ?? [],
+        isInitial: earliestId !== null && snapshot.id === earliestId,
       }));
-      const pinnedShas = Array.from(
+      const commitShas = Array.from(
         new Set(snapshots.map((s) => s.gitCommit).filter((sha): sha is string => Boolean(sha))),
       );
-      const refLabels = await resolveCommitRefLabels(pinnedShas).catch(() => ({}));
+      const refLabels = await resolveCommitRefLabels(commitShas).catch(() => ({}));
       setData({ rows, refLabels });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -166,16 +193,17 @@ export function LocalHistoryDashboardPage({
           <>
             <RecentSnapshotsCard
               rows={data.rows}
-              onSelect={(id) => onOpenPage(snapshotRef(id))}
+              onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
               refLabels={data.refLabels}
             />
             {byBranch.length > 0 ? (
-              <ByBranchCard groups={byBranch} onSelect={(id) => onOpenPage(snapshotRef(id))}
+              <ByBranchCard groups={byBranch}
+              onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
               refLabels={data.refLabels} onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))} />
             ) : null}
             <RecentEffortsCard
               rows={data.rows}
-              onOpenSnapshot={(id) => onOpenPage(snapshotRef(id))}
+              onOpenSnapshot={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
               onOpenTask={(itemId) => onOpenPage(taskRef(itemId))}
             />
           </>
@@ -185,26 +213,34 @@ export function LocalHistoryDashboardPage({
   );
 }
 
+function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
+  return rows.map((row) => ({
+    ref: snapshotRef(row.snapshot.id),
+    label: formatSnapshotSubject(row.efforts, row.isInitial),
+  }));
+}
+
 function RecentSnapshotsCard({
   rows,
   onSelect,
   refLabels,
 }: {
   rows: SnapshotRow[];
-  onSelect(id: number): void;
+  onSelect(id: number, siblings: NavSiblings): void;
   refLabels: Record<string, CommitRefLabel[]>;
 }) {
+  const entries = useMemo(() => snapshotSiblingEntries(rows), [rows]);
   return (
     <Card testId="local-history-recent" title="Recent Snapshots">
       {rows.length === 0 ? (
         <div style={muted}>No snapshots yet.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
-          {rows.map((row) => (
+          {rows.map((row, idx) => (
             <SnapshotRowItem
               key={row.snapshot.id}
               row={row}
-              onSelect={onSelect}
+              onSelect={(id) => onSelect(id, { entries, index: idx, title: "Recent snapshots" })}
               labels={row.snapshot.gitCommit ? refLabels[row.snapshot.gitCommit] ?? [] : []}
             />
           ))}
@@ -223,10 +259,8 @@ function SnapshotRowItem({
   onSelect(id: number): void;
   labels: CommitRefLabel[];
 }) {
-  const { snapshot, summary, efforts } = row;
-  const subjectish = efforts.length > 0
-    ? efforts.map((e) => e.title).join(" · ")
-    : "External change";
+  const { snapshot, summary, efforts, isInitial } = row;
+  const subjectish = formatSnapshotSubject(efforts, isInitial);
   return (
     <button
       type="button"
@@ -267,39 +301,63 @@ function ByBranchCard({
   refLabels,
 }: {
   groups: Array<{ commit: string; rows: SnapshotRow[] }>;
-  onSelect(id: number): void;
+  onSelect(id: number, siblings: NavSiblings): void;
   onOpenCommit(sha: string): void;
   refLabels: Record<string, CommitRefLabel[]>;
 }) {
   return (
-    <Card testId="local-history-by-branch" title="By Pinned Commit">
+    <Card testId="local-history-by-branch" title="By Git Commit">
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {groups.map((group) => (
-          <div key={group.commit}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-              <button
-                type="button"
-                onClick={() => onOpenCommit(group.commit)}
-                style={{ ...cardLinkButton, fontFamily: "monospace" }}
-              >
-                {group.commit.slice(0, 7)}
-              </button>
-              <span style={subtle}>· {group.rows.length} snapshots</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {group.rows.map((row) => (
-                <SnapshotRowItem
-                  key={row.snapshot.id}
-                  row={row}
-                  onSelect={onSelect}
-                  labels={row.snapshot.gitCommit ? refLabels[row.snapshot.gitCommit] ?? [] : []}
-                />
-              ))}
-            </div>
-          </div>
+          <ByBranchGroup
+            key={group.commit}
+            group={group}
+            onSelect={onSelect}
+            onOpenCommit={onOpenCommit}
+            refLabels={refLabels}
+          />
         ))}
       </div>
     </Card>
+  );
+}
+
+function ByBranchGroup({
+  group,
+  onSelect,
+  onOpenCommit,
+  refLabels,
+}: {
+  group: { commit: string; rows: SnapshotRow[] };
+  onSelect(id: number, siblings: NavSiblings): void;
+  onOpenCommit(sha: string): void;
+  refLabels: Record<string, CommitRefLabel[]>;
+}) {
+  const entries = useMemo(() => snapshotSiblingEntries(group.rows), [group.rows]);
+  const title = `Snapshots at ${group.commit.slice(0, 7)}`;
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <button
+          type="button"
+          onClick={() => onOpenCommit(group.commit)}
+          style={{ ...cardLinkButton, fontFamily: "monospace" }}
+        >
+          {group.commit.slice(0, 7)}
+        </button>
+        <span style={subtle}>· {group.rows.length} snapshots</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {group.rows.map((row, idx) => (
+          <SnapshotRowItem
+            key={row.snapshot.id}
+            row={row}
+            onSelect={(id) => onSelect(id, { entries, index: idx, title })}
+            labels={row.snapshot.gitCommit ? refLabels[row.snapshot.gitCommit] ?? [] : []}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -309,11 +367,18 @@ function RecentEffortsCard({
   onOpenTask,
 }: {
   rows: SnapshotRow[];
-  onOpenSnapshot(id: number): void;
+  onOpenSnapshot(id: number, siblings: NavSiblings): void;
   onOpenTask(itemId: number): void;
 }) {
   const flat = rows.flatMap((row) =>
-    row.efforts.map((e) => ({ snapshot: row.snapshot, effort: e })),
+    row.efforts.map((e) => ({ snapshot: row.snapshot, effort: e, isInitial: row.isInitial })),
+  );
+  const entries = useMemo<NavSiblingEntry[]>(
+    () => flat.map((f) => ({
+      ref: snapshotRef(f.snapshot.id),
+      label: f.effort.title,
+    })),
+    [flat],
   );
   return (
     <Card testId="local-history-efforts" title="Recent Task Efforts">
@@ -321,7 +386,7 @@ function RecentEffortsCard({
         <div style={muted}>No task efforts landed in the recent snapshot window.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
-          {flat.map(({ snapshot, effort }) => (
+          {flat.map(({ snapshot, effort }, idx) => (
             <div
               key={effort.effortId}
               style={{
@@ -345,7 +410,7 @@ function RecentEffortsCard({
               </button>
               <button
                 type="button"
-                onClick={() => onOpenSnapshot(snapshot.id)}
+                onClick={() => onOpenSnapshot(snapshot.id, { entries, index: idx, title: "Recent task efforts" })}
                 style={cardLinkButton}
                 title="Open snapshot detail"
               >

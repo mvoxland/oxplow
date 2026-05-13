@@ -2502,9 +2502,15 @@ export function App() {
       // Closures bind navigation to the SLOT's current ref id so that
       // when a back-stack page (still mounted, hidden) navigates, it
       // mutates the slot — same behavior as the visible page.
-      const navOpen = (newRef: TabRef, opts?: { newTab?: boolean }) => {
+      const navOpen = (
+        newRef: TabRef,
+        opts?: {
+          newTab?: boolean;
+          siblings?: import("./tabs/PageNavigationContext.js").NavSiblings;
+        },
+      ) => {
         if (opts?.newTab) handleOpenPage(newRef);
-        else handleNavigateInTab(slotRef.id, newRef);
+        else handleNavigateInTab(slotRef.id, newRef, opts?.siblings);
       };
       const navOpenFile = (path: string, opts?: { newTab?: boolean }) => {
         if (opts?.newTab) handleOpenPage(fileRef(path));
