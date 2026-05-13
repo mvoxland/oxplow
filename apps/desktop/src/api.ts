@@ -465,6 +465,15 @@ export async function getDefaultBranch(): Promise<string | null> {
   return unwrap(await commands.getDefaultBranch());
 }
 
+export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;
+
+export async function resolveCommitRefLabels(
+  shas: string[],
+): Promise<Record<string, CommitRefLabel[]>> {
+  if (shas.length === 0) return {};
+  return unwrap(await commands.resolveCommitRefLabels(shas));
+}
+
 export async function listGitRefs(): Promise<import("./api-types.js").GroupedGitRefs> {
   const raw = unwrap(await commands.listAllRefs());
   const localBranches = raw.locals.map((r) => ({
@@ -1535,22 +1544,36 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
   ) as unknown as SnapshotSummary | null;
 }
 
+/** Flat efforts whose end snapshot matched one of the requested
+ *  parent snapshot ids. Callers group by `endSnapshotId` themselves
+ *  — the IPC only carries effort columns (no task title), so any
+ *  display label has to be resolved via `getTaskSummaries`. */
+export interface EndingEffort {
+  effortId: string;
+  tasksId: number;
+  threadId: string;
+  endSnapshotId: number;
+}
+
 export async function listEffortsEndingAtSnapshots(
-  snapshotIds: string[],
-): Promise<Record<string, Array<{ effortId: string; tasksId: number; threadId: string; title: string; status: TaskStatus; priority: TaskPriority }>>> {
-  return unwrap(
-    await commands.listEffortsEndingAtSnapshots(snapshotIds.map(Number)),
-  ) as unknown as Record<
-    string,
-    Array<{
-      effortId: string;
-      tasksId: number;
-      threadId: string;
-      title: string;
-      status: TaskStatus;
-      priority: TaskPriority;
-    }>
-  >;
+  snapshotIds: number[],
+): Promise<EndingEffort[]> {
+  const rows = unwrap(
+    await commands.listEffortsEndingAtSnapshots(snapshotIds),
+  ) as unknown as Array<{
+    id: string;
+    task_id: number;
+    thread_id: string;
+    end_snapshot_id: number | null;
+  }>;
+  return rows
+    .filter((r) => r.end_snapshot_id != null)
+    .map((r) => ({
+      effortId: r.id,
+      tasksId: r.task_id,
+      threadId: r.thread_id,
+      endSnapshotId: r.end_snapshot_id!,
+    }));
 }
 
 export async function restoreFileFromSnapshot(

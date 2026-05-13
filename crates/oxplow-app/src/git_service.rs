@@ -27,9 +27,10 @@ use oxplow_domain::stores::StreamStore;
 use oxplow_domain::{StreamId, Timestamp};
 use oxplow_git::{
     detect_current_branch, AheadBehind, BlameLine, BranchChanges, BranchRef, ChangeScopes,
-    CommitDetail, GitFileStatus, GitLogCommit, GitLogOptions, GitLogResult, GitOpResult,
-    GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry, RepoConflictState,
-    TextSearchHit, WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile, WorkspaceStatusSummary,
+    CommitDetail, CommitRefLabel, GitFileStatus, GitLogCommit, GitLogOptions, GitLogResult,
+    GitOpResult, GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry,
+    RepoConflictState, TextSearchHit, WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile,
+    WorkspaceStatusSummary,
 };
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{debug, warn};
@@ -821,6 +822,19 @@ impl GitService {
         tokio::task::spawn_blocking(move || oxplow_git::list_all_refs(&path))
             .await
             .expect("list_all_refs join")
+    }
+
+    /// Map commit SHAs to every branch + tag pointing at them.
+    /// Branches come first, then tags. Shas without a matching ref
+    /// are absent — caller falls back to a short-sha chip.
+    pub async fn resolve_commit_ref_labels(
+        &self,
+        shas: Vec<String>,
+    ) -> std::collections::HashMap<String, Vec<CommitRefLabel>> {
+        let path = self.project_dir.clone();
+        tokio::task::spawn_blocking(move || oxplow_git::resolve_commit_ref_labels(&path, &shas))
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn list_recent_remote_branches(&self, limit: usize) -> Vec<RemoteBranchEntry> {

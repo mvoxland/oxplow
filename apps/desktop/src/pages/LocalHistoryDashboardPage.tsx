@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ParentSnapshot, Stream, TaskPriority, TaskStatus } from "../api.js";
+import type { CommitRefLabel, EndingEffort, ParentSnapshot, Stream } from "../api.js";
 import {
-  getBlobStorageBytes,
   getParentSnapshotSummary,
+  getTaskSummaries,
   listEffortsEndingAtSnapshots,
   listParentSnapshots,
+  resolveCommitRefLabels,
   subscribeSnapshotEvents,
 } from "../api.js";
 import { Card, cardLinkButton } from "../components/Card.js";
-import { formatBytes, formatShortDateTime } from "../components/format.js";
+import { FileStatusCounts } from "../components/FileStatusCounts.js";
+import { RefBadge } from "../components/RefBadge.js";
+import { formatShortDateTime } from "../components/format.js";
 import { logUi } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -21,25 +24,23 @@ export interface LocalHistoryDashboardPageProps {
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
 }
 
+interface SnapshotRowEffort {
+  effortId: string;
+  tasksId: number;
+  title: string;
+}
+
 interface SnapshotRow {
   parent: ParentSnapshot;
   summary: { created: number; modified: number; deleted: number; total: number } | null;
-  efforts: Array<{
-    effortId: string;
-    tasksId: number;
-    threadId: string;
-    title: string;
-    status: TaskStatus;
-    priority: TaskPriority;
-  }>;
+  efforts: SnapshotRowEffort[];
 }
 
 interface DashboardData {
   rows: SnapshotRow[];
-  storage: {
-    totalSnapshots: number;
-    blobBytes: number;
-  };
+  /** All branch+tag labels per pinned commit sha. Absent shas fall
+   *  back to a short-sha chip. */
+  refLabels: Record<string, CommitRefLabel[]>;
 }
 
 /**
@@ -69,12 +70,9 @@ export function LocalHistoryDashboardPage({
     }
     try {
       setError(null);
-      const [parents, blobBytes] = await Promise.all([
-        listParentSnapshots(streamId, RECENT_LIMIT),
-        getBlobStorageBytes().catch(() => 0),
-      ]);
+      const parents = await listParentSnapshots(streamId, RECENT_LIMIT);
       const parentIds = parents.map((p) => p.id);
-      const [summaries, effortsByParent] = await Promise.all([
+      const [summaries, endingEfforts] = await Promise.all([
         Promise.all(
           parentIds.map(async (id) => {
             try {
@@ -85,21 +83,45 @@ export function LocalHistoryDashboardPage({
             }
           }),
         ),
-        listEffortsEndingAtSnapshots(parentIds.map(String)).catch(() => ({})),
+        listEffortsEndingAtSnapshots(parentIds).catch((err): EndingEffort[] => {
+          logUi("warn", "ending efforts fetch failed", { error: String(err) });
+          return [];
+        }),
       ]);
       const summaryById = new Map<number, { created: number; modified: number; deleted: number; total: number }>();
       for (const [id, s] of summaries) {
         if (s) summaryById.set(id, s);
       }
+      // Resolve task titles for every effort the dashboard will show
+      // — the efforts IPC only carries effort columns, no task title.
+      const uniqueTaskIds = Array.from(new Set(endingEfforts.map((e) => e.tasksId)));
+      const taskSummaries = await getTaskSummaries(uniqueTaskIds).catch((err) => {
+        logUi("warn", "task summaries fetch failed", { error: String(err) });
+        return [] as Array<{ id: number; title: string }>;
+      });
+      const titleByTaskId = new Map<number, string>(
+        taskSummaries.map((t) => [t.id, t.title] as [number, string]),
+      );
+      const effortsByParent = new Map<number, SnapshotRowEffort[]>();
+      for (const e of endingEfforts) {
+        const list = effortsByParent.get(e.endSnapshotId) ?? [];
+        list.push({
+          effortId: e.effortId,
+          tasksId: e.tasksId,
+          title: titleByTaskId.get(e.tasksId) ?? `task ${e.tasksId}`,
+        });
+        effortsByParent.set(e.endSnapshotId, list);
+      }
       const rows: SnapshotRow[] = parents.map((parent) => ({
         parent,
         summary: summaryById.get(parent.id) ?? null,
-        efforts: effortsByParent[String(parent.id)] ?? [],
+        efforts: effortsByParent.get(parent.id) ?? [],
       }));
-      setData({
-        rows,
-        storage: { totalSnapshots: parents.length, blobBytes },
-      });
+      const pinnedShas = Array.from(
+        new Set(parents.map((p) => p.gitCommit).filter((s): s is string => Boolean(s))),
+      );
+      const refLabels = await resolveCommitRefLabels(pinnedShas).catch(() => ({}));
+      setData({ rows, refLabels });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -142,13 +164,14 @@ export function LocalHistoryDashboardPage({
         {loading && !data ? <div style={muted}>Loading…</div> : null}
         {data ? (
           <>
-            <StorageCard storage={data.storage} />
             <RecentSnapshotsCard
               rows={data.rows}
               onSelect={(id) => onOpenPage(snapshotRef(id))}
+              refLabels={data.refLabels}
             />
             {byBranch.length > 0 ? (
-              <ByBranchCard groups={byBranch} onSelect={(id) => onOpenPage(snapshotRef(id))} onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))} />
+              <ByBranchCard groups={byBranch} onSelect={(id) => onOpenPage(snapshotRef(id))}
+              refLabels={data.refLabels} onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))} />
             ) : null}
             <RecentEffortsCard
               rows={data.rows}
@@ -162,33 +185,14 @@ export function LocalHistoryDashboardPage({
   );
 }
 
-function StorageCard({
-  storage,
-}: {
-  storage: DashboardData["storage"];
-}) {
-  return (
-    <Card testId="local-history-storage" title="Storage">
-      <div style={{ display: "flex", gap: 18, fontSize: 13 }}>
-        <div>
-          <div style={subtle}>Recent snapshots</div>
-          <div style={{ fontWeight: 500 }}>{storage.totalSnapshots}</div>
-        </div>
-        <div>
-          <div style={subtle}>Blob storage</div>
-          <div style={{ fontWeight: 500 }}>{formatBytes(storage.blobBytes)}</div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 function RecentSnapshotsCard({
   rows,
   onSelect,
+  refLabels,
 }: {
   rows: SnapshotRow[];
   onSelect(id: number): void;
+  refLabels: Record<string, CommitRefLabel[]>;
 }) {
   return (
     <Card testId="local-history-recent" title="Recent Snapshots">
@@ -197,7 +201,12 @@ function RecentSnapshotsCard({
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {rows.map((row) => (
-            <SnapshotRowItem key={row.parent.id} row={row} onSelect={onSelect} />
+            <SnapshotRowItem
+              key={row.parent.id}
+              row={row}
+              onSelect={onSelect}
+              labels={row.parent.gitCommit ? refLabels[row.parent.gitCommit] ?? [] : []}
+            />
           ))}
         </div>
       )}
@@ -208,15 +217,15 @@ function RecentSnapshotsCard({
 function SnapshotRowItem({
   row,
   onSelect,
+  labels,
 }: {
   row: SnapshotRow;
   onSelect(id: number): void;
+  labels: CommitRefLabel[];
 }) {
   const { parent, summary, efforts } = row;
   const subjectish = efforts.length > 0
     ? efforts.map((e) => e.title).join(" · ")
-    : parent.gitCommit
-    ? `Clean tree at ${parent.gitCommit.slice(0, 7)}`
     : "External change";
   return (
     <button
@@ -226,20 +235,27 @@ function SnapshotRowItem({
       style={rowButtonStyle}
       title="Open snapshot detail"
     >
-      <span style={{ ...subtle, width: 130, flexShrink: 0 }} title={parent.createdAt}>
-        {formatShortDateTime(parent.createdAt)}
-      </span>
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {subjectish}
       </span>
+      {labels.length > 0
+        ? labels.map((l) => (
+            <RefBadge key={`${l.kind}-${l.name}`} label={l.name} tone={l.kind} />
+          ))
+        : parent.gitCommit
+        ? <RefBadge label={parent.gitCommit.slice(0, 7)} tone="sha" />
+        : null}
       {summary ? (
-        <span style={{ ...subtle, fontFamily: "monospace", whiteSpace: "nowrap" }}
-          title={`${summary.total} files captured`}>
-          +{summary.created} ~{summary.modified} −{summary.deleted}
-        </span>
-      ) : (
-        <span style={{ ...subtle, fontFamily: "monospace" }}>{parent.fileCount} files</span>
-      )}
+        <FileStatusCounts
+          filesAdded={summary.created}
+          filesModified={summary.modified}
+          filesDeleted={summary.deleted}
+          title={`${summary.total} file${summary.total === 1 ? "" : "s"} captured: ${summary.created} created · ${summary.modified} modified · ${summary.deleted} deleted`}
+        />
+      ) : null}
+      <span style={{ ...subtle, width: 130, flexShrink: 0, textAlign: "right" }} title={parent.createdAt}>
+        {formatShortDateTime(parent.createdAt)}
+      </span>
     </button>
   );
 }
@@ -248,10 +264,12 @@ function ByBranchCard({
   groups,
   onSelect,
   onOpenCommit,
+  refLabels,
 }: {
   groups: Array<{ commit: string; rows: SnapshotRow[] }>;
   onSelect(id: number): void;
   onOpenCommit(sha: string): void;
+  refLabels: Record<string, CommitRefLabel[]>;
 }) {
   return (
     <Card testId="local-history-by-branch" title="By Pinned Commit">
@@ -270,7 +288,12 @@ function ByBranchCard({
             </div>
             <div style={{ display: "flex", flexDirection: "column" }}>
               {group.rows.map((row) => (
-                <SnapshotRowItem key={row.parent.id} row={row} onSelect={onSelect} />
+                <SnapshotRowItem
+                  key={row.parent.id}
+                  row={row}
+                  onSelect={onSelect}
+                  labels={row.parent.gitCommit ? refLabels[row.parent.gitCommit] ?? [] : []}
+                />
               ))}
             </div>
           </div>
@@ -316,7 +339,7 @@ function RecentEffortsCard({
                 type="button"
                 onClick={() => onOpenTask(effort.tasksId)}
                 style={{ ...cardLinkButton, flex: 1, minWidth: 0, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                title={`task ${effort.tasksId} · ${effort.status}`}
+                title={`task ${effort.tasksId}`}
               >
                 {effort.title}
               </button>

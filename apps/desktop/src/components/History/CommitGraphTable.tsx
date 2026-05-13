@@ -1,10 +1,11 @@
-import type { CSSProperties, MutableRefObject } from "react";
+import type { MutableRefObject } from "react";
 import { useMemo } from "react";
 import type { GitLogCommit, GitLogResult } from "../../api.js";
 import { layoutCommits, type GraphRow } from "./layout.js";
 import { useRouteDispatch } from "../../tabs/RouteLink.js";
 import { gitCommitRef } from "../../tabs/pageRefs.js";
 import type { NavSiblingEntry } from "../../tabs/PageNavigationContext.js";
+import { RefBadge } from "../RefBadge.js";
 
 const BRANCH_COLORS = [
   "#4a9eff",
@@ -352,32 +353,6 @@ function pad2(n: number): string {
 
 function pad3(n: number): string {
   return String(n).padStart(3, " ");
-}
-
-function RefBadge({ label, tone }: { label: string; tone: "branch" | "current" | "tag" }) {
-  const styles: Record<typeof tone, CSSProperties> = {
-    branch: { borderColor: "#4a9eff", color: "#4a9eff" },
-    current: { borderColor: "#86efac", color: "#86efac", fontWeight: 600 },
-    tag: { borderColor: "#fcd34d", color: "#fcd34d" },
-  };
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        border: "1px solid",
-        borderRadius: 999,
-        padding: "0 6px",
-        fontSize: 10,
-        lineHeight: "14px",
-        flexShrink: 0,
-        ...styles[tone],
-      }}
-      title={tone === "tag" ? `tag: ${label}` : label}
-    >
-      {tone === "tag" ? "🏷 " : ""}{label}
-    </span>
-  );
 }
 
 /**

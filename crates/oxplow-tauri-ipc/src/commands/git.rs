@@ -1,9 +1,10 @@
 use oxplow_domain::stores::StreamStore;
 use oxplow_git::{
-    AheadBehind, BlameLine, BranchChanges, ChangeScopes, GitOpResult, GitOperationKind,
-    GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry, RepoConflictState,
-    TextSearchHit,
+    AheadBehind, BlameLine, BranchChanges, ChangeScopes, CommitRefLabel, GitOpResult,
+    GitOperationKind, GitWorktreeEntry, GroupedGitRefs, LocalBlameEntry, RemoteBranchEntry,
+    RepoConflictState, TextSearchHit,
 };
+use std::collections::HashMap;
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -194,6 +195,19 @@ pub async fn git_add_path(
 #[specta::specta]
 pub async fn list_all_refs(state: tauri::State<'_, AppState>) -> Result<GroupedGitRefs, IpcError> {
     Ok(state.git.list_all_refs().await)
+}
+
+/// Map commit SHAs to a single user-facing branch/tag label. Used by
+/// the Local History dashboard to chip each parent snapshot with its
+/// pinned commit's branch/tag name; SHAs that match no ref are absent
+/// from the result (caller renders a short-sha fallback).
+#[tauri::command]
+#[specta::specta]
+pub async fn resolve_commit_ref_labels(
+    state: tauri::State<'_, AppState>,
+    shas: Vec<String>,
+) -> Result<HashMap<String, Vec<CommitRefLabel>>, IpcError> {
+    Ok(state.git.resolve_commit_ref_labels(shas).await)
 }
 
 #[tauri::command]

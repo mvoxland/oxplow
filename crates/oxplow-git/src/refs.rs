@@ -93,6 +93,90 @@ pub fn list_all_refs(repo_path: &Path) -> GroupedGitRefs {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitRefLabelKind {
+    Branch,
+    Tag,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct CommitRefLabel {
+    pub kind: CommitRefLabelKind,
+    pub name: String,
+}
+
+/// Given a set of commit SHAs, return every branch + tag that points
+/// directly at each sha. Branches come first (sorted by name), then
+/// tags (sorted by name). SHAs with no matching ref are omitted —
+/// callers fall back to a short-sha chip.
+pub fn resolve_commit_ref_labels(
+    repo_path: &Path,
+    shas: &[String],
+) -> std::collections::HashMap<String, Vec<CommitRefLabel>> {
+    let mut out: std::collections::HashMap<String, Vec<CommitRefLabel>> =
+        std::collections::HashMap::new();
+    let repo = match git2::Repository::open(repo_path) {
+        Ok(r) => r,
+        Err(_) => return out,
+    };
+    let want: std::collections::HashSet<&str> = shas.iter().map(|s| s.as_str()).collect();
+    if let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) {
+        for entry in branches.flatten() {
+            let (branch, _) = entry;
+            let Ok(Some(name)) = branch.name() else {
+                continue;
+            };
+            let Ok(reference) = branch.get().resolve() else {
+                continue;
+            };
+            let Some(oid) = reference.target() else {
+                continue;
+            };
+            let sha = oid.to_string();
+            if want.contains(sha.as_str()) {
+                out.entry(sha).or_default().push(CommitRefLabel {
+                    kind: CommitRefLabelKind::Branch,
+                    name: name.to_string(),
+                });
+            }
+        }
+    }
+    if let Ok(tag_names) = repo.tag_names(None) {
+        for name in tag_names.iter().flatten() {
+            let full = format!("refs/tags/{name}");
+            let Ok(reference) = repo.find_reference(&full) else {
+                continue;
+            };
+            let target_oid = match reference.peel_to_commit() {
+                Ok(commit) => commit.id(),
+                Err(_) => match reference.target() {
+                    Some(oid) => oid,
+                    None => continue,
+                },
+            };
+            let sha = target_oid.to_string();
+            if want.contains(sha.as_str()) {
+                out.entry(sha).or_default().push(CommitRefLabel {
+                    kind: CommitRefLabelKind::Tag,
+                    name: name.to_string(),
+                });
+            }
+        }
+    }
+    // Stable ordering: branches (already alphabetical within their
+    // pass), then tags. Sort each kind alphabetically to keep the
+    // chip order deterministic across calls.
+    for labels in out.values_mut() {
+        labels.sort_by(|a, b| match (&a.kind, &b.kind) {
+            (CommitRefLabelKind::Branch, CommitRefLabelKind::Tag) => std::cmp::Ordering::Less,
+            (CommitRefLabelKind::Tag, CommitRefLabelKind::Branch) => std::cmp::Ordering::Greater,
+            _ => a.name.cmp(&b.name),
+        });
+    }
+    out
+}
+
 /// Read a file's contents at a given ref. Returns `None` if the path
 /// does not exist at that ref.
 pub fn read_file_at_ref(repo_path: &Path, r#ref: &str, path: &str) -> Option<String> {
@@ -247,6 +331,92 @@ mod tests {
             .current_dir(dir)
             .output()
             .unwrap();
+    }
+
+    #[test]
+    fn resolve_commit_ref_labels_lists_branch_and_tag_on_same_sha() {
+        let dir = tempdir().unwrap();
+        init_with_commit(dir.path(), "a.txt", "x");
+        Command::new("git")
+            .args(["tag", "v1"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        // A second branch on the same sha so we can verify multiple
+        // branches list together.
+        Command::new("git")
+            .args(["branch", "release"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let head_out = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let head = String::from_utf8(head_out.stdout)
+            .unwrap()
+            .trim()
+            .to_string();
+        let labels = resolve_commit_ref_labels(dir.path(), std::slice::from_ref(&head));
+        let labels = labels.get(&head).expect("head has labels");
+        // Branches before tags, alphabetical within each kind.
+        assert_eq!(labels.len(), 3);
+        assert_eq!(labels[0].kind, CommitRefLabelKind::Branch);
+        assert_eq!(labels[0].name, "main");
+        assert_eq!(labels[1].kind, CommitRefLabelKind::Branch);
+        assert_eq!(labels[1].name, "release");
+        assert_eq!(labels[2].kind, CommitRefLabelKind::Tag);
+        assert_eq!(labels[2].name, "v1");
+    }
+
+    #[test]
+    fn resolve_commit_ref_labels_returns_tag_when_no_branch() {
+        let dir = tempdir().unwrap();
+        init_with_commit(dir.path(), "a.txt", "x");
+        Command::new("git")
+            .args(["tag", "v1"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let head_out = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let head = String::from_utf8(head_out.stdout)
+            .unwrap()
+            .trim()
+            .to_string();
+        // Make a second commit so the tag stays on the older sha
+        // without a branch.
+        Command::new("git")
+            .args(["checkout", "-b", "feat"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::fs::write(dir.path().join("b.txt"), "y").unwrap();
+        Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "msg2"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        // Now delete `main` so the original sha has only the tag.
+        Command::new("git")
+            .args(["branch", "-D", "main"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let labels = resolve_commit_ref_labels(dir.path(), std::slice::from_ref(&head));
+        let labels = labels.get(&head).expect("head has labels");
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].kind, CommitRefLabelKind::Tag);
+        assert_eq!(labels[0].name, "v1");
     }
 
     #[test]

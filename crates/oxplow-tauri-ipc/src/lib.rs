@@ -143,6 +143,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::git::git_commit_all,
         commands::git::git_add_path,
         commands::git::list_all_refs,
+        commands::git::resolve_commit_ref_labels,
         commands::git::list_recent_remote_branches,
         commands::git::list_file_commits,
         commands::git::read_file_at_ref,

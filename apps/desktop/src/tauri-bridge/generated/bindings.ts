@@ -422,6 +422,13 @@ export const commands = {
 	gitCommitAll: (streamId: string | null, message: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_commit_all", { streamId, message })),
 	gitAddPath: (streamId: string | null, path: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_add_path", { streamId, path })),
 	listAllRefs: () => typedError<GroupedGitRefs, IpcError>(__TAURI_INVOKE("list_all_refs")),
+	/**
+	 *  Map commit SHAs to a single user-facing branch/tag label. Used by
+	 *  the Local History dashboard to chip each parent snapshot with its
+	 *  pinned commit's branch/tag name; SHAs that match no ref are absent
+	 *  from the result (caller renders a short-sha fallback).
+	 */
+	resolveCommitRefLabels: (shas: string[]) => typedError<{ [key in string]: CommitRefLabel[] }, IpcError>(__TAURI_INVOKE("resolve_commit_ref_labels", { shas })),
 	listRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError>(__TAURI_INVOKE("list_recent_remote_branches", { limit })),
 	listFileCommits: (streamId: string | null, path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { streamId, path, limit })),
 	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
@@ -878,6 +885,13 @@ export type CommitDetailFile = {
 	deletions: number,
 	status: string,
 };
+
+export type CommitRefLabel = {
+	kind: CommitRefLabelKind,
+	name: string,
+};
+
+export type CommitRefLabelKind = "branch" | "tag";
 
 export type CreateTaskInput = {
 	title: string,
