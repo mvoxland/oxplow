@@ -349,6 +349,20 @@ by `GitRefsWatcher` upstream), which catches new commits whether
 they came from the in-app commit affordance or an external
 `git commit` in the user's terminal.
 
+## Snapshot capture reacts to HEAD moves
+
+`SnapshotCaptureService::spawn_git_refs_listener` (wired from the
+desktop boot in `apps/desktop/src-tauri/src/main.rs`) subscribes to
+`OxplowEvent::GitRefsChanged` for its stream. On each event it drains
+any pending dirty paths via `request_snapshot(SnapshotSourceKind::GitRefs)`,
+then — if the worktree is clean and HEAD's sha differs from the latest
+snapshot's `git_commit` — **re-stamps the latest snapshot's
+`git_commit` to point at the new HEAD**. No new row is inserted: the
+worktree didn't change, so the existing snapshot is already the right
+representation of disk; it just now also corresponds to a new commit
+(common after `git commit`, `git commit --amend`, or a fast-forward
+pull that moves HEAD without altering the working tree).
+
 ## Related
 
 - [data-model.md](./data-model.md) — schema overview, including the

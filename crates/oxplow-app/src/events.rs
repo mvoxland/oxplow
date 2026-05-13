@@ -39,6 +39,12 @@ pub enum SnapshotSourceKind {
     TaskEvent,
     Startup,
     Manual,
+    /// Triggered by a HEAD/refs change (commit, branch switch, pull,
+    /// rebase, …). The capture service still drains any pending
+    /// dirty files; the new variant exists so an empty drain can
+    /// still emit a snapshot row that records the new HEAD when the
+    /// previous snapshot pointed at a different commit.
+    GitRefs,
 }
 
 /// Code-quality scan lifecycle phase the bus broadcasts. Mirrors the

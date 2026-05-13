@@ -213,6 +213,94 @@ impl SnapshotCaptureService {
         tokio::spawn(async move { this.run_watcher().await })
     }
 
+    /// Spawn a listener that turns `OxplowEvent::GitRefsChanged` into
+    /// a snapshot request for this stream. The event fires whenever
+    /// HEAD or any ref moves (commit, branch switch, fetch, pull,
+    /// rebase, …), so a fresh commit shows up in Local History as a
+    /// snapshot row tagged with the new HEAD even when the worktree
+    /// itself didn't change between snapshots.
+    ///
+    /// Requires `with_events` to have been called. No-op (returns a
+    /// finished task) when no bus is attached.
+    pub fn spawn_git_refs_listener(&self) -> tokio::task::JoinHandle<()> {
+        let bus = self.inner.events.read().unwrap().clone();
+        let Some(bus) = bus else {
+            return tokio::spawn(async {});
+        };
+        let mut rx = bus.subscribe();
+        let this = self.clone();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(OxplowEvent::GitRefsChanged { stream_id })
+                        if stream_id == this.inner.stream_id =>
+                    {
+                        if let Err(e) = this.request_snapshot_for_git_refs().await {
+                            debug!(error = %e, "snapshot: git-refs trigger failed");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(skipped = n, "snapshot capture: git-refs bus lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+    }
+
+    /// Drain any pending dirty files (via `request_snapshot`), then
+    /// — if the worktree is clean and HEAD has moved past whatever
+    /// the latest snapshot recorded — re-stamp the latest snapshot's
+    /// `git_commit` to point at the new HEAD. No new row is created:
+    /// the worktree state didn't change, so the existing snapshot is
+    /// already the right representation of disk; it just now also
+    /// corresponds to a new commit. Called from
+    /// `spawn_git_refs_listener`.
+    pub async fn request_snapshot_for_git_refs(
+        &self,
+    ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        let after_drain = self.request_snapshot(SnapshotSourceKind::GitRefs).await?;
+
+        let git = self.inner.git.read().unwrap().clone();
+        let Some(git) = git else {
+            return Ok(after_drain);
+        };
+        let stream_ref = Some(self.inner.stream_id.as_str());
+        let statuses = git.statuses(stream_ref).await;
+        if !statuses.is_empty() {
+            // Worktree dirty — the next normal capture will record
+            // the commit when things settle.
+            return Ok(after_drain);
+        }
+        let Some(head_sha) = git.head_commit_sha(stream_ref).await else {
+            return Ok(after_drain);
+        };
+        let Some(latest_id) = self
+            .inner
+            .store
+            .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
+            .await?
+        else {
+            // No snapshot yet — the regular capture path will create
+            // the first row the next time something is dirty.
+            return Ok(None);
+        };
+        let latest_commit = self.inner.store.get_snapshot_git_commit(latest_id).await?;
+        if latest_commit.as_deref() == Some(head_sha.as_str()) {
+            return Ok(Some(latest_id));
+        }
+        self.inner
+            .store
+            .set_snapshot_git_commit(latest_id, head_sha)
+            .await?;
+        info!(
+            snapshot_id = latest_id,
+            "snapshot: re-stamped latest snapshot with new HEAD (no file changes)",
+        );
+        Ok(Some(latest_id))
+    }
+
     async fn run_watcher(self) {
         let watcher =
             match FsWatcher::watch(self.inner.project_dir.clone(), Duration::from_millis(250)) {
@@ -1206,6 +1294,72 @@ mod tests {
         assert_eq!(
             store.get_snapshot_git_commit(with_ignored).await.unwrap(),
             Some(head_oid2.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn git_refs_trigger_restamps_latest_snapshot_when_worktree_unchanged() {
+        let project = tempdir().unwrap();
+        let repo = git2::Repository::init(project.path()).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "t").unwrap();
+        cfg.set_str("user.email", "t@example.com").unwrap();
+        std::fs::write(project.path().join(".gitignore"), ".oxplow\n").unwrap();
+        let tracked = project.path().join("tracked.txt");
+        std::fs::write(&tracked, "v1").unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        idx.add_path(std::path::Path::new(".gitignore")).unwrap();
+        idx.write().unwrap();
+        let tree_id = idx.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = repo.signature().unwrap();
+        let head1_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        let (svc, store) = svc_for(project.path()).await;
+        let svc = svc.with_git(git_service_for(project.path()));
+
+        // Initial snapshot — captures the tracked file and records the
+        // first commit.
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
+        let first_id = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store.get_snapshot_git_commit(first_id).await.unwrap(),
+            Some(head1_oid.to_string())
+        );
+
+        // User commits a new revision externally — worktree stays
+        // byte-identical to its previous state from oxplow's POV.
+        let parent = repo.find_commit(head1_oid).unwrap();
+        let head2_oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "empty 2", &tree, &[&parent])
+            .unwrap();
+
+        // No fs-watch event would fire (no file changed), but the
+        // git-refs listener triggers this path. The existing snapshot
+        // is re-stamped — no new row is created.
+        let second_id = svc.request_snapshot_for_git_refs().await.unwrap().unwrap();
+        assert_eq!(
+            second_id, first_id,
+            "no file changes → must re-use the existing row, not create a new one"
+        );
+        assert_eq!(
+            store.get_snapshot_git_commit(second_id).await.unwrap(),
+            Some(head2_oid.to_string())
+        );
+
+        // Calling again at the same HEAD is a no-op.
+        let third_id = svc.request_snapshot_for_git_refs().await.unwrap().unwrap();
+        assert_eq!(third_id, second_id);
+        assert_eq!(
+            store.get_snapshot_git_commit(third_id).await.unwrap(),
+            Some(head2_oid.to_string())
         );
     }
 

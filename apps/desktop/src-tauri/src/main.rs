@@ -72,6 +72,10 @@ fn main() {
     let snapshot_svc = (*state.snapshot_capture).clone();
     let project_dir = state.layout.project_dir.clone();
     snapshot_svc.spawn_watcher();
+    // Subscribe to GitRefsChanged so a fresh commit (or any HEAD
+    // move) shows up in Local History as a snapshot row tagged with
+    // the new commit, even when the worktree itself didn't change.
+    snapshot_svc.spawn_git_refs_listener();
     // Startup sweep: any file whose current content doesn't match
     // the latest snapshot row (or was never snapshotted) gets
     // queued + captured now. Backfills changes that landed while
