@@ -17,14 +17,15 @@
 //! the watcher loop once at boot via `spawn_watcher()`; everything
 //! else is method calls on the cloned handle.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex as AsyncMutex;
 
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use std::time::UNIX_EPOCH;
 
@@ -46,6 +47,21 @@ use oxplow_fs_watch::{should_ignore_workspace_watch_path, FsWatcher};
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
 
+/// Pre-computed metadata supplied to `mark_dirty_with_staging` by
+/// callers that already read + hashed the file (and wrote the blob).
+/// When attached to a dirty-set entry, the capture loop skips re-stat
+/// / re-read / re-hash / re-write and builds the DB row directly.
+///
+/// `blob_hash = None` means either an oversize row (metadata only) or
+/// a deletion row — distinguish via `oversize`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaptureStaging {
+    pub size_bytes: i64,
+    pub mtime_ms: Option<i64>,
+    pub blob_hash: Option<String>,
+    pub oversize: bool,
+}
+
 #[derive(Clone)]
 pub struct SnapshotCaptureService {
     inner: Arc<Inner>,
@@ -64,10 +80,19 @@ struct Inner {
     /// Snapshots panel without polling.
     events: RwLock<Option<EventBus>>,
     /// Paths that have changed since the last `request_snapshot()`.
-    /// The watcher loop pushes into this set; `request_snapshot`
-    /// drains it. A HashSet collapses repeated edits to the same
-    /// file between requests into a single capture.
-    dirty: Mutex<HashSet<PathBuf>>,
+    /// The watcher loop pushes into this map; `request_snapshot`
+    /// drains it. Keyed by path so repeated edits between requests
+    /// collapse into a single capture.
+    ///
+    /// The value carries optional pre-staged metadata: callers that
+    /// already read + hashed the file (currently just the startup
+    /// sweep, after writing the blob inline) supply
+    /// `Some(CaptureStaging)`, letting `request_snapshot` skip the
+    /// stat / read / hash / blob.write entirely and just build the DB
+    /// row. fs-watch and explicit `mark_dirty` callers store `None`;
+    /// those paths go through the full parallel-process pipeline in
+    /// `request_snapshot`.
+    dirty: Mutex<HashMap<PathBuf, Option<CaptureStaging>>>,
     /// Gate that serializes `request_snapshot` so at most one
     /// capture runs at a time. When a second call arrives while a
     /// capture is in flight, `try_lock` fails and the caller returns
@@ -99,7 +124,7 @@ impl SnapshotCaptureService {
                 stream_id,
                 max_file_bytes,
                 events: RwLock::new(None),
-                dirty: Mutex::new(HashSet::new()),
+                dirty: Mutex::new(HashMap::new()),
                 in_flight: AsyncMutex::new(()),
                 git: RwLock::new(None),
             }),
@@ -169,11 +194,26 @@ impl SnapshotCaptureService {
         }
     }
 
-    /// Add a path to the dirty set. Exposed for the startup sweep
-    /// (and any future code paths that want to enqueue captures
-    /// without going through fs-watch).
+    /// Add a path to the dirty set. The next `request_snapshot` will
+    /// stat + read + hash + blob.write + INSERT for it. fs-watch and
+    /// most call sites use this; the startup sweep prefers
+    /// [`mark_dirty_with_staging`] to skip the redundant re-read of
+    /// bytes it already had in memory.
     pub fn mark_dirty(&self, path: PathBuf) {
-        self.inner.dirty.lock().unwrap().insert(path);
+        let mut set = self.inner.dirty.lock().unwrap();
+        // Don't downgrade an already-staged entry to None — keep the
+        // pre-computed metadata so capture stays fast.
+        set.entry(path).or_insert(None);
+    }
+
+    /// Add a path to the dirty set along with pre-computed staging
+    /// metadata. `request_snapshot` will build the DB row from the
+    /// staging fields and skip the file-read / blob-write — the
+    /// caller must have already written the blob (when applicable).
+    /// If the path already has a staging entry from a prior call,
+    /// the newer staging wins.
+    pub fn mark_dirty_with_staging(&self, path: PathBuf, staging: CaptureStaging) {
+        self.inner.dirty.lock().unwrap().insert(path, Some(staging));
     }
 
     /// Prune snapshot rows older than `retention_days` (keeping the
@@ -215,16 +255,16 @@ impl SnapshotCaptureService {
                         progress: None,
                     })
                 });
+                let cleanup_started = Instant::now();
                 match this.run_cleanup(retention_days).await {
                     Ok((rows, blobs)) => {
-                        if rows > 0 || blobs > 0 {
-                            tracing::info!(
-                                rows_pruned = rows,
-                                blobs_removed = blobs,
-                                retention_days,
-                                "snapshot cleanup",
-                            );
-                        }
+                        tracing::info!(
+                            rows_pruned = rows,
+                            blobs_removed = blobs,
+                            retention_days,
+                            elapsed_ms = cleanup_started.elapsed().as_millis() as u64,
+                            "snapshot cleanup pass",
+                        );
                         if let (Some(s), Some(t)) = (bts.as_ref(), task.as_ref()) {
                             s.complete(
                                 &t.id,
@@ -261,28 +301,47 @@ impl SnapshotCaptureService {
     pub async fn enqueue_startup_diff(
         &self,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let sweep_started = Instant::now();
+        let db_started = Instant::now();
         let mut latest = self.inner.store.latest_stat_per_path().await?;
+        let prior_rows = latest.len();
+        let db_load_ms = db_started.elapsed().as_millis() as u64;
+        info!(
+            prior_rows,
+            db_load_ms, "snapshot startup sweep: loaded latest_stat_per_path",
+        );
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
+        let blobs = self.inner.blobs.clone();
 
         // Walk + stat off the async runtime — it's all blocking I/O.
         // The walk + per-file stat-shortcircuit stays single-threaded
-        // (cheap; ~50 ms / ~17k files). The expensive read+hash for
-        // paths that fall through is fanned out across the rayon
-        // thread pool — embarrassingly parallel and CPU-bound (xxh3
-        // hashes saturate memory bandwidth, not CPU, so the gain
-        // comes mostly from parallel I/O).
-        let queued = tokio::task::spawn_blocking(move || -> Vec<PathBuf> {
+        // (cheap; ~50 ms / ~17k files). The expensive read+hash+
+        // blob-write for paths that fall through is fanned out across
+        // the rayon thread pool — embarrassingly parallel.
+        //
+        // Phase 2 also writes the blob inline (we already have the
+        // bytes in memory). The resulting `CaptureStaging` is shipped
+        // back across the spawn_blocking boundary and queued via
+        // `mark_dirty_with_staging`, so `request_snapshot` can build
+        // each `file_snapshot` row without touching disk or hashing
+        // again.
+        let queued = tokio::task::spawn_blocking(move || -> Vec<(PathBuf, CaptureStaging)> {
             use rayon::prelude::*;
 
             // Phase 1 (sequential): walk, stat each file, decide
-            // which paths need a read+hash. Outputs three buckets:
-            //   - `to_capture`: immediate enqueues (oversize-new,
-            //     reverse-deletions). No read needed.
+            // which paths fall through to read+hash. Outputs:
+            //   - `staged`: oversize-new (already known) +
+            //     reverse-deletions (path missing on disk). No
+            //     read needed — staging built from stat only.
             //   - `needs_hash`: paths whose (size, mtime) didn't
             //     match the stored stat — fall through to phase 2.
-            let mut to_capture: Vec<PathBuf> = Vec::new();
-            let mut needs_hash: Vec<(PathBuf, Option<String>)> = Vec::new();
+            let mut staged: Vec<(PathBuf, CaptureStaging)> = Vec::new();
+            let mut needs_hash: Vec<(PathBuf, i64, Option<i64>, Option<String>)> = Vec::new();
+            let mut files_seen: u64 = 0;
+            let mut shortcircuit_hits: u64 = 0;
+            let mut oversize_new: u64 = 0;
+            let phase1_started = Instant::now();
             for entry in walkdir::WalkDir::new(&project_dir)
                 .into_iter()
                 .filter_entry(|e| {
@@ -297,6 +356,7 @@ impl SnapshotCaptureService {
                 if !entry.file_type().is_file() {
                     continue;
                 }
+                files_seen += 1;
                 let rel = entry
                     .path()
                     .strip_prefix(&project_dir)
@@ -317,6 +377,7 @@ impl SnapshotCaptureService {
                 if let Some(p) = prior.as_ref() {
                     if let (Some(prior_mtime), Some(cur_mtime)) = (p.mtime_ms, mtime_ms) {
                         if p.size_bytes == size && prior_mtime == cur_mtime {
+                            shortcircuit_hits += 1;
                             continue;
                         }
                     }
@@ -327,46 +388,128 @@ impl SnapshotCaptureService {
                 // identical to the existing one.
                 if size as u64 > max_bytes {
                     if prior.is_none() {
-                        to_capture.push(entry.path().to_path_buf());
+                        oversize_new += 1;
+                        staged.push((
+                            entry.path().to_path_buf(),
+                            CaptureStaging {
+                                size_bytes: size,
+                                mtime_ms,
+                                blob_hash: None,
+                                oversize: true,
+                            },
+                        ));
                     }
                     continue;
                 }
-                needs_hash.push((entry.path().to_path_buf(), prior.and_then(|s| s.blob_hash)));
+                needs_hash.push((
+                    entry.path().to_path_buf(),
+                    size,
+                    mtime_ms,
+                    prior.and_then(|s| s.blob_hash),
+                ));
             }
+            let phase1_ms = phase1_started.elapsed().as_millis() as u64;
+            let needs_hash_count = needs_hash.len() as u64;
+            info!(
+                files_seen,
+                shortcircuit_hits,
+                oversize_new,
+                needs_hash = needs_hash_count,
+                phase1_ms,
+                "snapshot startup sweep: phase 1 (walk + stat) done",
+            );
 
-            // Phase 2 (parallel): read + hash the fall-through set
-            // across the rayon pool. Each worker is independent —
-            // we only emit a path when the new hash differs from the
-            // stored one (or there was no stored hash).
-            let hashed: Vec<PathBuf> = needs_hash
+            // Phase 2 (parallel): read + hash + write-blob the
+            // fall-through set across the rayon pool. Each worker
+            // is independent — we only emit a staging entry when
+            // the new hash differs from the stored one (or there
+            // was no stored hash). `BlobStore::write` short-circuits
+            // when the content-addressed blob is already on disk,
+            // so re-runs are cheap.
+            let bytes_read = AtomicU64::new(0);
+            let blobs_written = AtomicU64::new(0);
+            let phase2_started = Instant::now();
+            let hashed: Vec<(PathBuf, CaptureStaging)> = needs_hash
                 .into_par_iter()
-                .filter_map(|(path, prior_hash)| {
+                .filter_map(|(path, size, mtime_ms, prior_hash)| {
                     let bytes = std::fs::read(&path).ok()?;
+                    bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                     let hash = BlobStore::hash(&bytes);
-                    match prior_hash {
-                        Some(prior) if prior == hash => None,
-                        _ => Some(path),
+                    if let Some(prior) = prior_hash.as_ref() {
+                        if *prior == hash {
+                            return None;
+                        }
                     }
+                    // Persist the blob now — we already have the
+                    // bytes in memory. The serial capture path
+                    // would otherwise re-read the same bytes off
+                    // disk a moment later.
+                    match blobs.write(&bytes) {
+                        Ok(_) => {
+                            blobs_written.fetch_add(1, Ordering::Relaxed);
+                        }
+                        Err(e) => {
+                            warn!(?path, error = %e, "snapshot sweep: blob write failed");
+                            return None;
+                        }
+                    }
+                    Some((
+                        path,
+                        CaptureStaging {
+                            size_bytes: size,
+                            mtime_ms,
+                            blob_hash: Some(hash),
+                            oversize: false,
+                        },
+                    ))
                 })
                 .collect();
-            to_capture.extend(hashed);
+            let phase2_ms = phase2_started.elapsed().as_millis() as u64;
+            let phase2_bytes = bytes_read.load(Ordering::Relaxed);
+            info!(
+                hashed_changed = hashed.len() as u64,
+                blobs_written = blobs_written.load(Ordering::Relaxed),
+                bytes_read = phase2_bytes,
+                mb_read = phase2_bytes as f64 / 1_048_576.0,
+                phase2_ms,
+                throughput_mb_per_s = if phase2_ms == 0 {
+                    0.0
+                } else {
+                    (phase2_bytes as f64 / 1_048_576.0) / (phase2_ms as f64 / 1000.0)
+                },
+                "snapshot startup sweep: phase 2 (parallel read+hash+blob) done",
+            );
+            staged.extend(hashed);
 
-            // Any paths still in `latest` had a snapshot but no file
-            // on disk now. Re-record deletions only for those whose
-            // latest row wasn't already a deletion.
+            // Any paths still in `latest` had a snapshot but no
+            // file on disk now. Re-record deletions only for
+            // those whose latest row wasn't already a deletion.
             for (path, stat) in latest {
                 if stat.blob_hash.is_some() {
-                    to_capture.push(project_dir.join(path));
+                    staged.push((
+                        project_dir.join(path),
+                        CaptureStaging {
+                            size_bytes: 0,
+                            mtime_ms: None,
+                            blob_hash: None,
+                            oversize: false,
+                        },
+                    ));
                 }
             }
-            to_capture
+            staged
         })
         .await?;
 
         let count = queued.len();
-        for path in queued {
-            self.mark_dirty(path);
+        for (path, staging) in queued {
+            self.mark_dirty_with_staging(path, staging);
         }
+        info!(
+            queued = count,
+            elapsed_ms = sweep_started.elapsed().as_millis() as u64,
+            "snapshot startup sweep: done",
+        );
         Ok(count)
     }
 
@@ -404,7 +547,7 @@ impl SnapshotCaptureService {
                     .await?);
             }
         };
-        let drained: Vec<PathBuf> = {
+        let drained: Vec<(PathBuf, Option<CaptureStaging>)> = {
             let mut set = self.inner.dirty.lock().unwrap();
             set.drain().collect()
         };
@@ -415,16 +558,146 @@ impl SnapshotCaptureService {
                 .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
                 .await?);
         }
+        let capture_started = Instant::now();
+        let drained_count = drained.len();
         let parent_id = self
             .inner
             .store
             .create_snapshot(self.inner.stream_id.clone())
             .await?;
-        for path in drained {
-            if let Err(e) = self.capture_path(&path, parent_id, source).await {
-                debug!(?path, error = %e, "snapshot capture: skipped");
+
+        // Split: staged entries → build the row directly; unstaged
+        // entries → run through the parallel stat/read/hash/blob.write
+        // pipeline on the rayon pool, then assemble rows.
+        let mut staged_paths: Vec<(PathBuf, CaptureStaging)> = Vec::new();
+        let mut unstaged_paths: Vec<PathBuf> = Vec::new();
+        for (path, staging) in drained {
+            match staging {
+                Some(s) => staged_paths.push((path, s)),
+                None => unstaged_paths.push(path),
             }
         }
+        let staged_count = staged_paths.len() as u64;
+        let unstaged_count = unstaged_paths.len() as u64;
+
+        let project_dir = self.inner.project_dir.clone();
+        let stream_id = self.inner.stream_id.clone();
+        let max_bytes = self.inner.max_file_bytes;
+        let blobs = self.inner.blobs.clone();
+        let rows: Vec<FileSnapshot> = tokio::task::spawn_blocking(move || -> Vec<FileSnapshot> {
+            use rayon::prelude::*;
+
+            fn rel_of(project_dir: &Path, path: &Path) -> String {
+                path.strip_prefix(project_dir)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .into_owned()
+            }
+
+            let now = Timestamp::now();
+            let mut rows: Vec<FileSnapshot> = Vec::with_capacity(staged_paths.len() + unstaged_paths.len());
+
+            // Staged: trivial — staging already carries everything
+            // the row needs.
+            for (path, s) in staged_paths {
+                rows.push(FileSnapshot {
+                    id: 0,
+                    stream_id: stream_id.clone(),
+                    path: rel_of(&project_dir, &path),
+                    blob_hash: s.blob_hash,
+                    size_bytes: s.size_bytes,
+                    captured_at: now,
+                    oversize: s.oversize,
+                    snapshot_id: Some(parent_id),
+                    mtime_ms: s.mtime_ms,
+                });
+            }
+
+            // Unstaged: parallel stat + read + hash + blob.write.
+            // Mirrors the cold-sweep phase 2 shape so a branch-switch-
+            // driven 5000-file drain runs as fast as the startup sweep.
+            let unstaged_rows: Vec<FileSnapshot> = unstaged_paths
+                .into_par_iter()
+                .filter_map(|path| {
+                    let metadata = match std::fs::metadata(&path) {
+                        Ok(m) => m,
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            return Some(FileSnapshot {
+                                id: 0,
+                                stream_id: stream_id.clone(),
+                                path: rel_of(&project_dir, &path),
+                                blob_hash: None,
+                                size_bytes: 0,
+                                captured_at: now,
+                                oversize: false,
+                                snapshot_id: Some(parent_id),
+                                mtime_ms: None,
+                            });
+                        }
+                        Err(e) => {
+                            debug!(?path, error = %e, "snapshot capture: stat failed");
+                            return None;
+                        }
+                    };
+                    if !metadata.is_file() {
+                        return None;
+                    }
+                    let size = metadata.len();
+                    let mtime_ms = mtime_to_unix_ms(&metadata);
+                    let oversize = size > max_bytes;
+                    let blob_hash = if oversize {
+                        None
+                    } else {
+                        match std::fs::read(&path) {
+                            Ok(bytes) => match blobs.write(&bytes) {
+                                Ok(h) => Some(h),
+                                Err(e) => {
+                                    debug!(?path, error = %e, "snapshot capture: blob write failed");
+                                    return None;
+                                }
+                            },
+                            Err(e) => {
+                                debug!(?path, error = %e, "snapshot capture: read failed");
+                                return None;
+                            }
+                        }
+                    };
+                    Some(FileSnapshot {
+                        id: 0,
+                        stream_id: stream_id.clone(),
+                        path: rel_of(&project_dir, &path),
+                        blob_hash,
+                        size_bytes: size as i64,
+                        captured_at: now,
+                        oversize,
+                        snapshot_id: Some(parent_id),
+                        mtime_ms,
+                    })
+                })
+                .collect();
+            rows.extend(unstaged_rows);
+            rows
+        })
+        .await?;
+
+        let assembled = rows.len() as u64;
+        let insert_started = Instant::now();
+        let ids = self.inner.store.capture_batch(rows).await?;
+        let insert_ms = insert_started.elapsed().as_millis() as u64;
+        self.emit_batch_event(parent_id, ids.len() as u32, source);
+        let capture_ms = capture_started.elapsed().as_millis() as u64;
+        info!(
+            parent_id,
+            drained = drained_count as u64,
+            staged = staged_count,
+            unstaged = unstaged_count,
+            inserted = ids.len() as u64,
+            assembled,
+            insert_ms,
+            capture_ms,
+            source = ?source,
+            "snapshot request: captured drained set",
+        );
         // After capture, pin to the current git commit if (and only
         // if) the worktree is clean — gitignored files don't count.
         // The check happens AFTER capture so any in-flight edits
@@ -437,9 +710,11 @@ impl SnapshotCaptureService {
         // pinning is skipped.
         let git = self.inner.git.read().unwrap().clone();
         if let Some(git) = git {
+            let pin_started = Instant::now();
             let stream_ref = Some(self.inner.stream_id.as_str());
             let statuses = git.statuses(stream_ref).await;
-            if statuses.is_empty() {
+            let clean = statuses.is_empty();
+            if clean {
                 if let Some(sha) = git.head_commit_sha(stream_ref).await {
                     if let Err(e) = self
                         .inner
@@ -451,94 +726,23 @@ impl SnapshotCaptureService {
                     }
                 }
             }
+            info!(
+                parent_id,
+                clean,
+                git_pin_ms = pin_started.elapsed().as_millis() as u64,
+                "snapshot request: git pin step",
+            );
         }
         Ok(Some(parent_id))
     }
 
-    async fn capture_path(
-        &self,
-        path: &Path,
-        parent_id: i64,
-        source: SnapshotSourceKind,
-    ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        let metadata = match std::fs::metadata(path) {
-            Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // File deleted between dirty-set entry and capture —
-                // record a deletion row (blob_hash = NULL, size = 0).
-                return self
-                    .record_deletion(path, parent_id, source)
-                    .await
-                    .map(Some);
-            }
-            Err(e) => return Err(Box::new(e)),
-        };
-        if !metadata.is_file() {
-            return Ok(None);
-        }
-        let size = metadata.len();
-        let mtime_ms = mtime_to_unix_ms(&metadata);
-        let oversize = size > self.inner.max_file_bytes;
-        let blob_hash = if oversize {
-            None
-        } else {
-            let bytes = std::fs::read(path)?;
-            Some(self.inner.blobs.write(&bytes)?)
-        };
-        let rel = path
-            .strip_prefix(&self.inner.project_dir)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned();
-        let snap = FileSnapshot {
-            id: 0,
-            stream_id: self.inner.stream_id.clone(),
-            path: rel,
-            blob_hash,
-            size_bytes: size as i64,
-            captured_at: Timestamp::now(),
-            oversize,
-            snapshot_id: Some(parent_id),
-            mtime_ms,
-        };
-        let row_id = self.inner.store.capture(snap).await?;
-        self.emit_event(row_id, source);
-        Ok(Some(row_id))
-    }
-
-    async fn record_deletion(
-        &self,
-        path: &Path,
-        parent_id: i64,
-        source: SnapshotSourceKind,
-    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        let rel = path
-            .strip_prefix(&self.inner.project_dir)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned();
-        let snap = FileSnapshot {
-            id: 0,
-            stream_id: self.inner.stream_id.clone(),
-            path: rel,
-            blob_hash: None,
-            size_bytes: 0,
-            captured_at: Timestamp::now(),
-            oversize: false,
-            snapshot_id: Some(parent_id),
-            mtime_ms: None,
-        };
-        let id = self.inner.store.capture(snap).await?;
-        self.emit_event(id, source);
-        Ok(id)
-    }
-
-    fn emit_event(&self, snapshot_id: i64, source: SnapshotSourceKind) {
+    fn emit_batch_event(&self, snapshot_id: i64, file_count: u32, source: SnapshotSourceKind) {
         let guard = self.inner.events.read().unwrap();
         if let Some(bus) = guard.as_ref() {
-            bus.emit(OxplowEvent::FileSnapshotCreated {
+            bus.emit(OxplowEvent::FileSnapshotsBatchCreated {
                 stream_id: Some(self.inner.stream_id.clone()),
                 snapshot_id,
+                file_count,
                 source,
                 effort_id: None,
                 thread_id: None,
@@ -940,6 +1144,123 @@ mod tests {
             .inner
             .blobs
             .has(remaining[0].blob_hash.as_ref().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn request_snapshot_uses_staged_metadata_without_reading_disk() {
+        // Pre-stage a row for a path whose file doesn't exist on disk.
+        // If the capture loop ignored the staging it would either skip
+        // the row (stat fails) or record a deletion row. Instead it
+        // must emit a row carrying the staged hash + size.
+        let project = tempdir().unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        let path = project.path().join("phantom.txt");
+        // File deliberately not created.
+        svc.mark_dirty_with_staging(
+            path.clone(),
+            CaptureStaging {
+                size_bytes: 42,
+                mtime_ms: Some(1_700_000_000_000),
+                blob_hash: Some("deadbeef".repeat(4)),
+                oversize: false,
+            },
+        );
+        let _parent = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .expect("parent id");
+        // list_for_path is the only read API that surfaces mtime_ms;
+        // list_files_for_snapshot drops it. Both are real but only
+        // the per-path one verifies staging carried mtime through.
+        let rows = store.list_for_path("phantom.txt").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].size_bytes, 42);
+        assert_eq!(rows[0].mtime_ms, Some(1_700_000_000_000));
+        assert_eq!(
+            rows[0].blob_hash.as_deref(),
+            Some("deadbeefdeadbeefdeadbeefdeadbeef"),
+        );
+        assert!(!rows[0].oversize);
+    }
+
+    #[tokio::test]
+    async fn request_snapshot_handles_mixed_staged_and_unstaged() {
+        // Half the dirty set is pre-staged; the other half is raw
+        // paths that still need stat+read+hash+blob.write. Both must
+        // land in the same parent snapshot and produce real rows.
+        let project = tempdir().unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+
+        let staged = project.path().join("staged.txt");
+        std::fs::write(&staged, "staged-body").unwrap();
+        let staged_bytes = std::fs::read(&staged).unwrap();
+        let staged_hash = svc.inner.blobs.write(&staged_bytes).unwrap();
+        svc.mark_dirty_with_staging(
+            staged.clone(),
+            CaptureStaging {
+                size_bytes: staged_bytes.len() as i64,
+                mtime_ms: Some(42),
+                blob_hash: Some(staged_hash.clone()),
+                oversize: false,
+            },
+        );
+
+        let unstaged = project.path().join("unstaged.txt");
+        std::fs::write(&unstaged, "unstaged-body-which-is-longer").unwrap();
+        svc.mark_dirty(unstaged.clone());
+
+        let parent = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .expect("parent id");
+        let files = store.list_files_for_snapshot(parent).await.unwrap();
+        assert_eq!(files.len(), 2);
+        let staged_row = files.iter().find(|f| f.path == "staged.txt").unwrap();
+        let unstaged_row = files.iter().find(|f| f.path == "unstaged.txt").unwrap();
+        assert_eq!(staged_row.blob_hash.as_deref(), Some(staged_hash.as_str()));
+        // Unstaged side actually read+hashed the file and got a real
+        // hash from the BlobStore.
+        assert!(unstaged_row.blob_hash.is_some());
+        assert!(svc
+            .inner
+            .blobs
+            .has(unstaged_row.blob_hash.as_ref().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn capture_batch_inserts_all_in_one_transaction() {
+        // Drive the new store API directly: 100 rows in one call,
+        // each gets a distinct id and shows up in latest_stat_per_path.
+        let db = Database::in_memory();
+        seed_stream(&db).await;
+        let store = SqliteSnapshotStore::new(db);
+        let parent = store
+            .create_snapshot(StreamId::from(TEST_STREAM))
+            .await
+            .unwrap();
+        let snaps: Vec<oxplow_db::FileSnapshot> = (0..100)
+            .map(|i| oxplow_db::FileSnapshot {
+                id: 0,
+                stream_id: StreamId::from(TEST_STREAM),
+                path: format!("file_{i:03}.txt"),
+                blob_hash: Some(format!("{:032x}", i)),
+                size_bytes: i as i64,
+                captured_at: Timestamp::now(),
+                oversize: false,
+                snapshot_id: Some(parent),
+                mtime_ms: Some(1000 + i as i64),
+            })
+            .collect();
+        let ids = store.capture_batch(snaps).await.unwrap();
+        assert_eq!(ids.len(), 100);
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            100
+        );
+        let latest = store.latest_stat_per_path().await.unwrap();
+        assert_eq!(latest.len(), 100);
     }
 
     #[tokio::test]

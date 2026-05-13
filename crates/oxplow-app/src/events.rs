@@ -121,6 +121,20 @@ pub enum OxplowEvent {
         effort_id: Option<String>,
         thread_id: Option<ThreadId>,
     },
+    /// A batched flush of N file snapshots landed under one parent.
+    /// Emitted instead of N per-file `FileSnapshotCreated` events when
+    /// `request_snapshot` drains many paths at once (startup sweep,
+    /// branch switch). Renderer treats it the same as the per-file
+    /// variant — fire-and-forget refetch — so a 34k-file batch causes
+    /// one refetch, not 34k.
+    FileSnapshotsBatchCreated {
+        stream_id: Option<StreamId>,
+        snapshot_id: i64,
+        file_count: u32,
+        source: SnapshotSourceKind,
+        effort_id: Option<String>,
+        thread_id: Option<ThreadId>,
+    },
     /// A code-quality scan transitioned states (started / completed /
     /// failed). The renderer refreshes scan + finding lists on receipt.
     CodeQualityScanned {

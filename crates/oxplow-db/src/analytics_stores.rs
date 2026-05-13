@@ -908,15 +908,39 @@ impl SqliteSnapshotStore {
     }
 
     pub async fn capture(&self, snap: FileSnapshot) -> Result<i64, DomainError> {
+        Ok(self.capture_batch(vec![snap]).await?[0])
+    }
+
+    /// Insert N `file_snapshot` rows in a single transaction. Returns
+    /// the new row ids in input order. Used by
+    /// `SnapshotCaptureService::request_snapshot` to flush the entire
+    /// drained dirty set with one DB round-trip — at 34k rows the
+    /// per-INSERT autocommit overhead of `capture()` dominates wall
+    /// time, and the transaction shape collapses it to a single fsync.
+    pub async fn capture_batch(&self, snaps: Vec<FileSnapshot>) -> Result<Vec<i64>, DomainError> {
+        if snaps.is_empty() {
+            return Ok(Vec::new());
+        }
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                conn.execute(
-                    "INSERT INTO file_snapshot
-                       (stream_id, path, blob_hash, size_bytes, captured_at, oversize,
-                        snapshot_id, mtime_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![
+            let mut conn = db
+                .conn()
+                .map_err(|e| DomainError::Invalid(format!("pool: {e}")))?;
+            let tx = conn
+                .transaction()
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            let mut ids = Vec::with_capacity(snaps.len());
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO file_snapshot
+                           (stream_id, path, blob_hash, size_bytes, captured_at, oversize,
+                            snapshot_id, mtime_ms)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    )
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                for snap in &snaps {
+                    stmt.execute(params![
                         snap.stream_id.as_str(),
                         snap.path,
                         snap.blob_hash,
@@ -925,10 +949,14 @@ impl SqliteSnapshotStore {
                         if snap.oversize { 1 } else { 0 },
                         snap.snapshot_id,
                         snap.mtime_ms,
-                    ],
-                )?;
-                Ok(conn.last_insert_rowid())
-            })
+                    ])
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    ids.push(tx.last_insert_rowid());
+                }
+            }
+            tx.commit()
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            Ok(ids)
         })
         .await
         .unwrap()

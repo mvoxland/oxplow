@@ -1488,7 +1488,7 @@ export function subscribeSnapshotEvents(
   fn: (payload: FileSnapshotCreatedEventPayload) => void,
 ): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.kind !== "fileSnapshotCreated") return;
+    if (event.kind !== "fileSnapshotCreated" && event.kind !== "fileSnapshotsBatchCreated") return;
     const eventStreamId = (event.streamId as string | null | undefined) ?? null;
     if (eventStreamId != null && eventStreamId !== streamId) return;
     fn({

@@ -87,9 +87,13 @@ fn main() {
         });
         let task_id = task.id.clone();
         boot_runtime.spawn(async move {
+            let hud_started = std::time::Instant::now();
             match svc.enqueue_startup_diff().await {
                 Ok(0) => {
-                    tracing::debug!("startup snapshot sweep: nothing to capture");
+                    tracing::info!(
+                        elapsed_ms = hud_started.elapsed().as_millis() as u64,
+                        "startup snapshot HUD: nothing to capture",
+                    );
                     bts.complete(&task_id, Some(serde_json::json!({"captured": 0})));
                 }
                 Ok(n) => {
@@ -106,6 +110,12 @@ fn main() {
                         .await
                     {
                         Ok(parent) => {
+                            tracing::info!(
+                                snapshot_id = ?parent,
+                                queued = n,
+                                elapsed_ms = hud_started.elapsed().as_millis() as u64,
+                                "startup snapshot HUD: complete",
+                            );
                             bts.complete(&task_id, Some(serde_json::json!({"snapshotId": parent})))
                         }
                         Err(e) => {
