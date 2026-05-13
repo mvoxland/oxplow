@@ -749,4 +749,4 @@ const toggleLabel: React.CSSProperties = {
   color: "var(--text-muted)",
   cursor: "pointer",
 };
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)" };

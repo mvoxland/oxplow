@@ -276,7 +276,7 @@ const tab: React.CSSProperties = {
   borderColor: "var(--border-subtle)",
   borderRadius: 4,
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const activeTab: React.CSSProperties = {
   ...tab,
@@ -284,12 +284,12 @@ const activeTab: React.CSSProperties = {
   color: "var(--text-primary)",
   borderColor: "var(--text-link, #2563eb)",
 };
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
 const rowOuter: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const addCol: React.CSSProperties = {
   color: "var(--text-success, #16a34a)",
@@ -329,7 +329,7 @@ const pathButton: React.CSSProperties = {
   padding: 0,
   color: "var(--text-link, #2563eb)",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   textAlign: "left",
   flexShrink: 0,
   // Fixed-width column so the next column (function name) starts
@@ -341,7 +341,7 @@ const pathButton: React.CSSProperties = {
 };
 const fnCol: React.CSSProperties = {
   color: "var(--text-primary)",
-  fontWeight: 500,
+  fontWeight: "var(--weight-medium)",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",

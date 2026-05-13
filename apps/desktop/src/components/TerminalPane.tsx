@@ -259,8 +259,17 @@ export function TerminalPane({
     const host = hostRef.current;
     if (!host) return;
 
+    // xterm's `fontFamily` is a one-shot constructor option, not a live
+    // CSS-resolved value — we read `--font-mono` once at mount so the
+    // terminal stays in lockstep with the rest of the app's mono surfaces.
+    // Fall back to the literal stack if the token isn't present (tests, SSR).
+    const resolvedMono =
+      (typeof window !== "undefined"
+        ? getComputedStyle(document.body).getPropertyValue("--font-mono").trim()
+        : "") ||
+      "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace";
     const term = new Terminal({
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      fontFamily: resolvedMono,
       fontSize: 13,
       theme: XTERM_THEME,
       scrollback: 5000,

@@ -375,8 +375,8 @@ function groupByBranch(
     .map(([commit, rs]) => ({ commit, rows: rs }));
 }
 
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
-const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
+const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)" };
 const errorBanner: React.CSSProperties = {
   padding: 8,
   background: "var(--surface-warning, #fef3c7)",
@@ -393,6 +393,6 @@ const rowButtonStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--border-subtle)",
   cursor: "pointer",
   textAlign: "left",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
   color: "var(--text-primary)",
 };

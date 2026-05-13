@@ -175,7 +175,7 @@ const inputStyle: CSSProperties = {
   borderBottom: "1px solid var(--border)",
   color: "var(--fg)",
   font: "inherit",
-  fontSize: 14,
+  fontSize: "var(--text-base)",
   padding: "10px 14px",
   outline: "none",
 };
@@ -189,7 +189,7 @@ const listStyle: CSSProperties = {
 const emptyStyle: CSSProperties = {
   padding: "12px 14px",
   color: "var(--muted)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 function rowStyle(active: boolean): CSSProperties {
@@ -199,7 +199,7 @@ function rowStyle(active: boolean): CSSProperties {
     gap: 8,
     padding: "6px 10px",
     borderRadius: 4,
-    fontSize: 13,
+    fontSize: "var(--text-sm)",
     cursor: "pointer",
     background: active ? "var(--accent)" : "transparent",
     color: active ? "#fff" : "var(--fg)",

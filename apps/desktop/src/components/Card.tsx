@@ -32,7 +32,7 @@ export function Card({
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
+        <div style={{ fontWeight: 600, fontSize: "var(--text-base)" }}>{title}</div>
         {action}
       </div>
       {children}
@@ -51,6 +51,6 @@ export const cardLinkButton: CSSProperties = {
   background: "transparent",
   border: "none",
   color: "var(--text-link, #2563eb)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };

@@ -117,7 +117,7 @@ export function FilesPanel({
                 display: "flex",
                 alignItems: "center",
                 gap: 4,
-                fontSize: 12,
+                fontSize: "var(--text-xs)",
                 cursor: "pointer",
                 color: statusFilter.has(key) ? "var(--text-primary)" : "var(--text-muted)",
               }}
@@ -263,7 +263,7 @@ function PivotRow({
           ) : null}
         </div>
       </div>
-      <span style={{ fontWeight: 500 }}>{rowKey}</span>
+      <span style={{ fontWeight: "var(--weight-medium)" }}>{rowKey}</span>
       <span style={{ color: "var(--text-muted)" }}>
         {files} file{files === 1 ? "" : "s"}
       </span>
@@ -308,7 +308,7 @@ const tab: React.CSSProperties = {
   borderColor: "var(--border-subtle)",
   borderRadius: 4,
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const activeTab: React.CSSProperties = {
   ...tab,
@@ -340,12 +340,12 @@ const delCol: React.CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   flexShrink: 0,
 };
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
 const pivotRowButton: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
   textAlign: "left",
   background: "transparent",
   border: "none",

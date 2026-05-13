@@ -17,7 +17,7 @@ export const smallButtonStyle = {
   padding: "6px 10px",
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 } satisfies CSSProperties;
 
 export const threadInputStyle = {
@@ -27,7 +27,7 @@ export const threadInputStyle = {
   borderRadius: 6,
   padding: "8px 10px",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 } satisfies CSSProperties;
 
 export const iconButtonStyle = {
@@ -39,7 +39,7 @@ export const iconButtonStyle = {
   height: 24,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",

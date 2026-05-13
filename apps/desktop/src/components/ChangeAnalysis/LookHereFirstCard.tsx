@@ -57,7 +57,7 @@ export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDif
     return (
       <section data-testid="change-analysis-look-here-first" style={card}>
         <div style={header}>Look here first</div>
-        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+        <div style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>
           Nothing stands out — diff looks routine.
         </div>
       </section>
@@ -75,7 +75,7 @@ export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDif
         {visible.map((row) => (
           <div
             key={row.path}
-            style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }}
+            style={{ display: "flex", alignItems: "center", gap: 10, fontSize: "var(--text-xs)" }}
             data-testid="change-analysis-look-here-first-row"
             title={row.reasons.join(" · ")}
           >
@@ -148,7 +148,7 @@ const pathButton: React.CSSProperties = {
   padding: 0,
   color: "var(--text-link, #2563eb)",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   textAlign: "left",
   flexShrink: 0,
   maxWidth: 320,
@@ -170,6 +170,6 @@ const showMoreButton: React.CSSProperties = {
   border: "none",
   color: "var(--text-link, #2563eb)",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   padding: 0,
 };

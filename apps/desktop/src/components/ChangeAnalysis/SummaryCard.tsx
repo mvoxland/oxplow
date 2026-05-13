@@ -44,7 +44,7 @@ export function SummaryCard({
         <Stat label="R" value={byStatus.renamed} />
       </div>
       <div
-        style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}
+        style={{ marginTop: 12, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}
         title={`${testLineRatio.testLines} test lines / ${testLineRatio.productionLines} production lines (added + deleted, function-anchored)`}
       >
         Tests: {testFunctions.added} added, {testFunctions.modified} modified,{" "}

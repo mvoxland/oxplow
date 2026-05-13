@@ -111,7 +111,7 @@ const containerStyle: CSSProperties = {
   padding: "5px 10px",
   background: "var(--bg-2)",
   borderBottom: "1px solid var(--border)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   color: "var(--fg)",
   position: "sticky",
   top: 0,

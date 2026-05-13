@@ -243,7 +243,7 @@ const inputStyle: CSSProperties = {
   padding: "10px 12px",
   borderRadius: 6,
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
 };
 
 const metaStyle: CSSProperties = {
@@ -256,7 +256,7 @@ const metaStyle: CSSProperties = {
 
 const errorStyle: CSSProperties = {
   color: "#ff6b6b",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const resultsStyle: CSSProperties = {
@@ -284,5 +284,5 @@ const resultStyle: CSSProperties = {
 const emptyStyle: CSSProperties = {
   color: "var(--muted)",
   padding: "8px 10px",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };

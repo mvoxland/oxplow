@@ -94,7 +94,7 @@ function formatScope(scope: ChangeAnalysisScope): string {
   return scope.value;
 }
 
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13, padding: 16 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)", padding: 16 };
 const errorBanner: React.CSSProperties = {
   padding: 8,
   background: "var(--surface-warning, #fef3c7)",

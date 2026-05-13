@@ -180,7 +180,7 @@ export function TaskPage({
   if (!item) {
     return (
       <Page testId="page-tasks" title={`task:${itemId}`} kind="task" backlinks={backlinks} outbound={outbound}>
-        <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
+        <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
           Loading tasks…
         </div>
       </Page>

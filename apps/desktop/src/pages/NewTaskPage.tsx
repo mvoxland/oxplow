@@ -250,7 +250,7 @@ export function NewTaskPage({
         </div>
 
         <div style={actionsRowStyle}>
-          {error ? <span style={{ color: "var(--severity-critical)", fontSize: 12 }}>{error}</span> : null}
+          {error ? <span style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}>{error}</span> : null}
           <span style={{ flex: 1 }} />
           <button type="button" onClick={onClose} style={buttonStyle}>
             Cancel
@@ -280,8 +280,8 @@ export function NewTaskPage({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, minWidth: 160 }}>
-      <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>{label}</span>
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-xs)", minWidth: 160 }}>
+      <span style={{ color: "var(--text-secondary)", fontWeight: "var(--weight-medium)" }}>{label}</span>
       {children}
     </label>
   );
@@ -304,7 +304,7 @@ const inputStyle: CSSProperties = {
   borderRadius: 6,
   padding: "6px 10px",
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
 };
 
 const textareaStyle: CSSProperties = {
@@ -322,7 +322,7 @@ const buttonStyle: CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
 };
 
 const primaryButtonStyle: CSSProperties = {

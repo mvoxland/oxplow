@@ -845,7 +845,7 @@ function BlameOverlay({
         width: BLAME_WIDTH,
         height: "100%",
         overflow: "hidden",
-        fontFamily: "var(--mono, monospace)",
+        fontFamily: "var(--font-mono)",
         fontSize: 11,
         userSelect: "none",
         zIndex: 3,

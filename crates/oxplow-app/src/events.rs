@@ -80,8 +80,11 @@ pub enum OxplowEvent {
         item_id: Option<TaskId>,
         thread_id: Option<ThreadId>,
     },
-    /// Wiki pages (creation, body update, deletion).
-    WikiPagesChanged,
+    /// A wiki page's backing file changed on disk (creation, body
+    /// update, deletion). `slug` is the file stem — subscribers
+    /// (e.g. `WikiPageTab`) filter by their own slug so an unrelated
+    /// edit doesn't trigger a refresh.
+    WikiPagesChanged { slug: String },
     /// Followups for a thread.
     FollowupsChanged { thread_id: ThreadId },
     /// Background task progress.
@@ -216,6 +219,8 @@ mod tests {
     async fn emit_with_no_subscribers_is_noop() {
         let bus = EventBus::new();
         // Should not panic / error.
-        bus.emit(OxplowEvent::WikiPagesChanged);
+        bus.emit(OxplowEvent::WikiPagesChanged {
+            slug: "test".to_string(),
+        });
     }
 }

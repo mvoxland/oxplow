@@ -74,7 +74,7 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
       <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 0.4 }}>
         {label}
       </div>
-      <div style={{ fontFamily: mono ? "var(--mono, monospace)" : undefined, fontSize: 13, color: "var(--text-primary)" }}>
+      <div style={{ fontFamily: mono ? "var(--mono, monospace)" : undefined, fontSize: "var(--text-sm)", color: "var(--text-primary)" }}>
         {value}
       </div>
     </div>
@@ -95,7 +95,7 @@ function Block({ label, body, tone }: { label: string; body: string; tone?: "err
           border: `1px solid ${tone === "error" ? "var(--diff-del-fg, #f85149)" : "var(--border-subtle)"}`,
           borderRadius: 4,
           fontFamily: "var(--mono, monospace)",
-          fontSize: 12,
+          fontSize: "var(--text-xs)",
           color: tone === "error" ? "var(--diff-del-fg, #f85149)" : "var(--text-primary)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",

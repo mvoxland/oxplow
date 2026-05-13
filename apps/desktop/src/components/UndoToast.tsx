@@ -91,7 +91,7 @@ const toastStyle: CSSProperties = {
   border: "1px solid var(--border-strong)",
   borderRadius: 6,
   padding: "8px 12px",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   minWidth: 240,
   maxWidth: 380,
   boxShadow: "0 6px 20px rgba(0, 0, 0, 0.45)",

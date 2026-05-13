@@ -132,9 +132,9 @@ export function HistoryPanel({ stream, onSelectCommit, revealSha }: Props) {
       </div>
       <div style={listStyle}>
         {error ? (
-          <div style={{ padding: 12, color: "#ff6b6b", fontSize: 12 }}>{error}</div>
+          <div style={{ padding: 12, color: "#ff6b6b", fontSize: "var(--text-xs)" }}>{error}</div>
         ) : !stream ? (
-          <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No stream selected.</div>
+          <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>No stream selected.</div>
         ) : !log ? null : (
           <CommitGraphTable
             commits={visibleCommits}
@@ -199,7 +199,7 @@ const inputStyle: CSSProperties = {
   color: "inherit",
   font: "inherit",
   padding: "3px 6px",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const listStyle: CSSProperties = {

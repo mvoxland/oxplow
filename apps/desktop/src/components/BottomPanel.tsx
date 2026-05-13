@@ -35,7 +35,7 @@ export function BottomPanel({ streamId }: { streamId: string | null }) {
         display: "flex",
         flexDirection: "column",
         fontSize: 11,
-        fontFamily: "ui-monospace, Menlo, monospace",
+        fontFamily: "var(--font-mono)",
       }}
     >
       <div

@@ -373,7 +373,7 @@ export function priorityIcon(priority: TaskPriority): string {
  */
 export function priorityStyle(priority: TaskPriority): CSSProperties {
   switch (priority) {
-    case "urgent": return { color: "var(--priority-urgent)", fontWeight: 700 };
+    case "urgent": return { color: "var(--priority-urgent)", fontWeight: "var(--weight-bold)" };
     case "high": return { color: "var(--priority-high)" };
     case "medium": return { color: "var(--priority-medium)" };
     case "low": return { color: "var(--priority-low)" };
@@ -381,7 +381,7 @@ export function priorityStyle(priority: TaskPriority): CSSProperties {
 }
 
 export const inputStyle: CSSProperties = {
-  borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "inherit", font: "inherit", padding: "4px 6px", fontSize: 12,
+  borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "inherit", font: "inherit", padding: "4px 6px", fontSize: "var(--text-xs)",
 };
 
 export const miniButtonStyle: CSSProperties = {
@@ -421,7 +421,7 @@ export const sectionActionButtonStyle: CSSProperties = {
   cursor: "pointer",
   font: "inherit",
   padding: "2px 6px",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   lineHeight: 1,
   minWidth: 22,
   textAlign: "center",

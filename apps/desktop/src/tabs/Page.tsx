@@ -208,7 +208,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           <span
             data-testid="page-title"
             style={{
-              fontSize: 17,
+              fontSize: "var(--text-lg)",
               fontWeight: 600,
               color: "var(--text-primary)",
               overflow: "hidden",
@@ -223,7 +223,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
               data-testid="page-kind"
               style={{
                 fontSize: 11,
-                fontWeight: 500,
+                fontWeight: "var(--weight-medium)",
                 color: "var(--text-secondary)",
                 background: "var(--surface-tab-inactive)",
                 padding: "2px 6px",
@@ -240,7 +240,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
               title={chip.title}
               style={{
                 fontSize: 11,
-                fontWeight: 500,
+                fontWeight: "var(--weight-medium)",
                 color: chip.color ?? "var(--text-secondary)",
                 background: chip.background ?? "transparent",
                 padding: "2px 6px",
@@ -277,7 +277,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
                 title={chip.title}
                 style={{
                   fontSize: 11,
-                  fontWeight: 500,
+                  fontWeight: "var(--weight-medium)",
                   color: chip.color ?? "var(--text-secondary)",
                   background: chip.background ?? "transparent",
                   padding: "2px 6px",
@@ -316,7 +316,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
               color: "var(--text-secondary)",
               padding: "8px 16px",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: "var(--text-xs)",
               width: "100%",
               textAlign: "left",
             }}
@@ -325,7 +325,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
             {backlinksOpen ? "▾" : "▸"} Backlinks
           </button>
           {backlinksOpen ? (
-            <div data-testid="page-backlinks-body" style={{ padding: "0 16px 12px", fontSize: 12 }}>
+            <div data-testid="page-backlinks-body" style={{ padding: "0 16px 12px", fontSize: "var(--text-xs)" }}>
               {backlinksBody}
             </div>
           ) : null}

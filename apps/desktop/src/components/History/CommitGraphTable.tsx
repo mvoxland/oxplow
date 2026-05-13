@@ -82,7 +82,7 @@ export function CommitGraphTable({
   );
 
   if (layout.rows.length === 0) {
-    return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>No commits.</div>;
+    return <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>No commits.</div>;
   }
 
   return (
@@ -274,7 +274,7 @@ function CommitRow({
         cursor: "pointer",
         background: selected ? "var(--accent-soft-bg)" : "transparent",
         opacity: matched ? 1 : 0.35,
-        fontSize: 13,
+        fontSize: "var(--text-sm)",
         lineHeight: 1,
         whiteSpace: "nowrap",
         overflow: "hidden",

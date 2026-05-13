@@ -209,7 +209,7 @@ export function BacklinksList({
             borderRadius: 4,
             cursor: "pointer",
             textAlign: "left",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
           }}
         >
           <PageKindIcon kind={entry.ref.kind} size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
@@ -237,5 +237,5 @@ const listButtonStyle = {
   borderRadius: 4,
   cursor: "pointer",
   textAlign: "left" as const,
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };

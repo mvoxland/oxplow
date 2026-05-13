@@ -36,7 +36,7 @@ function KebabButton({ onClick, label = "More actions" }: { onClick(rect: DOMRec
         color: "var(--muted)",
         cursor: "pointer",
         padding: "0 4px",
-        fontSize: 14,
+        fontSize: "var(--text-base)",
         lineHeight: 1,
         flexShrink: 0,
       }}

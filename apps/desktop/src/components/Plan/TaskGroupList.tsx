@@ -648,7 +648,7 @@ function BrailleSpinner() {
   return (
     <span
       aria-hidden="true"
-      style={{ display: "inline-block", fontFamily: "monospace", width: "1ch", color: "var(--accent)" }}
+      style={{ display: "inline-block", fontFamily: "var(--font-mono)", width: "1ch", color: "var(--accent)" }}
     >
       {BRAILLE_FRAMES[frame]}
     </span>
@@ -699,7 +699,7 @@ function FollowupRow({
             border: "none",
             color: "var(--muted)",
             cursor: "pointer",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
             lineHeight: 1,
             padding: "0 4px",
           }}
@@ -842,7 +842,7 @@ function EpicInlineRow({
         borderTop: isOver ? "1px solid var(--accent)" : "1px solid transparent",
         borderLeft: isMarked ? "3px solid var(--status-waiting)" : isSelected ? "3px solid var(--accent)" : "3px solid transparent",
         background: isMarked ? "rgba(217,119,6,0.10)" : isSelected ? "var(--accent-soft-bg)" : isDragging ? "var(--surface-tab-inactive)" : "transparent",
-        fontSize: 13, userSelect: "none", opacity: dimmed ? 0.6 : 1,
+        fontSize: "var(--text-sm)", userSelect: "none", opacity: dimmed ? 0.6 : 1,
       }}
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
@@ -856,7 +856,7 @@ function EpicInlineRow({
       >
         {isExpanded ? "\u25BC" : "\u25B6"}
       </span>
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: "var(--weight-medium)" }}>
         {item.title}
       </span>
       <InlinePriorityPicker priority={item.priority} onChange={(priority) => { void onUpdateTask(item.id, { priority }); }} />
@@ -874,7 +874,7 @@ function EpicInlineRow({
           color: "var(--muted)",
           cursor: "pointer",
           padding: "0 4px",
-          fontSize: 14,
+          fontSize: "var(--text-base)",
           lineHeight: 1,
           flexShrink: 0,
         }}
@@ -1116,7 +1116,7 @@ function InlineItemRow({
             : isDragging
               ? "var(--surface-tab-inactive)"
               : "transparent",
-        fontSize: 13,
+        fontSize: "var(--text-sm)",
         userSelect: "none",
         opacity: dimmed ? 0.6 : 1,
       }}
@@ -1158,7 +1158,7 @@ function InlineItemRow({
           color: "var(--muted)",
           cursor: "pointer",
           padding: "0 4px",
-          fontSize: 14,
+          fontSize: "var(--text-base)",
           lineHeight: 1,
           flexShrink: 0,
         }}
@@ -1272,7 +1272,7 @@ function StaleEpicChildrenBanner({
         background: "var(--surface-warning, rgba(255,200,0,0.08))",
         border: "1px solid var(--border-warning, rgba(255,200,0,0.4))",
         borderRadius: 4,
-        fontSize: 12,
+        fontSize: "var(--text-xs)",
       }}
     >
       <span style={{ flex: 1, color: "var(--text-warning, var(--fg))" }}>

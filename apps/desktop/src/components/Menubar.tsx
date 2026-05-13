@@ -86,7 +86,7 @@ const menuButtonStyle: CSSProperties = {
   padding: "4px 10px",
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const menuStyle: CSSProperties = {

@@ -168,7 +168,7 @@ export function CodeQualityPanel({ stream, onOpenFile }: Props) {
         })}
       </div>
       {error ? (
-        <div style={{ padding: "6px 12px", color: "var(--danger)", fontSize: 12 }}>{error}</div>
+        <div style={{ padding: "6px 12px", color: "var(--danger)", fontSize: "var(--text-xs)" }}>{error}</div>
       ) : null}
       <ScanStatusStrip scans={visibleScans} />
       <div style={{ flex: 1, overflowY: "auto" }}>
@@ -317,7 +317,7 @@ function FileGroup({
           border: "none",
           cursor: "pointer",
           fontFamily: "var(--font-mono)",
-          fontSize: 13,
+          fontSize: "var(--text-sm)",
         }}
         title="Open file (drag to add to agent context)"
       >

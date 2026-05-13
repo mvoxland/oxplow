@@ -377,7 +377,7 @@ export function ProjectPanel({
   }, [commitRequest, gitEnabled, stream]);
 
   if (!stream) {
-    return <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>loading stream…</div>;
+    return <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>loading stream…</div>;
   }
 
   async function toggleDirectory(path: string) {
@@ -675,7 +675,7 @@ export function ProjectPanel({
     : [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: 12, overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontSize: "var(--text-xs)", overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid var(--border)", gap: 6 }}>
         <div title={stream.branch} style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{stream.branch}</div>
         <button type="button"
@@ -933,18 +933,18 @@ function FindUsagesModal({
       >
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ minWidth: 0, overflow: "hidden" }}>
-            <div style={{ fontWeight: 600, fontSize: 13 }}>Find usages</div>
+            <div style={{ fontWeight: 600, fontSize: "var(--text-sm)" }}>Find usages</div>
             <div style={{ color: "var(--muted)", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               “{state.query}” &middot; from {state.path}
             </div>
           </div>
-          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 14 }}>✕</button>
+          <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: "var(--text-base)" }}>✕</button>
         </div>
         <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "6px 0" }}>
           {state.loading ? (
-            <div style={{ padding: 14, color: "var(--muted)", fontSize: 12 }}>Searching…</div>
+            <div style={{ padding: 14, color: "var(--muted)", fontSize: "var(--text-xs)" }}>Searching…</div>
           ) : !state.results || state.results.length === 0 ? (
-            <div style={{ padding: 14, color: "var(--muted)", fontSize: 12 }}>No matches.</div>
+            <div style={{ padding: 14, color: "var(--muted)", fontSize: "var(--text-xs)" }}>No matches.</div>
           ) : (
             [...grouped.entries()].map(([path, hits]) => (
               <div key={path} style={{ borderTop: "1px solid var(--border)" }}>
@@ -968,7 +968,7 @@ function FindUsagesModal({
                       cursor: "pointer",
                       textAlign: "left",
                       gap: 10,
-                      fontSize: 12,
+                      fontSize: "var(--text-xs)",
                       alignItems: "baseline",
                     }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-2)"; }}
@@ -1123,7 +1123,7 @@ function PushPullDialog({
     >
       <form
         onSubmit={(e) => { e.preventDefault(); void run(); }}
-        style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}
+        style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-xs)" }}
       >
         {kind === "push" ? (
           <>
@@ -1202,7 +1202,7 @@ function CommitDialog({
     >
       <form
         onSubmit={(e) => { e.preventDefault(); void run(); }}
-        style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}
+        style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: "var(--text-xs)" }}
       >
         <label htmlFor="files-commit-message" style={{ color: "var(--muted)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
           Commit message
@@ -1258,7 +1258,7 @@ function GitOpResultModal({ title, result, onClose }: { title: string; result: G
   return (
     <Slideover open onClose={onClose} title={title} testId="git-op-result-slideover">
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <div style={{ color: colour, fontSize: 12, fontWeight: 600 }}>
+        <div style={{ color: colour, fontSize: "var(--text-xs)", fontWeight: 600 }}>
           {result.success ? "Success" : `Failed (exit ${result.status ?? "?"})`}
         </div>
         {result.stdout ? (
@@ -1272,7 +1272,7 @@ function GitOpResultModal({ title, result, onClose }: { title: string; result: G
   );
 }
 
-const modalEmptyStyle = { padding: 14, color: "var(--muted)", fontSize: 12 } as const;
+const modalEmptyStyle = { padding: 14, color: "var(--muted)", fontSize: "var(--text-xs)" } as const;
 const modalRowStyle = {
   display: "flex",
   width: "100%",
@@ -1284,7 +1284,7 @@ const modalRowStyle = {
   cursor: "pointer",
   textAlign: "left" as const,
   gap: 10,
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   alignItems: "center" as const,
   borderTop: "1px solid var(--border)",
 };
@@ -1295,7 +1295,7 @@ const modalInputStyle = {
   color: "inherit",
   font: "inherit",
   padding: "4px 6px",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 } as const;
 const modalCheckboxStyle = { display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" } as const;
 const modalBtnStyle = {
@@ -1306,7 +1306,7 @@ const modalBtnStyle = {
   padding: "4px 10px",
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 } as const;
 const modalPreStyle = {
   whiteSpace: "pre-wrap" as const,
@@ -1329,7 +1329,7 @@ const iconButtonStyle = {
   padding: "2px 6px",
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   lineHeight: 1,
   flexShrink: 0,
 } as const;
@@ -1477,7 +1477,7 @@ const filterMenuItemStyle: CSSProperties = {
   borderRadius: 4,
   padding: "6px 10px",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const filterStatusBarStyle: CSSProperties = {
@@ -1551,7 +1551,7 @@ function InlinePromptStrip({
             borderRadius: 4,
             padding: "4px 6px",
             fontFamily: "inherit",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
           }}
         />
         <button type="button" onClick={onCancel} style={{ ...miniInlineButton }}>
@@ -1590,7 +1590,7 @@ function InlineConfirmStrip({
         padding: "8px 12px",
         borderBottom: "1px solid var(--border)",
         background: "var(--bg-2)",
-        fontSize: 12,
+        fontSize: "var(--text-xs)",
       }}
     >
       <span style={{ flex: 1, color: "var(--fg)" }}>{message}</span>

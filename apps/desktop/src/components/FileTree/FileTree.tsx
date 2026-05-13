@@ -367,7 +367,7 @@ const chevronStyle: CSSProperties = {
 };
 
 const dirNameStyle: CSSProperties = {
-  fontWeight: 500,
+  fontWeight: "var(--weight-medium)",
 };
 
 const dirCountStyle: CSSProperties = {
@@ -379,5 +379,5 @@ const dirCountStyle: CSSProperties = {
 const emptyStyle: CSSProperties = {
   padding: "8px 4px",
   color: "var(--text-muted)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };

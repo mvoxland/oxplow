@@ -140,7 +140,10 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
   // closed and reopened the tab.
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
-  useEffect(() => subscribeWikiPageEvents(() => { void refreshRef.current(); }), []);
+  useEffect(() => subscribeWikiPageEvents((changedSlug) => {
+    if (changedSlug !== slug) return;
+    void refreshRef.current();
+  }), [slug]);
 
   const [draftInitialized, setDraftInitialized] = useState(false);
 
@@ -223,7 +226,7 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
           padding: "4px 12px",
           borderBottom: "1px solid var(--border-subtle)",
           background: "var(--surface-app)",
-          fontSize: 12,
+          fontSize: "var(--text-xs)",
           flexShrink: 0,
         }}
       >
@@ -264,8 +267,8 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
         style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}
       >
         {notFound ? (
-          <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
-            <div style={{ fontSize: 15, marginBottom: 8, color: "var(--text-primary)" }}>Page not found</div>
+          <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+            <div style={{ fontSize: "var(--text-md)", marginBottom: 8, color: "var(--text-primary)" }}>Page not found</div>
             <div>No wiki page exists with slug <code>{slug}</code>.</div>
             <div style={{ marginTop: 8 }}>
               Click <strong>Create page</strong> above to start a new wiki page at <code>.oxplow/wiki/{slug}.md</code>.
@@ -282,7 +285,7 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
               height: "100%",
               minHeight: 300,
               fontFamily: "var(--font-mono, monospace)",
-              fontSize: 13,
+              fontSize: "var(--text-sm)",
               background: "var(--surface-card)",
               color: "var(--text-primary)",
               border: "1px solid var(--border-subtle)",
@@ -334,7 +337,7 @@ function BacklinksFooter({
       style={{
         borderTop: "1px solid var(--border-subtle)",
         padding: "6px 10px",
-        fontSize: 12,
+        fontSize: "var(--text-xs)",
         color: "var(--text-muted)",
         display: "flex",
         flexWrap: "wrap",

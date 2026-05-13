@@ -535,7 +535,7 @@ function UncommittedMiniCard({
         <div style={subtle}>No uncommitted files</div>
       ) : (
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13 }}>{summary.total} changed</span>
+          <span style={{ fontSize: "var(--text-sm)" }}>{summary.total} changed</span>
           <FileStatusCountsForSummary summary={summary} testId="git-dashboard-uncommitted-counts" />
         </div>
       )}
@@ -687,7 +687,7 @@ function StreamsCard({
                     {workingByStreamId[row.stream.id] ? (
                       <AgentStatusDot status="working" />
                     ) : null}
-                    <span style={{ fontWeight: 500, flexShrink: 0 }}>{row.stream.title}</span>
+                    <span style={{ fontWeight: "var(--weight-medium)", flexShrink: 0 }}>{row.stream.title}</span>
                     <span style={{ ...subtle, flexShrink: 0 }}>·</span>
                     <span style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {branchLabel}
@@ -921,7 +921,7 @@ function menuItem(active: boolean): React.CSSProperties {
     border: "none",
     borderBottom: "1px solid var(--border-subtle)",
     textAlign: "left",
-    fontSize: 12,
+    fontSize: "var(--text-xs)",
     cursor: "pointer",
     fontWeight: active ? 600 : 400,
   };
@@ -1057,7 +1057,7 @@ function RemoteBranchesCard({
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500 }}>{row.short_name}</div>
+                  <div style={{ fontWeight: "var(--weight-medium)" }}>{row.short_name}</div>
                   <div style={{ ...subtle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {row.last_commit_subject} · {row.last_commit_at} · {formatDate(row.last_commit_at)}
                   </div>
@@ -1120,8 +1120,8 @@ function formatDate(input: string | number | null | undefined): string {
   }
 }
 
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
-const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
+const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)" };
 const errorBanner: React.CSSProperties = {
   padding: 8,
   background: "var(--surface-warning, #fef3c7)",
@@ -1142,7 +1142,7 @@ const smallButton: React.CSSProperties = {
   color: "var(--text-primary)",
   border: "1px solid var(--border-subtle)",
   borderRadius: 4,
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };
 const linkButton: React.CSSProperties = cardLinkButton;

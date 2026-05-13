@@ -45,7 +45,7 @@ export function WikiPage({ stream, slug, threadWork, onClosed, onOpenWikiPage, o
   if (!stream) {
     return (
       <Page testId="page-wiki" kind="wiki" backlinks={backlinks} outbound={outbound}>
-        <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: 13 }}>
+        <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
           No stream selected.
         </div>
       </Page>

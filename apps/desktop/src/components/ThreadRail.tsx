@@ -385,7 +385,7 @@ function ThreadChip({
           color,
           cursor: isRenaming ? "text" : "pointer",
           fontFamily: "inherit",
-          fontSize: 12,
+          fontSize: "var(--text-xs)",
           whiteSpace: "nowrap",
           flexShrink: 0,
           marginBottom: -1, // overlap the rail's bottom border so the tab looks connected to the content below when selected
@@ -434,7 +434,7 @@ function ThreadChip({
               borderRadius: 4,
               padding: "2px 6px",
               fontFamily: "inherit",
-              fontSize: 12,
+              fontSize: "var(--text-xs)",
               minWidth: 120,
             }}
           />
@@ -499,7 +499,7 @@ function HoverCard({
   return (
     <div style={hoverCardStyle}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <strong style={{ fontSize: 13 }}>{thread.title}</strong>
+        <strong style={{ fontSize: "var(--text-sm)" }}>{thread.title}</strong>
         <span
           style={{
             fontSize: 10,
@@ -516,7 +516,7 @@ function HoverCard({
       </div>
       <div style={{ color: "var(--muted)", fontSize: 11 }}>agent: {agentStatus}</div>
       {inProgress.length > 0 ? (
-        <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+        <div style={{ fontSize: "var(--text-xs)", lineHeight: 1.4 }}>
           <div style={metaLabel}>In progress</div>
           <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {inProgress[0].title}
@@ -693,7 +693,7 @@ const primaryBtn: CSSProperties = {
   cursor: "pointer",
   fontFamily: "inherit",
   fontSize: 11,
-  fontWeight: 500,
+  fontWeight: "var(--weight-medium)",
 };
 
 const hoverCardStyle: CSSProperties = {
@@ -727,7 +727,7 @@ const settingsInputStyle: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: 4,
   padding: "6px 8px",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   width: "100%",
   boxSizing: "border-box",
 };
