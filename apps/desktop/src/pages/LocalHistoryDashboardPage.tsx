@@ -169,14 +169,14 @@ function StorageCard({
 }) {
   return (
     <Card testId="local-history-storage" title="Storage">
-      <div style={{ display: "flex", gap: 18, fontSize: 13 }}>
+      <div style={{ display: "flex", gap: 18, fontSize: "var(--text-sm)" }}>
         <div>
           <div style={subtle}>Recent snapshots</div>
-          <div style={{ fontWeight: 500 }}>{storage.totalSnapshots}</div>
+          <div style={{ fontWeight: "var(--weight-medium)" }}>{storage.totalSnapshots}</div>
         </div>
         <div>
           <div style={subtle}>Blob storage</div>
-          <div style={{ fontWeight: 500 }}>{formatBytes(storage.blobBytes)}</div>
+          <div style={{ fontWeight: "var(--weight-medium)" }}>{formatBytes(storage.blobBytes)}</div>
         </div>
       </div>
     </Card>
@@ -352,8 +352,8 @@ function groupByBranch(
     .map(([commit, rs]) => ({ commit, rows: rs }));
 }
 
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
-const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
+const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)" };
 const errorBanner: React.CSSProperties = {
   padding: 8,
   background: "var(--surface-warning, #fef3c7)",
@@ -370,6 +370,6 @@ const rowButtonStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--border-subtle)",
   cursor: "pointer",
   textAlign: "left",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
   color: "var(--text-primary)",
 };

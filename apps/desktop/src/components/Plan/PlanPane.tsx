@@ -513,7 +513,7 @@ export function PlanPane({
         })()}
         {groups.length === 0 ? (
           <>
-            <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>
+            <div style={{ padding: 12, color: "var(--muted)", fontSize: "var(--text-xs)" }}>
               No tasks.
             </div>
           </>
@@ -776,7 +776,7 @@ function KeyboardValuePicker({
                 style={{
                   padding: "5px 10px",
                   borderRadius: 4,
-                  fontSize: 13,
+                  fontSize: "var(--text-sm)",
                   cursor: "pointer",
                   background: active ? "var(--accent)" : "transparent",
                   color: active ? "#fff" : "var(--fg)",

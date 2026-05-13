@@ -9,7 +9,7 @@ const headerStyle: React.CSSProperties = {
   padding: "6px 10px",
   background: "var(--bg-2)",
   borderTop: "1px solid var(--border)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
   userSelect: "none",
 };
@@ -23,7 +23,7 @@ const drawerBodyStyle: React.CSSProperties = {
   gap: 4,
   maxHeight: 220,
   overflowY: "auto",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const rowStyle: React.CSSProperties = {

@@ -183,7 +183,7 @@ const defaultInputStyle: CSSProperties = {
   borderRadius: 4,
   padding: "4px 6px",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   width: "100%",
   boxSizing: "border-box",
 };

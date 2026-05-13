@@ -25,7 +25,7 @@ export function ChangeAnalysisHeader({
 }: ChangeAnalysisHeaderProps) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+      <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
         {target === "working" ? "Working tree (HEAD vs uncommitted)" : `Parent vs ${target.slice(0, 12)}`}
       </span>
       <button
@@ -58,13 +58,13 @@ const smallButton: React.CSSProperties = {
   border: "1px solid var(--border-subtle)",
   borderRadius: 4,
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const linkButton: React.CSSProperties = {
   padding: 0,
   background: "transparent",
   border: "none",
   color: "var(--text-link, #2563eb)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };

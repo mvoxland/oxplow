@@ -438,7 +438,7 @@ export function Navigator({
                 borderRadius: 6,
                 cursor: removeBusy ? "not-allowed" : "pointer",
                 fontFamily: "inherit",
-                fontSize: 12,
+                fontSize: "var(--text-xs)",
               }}
             >
               Cancel
@@ -456,8 +456,8 @@ export function Navigator({
                 borderRadius: 6,
                 cursor: removeBusy ? "not-allowed" : "pointer",
                 fontFamily: "inherit",
-                fontSize: 12,
-                fontWeight: 500,
+                fontSize: "var(--text-xs)",
+                fontWeight: "var(--weight-medium)",
               }}
             >
               {removeBusy ? "Removing…" : "Remove"}
@@ -466,7 +466,7 @@ export function Navigator({
         )}
       >
         {removeStream ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: "var(--text-xs)" }}>
             <p style={{ margin: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
               The stream and every thread under it will be archived (hidden from the rail). History — closed efforts, snapshots, and visit logs — stays intact.
             </p>
@@ -657,7 +657,7 @@ function OverlayRow({
         <span
           style={{
             flex: 1,
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
             fontWeight: isStream ? 700 : 400,
             color: isStream
               ? "var(--text-primary)"
@@ -724,7 +724,7 @@ function RenameInput({
         border: "1px solid var(--accent)",
         borderRadius: 4,
         padding: "3px 6px",
-        fontSize: 13,
+        fontSize: "var(--text-sm)",
         marginLeft: paddingLeft,
       }}
     />
@@ -822,8 +822,8 @@ function AddStreamButton({ gitEnabled, onClick }: { gitEnabled: boolean; onClick
           padding: "6px 10px",
           cursor: gitEnabled ? "pointer" : "not-allowed",
           fontFamily: "inherit",
-          fontSize: 12,
-          fontWeight: 500,
+          fontSize: "var(--text-xs)",
+          fontWeight: "var(--weight-medium)",
           letterSpacing: 0.2,
           opacity: gitEnabled ? 1 : 0.5,
         }}
@@ -886,7 +886,7 @@ function InlineNewThread({
           border: "1px solid var(--border-subtle)",
           borderRadius: 4,
           padding: "4px 6px",
-          fontSize: 12,
+          fontSize: "var(--text-xs)",
         }}
       />
     </form>

@@ -50,7 +50,7 @@ const banner: React.CSSProperties = {
   border: "1px solid var(--border-subtle)",
   borderLeft: "3px solid var(--text-link, #2563eb)",
   borderRadius: 6,
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const clearButton: React.CSSProperties = {
   background: "transparent",
@@ -58,5 +58,5 @@ const clearButton: React.CSSProperties = {
   padding: 0,
   color: "var(--text-link, #2563eb)",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };

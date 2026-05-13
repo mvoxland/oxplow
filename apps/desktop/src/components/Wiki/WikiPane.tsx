@@ -232,7 +232,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
         borderBottom: "1px solid var(--border-subtle)",
         gap: 6,
       }}>
-        <span style={{ fontSize: 12, opacity: 0.7 }}>Wiki pages ({notes.length})</span>
+        <span style={{ fontSize: "var(--text-xs)", opacity: 0.7 }}>Wiki pages ({notes.length})</span>
         <button type="button" onClick={beginNew} title="New wiki page" disabled={newSlugDraft !== null}>+ New</button>
       </div>
 
@@ -247,7 +247,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
           style={{
             width: "100%",
             boxSizing: "border-box",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
             padding: "4px 6px",
             background: "var(--surface-card)",
             color: "var(--text-primary)",
@@ -276,7 +276,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
             }}
             style={{
               fontFamily: "var(--font-mono, monospace)",
-              fontSize: 12,
+              fontSize: "var(--text-xs)",
               background: "var(--surface-card)",
               color: "var(--text-primary)",
               border: "1px solid var(--border-subtle)",
@@ -307,7 +307,7 @@ export function WikiPane({ stream, selectedSlug, onOpenWikiPage }: Props) {
             }}
           />
         ) : notes.length === 0 ? (
-          <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>
+          <div style={{ padding: 12, fontSize: "var(--text-xs)", opacity: 0.6 }}>
             No wiki pages yet. Click "+ New" or create a file at <code>.oxplow/wiki/*.md</code>.
           </div>
         ) : (
@@ -438,13 +438,13 @@ function SearchResults({
   onOpenMenu: (rect: DOMRect, hit: WikiPageSearchHit) => void;
 }) {
   if (hits === null && searching) {
-    return <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>Searching…</div>;
+    return <div style={{ padding: 12, fontSize: "var(--text-xs)", opacity: 0.6 }}>Searching…</div>;
   }
   if (hits === null) {
     return null;
   }
   if (hits.length === 0) {
-    return <div style={{ padding: 12, fontSize: 12, opacity: 0.6 }}>No matches.</div>;
+    return <div style={{ padding: 12, fontSize: "var(--text-xs)", opacity: 0.6 }}>No matches.</div>;
   }
   const siblingEntries = hits.map((h) => ({ ref: wikiPageRef(h.slug), label: h.title }));
   return (
@@ -498,7 +498,7 @@ function SearchRow({
         cursor: "pointer",
         background: selected ? "var(--accent-soft-bg)" : "transparent",
         borderBottom: "1px solid var(--border-subtle)",
-        fontSize: 13,
+        fontSize: "var(--text-sm)",
         display: "flex",
         flexDirection: "column",
         gap: 2,
@@ -531,7 +531,7 @@ function SearchRow({
             color: "var(--muted)",
             cursor: "pointer",
             padding: "0 4px",
-            fontSize: 14,
+            fontSize: "var(--text-base)",
             lineHeight: 1,
           }}
         >⋯</button>
@@ -572,7 +572,7 @@ function NoteRow({
         cursor: "pointer",
         background: selected ? "var(--accent-soft-bg)" : "transparent",
         borderBottom: "1px solid var(--border-subtle)",
-        fontSize: 13,
+        fontSize: "var(--text-sm)",
         display: "flex",
         alignItems: "center",
         gap: 6,
@@ -607,7 +607,7 @@ function NoteRow({
           color: "var(--muted)",
           cursor: "pointer",
           padding: "0 4px",
-          fontSize: 14,
+          fontSize: "var(--text-base)",
           lineHeight: 1,
           flex: "0 0 auto",
         }}

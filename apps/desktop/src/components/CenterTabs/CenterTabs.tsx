@@ -232,7 +232,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 outlineOffset: isDropTarget ? -2 : 0,
                 opacity: draggingId === tab.id ? 0.5 : 1,
                 cursor: canDrag ? "grab" : "pointer",
-                fontSize: 13,
+                fontSize: "var(--text-sm)",
                 fontWeight: isActive ? 600 : 400,
                 display: hiddenInStrip ? "none" : "inline-flex",
                 alignItems: "center",
@@ -277,7 +277,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                     color: "var(--muted)",
                     cursor: "pointer",
                     padding: "0 2px",
-                    fontSize: 14,
+                    fontSize: "var(--text-base)",
                     lineHeight: 1,
                   }}
                 >
@@ -443,7 +443,7 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
               background: isActive ? "var(--surface-tab-active)" : "transparent",
               color: isActive ? "var(--accent)" : "var(--text-primary)",
               fontWeight: isActive ? 600 : 400,
-              fontSize: 13,
+              fontSize: "var(--text-sm)",
             }}
             onMouseEnter={(e) => {
               if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "var(--surface-hover)";
@@ -471,7 +471,7 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
                   color: "var(--muted)",
                   cursor: "pointer",
                   padding: "0 2px",
-                  fontSize: 14,
+                  fontSize: "var(--text-base)",
                   lineHeight: 1,
                 }}
               >

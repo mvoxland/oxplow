@@ -230,12 +230,12 @@ export function TasksPage({
           onRequestThreads={requestThreads}
         />
         {scopedError ? (
-          <div data-testid="tasks-scope-error" style={{ padding: "4px 10px", color: "var(--danger)", fontSize: 12 }}>
+          <div data-testid="tasks-scope-error" style={{ padding: "4px 10px", color: "var(--danger)", fontSize: "var(--text-xs)" }}>
             {scopedError}
           </div>
         ) : null}
         {scopedLoading && scope.kind !== "currentThread" ? (
-          <div style={{ padding: "4px 10px", color: "var(--muted)", fontSize: 12 }}>Loading…</div>
+          <div style={{ padding: "4px 10px", color: "var(--muted)", fontSize: "var(--text-xs)" }}>Loading…</div>
         ) : null}
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
           <TasksList

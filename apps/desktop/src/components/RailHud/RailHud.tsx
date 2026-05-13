@@ -262,7 +262,7 @@ const rowStyle: CSSProperties = {
   alignItems: "center",
   gap: 8,
   padding: "6px 14px",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
   color: "var(--text-primary)",
   cursor: "pointer",
   border: "none",
@@ -290,7 +290,7 @@ function SearchTrigger({ onOpenSearch }: { onOpenSearch?: () => void }) {
           border: "1px solid var(--border-subtle)",
           borderRadius: 6,
           color: "var(--text-secondary)",
-          fontSize: 13,
+          fontSize: "var(--text-sm)",
           textAlign: "left",
           cursor: onOpenSearch ? "pointer" : "default",
           display: "flex",
@@ -407,8 +407,8 @@ function ActiveItemSection({
               style={{
                 flex: 1,
                 color: "var(--text-primary)",
-                fontWeight: 500,
-                fontSize: 13,
+                fontWeight: "var(--weight-medium)",
+                fontSize: "var(--text-sm)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
@@ -453,7 +453,7 @@ function ActiveItemSection({
                       display: "inline-flex",
                       justifyContent: "center",
                       color: statusIconColor(child.status),
-                      fontSize: 12,
+                      fontSize: "var(--text-xs)",
                     }}
                   >
                     {statusIcon(child.status)}
@@ -494,8 +494,8 @@ function ActiveItemSection({
         <span
           style={{
             color: "var(--text-primary)",
-            fontWeight: 500,
-            fontSize: 13,
+            fontWeight: "var(--weight-medium)",
+            fontSize: "var(--text-sm)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -538,7 +538,7 @@ function UncommittedSection({
             gap: 8,
           }}
         >
-          <span style={{ color: "var(--text-primary)", fontSize: 12 }}>
+          <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>
             {parts.join(" · ")}
           </span>
           <span style={{ flex: 1 }} />
@@ -566,7 +566,7 @@ function UncommittedSection({
             gap: 8,
           }}
         >
-          <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: 12 }}>
+          <span style={{ color: "var(--diff-del-fg, #f85149)", fontSize: "var(--text-xs)" }}>
             {op ? `${op} in progress` : `${conflictedCount} conflict${conflictedCount === 1 ? "" : "s"}`}
           </span>
           {op && conflictedCount > 0 ? (

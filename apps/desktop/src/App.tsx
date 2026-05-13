@@ -3315,7 +3315,7 @@ export function App() {
               data-testid="status-bar-context"
               title={text}
               style={{
-                fontSize: 12,
+                fontSize: "var(--text-xs)",
                 color: "var(--text-secondary)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",

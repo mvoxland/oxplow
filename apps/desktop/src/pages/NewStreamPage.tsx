@@ -200,7 +200,7 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
   if (!gitEnabled) {
     return (
       <Page testId="page-new-stream" title="New Stream">
-        <div style={{ padding: "20px 24px", color: "var(--text-secondary)", fontSize: 13 }}>
+        <div style={{ padding: "20px 24px", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
           This workspace root does not contain its own <code>.git</code> directory, so streams
           cannot be created here. Open a git-enabled workspace to add streams.
         </div>
@@ -310,7 +310,7 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
           </Field>
         )}
 
-        <div style={{ color: formError ? "var(--severity-critical)" : "var(--text-secondary)", fontSize: 12 }}>
+        <div style={{ color: formError ? "var(--severity-critical)" : "var(--text-secondary)", fontSize: "var(--text-xs)" }}>
           {formError ?? "Each stream gets its own worktree and Claude resume metadata."}
         </div>
 
@@ -335,8 +335,8 @@ export function NewStreamPage({ gitEnabled, defaultTitle, onClose, onCreated }: 
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
-      <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>{label}</span>
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-xs)" }}>
+      <span style={{ color: "var(--text-secondary)", fontWeight: "var(--weight-medium)" }}>{label}</span>
       {children}
     </label>
   );
@@ -349,7 +349,7 @@ const inputStyle: CSSProperties = {
   borderRadius: 6,
   padding: "6px 10px",
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
 };
 
 const pickerButtonStyle: CSSProperties = {
@@ -359,7 +359,7 @@ const pickerButtonStyle: CSSProperties = {
   padding: "6px 10px",
   borderRadius: 6,
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
   minWidth: 220,
   justifyContent: "flex-start",
   height: "auto",
@@ -373,7 +373,7 @@ const buttonStyle: CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
 };
 
 const primaryButtonStyle: CSSProperties = {

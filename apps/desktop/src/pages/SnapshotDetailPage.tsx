@@ -185,7 +185,7 @@ function SnapshotMeta({ parent, collapsedMaxHeight, onOpenCommit }: SnapshotMeta
         overflow: collapsedMaxHeight ? "hidden" : undefined,
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: "var(--text-xs)" }}>
         <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
           Captured {captured}
         </div>
@@ -226,7 +226,7 @@ function SnapshotMeta({ parent, collapsedMaxHeight, onOpenCommit }: SnapshotMeta
   );
 }
 
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
 const card: React.CSSProperties = {
   background: "var(--surface-card)",
   border: "1px solid var(--border-subtle)",
@@ -240,6 +240,6 @@ const linkButton: React.CSSProperties = {
   border: "none",
   color: "var(--text-link, #2563eb)",
   fontFamily: "var(--mono, monospace)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   cursor: "pointer",
 };

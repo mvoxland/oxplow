@@ -313,7 +313,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
         )}
       >
         {removeStream ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: "var(--text-xs)" }}>
             <p style={{ margin: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
               The stream and every thread under it will be archived (hidden from the rail). History — closed efforts, snapshots, and visit logs — stays intact.
             </p>
@@ -377,7 +377,7 @@ export function StreamRail({ stream, streams, streamStatuses, streamActiveThread
                 ))}
               </select>
             </label>
-            <div style={{ color: switchBranchError ? "#ff6b6b" : "var(--muted)", fontSize: 12, whiteSpace: "pre-wrap" }}>
+            <div style={{ color: switchBranchError ? "#ff6b6b" : "var(--muted)", fontSize: "var(--text-xs)", whiteSpace: "pre-wrap" }}>
               {switchBranchError ?? `Currently on ${switchBranchStream.branch}. Git will reject switches that conflict (dirty tree, missing branch, or branch already checked out in another worktree).`}
             </div>
           </form>
@@ -395,7 +395,7 @@ const buttonStyle: CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const primaryButtonStyle: CSSProperties = {
@@ -406,8 +406,8 @@ const primaryButtonStyle: CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
-  fontWeight: 500,
+  fontSize: "var(--text-xs)",
+  fontWeight: "var(--weight-medium)",
 };
 
 const tabStyle: CSSProperties = {
@@ -437,7 +437,7 @@ const inputStyle: CSSProperties = {
 
 const selectStyle: CSSProperties = { ...inputStyle, minWidth: 220 };
 
-const labelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12 };
+const labelStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-xs)" };
 
 const renameInputStyle: CSSProperties = {
   background: "var(--bg)",
@@ -446,7 +446,7 @@ const renameInputStyle: CSSProperties = {
   borderRadius: 4,
   padding: "2px 6px",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   minWidth: 140,
 };
 

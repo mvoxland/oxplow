@@ -107,7 +107,7 @@ function DuplicateRow({ finding, scanVersion, onOpenFile }: DuplicateRowProps) {
   return (
     <div
       data-testid="change-analysis-duplicate-row"
-      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}
+      style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-xs)" }}
     >
       {hasPeer ? (
         <button
@@ -154,7 +154,7 @@ const card: React.CSSProperties = {
   padding: 12,
 };
 const header: React.CSSProperties = { fontWeight: 600 };
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)" };
 const smallButton: React.CSSProperties = {
   padding: "4px 10px",
   background: "var(--surface-card)",
@@ -162,7 +162,7 @@ const smallButton: React.CSSProperties = {
   border: "1px solid var(--border-subtle)",
   borderRadius: 4,
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const pathButton: React.CSSProperties = {
   background: "transparent",
@@ -170,5 +170,5 @@ const pathButton: React.CSSProperties = {
   padding: 0,
   color: "var(--text-link, #2563eb)",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };

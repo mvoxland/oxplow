@@ -125,7 +125,7 @@ export function UncommittedChangesPage({
                 boxSizing: "border-box",
                 padding: 8,
                 fontFamily: "inherit",
-                fontSize: 13,
+                fontSize: "var(--text-sm)",
                 border: "1px solid var(--border-subtle)",
                 borderRadius: 4,
                 background: "var(--surface-input, var(--surface-card))",
@@ -230,8 +230,8 @@ const card: React.CSSProperties = {
   borderRadius: 6,
   padding: 12,
 };
-const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: 13 };
-const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: 12 };
+const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
+const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)" };
 const errorBanner: React.CSSProperties = {
   padding: 8,
   background: "var(--surface-warning, #fef3c7)",
@@ -246,7 +246,7 @@ const cleanState: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 12,
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
   color: "var(--text-muted)",
 };
 const historyLink: React.CSSProperties = {
@@ -255,7 +255,7 @@ const historyLink: React.CSSProperties = {
   padding: 0,
   color: "var(--text-link, #2563eb)",
   cursor: "pointer",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
 };
 const primaryButton: React.CSSProperties = {
   padding: "4px 10px",

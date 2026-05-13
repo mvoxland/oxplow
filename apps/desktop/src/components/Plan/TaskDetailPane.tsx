@@ -9,7 +9,7 @@ const paneStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 12,
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   overflowY: "auto",
 };
 

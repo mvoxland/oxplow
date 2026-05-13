@@ -47,12 +47,12 @@ export class ErrorBoundary extends Component<Props, State> {
           background: "var(--surface-app)",
           color: "var(--text-primary)",
           fontFamily: "var(--font-mono)",
-          fontSize: 12,
+          fontSize: "var(--text-xs)",
           minHeight: 0,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <strong style={{ fontSize: 13, color: "var(--severity-critical)" }}>
+          <strong style={{ fontSize: "var(--text-sm)", color: "var(--severity-critical)" }}>
             {this.props.label ? `${this.props.label}: error` : "Error"}
           </strong>
           <button
@@ -65,7 +65,7 @@ export class ErrorBoundary extends Component<Props, State> {
               borderRadius: 6,
               padding: "4px 10px",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: "var(--text-xs)",
             }}
           >
             Retry

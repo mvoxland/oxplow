@@ -224,7 +224,7 @@ function CommitMeta({ detail, collapsedMaxHeight }: CommitMetaProps) {
         overflow: collapsed ? "hidden" : undefined,
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: "var(--text-xs)" }}>
         <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
           {date} · {author}
         </div>
@@ -282,7 +282,7 @@ function formatAbsolute(input: string): string {
   return d.toLocaleString();
 }
 
-const muted: React.CSSProperties = { color: "var(--text-secondary)", fontSize: 12 };
+const muted: React.CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)" };
 const card: React.CSSProperties = {
   background: "var(--surface-card)",
   border: "1px solid var(--border-subtle)",

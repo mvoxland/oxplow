@@ -58,7 +58,7 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
     >
       <div style={{ padding: "20px 24px", maxWidth: 720 }}>
         {!thread ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+          <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
             This thread is no longer available.
           </div>
         ) : (
@@ -82,10 +82,10 @@ export function ThreadSettingsPage({ streamId, thread, onClose, onSaved }: Threa
 
             <div style={actionsRowStyle}>
               {error ? (
-                <span style={{ color: "var(--severity-critical)", fontSize: 12 }}>{error}</span>
+                <span style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}>{error}</span>
               ) : null}
               {savedMessage ? (
-                <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{savedMessage}</span>
+                <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{savedMessage}</span>
               ) : null}
               <span style={{ flex: 1 }} />
               <button
@@ -127,7 +127,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 10 }}>
+    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 10 }}>
       {children}
     </div>
   );
@@ -141,7 +141,7 @@ const textareaStyle: CSSProperties = {
   borderRadius: 6,
   padding: 10,
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
   resize: "vertical",
   minHeight: 160,
 };
@@ -154,7 +154,7 @@ const buttonStyle: CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
 };
 
 const primaryButtonStyle: CSSProperties = {

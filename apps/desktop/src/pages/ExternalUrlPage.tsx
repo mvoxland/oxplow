@@ -50,17 +50,17 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
     return (
       <Page testId="page-external-url" title="Link Blocked" kind="external-url">
         <div style={{ padding: "16px 20px", maxWidth: 720 }}>
-          <div style={{ color: "var(--severity-critical)", fontSize: 13, marginBottom: 8 }}>
+          <div style={{ color: "var(--severity-critical)", fontSize: "var(--text-sm)", marginBottom: 8 }}>
             Couldn't open link
           </div>
-          <div style={{ color: "var(--text-secondary)", fontSize: 12, marginBottom: 12 }}>{reason}</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)", marginBottom: 12 }}>{reason}</div>
           <pre
             style={{
               background: "var(--surface-app)",
               border: "1px solid var(--border-subtle)",
               borderRadius: 6,
               padding: "8px 10px",
-              fontSize: 12,
+              fontSize: "var(--text-xs)",
               color: "var(--text-primary)",
               margin: 0,
               whiteSpace: "pre-wrap",
@@ -89,7 +89,7 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
         border: "1px solid var(--border-subtle)",
         borderRadius: 6,
         cursor: "pointer",
-        fontSize: 12,
+        fontSize: "var(--text-xs)",
       }}
     >
       Open in browser
@@ -104,7 +104,7 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
           padding: "16px 20px",
           maxWidth: 720,
           color: "var(--text-secondary)",
-          fontSize: 13,
+          fontSize: "var(--text-sm)",
         }}
       >
         <div style={{ marginBottom: 8, color: "var(--text-primary)" }}>
@@ -120,7 +120,7 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
             border: "1px solid var(--border-subtle)",
             borderRadius: 6,
             padding: "8px 10px",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
             color: "var(--text-primary)",
             margin: 0,
             marginBottom: 12,
@@ -137,7 +137,7 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
               padding: "8px 12px",
               background: "var(--severity-critical-soft, var(--surface-app))",
               color: "var(--severity-critical)",
-              fontSize: 12,
+              fontSize: "var(--text-xs)",
               borderRadius: 6,
               marginBottom: 12,
             }}
@@ -157,7 +157,7 @@ export function ExternalUrlPage({ url, onOpenInBrowser }: ExternalUrlPageProps) 
             border: "1px solid var(--border-subtle)",
             borderRadius: 6,
             cursor: opening ? "default" : "pointer",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
           }}
         >
           {opening ? "Opening…" : "Open again"}

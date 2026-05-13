@@ -164,9 +164,9 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         </Section>
 
         <div style={actionsRowStyle}>
-          {error ? <span style={{ color: "var(--severity-critical)", fontSize: 12 }}>{error}</span> : null}
+          {error ? <span style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}>{error}</span> : null}
           {savedMessage ? (
-            <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{savedMessage}</span>
+            <span style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}>{savedMessage}</span>
           ) : null}
           <span style={{ flex: 1 }} />
           <button
@@ -206,7 +206,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 10 }}>
+    <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 10 }}>
       {children}
     </div>
   );
@@ -214,7 +214,7 @@ function Hint({ children }: { children: React.ReactNode }) {
 
 function Field({ label, hint, input }: { label: string; hint?: string; input: React.ReactNode }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, fontSize: 13 }}>
+    <label style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, fontSize: "var(--text-sm)" }}>
       <span style={{ minWidth: 180, color: "var(--text-primary)" }}>{label}</span>
       {input}
       {hint ? <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{hint}</span> : null}
@@ -230,7 +230,7 @@ const textareaStyle: CSSProperties = {
   borderRadius: 6,
   padding: 10,
   fontFamily: "ui-monospace, monospace",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   resize: "vertical",
   minHeight: 140,
 };
@@ -242,7 +242,7 @@ const numberInputStyle: CSSProperties = {
   borderRadius: 6,
   padding: "6px 10px",
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
   width: 120,
 };
 
@@ -254,7 +254,7 @@ const buttonStyle: CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 13,
+  fontSize: "var(--text-sm)",
 };
 
 const primaryButtonStyle: CSSProperties = {

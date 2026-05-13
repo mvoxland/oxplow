@@ -360,7 +360,7 @@ export function BranchPicker({
                 padding: "8px 10px",
                 borderBottom: "1px solid var(--border)",
                 background: "var(--bg-2)",
-                fontSize: 12,
+                fontSize: "var(--text-xs)",
               }}
             >
               <span style={{ flex: 1, color: "var(--fg)" }}>{deleting.message}</span>
@@ -543,7 +543,7 @@ export function BranchPicker({
             onSubmit={(e) => { e.preventDefault(); void handleRename(); }}
             style={{ display: "flex", flexDirection: "column", gap: 8 }}
           >
-            <div style={{ fontSize: 12, color: "var(--muted)" }}>New name</div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--muted)" }}>New name</div>
             <input
               autoFocus
               value={renaming.value}
@@ -569,7 +569,7 @@ function RemoteGroup({ remote, branches, busy, onPick, onOpenMenu, forceOpen }: 
   const isOpen = forceOpen || open;
   return (
     <div>
-      <button type="button" onClick={() => setOpen((v) => !v)} style={{ ...groupHeaderStyle, paddingLeft: 18, fontWeight: 400 }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} style={{ ...groupHeaderStyle, paddingLeft: 18, fontWeight: "var(--weight-regular)" }}>
         <span style={{ display: "inline-block", width: 10, color: "var(--muted)" }}>{isOpen ? "▾" : "▸"}</span>
         <span style={{ flex: 1, textAlign: "left" }}>{remote}</span>
         <span style={{ color: "var(--muted)", fontSize: 10 }}>{branches.length}</span>
@@ -663,7 +663,7 @@ const inputStyle: CSSProperties = {
   padding: "4px 6px",
   borderRadius: 3,
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   boxSizing: "border-box",
 };
 
@@ -701,7 +701,7 @@ const itemStyle: CSSProperties = {
   borderRadius: 3,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   textAlign: "left",
   color: "var(--fg)",
   width: "100%",
@@ -710,7 +710,7 @@ const itemStyle: CSSProperties = {
 const emptyStyle: CSSProperties = {
   padding: "8px 10px",
   color: "var(--muted)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const dialogButtonStyle: CSSProperties = {
@@ -721,7 +721,7 @@ const dialogButtonStyle: CSSProperties = {
   borderRadius: 4,
   cursor: "pointer",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const errorStyle: CSSProperties = {

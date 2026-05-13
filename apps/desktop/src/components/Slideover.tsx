@@ -164,7 +164,7 @@ const headerStyle: CSSProperties = {
 };
 
 const titleStyle: CSSProperties = {
-  fontSize: 14,
+  fontSize: "var(--text-base)",
   fontWeight: 600,
   color: "var(--text-primary, var(--fg))",
   overflow: "hidden",

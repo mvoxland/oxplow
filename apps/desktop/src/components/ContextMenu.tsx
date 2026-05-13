@@ -193,7 +193,7 @@ const menuItemStyle: CSSProperties = {
   background: "transparent",
   color: "var(--fg)",
   fontFamily: "inherit",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   textAlign: "left",
 };
 

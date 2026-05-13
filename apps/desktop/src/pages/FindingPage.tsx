@@ -105,10 +105,10 @@ export function FindingPage({ stream, findingId, threadWork, onOpenPage, onOpenF
     <Page testId="page-finding" title={title} kind="finding" chips={chips} backlinks={backlinks} outbound={outbound}>
       <div style={{ padding: "16px 20px", maxWidth: 880 }}>
         {error ? (
-          <div data-testid="page-finding-error" style={{ color: "var(--severity-critical)", fontSize: 12 }}>{error}</div>
+          <div data-testid="page-finding-error" style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}>{error}</div>
         ) : null}
         {!row && !error ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>Loading…</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>Loading…</div>
         ) : null}
         {row ? (
           <>
@@ -124,7 +124,7 @@ export function FindingPage({ stream, findingId, threadWork, onOpenPage, onOpenF
                   border: "1px solid var(--border-subtle)",
                   borderRadius: 6,
                   cursor: "pointer",
-                  fontSize: 12,
+                  fontSize: "var(--text-xs)",
                 }}
               >
                 Jump to source
@@ -138,7 +138,7 @@ export function FindingPage({ stream, findingId, threadWork, onOpenPage, onOpenF
                   border: "1px solid var(--border-subtle)",
                   borderRadius: 6,
                   padding: "10px 12px",
-                  fontSize: 12,
+                  fontSize: "var(--text-xs)",
                   lineHeight: 1.45,
                   overflow: "auto",
                   maxHeight: 400,

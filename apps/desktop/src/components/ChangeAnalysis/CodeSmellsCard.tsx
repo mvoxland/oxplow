@@ -207,7 +207,7 @@ const rowOuter: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const pathButton: React.CSSProperties = {
   background: "transparent",
@@ -215,7 +215,7 @@ const pathButton: React.CSSProperties = {
   padding: 0,
   color: "var(--text-link, #2563eb)",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   textAlign: "left",
   flexShrink: 0,
   width: 360,
@@ -225,7 +225,7 @@ const pathButton: React.CSSProperties = {
 };
 const fnCol: React.CSSProperties = {
   color: "var(--text-primary)",
-  fontWeight: 500,
+  fontWeight: "var(--weight-medium)",
   flex: 1,
   minWidth: 0,
   overflow: "hidden",

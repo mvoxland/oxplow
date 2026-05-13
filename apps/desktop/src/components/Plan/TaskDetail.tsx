@@ -68,7 +68,7 @@ export function TaskDetail({
 }) {
   return (
     <div
-      style={{ padding: "6px 10px 10px 10px", background: "var(--bg-detail)", borderBottom: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}
+      style={{ padding: "6px 10px 10px 10px", background: "var(--bg-detail)", borderBottom: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6, fontSize: "var(--text-xs)" }}
       onClick={(event) => event.stopPropagation()}
     >
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11 }}>
@@ -187,7 +187,7 @@ export function ActivityTimeline({
   const rows = buildActivityTimeline(efforts);
   if (rows.length === 0) {
     return (
-      <div style={{ color: "var(--muted)", fontSize: 12, fontStyle: "italic" }}>
+      <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", fontStyle: "italic" }}>
         No activity yet — moving this item to "in progress" starts an effort.
       </div>
     );
@@ -289,7 +289,7 @@ function ActivityEffortRow({
         </div>
       ) : null}
       {detail.effort.summary && detail.effort.summary.length > 0 ? (
-        <div data-testid={`tasks-effort-summary-${detail.effort.id}`} style={{ fontSize: 12 }}>
+        <div data-testid={`tasks-effort-summary-${detail.effort.id}`} style={{ fontSize: "var(--text-xs)" }}>
           <MarkdownView body={detail.effort.summary} maxHeight={240} />
         </div>
       ) : !active ? (
@@ -450,7 +450,7 @@ const markdownSurfaceStyle: CSSProperties = {
   padding: "4px 6px",
   cursor: "text",
   background: "transparent",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   lineHeight: 1.45,
 };
 

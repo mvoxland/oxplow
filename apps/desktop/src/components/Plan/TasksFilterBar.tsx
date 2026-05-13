@@ -15,7 +15,7 @@ const barStyle: CSSProperties = {
   padding: "6px 10px",
   borderBottom: "1px solid var(--border)",
   background: "var(--bg-2)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 
 const chipStyle: CSSProperties = {

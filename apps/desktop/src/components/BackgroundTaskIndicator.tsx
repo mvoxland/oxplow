@@ -185,7 +185,7 @@ function BackgroundTaskRow({ task }: { task: BackgroundTask }) {
         borderRadius: 4,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--text-xs)" }}>
         <span style={{ color: "var(--muted)", fontSize: 10, minWidth: 80 }}>
           {KIND_LABEL[task.kind]}
         </span>

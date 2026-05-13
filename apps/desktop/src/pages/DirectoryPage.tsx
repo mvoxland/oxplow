@@ -78,24 +78,24 @@ export function DirectoryPage({ stream, path, onOpenPage }: DirectoryPageProps) 
           style={{
             color: "var(--text-secondary)",
             margin: "0 0 16px",
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
           }}
         >
           Workspace directory <code>{path || "/"}</code>.
         </p>
         {loading ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>Loading…</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>Loading…</div>
         ) : null}
         {error ? (
           <div
             data-testid="page-directory-error"
-            style={{ color: "var(--severity-critical)", fontSize: 12 }}
+            style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}
           >
             {error}
           </div>
         ) : null}
         {!loading && !error && total === 0 ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+          <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
             (empty)
           </div>
         ) : null}
@@ -143,11 +143,11 @@ function DirectoryEntryRow({
         border: "1px solid var(--border-subtle)",
         borderRadius: 6,
         cursor: "pointer",
-        fontSize: 13,
+        fontSize: "var(--text-sm)",
         textAlign: "left",
       }}
     >
-      <span aria-hidden style={{ fontSize: 14 }}>{isDir ? "📁" : "📄"}</span>
+      <span aria-hidden style={{ fontSize: "var(--text-base)" }}>{isDir ? "📁" : "📄"}</span>
       <span>{entry.name}{isDir ? "/" : ""}</span>
     </button>
   );

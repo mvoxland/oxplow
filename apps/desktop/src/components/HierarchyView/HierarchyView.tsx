@@ -464,7 +464,7 @@ const searchInput: React.CSSProperties = {
   color: "var(--text-primary)",
   border: "1px solid var(--border-subtle)",
   borderRadius: 4,
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const smallButton: React.CSSProperties = {
   padding: "4px 10px",
@@ -473,11 +473,11 @@ const smallButton: React.CSSProperties = {
   border: "1px solid var(--border-subtle)",
   borderRadius: 4,
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
 };
 const emptyStyle: React.CSSProperties = {
   color: "var(--text-muted)",
-  fontSize: 12,
+  fontSize: "var(--text-xs)",
   padding: 8,
 };
 const rowOuter: React.CSSProperties = {
@@ -600,7 +600,7 @@ const badgeStyle = (cfg: { fg: string; bg: string }): React.CSSProperties => ({
   height: 14,
   borderRadius: 3,
   fontSize: 10,
-  fontWeight: 700,
+  fontWeight: "var(--weight-bold)",
   color: cfg.fg,
   background: cfg.bg,
   lineHeight: 1,

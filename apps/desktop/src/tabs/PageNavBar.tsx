@@ -212,7 +212,7 @@ export function PageNavBar({
                       boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
                       padding: 4,
                       zIndex: 10,
-                      fontSize: 12,
+                      fontSize: "var(--text-xs)",
                     }}
                   >
                     {siblings.indicatorTitle ? (
@@ -317,7 +317,7 @@ export function PageNavBar({
             <span
               data-testid="page-nav-title"
               style={{
-                fontSize: 14,
+                fontSize: "var(--text-base)",
                 fontWeight: 600,
                 color: "var(--text-primary)",
                 overflow: "hidden",
@@ -336,7 +336,7 @@ export function PageNavBar({
                 alignItems: "center",
                 gap: 4,
                 fontSize: 11,
-                fontWeight: 500,
+                fontWeight: "var(--weight-medium)",
                 color: "var(--text-secondary)",
                 background: "var(--surface-tab-inactive)",
                 padding: "2px 6px",
@@ -383,7 +383,7 @@ export function PageNavBar({
                 boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
                 padding: 6,
                 zIndex: 10,
-                fontSize: 12,
+                fontSize: "var(--text-xs)",
               }}
             >
               {(["thread", "stream", "global"] as BookmarkScope[]).map((scope) => {
@@ -429,7 +429,7 @@ export function PageNavBar({
             style={{
               ...navButtonStyle(backlinks.count > 0),
               padding: "4px 10px",
-              fontSize: 12,
+              fontSize: "var(--text-xs)",
             }}
           >
             Backlinks ({backlinks.count}) {backlinksOpen ? "▾" : "▸"}
@@ -470,7 +470,7 @@ export function PageNavBar({
             style={{
               ...navButtonStyle(outbound.count > 0),
               padding: "4px 10px",
-              fontSize: 12,
+              fontSize: "var(--text-xs)",
             }}
           >
             Outbound ({outbound.count}) {outboundOpen ? "▾" : "▸"}
@@ -516,7 +516,7 @@ function navButtonStyle(enabled: boolean): React.CSSProperties {
     borderRadius: 4,
     cursor: enabled ? "pointer" : "default",
     opacity: enabled ? 1 : 0.4,
-    fontSize: 13,
+    fontSize: "var(--text-sm)",
     minWidth: 28,
   };
 }

@@ -70,24 +70,24 @@ export function SubsystemDocsPage({ stream, onOpenPage }: SubsystemDocsPageProps
           style={{
             color: "var(--text-secondary)",
             margin: "0 0 16px",
-            fontSize: 13,
+            fontSize: "var(--text-sm)",
           }}
         >
           Durable knowledge base under <code>.context/</code>. Read these before touching the matching subsystem.
         </p>
         {loading ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>Loading…</div>
+          <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>Loading…</div>
         ) : null}
         {error ? (
           <div
             data-testid="page-subsystem-docs-error"
-            style={{ color: "var(--severity-critical)", fontSize: 12 }}
+            style={{ color: "var(--severity-critical)", fontSize: "var(--text-xs)" }}
           >
             {error}
           </div>
         ) : null}
         {!loading && !error && entries.length === 0 ? (
-          <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+          <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
             No <code>.context/*.md</code> docs found in this workspace.
           </div>
         ) : null}
@@ -108,11 +108,11 @@ export function SubsystemDocsPage({ stream, onOpenPage }: SubsystemDocsPageProps
                 border: "1px solid var(--border-subtle)",
                 borderRadius: 6,
                 cursor: "pointer",
-                fontSize: 13,
+                fontSize: "var(--text-sm)",
                 textAlign: "left",
               }}
             >
-              <span aria-hidden style={{ fontSize: 14 }}>📄</span>
+              <span aria-hidden style={{ fontSize: "var(--text-base)" }}>📄</span>
               <span>{entry.name}</span>
             </button>
           ))}

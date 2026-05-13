@@ -124,7 +124,7 @@ function ClosedThreadRow({
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-          <strong style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <strong style={{ fontSize: "var(--text-base)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {thread.title}
           </strong>
           <span style={{ color: "var(--muted)", fontSize: 11 }}>
@@ -145,14 +145,14 @@ function ClosedThreadRow({
             padding: "4px 10px",
             cursor: "pointer",
             fontFamily: "inherit",
-            fontSize: 12,
+            fontSize: "var(--text-xs)",
           }}
         >
           Reopen
         </button>
       </div>
       {items.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: "var(--text-xs)" }}>
           {(["in_progress", "ready", "blocked", "done", "canceled", "archived"] as const).map((status) => {
             const bucket = grouped[status];
             if (!bucket || bucket.length === 0) return null;

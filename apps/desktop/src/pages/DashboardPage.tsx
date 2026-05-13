@@ -123,7 +123,7 @@ function RowButton({
         border: "1px solid var(--border-subtle)",
         borderRadius: 6,
         cursor: "pointer",
-        fontSize: 13,
+        fontSize: "var(--text-sm)",
         textAlign: "left",
       }}
     >
@@ -139,7 +139,7 @@ function RowButton({
 
 function EmptyHint({ children }: { children: ReactNode }) {
   return (
-    <div style={{ color: "var(--text-secondary)", fontSize: 12, fontStyle: "italic" }}>{children}</div>
+    <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-xs)", fontStyle: "italic" }}>{children}</div>
   );
 }
 
@@ -429,7 +429,7 @@ function DailyChart({ rows }: { rows: CountByDayRowApi[] }) {
         padding: "12px 14px",
       }}
     >
-      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 8 }}>
+      <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", marginBottom: 8 }}>
         {total} total · peak {max}/day
       </div>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 80 }}>
