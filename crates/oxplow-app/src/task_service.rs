@@ -659,13 +659,18 @@ mod tests {
             archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
-        let snapshot_svc = Arc::new(crate::snapshot_capture::SnapshotCaptureService::new(
-            snapshot_store,
-            blobs,
-            project.path().to_path_buf(),
-            s.id.clone(),
-            1_000_000,
-        ));
+        let snapshot_svc = Arc::new(
+            crate::snapshot_capture::SnapshotCaptureService::new(
+                snapshot_store,
+                blobs,
+                project.path().to_path_buf(),
+                s.id.clone(),
+                1_000_000,
+            )
+            // Tests bypass the settle gate; the gate is independently
+            // covered in `snapshot_capture::tests::settle_window_*`.
+            .with_settle_duration(std::time::Duration::ZERO),
+        );
         let t = Thread {
             id: ThreadId::from("b-life"),
             stream_id: s.id.clone(),
@@ -731,7 +736,10 @@ mod tests {
         // a non-empty result.
         let svc_for_dirty = svc.snapshot_capture.as_ref().unwrap().clone();
         std::fs::write(_project.path().join("a.txt"), "v").unwrap();
-        svc_for_dirty.mark_dirty(_project.path().join("a.txt"));
+        svc_for_dirty.mark_dirty(
+            _project.path().join("a.txt"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
 
         // InProgress → Done: closes the open effort with end_snapshot_id.
         let _ = svc

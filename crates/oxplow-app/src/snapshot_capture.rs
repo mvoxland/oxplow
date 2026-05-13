@@ -35,6 +35,13 @@ use std::time::UNIX_EPOCH;
 
 use oxplow_db::{FileSnapshot, SqliteSnapshotStore};
 
+/// How long a path must persist on disk after we first hear about it
+/// before we'll write a content row. Editor atomic-write temp files
+/// (e.g. `foo.tsx.tmp.NNNNN.HASH`) live for a few milliseconds; a 1 s
+/// settle window is comfortably above that floor and below human
+/// perception. Tests override this via [`SnapshotCaptureService::with_settle_duration`].
+pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
+
 /// Extract `mtime` from a `Metadata` and convert to unix
 /// milliseconds. Returns `None` when the platform / filesystem
 /// doesn't expose mtime (rare) — callers fall back to hashing.
@@ -46,7 +53,7 @@ fn mtime_to_unix_ms(m: &std::fs::Metadata) -> Option<i64> {
         .map(|d| d.as_millis() as i64)
 }
 use oxplow_domain::{StreamId, Timestamp};
-use oxplow_fs_watch::{should_ignore_workspace_watch_path, FsWatcher};
+use oxplow_fs_watch::{should_ignore_workspace_watch_path, FsWatcher, WatchEventKind};
 
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
@@ -64,6 +71,18 @@ pub struct CaptureStaging {
     pub mtime_ms: Option<i64>,
     pub blob_hash: Option<String>,
     pub oversize: bool,
+}
+
+/// State per path tracked in the dirty set between snapshot drains.
+/// `first_seen` is the earliest moment fs-watch told us *something*
+/// happened to this path; it's the input to the settle gate that
+/// drops short-lived temp files. `staging`, when populated by the
+/// startup sweep, lets the capture loop skip stat/read/hash/write.
+#[derive(Debug, Clone)]
+struct DirtyEntry {
+    staging: Option<CaptureStaging>,
+    first_seen: Instant,
+    last_kind: WatchEventKind,
 }
 
 #[derive(Clone)]
@@ -96,7 +115,13 @@ struct Inner {
     /// row. fs-watch and explicit `mark_dirty` callers store `None`;
     /// those paths go through the full parallel-process pipeline in
     /// `request_snapshot`.
-    dirty: Mutex<HashMap<PathBuf, Option<CaptureStaging>>>,
+    dirty: Mutex<HashMap<PathBuf, DirtyEntry>>,
+    /// How long a newly-observed path must persist on disk before we
+    /// accept it as real. Entries whose `first_seen` is younger than
+    /// `now - settle_duration` defer to the next snapshot drain. See
+    /// [`DEFAULT_SETTLE_DURATION`]. Tests set this to `Duration::ZERO`
+    /// to bypass the gate.
+    settle_duration: Duration,
     /// Single-flight slot for `request_snapshot`. When a capture is
     /// running, this holds a `watch` receiver that publishes the
     /// eventual result. Concurrent callers clone the receiver and
@@ -131,10 +156,26 @@ impl SnapshotCaptureService {
                 max_file_bytes,
                 events: RwLock::new(None),
                 dirty: Mutex::new(HashMap::new()),
+                settle_duration: DEFAULT_SETTLE_DURATION,
                 in_flight: Mutex::new(None),
                 git: RwLock::new(None),
             }),
         }
+    }
+
+    /// Override the settle window (default [`DEFAULT_SETTLE_DURATION`]).
+    /// Setting this to `Duration::ZERO` disables the gate and captures
+    /// every newly-observed path on the next snapshot — used by tests
+    /// to keep the existing capture semantics.
+    pub fn with_settle_duration(mut self, settle: Duration) -> Self {
+        // We're the sole reference until the service is shared via
+        // Arc::clone — Arc::get_mut is safe here in the builder.
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.settle_duration = settle;
+        } else {
+            warn!("with_settle_duration called after the service was shared; ignoring");
+        }
+        self
     }
 
     /// Attach an `EventBus` so capture emits `FileSnapshotCreated`
@@ -190,7 +231,7 @@ impl SnapshotCaptureService {
                     if should_ignore_workspace_watch_path(rel) {
                         continue;
                     }
-                    self.mark_dirty(path);
+                    self.mark_dirty(path, event.kind);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     warn!(skipped = n, "snapshot capture: fs-watch lagged");
@@ -205,11 +246,28 @@ impl SnapshotCaptureService {
     /// most call sites use this; the startup sweep prefers
     /// [`mark_dirty_with_staging`] to skip the redundant re-read of
     /// bytes it already had in memory.
-    pub fn mark_dirty(&self, path: PathBuf) {
+    ///
+    /// `kind` records the most recent fs-watch verdict for this path
+    /// — used by the settle gate to distinguish transient creates
+    /// from real ones. Callers without an event source (tests, manual
+    /// triggers) pass `WatchEventKind::Other`.
+    pub fn mark_dirty(&self, path: PathBuf, kind: WatchEventKind) {
         let mut set = self.inner.dirty.lock().unwrap();
-        // Don't downgrade an already-staged entry to None — keep the
-        // pre-computed metadata so capture stays fast.
-        set.entry(path).or_insert(None);
+        let now = Instant::now();
+        set.entry(path)
+            .and_modify(|e| {
+                // Preserve the earliest `first_seen` so a path that's
+                // been bouncing in the dirty set still measures its
+                // age from when we first heard about it. Don't
+                // downgrade an already-staged entry — keep its
+                // pre-computed metadata so capture stays fast.
+                e.last_kind = kind.clone();
+            })
+            .or_insert_with(|| DirtyEntry {
+                staging: None,
+                first_seen: now,
+                last_kind: kind,
+            });
     }
 
     /// Add a path to the dirty set along with pre-computed staging
@@ -218,8 +276,26 @@ impl SnapshotCaptureService {
     /// caller must have already written the blob (when applicable).
     /// If the path already has a staging entry from a prior call,
     /// the newer staging wins.
+    ///
+    /// Staged entries set `first_seen` far enough in the past that
+    /// the settle gate always lets them through — the startup sweep
+    /// already proved the file existed when it staged the row, so
+    /// there's no transient-file concern.
     pub fn mark_dirty_with_staging(&self, path: PathBuf, staging: CaptureStaging) {
-        self.inner.dirty.lock().unwrap().insert(path, Some(staging));
+        let mut set = self.inner.dirty.lock().unwrap();
+        // Anchor `first_seen` to a point comfortably before any
+        // realistic settle window so staged entries are never gated.
+        let bypass = Instant::now()
+            .checked_sub(Duration::from_secs(3600))
+            .unwrap_or_else(Instant::now);
+        set.insert(
+            path,
+            DirtyEntry {
+                staging: Some(staging),
+                first_seen: bypass,
+                last_kind: WatchEventKind::Other,
+            },
+        );
     }
 
     /// Prune snapshot rows older than `retention_days` (keeping the
@@ -591,7 +667,7 @@ impl SnapshotCaptureService {
         &self,
         source: SnapshotSourceKind,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        let drained: Vec<(PathBuf, Option<CaptureStaging>)> = {
+        let drained: Vec<(PathBuf, DirtyEntry)> = {
             let mut set = self.inner.dirty.lock().unwrap();
             set.drain().collect()
         };
@@ -604,125 +680,222 @@ impl SnapshotCaptureService {
         }
         let capture_started = Instant::now();
         let drained_count = drained.len();
-        let parent_id = self
+        // Settle classification + "have we seen this path before?"
+        // depend on the current contents of `file_snapshot`. One
+        // query yields both lookups; staged sweep already uses the
+        // same call so the query plan is hot.
+        let known_paths: std::collections::HashSet<String> = self
             .inner
             .store
-            .create_snapshot(self.inner.stream_id.clone())
-            .await?;
+            .latest_stat_per_path()
+            .await?
+            .into_keys()
+            .collect();
 
-        // Split: staged entries → build the row directly; unstaged
-        // entries → run through the parallel stat/read/hash/blob.write
-        // pipeline on the rayon pool, then assemble rows.
+        // Split into:
+        //   - staged   — short-circuit straight to a row.
+        //   - unstaged — parallel stat / read / hash / blob.write.
         let mut staged_paths: Vec<(PathBuf, CaptureStaging)> = Vec::new();
-        let mut unstaged_paths: Vec<PathBuf> = Vec::new();
-        for (path, staging) in drained {
-            match staging {
-                Some(s) => staged_paths.push((path, s)),
-                None => unstaged_paths.push(path),
+        let mut unstaged_entries: Vec<(PathBuf, DirtyEntry)> = Vec::new();
+        for (path, entry) in drained {
+            match &entry.staging {
+                Some(_) => {
+                    // unwrap is safe — we just matched `Some`.
+                    staged_paths.push((path, entry.staging.unwrap()));
+                }
+                None => unstaged_entries.push((path, entry)),
             }
         }
         let staged_count = staged_paths.len() as u64;
-        let unstaged_count = unstaged_paths.len() as u64;
+        let unstaged_count = unstaged_entries.len() as u64;
 
         let project_dir = self.inner.project_dir.clone();
         let stream_id = self.inner.stream_id.clone();
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
-        let rows: Vec<FileSnapshot> = tokio::task::spawn_blocking(move || -> Vec<FileSnapshot> {
-            use rayon::prelude::*;
+        let settle = self.inner.settle_duration;
+        let classify_now = Instant::now();
 
-            fn rel_of(project_dir: &Path, path: &Path) -> String {
-                path.strip_prefix(project_dir)
-                    .unwrap_or(path)
-                    .to_string_lossy()
-                    .into_owned()
-            }
+        // The rayon worker yields one of three outcomes per entry: a
+        // row to insert, a deferral (re-queue for the next snapshot),
+        // or a drop (silently ignore).
+        enum Outcome {
+            Row(FileSnapshot),
+            Defer(PathBuf, DirtyEntry),
+        }
 
-            let now = Timestamp::now();
-            let mut rows: Vec<FileSnapshot> = Vec::with_capacity(staged_paths.len() + unstaged_paths.len());
+        let (rows, deferred): (Vec<FileSnapshot>, Vec<(PathBuf, DirtyEntry)>) =
+            tokio::task::spawn_blocking(move || {
+                use rayon::prelude::*;
 
-            // Staged: trivial — staging already carries everything
-            // the row needs.
-            for (path, s) in staged_paths {
-                rows.push(FileSnapshot {
-                    id: 0,
-                    stream_id: stream_id.clone(),
-                    path: rel_of(&project_dir, &path),
-                    blob_hash: s.blob_hash,
-                    size_bytes: s.size_bytes,
-                    captured_at: now,
-                    oversize: s.oversize,
-                    snapshot_id: Some(parent_id),
-                    mtime_ms: s.mtime_ms,
-                });
-            }
+                fn rel_of(project_dir: &Path, path: &Path) -> String {
+                    path.strip_prefix(project_dir)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .into_owned()
+                }
 
-            // Unstaged: parallel stat + read + hash + blob.write.
-            // Mirrors the cold-sweep phase 2 shape so a branch-switch-
-            // driven 5000-file drain runs as fast as the startup sweep.
-            let unstaged_rows: Vec<FileSnapshot> = unstaged_paths
-                .into_par_iter()
-                .filter_map(|path| {
-                    let metadata = match std::fs::metadata(&path) {
-                        Ok(m) => m,
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                            return Some(FileSnapshot {
+                let now = Timestamp::now();
+                let mut rows: Vec<FileSnapshot> =
+                    Vec::with_capacity(staged_paths.len() + unstaged_entries.len());
+
+                // Staged: trivial — staging already carries everything
+                // the row needs. The settle gate doesn't apply because
+                // mark_dirty_with_staging anchors first_seen in the past.
+                for (path, s) in staged_paths {
+                    rows.push(FileSnapshot {
+                        id: 0,
+                        stream_id: stream_id.clone(),
+                        path: rel_of(&project_dir, &path),
+                        blob_hash: s.blob_hash,
+                        size_bytes: s.size_bytes,
+                        captured_at: now,
+                        oversize: s.oversize,
+                        snapshot_id: None,
+                        mtime_ms: s.mtime_ms,
+                    });
+                }
+
+                // Unstaged: classify per the truth table —
+                //   exists, has prior        → capture content
+                //   exists, no prior, fresh  → defer (settle gate)
+                //   exists, no prior, aged   → capture content
+                //   missing, has prior       → deletion row
+                //   missing, no prior        → drop (transient temp)
+                let outcomes: Vec<Outcome> = unstaged_entries
+                    .into_par_iter()
+                    .filter_map(|(path, entry)| {
+                        let rel = rel_of(&project_dir, &path);
+                        let has_prior = known_paths.contains(&rel);
+                        let metadata = match std::fs::metadata(&path) {
+                            Ok(m) => Some(m),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                            Err(e) => {
+                                debug!(?path, error = %e, "snapshot capture: stat failed");
+                                return None;
+                            }
+                        };
+                        match (metadata, has_prior) {
+                            (None, false) => None,
+                            (None, true) => Some(Outcome::Row(FileSnapshot {
                                 id: 0,
                                 stream_id: stream_id.clone(),
-                                path: rel_of(&project_dir, &path),
+                                path: rel,
                                 blob_hash: None,
                                 size_bytes: 0,
                                 captured_at: now,
                                 oversize: false,
-                                snapshot_id: Some(parent_id),
+                                snapshot_id: None,
                                 mtime_ms: None,
-                            });
-                        }
-                        Err(e) => {
-                            debug!(?path, error = %e, "snapshot capture: stat failed");
-                            return None;
-                        }
-                    };
-                    if !metadata.is_file() {
-                        return None;
-                    }
-                    let size = metadata.len();
-                    let mtime_ms = mtime_to_unix_ms(&metadata);
-                    let oversize = size > max_bytes;
-                    let blob_hash = if oversize {
-                        None
-                    } else {
-                        match std::fs::read(&path) {
-                            Ok(bytes) => match blobs.write(&bytes) {
-                                Ok(h) => Some(h),
-                                Err(e) => {
-                                    debug!(?path, error = %e, "snapshot capture: blob write failed");
+                            })),
+                            (Some(metadata), has_prior) => {
+                                if !metadata.is_file() {
                                     return None;
                                 }
-                            },
-                            Err(e) => {
-                                debug!(?path, error = %e, "snapshot capture: read failed");
-                                return None;
+                                // Settle gate: only applies when this
+                                // path has never been captured before.
+                                // Established paths skip straight to
+                                // capture.
+                                let age = classify_now.saturating_duration_since(entry.first_seen);
+                                if !has_prior && age < settle {
+                                    return Some(Outcome::Defer(path, entry));
+                                }
+                                let size = metadata.len();
+                                let mtime_ms = mtime_to_unix_ms(&metadata);
+                                let oversize = size > max_bytes;
+                                let blob_hash = if oversize {
+                                    None
+                                } else {
+                                    match std::fs::read(&path) {
+                                        Ok(bytes) => match blobs.write(&bytes) {
+                                            Ok(h) => Some(h),
+                                            Err(e) => {
+                                                debug!(?path, error = %e, "snapshot capture: blob write failed");
+                                                return None;
+                                            }
+                                        },
+                                        Err(e) => {
+                                            debug!(?path, error = %e, "snapshot capture: read failed");
+                                            return None;
+                                        }
+                                    }
+                                };
+                                Some(Outcome::Row(FileSnapshot {
+                                    id: 0,
+                                    stream_id: stream_id.clone(),
+                                    path: rel,
+                                    blob_hash,
+                                    size_bytes: size as i64,
+                                    captured_at: now,
+                                    oversize,
+                                    snapshot_id: None,
+                                    mtime_ms,
+                                }))
                             }
                         }
-                    };
-                    Some(FileSnapshot {
-                        id: 0,
-                        stream_id: stream_id.clone(),
-                        path: rel_of(&project_dir, &path),
-                        blob_hash,
-                        size_bytes: size as i64,
-                        captured_at: now,
-                        oversize,
-                        snapshot_id: Some(parent_id),
-                        mtime_ms,
                     })
-                })
-                .collect();
-            rows.extend(unstaged_rows);
-            rows
-        })
-        .await?;
+                    .collect();
+                let mut deferred: Vec<(PathBuf, DirtyEntry)> = Vec::new();
+                for outcome in outcomes {
+                    match outcome {
+                        Outcome::Row(r) => rows.push(r),
+                        Outcome::Defer(p, e) => deferred.push((p, e)),
+                    }
+                }
+                (rows, deferred)
+            })
+            .await?;
+
+        // Re-queue deferred entries so they're reconsidered on the
+        // next drain. We deliberately don't spawn an auto-followup
+        // `request_snapshot` here: doing so would create a recursive
+        // Send-bound cycle on the anonymous Future types
+        // (request_snapshot → capture_inner → tokio::spawn(...) →
+        // request_snapshot). In practice, the next external
+        // `request_snapshot` (task lifecycle transition, periodic
+        // sweep) will pick the deferred entries up. Fresh-file
+        // captures may land in a later snapshot than the one that
+        // first observed them — a small latency cost for completely
+        // suppressing transient-file rows.
+        let deferred_count = deferred.len() as u64;
+        if !deferred.is_empty() {
+            let mut set = self.inner.dirty.lock().unwrap();
+            for (path, entry) in deferred {
+                set.entry(path).or_insert(entry);
+            }
+        }
+
+        // The rayon worker left `snapshot_id = None` because the
+        // parent_id wasn't known yet. We only create the parent row
+        // once we know there's actually something to insert, so a
+        // drain that resolves entirely to "defer" or "drop" doesn't
+        // leak an empty snapshot.
+        if rows.is_empty() {
+            info!(
+                drained = drained_count as u64,
+                staged = staged_count,
+                unstaged = unstaged_count,
+                deferred = deferred_count,
+                source = ?source,
+                "snapshot request: nothing to capture (all deferred or dropped)",
+            );
+            return Ok(self
+                .inner
+                .store
+                .latest_snapshot_id_for_stream(self.inner.stream_id.clone())
+                .await?);
+        }
+
+        let parent_id = self
+            .inner
+            .store
+            .create_snapshot(self.inner.stream_id.clone())
+            .await?;
+        // Fill in the real parent_id now that the row exists.
+        let mut rows = rows;
+        for row in &mut rows {
+            row.snapshot_id = Some(parent_id);
+        }
 
         let assembled = rows.len() as u64;
         let insert_started = Instant::now();
@@ -835,13 +1008,16 @@ mod tests {
         seed_stream(&db).await;
         let store = Arc::new(SqliteSnapshotStore::new(db));
         let blobs = BlobStore::new(project.join(".oxplow/snapshots"));
+        // Tests bypass the settle gate so they observe immediate
+        // captures; the gate is independently tested elsewhere.
         let svc = SnapshotCaptureService::new(
             store.clone(),
             blobs,
             project.to_path_buf(),
             StreamId::from(TEST_STREAM),
             1_000_000,
-        );
+        )
+        .with_settle_duration(Duration::ZERO);
         (svc, store)
     }
 
@@ -853,8 +1029,8 @@ mod tests {
         std::fs::write(&a, "hello").unwrap();
         std::fs::write(&b, "world").unwrap();
         let (svc, store) = svc_for(project.path()).await;
-        svc.mark_dirty(a.clone());
-        svc.mark_dirty(b.clone());
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.mark_dirty(b.clone(), WatchEventKind::Other);
 
         let parent = svc
             .request_snapshot(SnapshotSourceKind::Startup)
@@ -889,7 +1065,10 @@ mod tests {
         }
         let (svc, store) = svc_for(project.path()).await;
         for i in 0..50 {
-            svc.mark_dirty(project.path().join(format!("f{i}.txt")));
+            svc.mark_dirty(
+                project.path().join(format!("f{i}.txt")),
+                WatchEventKind::Other,
+            );
         }
 
         let svc_a = svc.clone();
@@ -925,7 +1104,7 @@ mod tests {
         std::fs::write(&file, "x").unwrap();
         let (svc, store) = svc_for(project.path()).await;
         for _ in 0..10 {
-            svc.mark_dirty(file.clone());
+            svc.mark_dirty(file.clone(), WatchEventKind::Other);
         }
         let parent = svc
             .request_snapshot(SnapshotSourceKind::Startup)
@@ -975,7 +1154,7 @@ mod tests {
         let svc = svc.with_git(git_service_for(project.path()));
 
         // Clean tree → snapshot pinned to HEAD.
-        svc.mark_dirty(tracked.clone());
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
         let clean_id = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
@@ -989,7 +1168,7 @@ mod tests {
         // Mutate the tracked file → worktree now dirty. The next
         // snapshot must NOT carry a git_commit.
         std::fs::write(&tracked, "v2").unwrap();
-        svc.mark_dirty(tracked.clone());
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
         let dirty_id = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
@@ -1017,7 +1196,7 @@ mod tests {
             .unwrap();
         // Create an ignored file — should not break cleanliness.
         std::fs::write(project.path().join("junk.log"), "noise").unwrap();
-        svc.mark_dirty(tracked.clone());
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
         let with_ignored = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
@@ -1044,7 +1223,7 @@ mod tests {
         // Take a real snapshot.
         let file = project.path().join("a.txt");
         std::fs::write(&file, "hi").unwrap();
-        svc.mark_dirty(file);
+        svc.mark_dirty(file, WatchEventKind::Other);
         let parent = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
@@ -1070,26 +1249,128 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deleted_file_records_a_deletion_row() {
+    async fn deleted_file_with_prior_row_records_a_deletion() {
+        // A path that has a prior content row, then disappears,
+        // gets a real deletion row on the next snapshot.
+        let project = tempdir().unwrap();
+        let file = project.path().join("real.txt");
+        let (svc, store) = svc_for(project.path()).await;
+
+        // Prime: real capture so a content row exists.
+        std::fs::write(&file, "hello").unwrap();
+        svc.mark_dirty(file.clone(), WatchEventKind::Other);
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        assert_eq!(store.list_for_path("real.txt").await.unwrap().len(), 1);
+
+        // Delete, mark dirty (as fs-watch would), capture again.
+        std::fs::remove_file(&file).unwrap();
+        svc.mark_dirty(file, WatchEventKind::Removed);
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+
+        let rows = store.list_for_path("real.txt").await.unwrap();
+        assert_eq!(rows.len(), 2);
+        // Newest row is the deletion (no blob).
+        assert!(rows[0].blob_hash.is_none());
+        assert_eq!(rows[0].size_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn dirty_unknown_path_thats_missing_writes_no_row() {
+        // A path that fs-watch told us about but that isn't on disk
+        // and has no prior content row — the classic "tmp file came
+        // and went between snapshot drains" case. Should produce no
+        // file_snapshot row at all.
         let project = tempdir().unwrap();
         let file = project.path().join("ghost.txt");
         let (svc, store) = svc_for(project.path()).await;
-        // Never created on disk — mark_dirty + request_snapshot
-        // should still record a deletion row.
-        svc.mark_dirty(file);
+        svc.mark_dirty(file, WatchEventKind::Removed);
+        let snap = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        // No rows written; no parent snapshot created either.
+        assert!(snap.is_none(), "no parent should be created");
+        let rows = store.list_for_path("ghost.txt").await.unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn settle_window_defers_a_fresh_new_path() {
+        // A path that has no prior content row and was first observed
+        // within the settle window must defer to a later snapshot.
+        let project = tempdir().unwrap();
+        let file = project.path().join("fresh.txt");
+        std::fs::write(&file, "x").unwrap();
+        let db = Database::in_memory();
+        seed_stream(&db).await;
+        let store = Arc::new(SqliteSnapshotStore::new(db));
+        let blobs = BlobStore::new(project.path().join(".oxplow/snapshots"));
+        let svc = SnapshotCaptureService::new(
+            store.clone(),
+            blobs,
+            project.path().to_path_buf(),
+            StreamId::from(TEST_STREAM),
+            1_000_000,
+        )
+        .with_settle_duration(Duration::from_millis(100));
+
+        svc.mark_dirty(file.clone(), WatchEventKind::Created);
+        let snap = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        assert!(snap.is_none(), "first drain should defer the fresh path");
+        let rows = store.list_for_path("fresh.txt").await.unwrap();
+        assert!(rows.is_empty(), "no row written yet");
+        // The deferred entry stays queued. Wait past the settle, then
+        // re-request — the entry now ages past the gate and captures.
+        tokio::time::sleep(Duration::from_millis(150)).await;
         let parent = svc
             .request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap()
             .expect("parent id");
-        assert_eq!(
-            store.list_files_for_snapshot(parent).await.unwrap().len(),
-            1
-        );
-        let rows = store.list_for_path("ghost.txt").await.unwrap();
+        let rows = store.list_for_path("fresh.txt").await.unwrap();
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].blob_hash.is_none());
-        assert_eq!(rows[0].size_bytes, 0);
+        assert_eq!(rows[0].snapshot_id, Some(parent));
+    }
+
+    #[tokio::test]
+    async fn settle_window_drops_a_transient_create_then_delete() {
+        // Mark a fresh path dirty, then immediately delete it; before
+        // the settle window elapses, request a snapshot. No row should
+        // be written — the path never had a prior content row and is
+        // missing on disk, so it's a pure transient.
+        let project = tempdir().unwrap();
+        let file = project.path().join("transient.txt");
+        std::fs::write(&file, "tmp").unwrap();
+        let db = Database::in_memory();
+        seed_stream(&db).await;
+        let store = Arc::new(SqliteSnapshotStore::new(db));
+        let blobs = BlobStore::new(project.path().join(".oxplow/snapshots"));
+        let svc = SnapshotCaptureService::new(
+            store.clone(),
+            blobs,
+            project.path().to_path_buf(),
+            StreamId::from(TEST_STREAM),
+            1_000_000,
+        )
+        .with_settle_duration(Duration::from_secs(60));
+
+        svc.mark_dirty(file.clone(), WatchEventKind::Created);
+        std::fs::remove_file(&file).unwrap();
+        svc.mark_dirty(file, WatchEventKind::Removed);
+        let snap = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        assert!(snap.is_none(), "transient should not create a parent");
+        let rows = store.list_for_path("transient.txt").await.unwrap();
+        assert!(rows.is_empty(), "no row for a path that came and went");
     }
 
     #[tokio::test]
@@ -1100,7 +1381,7 @@ mod tests {
         let (svc, store) = svc_for(project.path()).await;
 
         // Prime: capture once so a baseline row exists with mtime.
-        svc.mark_dirty(file.clone());
+        svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
@@ -1131,9 +1412,9 @@ mod tests {
         let (svc, store) = svc_for(project.path()).await;
 
         // Prime: capture all three so they have a baseline row.
-        svc.mark_dirty(a.clone());
-        svc.mark_dirty(b.clone());
-        svc.mark_dirty(c.clone());
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.mark_dirty(b.clone(), WatchEventKind::Other);
+        svc.mark_dirty(c.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
@@ -1165,14 +1446,14 @@ mod tests {
 
         // First capture — content "v1".
         std::fs::write(&file, "v1").unwrap();
-        svc.mark_dirty(file.clone());
+        svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
 
         // Mutate and capture again — content "v2".
         std::fs::write(&file, "v2").unwrap();
-        svc.mark_dirty(file.clone());
+        svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
@@ -1262,7 +1543,7 @@ mod tests {
 
         let unstaged = project.path().join("unstaged.txt");
         std::fs::write(&unstaged, "unstaged-body-which-is-longer").unwrap();
-        svc.mark_dirty(unstaged.clone());
+        svc.mark_dirty(unstaged.clone(), WatchEventKind::Other);
 
         let parent = svc
             .request_snapshot(SnapshotSourceKind::Startup)
@@ -1332,8 +1613,9 @@ mod tests {
             project.path().to_path_buf(),
             StreamId::from(TEST_STREAM),
             512, // 512 byte cap → 1KB is oversize
-        );
-        svc.mark_dirty(file);
+        )
+        .with_settle_duration(Duration::ZERO);
+        svc.mark_dirty(file, WatchEventKind::Other);
         svc.request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
