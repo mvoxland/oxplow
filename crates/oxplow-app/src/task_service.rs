@@ -178,6 +178,14 @@ impl TaskService {
         };
         let id = self.store.insert(&item).await?;
         item.id = id;
+        // Filing directly in `in_progress` (the path CLAUDE.md
+        // recommends to "start the work in the same call") needs the
+        // same lifecycle hook that update() runs on a Ready →
+        // InProgress transition — otherwise complete_task's TaskEnd
+        // snapshot has no open effort to land on and gets orphaned.
+        if matches!(item.status, TaskStatus::InProgress) {
+            self.apply_lifecycle_snapshot(&item, true).await;
+        }
         Ok(item)
     }
 
@@ -758,6 +766,58 @@ mod tests {
         assert!(closed.ended_at.is_some());
         assert!(closed.end_snapshot_id.is_some());
         // And no new effort was opened.
+        assert!(effort_store
+            .find_open_for_task(item.id)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn create_with_in_progress_opens_lifecycle_effort() {
+        // Filing a task directly in `in_progress` (the path CLAUDE.md
+        // recommends for "start the work in the same call") must run
+        // the lifecycle hook — otherwise complete_task's TaskEnd
+        // snapshot has no open effort to attach to and the snapshot
+        // is orphaned.
+        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid.clone()),
+                CreateTaskInput {
+                    title: "born running".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let open = effort_store
+            .find_open_for_task(item.id)
+            .await
+            .unwrap()
+            .expect("lifecycle effort should be open after in_progress create");
+        assert!(open.ended_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn create_with_done_skips_effort_lifecycle() {
+        // Filing directly in a terminal status (e.g. retroactively
+        // logging completed work) must NOT open a lifecycle effort —
+        // record_effort handles that synthesis itself, with the
+        // touched_files payload.
+        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid.clone()),
+                CreateTaskInput {
+                    title: "retro".into(),
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert!(effort_store
             .find_open_for_task(item.id)
             .await

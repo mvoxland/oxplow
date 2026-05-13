@@ -899,35 +899,12 @@ mod tests {
             })
             .await
             .unwrap();
+        // task_effort.end_snapshot_id references snapshot(id), not
+        // file_snapshot(id). Build real snapshot grouping rows so the
+        // FK validates.
         let snap_store = crate::SqliteSnapshotStore::new(db.clone());
-        let snap1 = snap_store
-            .capture(crate::FileSnapshot {
-                id: 0,
-                stream_id: s.id.clone(),
-                path: "a.txt".into(),
-                blob_hash: Some("h1".into()),
-                size_bytes: 1,
-                captured_at: now,
-                oversize: false,
-                snapshot_id: None,
-                mtime_ms: None,
-            })
-            .await
-            .unwrap();
-        let snap2 = snap_store
-            .capture(crate::FileSnapshot {
-                id: 0,
-                stream_id: s.id.clone(),
-                path: "a.txt".into(),
-                blob_hash: Some("h2".into()),
-                size_bytes: 2,
-                captured_at: now,
-                oversize: false,
-                snapshot_id: None,
-                mtime_ms: None,
-            })
-            .await
-            .unwrap();
+        let snap1 = snap_store.create_snapshot(s.id.clone()).await.unwrap();
+        let snap2 = snap_store.create_snapshot(s.id.clone()).await.unwrap();
 
         let store = SqliteTaskEffortStore::new(db);
         let a = store.start(tid, &t.id, None).await.unwrap();
