@@ -1050,9 +1050,12 @@ export async function deleteWikiPage(_streamId: string, slug: string): Promise<v
   unwrap(await commands.deleteWikiPage(slug));
 }
 
-export function subscribeWikiPageEvents(onEvent: () => void): () => void {
+export function subscribeWikiPageEvents(onEvent: (slug: string) => void): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.kind === "wikiPagesChanged") onEvent();
+    if (event.kind === "wikiPagesChanged") {
+      const slug = typeof event.slug === "string" ? event.slug : "";
+      onEvent(slug);
+    }
   });
 }
 

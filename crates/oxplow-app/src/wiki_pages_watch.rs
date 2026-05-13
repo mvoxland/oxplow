@@ -44,7 +44,7 @@ impl WikiPagesWatcher {
             info!(dir = %dir.display(), "wiki pages initial scan complete");
         }
 
-        let watcher = match FsWatcher::watch(&dir, Duration::from_millis(200)) {
+        let watcher = match FsWatcher::watch(&dir, Duration::from_millis(250)) {
             Ok(w) => w,
             Err(err) => {
                 warn!(?err, "wiki pages watcher failed to start");
@@ -78,7 +78,9 @@ impl WikiPagesWatcher {
                             warn!(slug, ?err, "wiki page resync failed");
                             continue;
                         }
-                        events_for_loop.emit(OxplowEvent::WikiPagesChanged);
+                        events_for_loop.emit(OxplowEvent::WikiPagesChanged {
+                            slug: slug.to_string(),
+                        });
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!(skipped = n, "wiki pages watcher lagged");
@@ -89,5 +91,59 @@ impl WikiPagesWatcher {
         });
 
         Some(Self { _watcher: watcher })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::events::EventBus;
+
+    /// Touching `.oxplow/wiki/<slug>.md` makes the watcher emit
+    /// `WikiPagesChanged { slug }` carrying exactly that file's stem,
+    /// so subscribers can filter by their own slug.
+    #[tokio::test]
+    async fn watcher_emits_slug_on_file_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().to_path_buf();
+        let wiki_dir = crate::wiki_pages::wiki_pages_dir(&project);
+        std::fs::create_dir_all(&wiki_dir).unwrap();
+
+        let db = oxplow_db::Database::in_memory();
+        let store = Arc::new(oxplow_db::SqliteWikiPageStore::new(db.clone()));
+        let page_refs = Arc::new(oxplow_db::SqlitePageRefStore::new(db));
+        let events = EventBus::new();
+        let mut rx = events.subscribe();
+
+        let _watcher = WikiPagesWatcher::spawn(project.clone(), store, page_refs, events)
+            .await
+            .expect("watcher to spawn");
+
+        // Give the OS-level watcher a moment to attach before we
+        // poke the directory.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        std::fs::write(wiki_dir.join("hello-world.md"), "# Hello\nbody\n").unwrap();
+
+        // 250ms debounce + scheduling slack.
+        let evt = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match rx.recv().await {
+                    Ok(OxplowEvent::WikiPagesChanged { slug }) => return slug,
+                    Ok(_) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        panic!("event bus closed before WikiPagesChanged");
+                    }
+                }
+            }
+        })
+        .await
+        .expect("WikiPagesChanged event within 3s");
+
+        assert_eq!(evt, "hello-world");
     }
 }

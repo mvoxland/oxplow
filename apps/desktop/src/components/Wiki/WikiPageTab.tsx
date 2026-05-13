@@ -140,7 +140,10 @@ export function WikiPageTab({ stream, slug, onClosed, onNavigateInternalWikiPage
   // closed and reopened the tab.
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
-  useEffect(() => subscribeWikiPageEvents(() => { void refreshRef.current(); }), []);
+  useEffect(() => subscribeWikiPageEvents((changedSlug) => {
+    if (changedSlug !== slug) return;
+    void refreshRef.current();
+  }), [slug]);
 
   const [draftInitialized, setDraftInitialized] = useState(false);
 

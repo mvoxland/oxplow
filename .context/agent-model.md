@@ -523,6 +523,15 @@ on every file event; `resync_wiki_page` forces an immediate re-baseline
 when the agent wants freshness pinned to the current HEAD without
 waiting for the debounce.
 
+The watcher emits `OxplowEvent::WikiPagesChanged { slug }` after
+each successful resync. The slug is the file stem of the touched
+`.oxplow/wiki/<slug>.md`, and the `FsWatcher` debounce is 250 ms so
+bursts (editor swap-saves, batched writes) coalesce into one event.
+Renderer subscribers — `WikiPageTab` in particular — filter by their
+own slug and skip refreshes for unrelated wiki edits; coarse
+consumers (rail HUD, title cache) ignore the slug and refetch as
+before.
+
 The `oxplow-wiki-capture` skill (the orchestrator-side skill manifest;
 not yet ported into `crates/oxplow-session/`) loads when the agent
 uses these tools or when the user asks an
