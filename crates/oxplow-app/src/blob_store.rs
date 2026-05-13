@@ -14,9 +14,16 @@
 //! 30-50× faster than SHA-256 on Apple silicon.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
 use xxhash_rust::xxh3::Xxh3;
+
+/// Process-wide counter feeding [`BlobStore::write`]'s temp filename.
+/// Each call burns one increment, guaranteeing concurrent writers
+/// targeting the same content hash get distinct staging filenames so
+/// the rename phase doesn't race on a shared tmp.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 pub enum BlobStoreError {
@@ -64,10 +71,19 @@ impl BlobStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        // Write to a sibling temp then rename so partial-failure
-        // never leaves a half-written blob in place.
-        let tmp = path.with_extension("tmp");
+        // Write to a writer-unique sibling temp then rename so
+        // partial-failure never leaves a half-written blob in place.
+        // The counter-based suffix prevents two concurrent rayon
+        // workers that hash to the same content (duplicate files,
+        // mirrored backup blobs) from racing on a shared
+        // `<hash>.tmp` — the rename would otherwise hit ENOENT
+        // for whichever worker lost the race.
+        let n = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp = path.with_file_name(format!("{hash}.{n}.tmp"));
         std::fs::write(&tmp, bytes)?;
+        // Rename is atomic + overwriting on Unix, so identical
+        // concurrent commits to the same canonical path are safe —
+        // the final file is one of the (bit-identical) tmp bodies.
         std::fs::rename(&tmp, &path)?;
         Ok(hash)
     }
@@ -160,5 +176,32 @@ mod tests {
         let h = store.write(b"y").unwrap();
         assert!(store.has(&h));
         assert!(!store.has("deadbeef"));
+    }
+
+    #[test]
+    fn concurrent_writes_of_same_bytes_dont_race_on_tmp() {
+        // Regression: when phase 2 of the snapshot sweep parallelized
+        // BlobStore::write across rayon, two workers hashing the same
+        // content shared a `<hash>.tmp` staging file. One thread's
+        // rename consumed the tmp out from under the other, leaving
+        // the loser with an ENOENT. The fix gives each writer a
+        // unique tmp suffix.
+        let dir = tempdir().unwrap();
+        let store = BlobStore::new(dir.path().join("blobs"));
+        let payload: Vec<u8> = b"shared-blob-content".to_vec();
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let s = store.clone();
+            let p = payload.clone();
+            handles.push(std::thread::spawn(move || s.write(&p)));
+        }
+        let mut hashes = Vec::new();
+        for h in handles {
+            hashes.push(h.join().unwrap().expect("write should not race"));
+        }
+        // Every writer agrees on the hash and the blob is on disk.
+        let first = hashes[0].clone();
+        assert!(hashes.iter().all(|h| h == &first));
+        assert!(store.has(&first));
     }
 }
