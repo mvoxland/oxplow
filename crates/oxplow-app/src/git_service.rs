@@ -1,27 +1,28 @@
 //! Singleton git access surface.
 //!
 //! `GitService` is the one place anything in the app reaches when it
-//! needs git data. It owns a per-stream snapshot cache (status,
-//! branches, conflict state, ahead/behind) that's refreshed in the
-//! background whenever the filesystem watcher reports a change under
-//! the worktree or `.git/refs/`. Read methods serve from the cache
-//! when possible and fall back to a live query if the snapshot hasn't
-//! been hydrated yet (initial paint, brand-new stream). Mutating
-//! operations — commit, push, pull, fetch, merge, rebase, branch
-//! ops — pass through to `oxplow_git::*` and immediately schedule a
-//! refresh + broadcast so the UI catches up without waiting for the
-//! watcher's debounce window.
+//! needs git data. It's a **thin facade** over `oxplow_git::*`: every
+//! read shells out live and every write passes through to the
+//! corresponding `oxplow_git::*` op and then emits the renderer-facing
+//! `OxplowEvent` so panels refetch.
 //!
-//! Why a singleton across all streams (rather than one service per
-//! stream): a single watcher task / debouncer / broadcast subscription
-//! is fewer moving parts, and stream creation/deletion is just a
-//! register/deregister against this one service. Per-stream snapshots
-//! still live inside it, keyed by `StreamId`.
+//! There is no shared mutable cache here. The previous design cached
+//! statuses / branches / log / ahead-behind / remote-branches and
+//! subscribed to its own invalidation triggers (`WorkspaceChanged` /
+//! `GitRefsChanged`). That made cache invalidation race other bus
+//! subscribers on the same event — readers landing on the cache before
+//! the invalidation hop could see stale data. The git ops we wrap
+//! (`list_git_statuses`, `list_branches`, etc.) are sub-10ms libgit2
+//! calls; the cache wasn't carrying its weight against the correctness
+//! cost.
+//!
+//! If a future hotspot warrants caching, add it **inside** the facade
+//! (per-method memo, request coalescer, whatever) — never let cached
+//! state leak through the API. Callers shouldn't be able to tell.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use oxplow_domain::stores::StreamStore;
 use oxplow_domain::{StreamId, Timestamp};
@@ -32,160 +33,53 @@ use oxplow_git::{
     RepoConflictState, TextSearchHit, WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile,
     WorkspaceStatusSummary,
 };
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
-use crate::events::{EventBus, OxplowEvent};
-
-/// Which slice of a stream's snapshot a refresh request should
-/// recompute. Multiple flags can be OR'd in a single request.
-#[derive(Debug, Clone, Copy, Default)]
-struct RefreshKinds {
-    statuses: bool,
-    branches: bool,
-    conflict: bool,
-    /// Recent commit log (top `RECENT_LOG_LIMIT`, HEAD-only).
-    log: bool,
-    /// Remote branches list (project-wide cache, but scheduled per
-    /// stream so the worker dedupes naturally).
-    remote_branches: bool,
-}
-
-/// How many commits the per-stream `recent_log` cache holds. The
-/// dashboard asks for 5; we cache extra so the same snapshot can serve
-/// the GitHistory page's first paint without a re-query.
-const RECENT_LOG_LIMIT: usize = 50;
-/// How many remote branches the project-wide cache holds.
-const RECENT_REMOTE_BRANCHES_LIMIT: usize = 50;
-
-impl RefreshKinds {
-    fn all() -> Self {
-        Self {
-            statuses: true,
-            branches: true,
-            conflict: true,
-            log: true,
-            remote_branches: true,
-        }
-    }
-
-    fn merge(&mut self, other: RefreshKinds) {
-        self.statuses |= other.statuses;
-        self.branches |= other.branches;
-        self.conflict |= other.conflict;
-        self.log |= other.log;
-        self.remote_branches |= other.remote_branches;
-    }
-
-    fn any(&self) -> bool {
-        self.statuses || self.branches || self.conflict || self.log || self.remote_branches
-    }
-}
-
-/// What we keep in memory per stream. `None` means "not yet
-/// hydrated"; readers fall through to a live query for those slots
-/// and write the result back.
-#[derive(Default)]
-struct StreamSnapshot {
-    worktree: PathBuf,
-    statuses: Option<HashMap<String, GitFileStatus>>,
-    status_summary: Option<WorkspaceStatusSummary>,
-    branches: Option<Vec<BranchRef>>,
-    conflict_state: Option<RepoConflictState>,
-    /// Top `RECENT_LOG_LIMIT` HEAD-only commits.
-    recent_log: Option<GitLogResult>,
-    /// `(base, head)` -> counts. Cleared whenever refs/statuses change.
-    /// The dashboard fans out per-stream `getAheadBehind` calls; this
-    /// memoization makes the second-and-later renders free.
-    ahead_behind: HashMap<(String, String), AheadBehind>,
-    last_refreshed: Option<Instant>,
-}
-
-struct Inner {
-    snapshots: HashMap<StreamId, Arc<RwLock<StreamSnapshot>>>,
-    /// Project-wide cache for `list_recent_remote_branches` (the call
-    /// is scoped to the project root, not a worktree). Holds up to
-    /// `RECENT_REMOTE_BRANCHES_LIMIT` entries; readers can serve
-    /// `limit <= cached.len()` from cache.
-    recent_remote_branches: Option<Vec<RemoteBranchEntry>>,
-}
-
-/// One entry the refresh worker is asked to handle. The worker
-/// coalesces consecutive entries for the same stream within a small
-/// debounce window so a flurry of fs-watch events collapses to one
-/// `git status` round-trip.
-#[derive(Debug, Clone)]
-struct RefreshTask {
-    stream_id: StreamId,
-    kinds: RefreshKinds,
-}
+use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 
 /// Singleton handle. Held inside `Services` as `Arc<GitService>`.
 pub struct GitService {
     project_dir: PathBuf,
     streams: Arc<dyn StreamStore>,
     events: EventBus,
-    inner: Arc<RwLock<Inner>>,
-    refresh_tx: mpsc::UnboundedSender<RefreshTask>,
-    /// Internal broadcast — emitted alongside every cache update.
-    /// Most consumers subscribe to `EventBus` instead; this exists so
-    /// inside-process modules can wait on a specific stream/kind
-    /// without going through the json-typed `OxplowEvent` payload.
-    snapshot_tx: broadcast::Sender<SnapshotChanged>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SnapshotChanged {
-    pub stream_id: StreamId,
-    pub statuses: bool,
-    pub branches: bool,
-    pub conflict: bool,
-    pub log: bool,
-    pub remote_branches: bool,
+    /// stream_id → worktree path. The only mutable state we keep —
+    /// it's a routing table, not a cache. `register/deregister`
+    /// maintain it as streams come and go.
+    worktrees: Arc<RwLock<HashMap<StreamId, PathBuf>>>,
 }
 
 impl GitService {
-    /// Build the service and start its background refresh worker.
-    /// Must run inside an entered tokio runtime (the workers are
-    /// spawned via `tokio::spawn`). Existing streams are seeded
-    /// asynchronously from `streams.list()` so callers don't have to
-    /// await; reads against unseeded streams fall back to a live
-    /// query and write the result back into the cache.
+    /// Build the service. Existing streams are seeded asynchronously
+    /// from `streams.list()` so callers don't have to await; reads
+    /// against unseeded streams fall back to the project root via
+    /// `resolve_repo_dir`.
+    ///
+    /// A small bus listener is spawned to keep the per-stream `branch`
+    /// field reconciled against the live HEAD whenever refs move.
+    /// That's persistent state in the stream record — not a cache.
     pub fn spawn(
         project_dir: PathBuf,
         streams: Arc<dyn StreamStore>,
         events: EventBus,
     ) -> Arc<Self> {
-        let (refresh_tx, refresh_rx) = mpsc::unbounded_channel::<RefreshTask>();
-        let (snapshot_tx, _) = broadcast::channel::<SnapshotChanged>(256);
         let svc = Arc::new(Self {
             project_dir,
             streams: streams.clone(),
             events: events.clone(),
-            inner: Arc::new(RwLock::new(Inner {
-                snapshots: HashMap::new(),
-                recent_remote_branches: None,
-            })),
-            refresh_tx,
-            snapshot_tx,
+            worktrees: Arc::new(RwLock::new(HashMap::new())),
         });
 
-        // Refresh worker — owns the cache mutation. Lives for the
-        // process lifetime.
-        Self::spawn_refresh_worker(svc.clone(), refresh_rx);
-        // Bus listener — translates fs-watch + refs events into
-        // refresh tasks.
-        Self::spawn_bus_listener(svc.clone());
-        // Seed snapshots for existing streams in the background, and
-        // reconcile each stream's branch field against the live HEAD
-        // — covers the case where the user switched branches in the
-        // worktree while oxplow was not running.
+        // Reconcile-branch listener.
+        Self::spawn_branch_reconciler(svc.clone());
+
+        // Seed known streams + reconcile each one's branch from HEAD.
         let seed_svc = svc.clone();
         tokio::spawn(async move {
             if let Ok(rows) = streams.list().await {
                 for s in rows {
                     let path = resolve_worktree(&seed_svc.project_dir, &s.worktree_path);
-                    seed_svc.register_internal(&s.id, path.clone()).await;
+                    seed_svc.register(&s.id, path.clone()).await;
                     seed_svc.reconcile_branch(&s.id, &path).await;
                 }
             }
@@ -198,23 +92,15 @@ impl GitService {
         &self.project_dir
     }
 
-    /// Subscribe to fine-grained snapshot updates. Most callers should
-    /// prefer the renderer-facing `EventBus` instead — this is for
-    /// rust-internal consumers that want to block on "branches just
-    /// re-listed for this specific stream".
-    pub fn subscribe(&self) -> broadcast::Receiver<SnapshotChanged> {
-        self.snapshot_tx.subscribe()
-    }
-
     /// Resolve a stream id (or `None` → project root) to a worktree
-    /// path. Mirrors what the IPC layer used to do inline.
+    /// path.
     pub async fn resolve_repo_dir(&self, stream_id: Option<&str>) -> PathBuf {
         let Some(id) = stream_id else {
             return self.project_dir.clone();
         };
-        let map = self.inner.read().await;
-        if let Some(snap) = map.snapshots.get(&StreamId::from(id)) {
-            return snap.read().await.worktree.clone();
+        let map = self.worktrees.read().await;
+        if let Some(p) = map.get(&StreamId::from(id)) {
+            return p.clone();
         }
         drop(map);
         // Stream may exist in the store but not yet registered (e.g.
@@ -229,125 +115,29 @@ impl GitService {
     }
 
     /// Register a stream's worktree with the service. Idempotent.
-    /// Triggers an initial full refresh asynchronously.
     pub async fn register(&self, stream_id: &StreamId, worktree: PathBuf) {
-        self.register_internal(stream_id, worktree).await;
-    }
-
-    async fn register_internal(&self, stream_id: &StreamId, worktree: PathBuf) {
-        {
-            let mut inner = self.inner.write().await;
-            inner.snapshots.entry(stream_id.clone()).or_insert_with(|| {
-                Arc::new(RwLock::new(StreamSnapshot {
-                    worktree: worktree.clone(),
-                    ..Default::default()
-                }))
-            });
-        }
-        // Best-effort kick — failure means the worker shut down.
-        let _ = self.refresh_tx.send(RefreshTask {
-            stream_id: stream_id.clone(),
-            kinds: RefreshKinds::all(),
-        });
+        let mut map = self.worktrees.write().await;
+        map.insert(stream_id.clone(), worktree);
     }
 
     /// Drop a stream from the service. Used when a stream is deleted.
     pub async fn deregister(&self, stream_id: &StreamId) {
-        let mut inner = self.inner.write().await;
-        inner.snapshots.remove(stream_id);
+        let mut map = self.worktrees.write().await;
+        map.remove(stream_id);
     }
 
-    fn spawn_refresh_worker(svc: Arc<Self>, mut rx: mpsc::UnboundedReceiver<RefreshTask>) {
-        tokio::spawn(async move {
-            // Coalesce within a small debounce window so a burst of
-            // fs-watch hits doesn't translate into N separate git
-            // status walks.
-            let debounce = Duration::from_millis(200);
-            let mut pending: HashMap<StreamId, RefreshKinds> = HashMap::new();
-            loop {
-                let task = match rx.recv().await {
-                    Some(t) => t,
-                    None => break,
-                };
-                pending
-                    .entry(task.stream_id.clone())
-                    .or_default()
-                    .merge(task.kinds);
-
-                // Drain anything that's already queued, then sleep
-                // briefly to let more events coalesce.
-                let deadline = tokio::time::Instant::now() + debounce;
-                loop {
-                    let timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
-                    if timeout.is_zero() {
-                        break;
-                    }
-                    match tokio::time::timeout(timeout, rx.recv()).await {
-                        Ok(Some(t)) => {
-                            pending
-                                .entry(t.stream_id.clone())
-                                .or_default()
-                                .merge(t.kinds);
-                        }
-                        Ok(None) => return,
-                        Err(_) => break,
-                    }
-                }
-
-                let drained: Vec<_> = pending.drain().collect();
-                for (stream_id, kinds) in drained {
-                    if !kinds.any() {
-                        continue;
-                    }
-                    svc.do_refresh(&stream_id, kinds).await;
-                }
-            }
-        });
-    }
-
-    fn spawn_bus_listener(svc: Arc<Self>) {
+    fn spawn_branch_reconciler(svc: Arc<Self>) {
         let mut rx = svc.events.subscribe();
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(OxplowEvent::WorkspaceChanged { stream_id, .. }) => {
-                        // Synchronously invalidate so the next reader
-                        // recomputes from disk — without this, the
-                        // frontend's debounced refresh can race the
-                        // backend's async do_refresh and read the stale
-                        // cached value.
-                        svc.invalidate_statuses(&stream_id).await;
-                        let _ = svc.refresh_tx.send(RefreshTask {
-                            stream_id,
-                            kinds: RefreshKinds {
-                                statuses: true,
-                                branches: false,
-                                conflict: true,
-                                log: false,
-                                remote_branches: false,
-                            },
-                        });
-                    }
                     Ok(OxplowEvent::GitRefsChanged { stream_id }) => {
-                        // HEAD moving (commit, checkout, reset) changes
-                        // the worktree's diff vs HEAD even when files
-                        // don't change, so the cached status_summary
-                        // must be invalidated and recomputed too.
-                        svc.invalidate_statuses(&stream_id).await;
-                        let _ = svc.refresh_tx.send(RefreshTask {
-                            stream_id,
-                            kinds: RefreshKinds {
-                                statuses: true,
-                                branches: true,
-                                conflict: true,
-                                log: true,
-                                remote_branches: true,
-                            },
-                        });
+                        let path = svc.resolve_repo_dir(Some(stream_id.as_str())).await;
+                        svc.reconcile_branch(&stream_id, &path).await;
                     }
                     Ok(_) => {}
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
@@ -360,10 +150,7 @@ impl GitService {
     /// a terminal during a session — never touch the Stream record on
     /// their own; without this step the bottom-bar branch chip and any
     /// other consumer of `stream.branch` keep showing the branch the
-    /// stream was created on. We reconcile both at seed time (covers
-    /// the "switched while oxplow was off" case) and after every
-    /// branch-refresh task fires (covers the in-session case driven
-    /// by GitRefsChanged from the fs-watcher).
+    /// stream was created on.
     async fn reconcile_branch(&self, stream_id: &StreamId, worktree: &Path) {
         let Some(detected) = detect_current_branch(worktree) else {
             return;
@@ -385,176 +172,17 @@ impl GitService {
         self.events.emit(OxplowEvent::StreamsChanged);
     }
 
-    /// Drop the cached status map / summary for `stream_id` so the next
-    /// reader recomputes from disk. Called from the event-bus listener
-    /// the moment a workspace or refs change is observed; the async
-    /// pre-warm (via `do_refresh`) still runs in parallel to repopulate
-    /// the cache before the next reader arrives.
-    async fn invalidate_statuses(&self, stream_id: &StreamId) {
-        let snapshot = {
-            let inner = self.inner.read().await;
-            match inner.snapshots.get(stream_id) {
-                Some(s) => s.clone(),
-                None => return,
-            }
-        };
-        let mut snap = snapshot.write().await;
-        snap.statuses = None;
-        snap.status_summary = None;
-    }
-
-    async fn do_refresh(&self, stream_id: &StreamId, kinds: RefreshKinds) {
-        let snapshot = {
-            let inner = self.inner.read().await;
-            match inner.snapshots.get(stream_id) {
-                Some(s) => s.clone(),
-                None => return,
-            }
-        };
-        let worktree = snapshot.read().await.worktree.clone();
-        let worktree_for_blocking = worktree.clone();
-        let project_dir = self.project_dir.clone();
-        let RefreshKinds {
-            statuses,
-            branches,
-            conflict,
-            log,
-            remote_branches,
-        } = kinds;
-
-        let (statuses_v, branches_v, conflict_v, log_v, remote_branches_v) =
-            tokio::task::spawn_blocking(move || {
-                let worktree = worktree_for_blocking;
-                let s = if statuses {
-                    let map = oxplow_git::list_git_statuses(&worktree);
-                    let summary = oxplow_git::summarize_git_statuses(&map);
-                    Some((map, summary))
-                } else {
-                    None
-                };
-                let b = if branches {
-                    Some(oxplow_git::list_branches(worktree.clone()))
-                } else {
-                    None
-                };
-                let c = if conflict {
-                    Some(oxplow_git::get_repo_conflict_state(&worktree))
-                } else {
-                    None
-                };
-                let lg = if log {
-                    Some(oxplow_git::get_git_log(
-                        &worktree,
-                        oxplow_git::GitLogOptions {
-                            limit: Some(RECENT_LOG_LIMIT),
-                            all: false,
-                        },
-                    ))
-                } else {
-                    None
-                };
-                let rb = if remote_branches {
-                    Some(oxplow_git::list_recent_remote_branches(
-                        &project_dir,
-                        RECENT_REMOTE_BRANCHES_LIMIT,
-                    ))
-                } else {
-                    None
-                };
-                (s, b, c, lg, rb)
-            })
-            .await
-            .unwrap_or((None, None, None, None, None));
-
-        let mut changed = SnapshotChanged {
-            stream_id: stream_id.clone(),
-            statuses: false,
-            branches: false,
-            conflict: false,
-            log: false,
-            remote_branches: false,
-        };
-        {
-            let mut snap = snapshot.write().await;
-            if let Some((map, summary)) = statuses_v {
-                snap.statuses = Some(map);
-                snap.status_summary = Some(summary);
-                changed.statuses = true;
-                // Status changes can affect ahead/behind only if HEAD
-                // moves; a `git status` walk doesn't move HEAD, so we
-                // leave the ahead_behind cache alone here.
-            }
-            if let Some(b) = branches_v {
-                snap.branches = Some(b);
-                changed.branches = true;
-                // Refs moved → ahead/behind is stale.
-                snap.ahead_behind.clear();
-            }
-            if let Some(c) = conflict_v {
-                snap.conflict_state = Some(c);
-                changed.conflict = true;
-            }
-            if let Some(l) = log_v {
-                snap.recent_log = Some(l);
-                changed.log = true;
-                // HEAD moved → ahead/behind is stale.
-                snap.ahead_behind.clear();
-            }
-            snap.last_refreshed = Some(Instant::now());
-        }
-        if let Some(rb) = remote_branches_v {
-            let mut inner = self.inner.write().await;
-            inner.recent_remote_branches = Some(rb);
-            changed.remote_branches = true;
-        }
-        if changed.statuses
-            || changed.branches
-            || changed.conflict
-            || changed.log
-            || changed.remote_branches
-        {
-            let _ = self.snapshot_tx.send(changed);
-        }
-
-        // Branch-list refresh implies HEAD may have moved. Reconcile
-        // the Stream record's stored branch field so consumers
-        // (status-bar chip, agent prompt, etc.) follow along when an
-        // external `git checkout` happens during a session.
-        if branches {
-            self.reconcile_branch(stream_id, &worktree).await;
-        }
-    }
-
-    fn schedule(&self, stream_id: &StreamId, kinds: RefreshKinds) {
-        if !kinds.any() {
-            return;
-        }
-        let _ = self.refresh_tx.send(RefreshTask {
-            stream_id: stream_id.clone(),
-            kinds,
-        });
-    }
-
-    /// After a write op against `stream_id`, push the renderer-facing
-    /// events the affected panels listen for and queue a fresh
-    /// snapshot pull so the next read is hot.
-    fn announce_write(&self, stream_id: Option<&StreamId>, kinds: RefreshKinds) {
+    /// Emit the renderer-facing events for a write that touched
+    /// `stream_id`'s worktree. Pass `refs_changed=true` when the op
+    /// may have moved HEAD or any ref so refs subscribers fire too.
+    fn announce_write(&self, stream_id: Option<&StreamId>, refs_changed: bool) {
         if let Some(id) = stream_id {
-            // Any branches/conflict bump implies refs may have moved,
-            // which means recent log + remote branches need a re-fetch
-            // too. Layer that in so callers don't have to remember.
-            let mut effective = kinds;
-            if kinds.branches || kinds.conflict {
-                effective.log = true;
-                effective.remote_branches = true;
-            }
-            self.schedule(id, effective);
             self.events.emit(OxplowEvent::WorkspaceChanged {
                 stream_id: id.clone(),
-                change_kind: crate::events::WorkspaceChangeKind::Updated,
+                change_kind: WorkspaceChangeKind::Updated,
                 path: String::new(),
             });
-            if kinds.branches || kinds.conflict {
+            if refs_changed {
                 self.events.emit(OxplowEvent::GitRefsChanged {
                     stream_id: id.clone(),
                 });
@@ -563,70 +191,31 @@ impl GitService {
     }
 
     // ---------------------------------------------------------------
-    // Cached reads
+    // Reads — every one is a live shell-out via spawn_blocking.
     // ---------------------------------------------------------------
 
     pub async fn status_summary(&self, stream_id: Option<&str>) -> WorkspaceStatusSummary {
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let guard = snap.read().await;
-            if let Some(s) = guard.status_summary.as_ref() {
-                return s.clone();
-            }
-        }
-        // Cache miss — compute live, populate.
         let path = self.resolve_repo_dir(stream_id).await;
-        let summary = tokio::task::spawn_blocking(move || {
-            let m = oxplow_git::list_git_statuses(&path);
-            (oxplow_git::summarize_git_statuses(&m), m)
+        tokio::task::spawn_blocking(move || {
+            let map = oxplow_git::list_git_statuses(&path);
+            oxplow_git::summarize_git_statuses(&map)
         })
         .await
-        .ok();
-        let Some((summary, map)) = summary else {
-            return WorkspaceStatusSummary::default();
-        };
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let mut guard = snap.write().await;
-            guard.statuses = Some(map);
-            guard.status_summary = Some(summary.clone());
-        }
-        summary
+        .unwrap_or_default()
     }
 
     pub async fn statuses(&self, stream_id: Option<&str>) -> HashMap<String, GitFileStatus> {
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let guard = snap.read().await;
-            if let Some(s) = guard.statuses.as_ref() {
-                return s.clone();
-            }
-        }
         let path = self.resolve_repo_dir(stream_id).await;
-        let map = tokio::task::spawn_blocking(move || oxplow_git::list_git_statuses(&path))
+        tokio::task::spawn_blocking(move || oxplow_git::list_git_statuses(&path))
             .await
-            .unwrap_or_default();
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let mut guard = snap.write().await;
-            guard.statuses = Some(map.clone());
-            guard.status_summary = Some(oxplow_git::summarize_git_statuses(&map));
-        }
-        map
+            .unwrap_or_default()
     }
 
     pub async fn branches_for(&self, stream_id: Option<&str>) -> Vec<BranchRef> {
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let guard = snap.read().await;
-            if let Some(b) = guard.branches.as_ref() {
-                return b.clone();
-            }
-        }
         let path = self.resolve_repo_dir(stream_id).await;
-        let list = tokio::task::spawn_blocking(move || oxplow_git::list_branches(path))
+        tokio::task::spawn_blocking(move || oxplow_git::list_branches(path))
             .await
-            .unwrap_or_default();
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let mut guard = snap.write().await;
-            guard.branches = Some(list.clone());
-        }
-        list
+            .unwrap_or_default()
     }
 
     /// `list_branches` against the project root — used by the shared
@@ -639,27 +228,11 @@ impl GitService {
     }
 
     pub async fn conflict_state(&self, stream_id: Option<&str>) -> RepoConflictState {
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let guard = snap.read().await;
-            if let Some(c) = guard.conflict_state.as_ref() {
-                return c.clone();
-            }
-        }
         let path = self.resolve_repo_dir(stream_id).await;
-        let state = tokio::task::spawn_blocking(move || oxplow_git::get_repo_conflict_state(&path))
+        tokio::task::spawn_blocking(move || oxplow_git::get_repo_conflict_state(&path))
             .await
-            .expect("conflict_state join");
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let mut guard = snap.write().await;
-            guard.conflict_state = Some(state.clone());
-        }
-        state
+            .expect("conflict_state join")
     }
-
-    // ---------------------------------------------------------------
-    // Pass-through reads (no cache yet — easy to add later because
-    // every caller already routes through here)
-    // ---------------------------------------------------------------
 
     pub async fn ahead_behind(
         &self,
@@ -667,32 +240,15 @@ impl GitService {
         base: String,
         head: String,
     ) -> AheadBehind {
-        let key = (base.clone(), head.clone());
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let guard = snap.read().await;
-            if let Some(v) = guard.ahead_behind.get(&key) {
-                return v.clone();
-            }
-        }
         let path = self.resolve_repo_dir(stream_id).await;
-        let base_for_blocking = base.clone();
-        let head_for_blocking = head.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            oxplow_git::get_ahead_behind(&path, &base_for_blocking, &head_for_blocking)
-        })
-        .await
-        .expect("ahead_behind join");
-        if let Some(snap) = self.snapshot_for(stream_id).await {
-            let mut guard = snap.write().await;
-            guard.ahead_behind.insert(key, result.clone());
-        }
-        result
+        tokio::task::spawn_blocking(move || oxplow_git::get_ahead_behind(&path, &base, &head))
+            .await
+            .expect("ahead_behind join")
     }
 
     /// Resolved 40-char sha for HEAD in `stream_id`'s worktree.
     /// Returns `None` when the directory isn't a git repo or HEAD
-    /// is unborn. Pass-through; no caching yet (refs can change
-    /// arbitrarily often relative to other cached state).
+    /// is unborn.
     pub async fn head_commit_sha(&self, stream_id: Option<&str>) -> Option<String> {
         let path = self.resolve_repo_dir(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::head_commit_sha(&path))
@@ -716,25 +272,6 @@ impl GitService {
     }
 
     pub async fn git_log(&self, stream_id: Option<&str>, opts: GitLogOptions) -> GitLogResult {
-        // Cache hit: HEAD-only query whose limit fits inside the
-        // pre-fetched window. The dashboard asks for limit=5; the
-        // GitHistory page's first paint asks for ~50.
-        if !opts.all {
-            let want = opts.limit.unwrap_or(usize::MAX);
-            if want <= RECENT_LOG_LIMIT {
-                if let Some(snap) = self.snapshot_for(stream_id).await {
-                    let guard = snap.read().await;
-                    if let Some(cached) = guard.recent_log.as_ref() {
-                        let take = want.min(cached.commits.len());
-                        return GitLogResult {
-                            commits: cached.commits[..take].to_vec(),
-                            branch_heads: cached.branch_heads.clone(),
-                            tags: cached.tags.clone(),
-                        };
-                    }
-                }
-            }
-        }
         let path = self.resolve_repo_dir(stream_id).await;
         tokio::task::spawn_blocking(move || oxplow_git::get_git_log(&path, opts))
             .await
@@ -838,27 +375,10 @@ impl GitService {
     }
 
     pub async fn list_recent_remote_branches(&self, limit: usize) -> Vec<RemoteBranchEntry> {
-        {
-            let inner = self.inner.read().await;
-            if let Some(cached) = inner.recent_remote_branches.as_ref() {
-                if limit <= cached.len() || cached.len() < RECENT_REMOTE_BRANCHES_LIMIT {
-                    let take = limit.min(cached.len());
-                    return cached[..take].to_vec();
-                }
-            }
-        }
         let path = self.project_dir.clone();
-        let fetched = tokio::task::spawn_blocking(move || {
-            oxplow_git::list_recent_remote_branches(&path, RECENT_REMOTE_BRANCHES_LIMIT.max(limit))
-        })
-        .await
-        .unwrap_or_default();
-        {
-            let mut inner = self.inner.write().await;
-            inner.recent_remote_branches = Some(fetched.clone());
-        }
-        let take = limit.min(fetched.len());
-        fetched[..take].to_vec()
+        tokio::task::spawn_blocking(move || oxplow_git::list_recent_remote_branches(&path, limit))
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn list_existing_worktrees(&self) -> Vec<GitWorktreeEntry> {
@@ -885,9 +405,7 @@ impl GitService {
     }
 
     // ---------------------------------------------------------------
-    // Workspace-file pass-throughs (kept on the service so every git
-    // touch goes through one place; cache invalidation rides the
-    // fs-watch path on its own).
+    // Workspace-file pass-throughs.
     // ---------------------------------------------------------------
 
     pub async fn list_workspace_entries(
@@ -938,17 +456,7 @@ impl GitService {
         })
         .await
         .expect("write workspace file join")?;
-        if let Some(id) = stream_id_from(stream_id) {
-            self.announce_write(
-                Some(&id),
-                RefreshKinds {
-                    statuses: true,
-                    branches: false,
-                    conflict: false,
-                    ..Default::default()
-                },
-            );
-        }
+        self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(result)
     }
 
@@ -964,17 +472,7 @@ impl GitService {
         })
         .await
         .expect("create workspace file join")?;
-        if let Some(id) = stream_id_from(stream_id) {
-            self.announce_write(
-                Some(&id),
-                RefreshKinds {
-                    statuses: true,
-                    branches: false,
-                    conflict: false,
-                    ..Default::default()
-                },
-            );
-        }
+        self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(result)
     }
 
@@ -1003,17 +501,7 @@ impl GitService {
         })
         .await
         .expect("rename workspace path join")?;
-        if let Some(id) = stream_id_from(stream_id) {
-            self.announce_write(
-                Some(&id),
-                RefreshKinds {
-                    statuses: true,
-                    branches: false,
-                    conflict: false,
-                    ..Default::default()
-                },
-            );
-        }
+        self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(result)
     }
 
@@ -1028,22 +516,12 @@ impl GitService {
         })
         .await
         .expect("delete workspace path join")?;
-        if let Some(id) = stream_id_from(stream_id) {
-            self.announce_write(
-                Some(&id),
-                RefreshKinds {
-                    statuses: true,
-                    branches: false,
-                    conflict: false,
-                    ..Default::default()
-                },
-            );
-        }
+        self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(result)
     }
 
     // ---------------------------------------------------------------
-    // Mutating ops — pass through to oxplow_git, then refresh + bus.
+    // Mutating ops — pass through to oxplow_git, then emit events.
     // ---------------------------------------------------------------
 
     pub async fn commit_all(
@@ -1053,15 +531,7 @@ impl GitService {
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::commit_all(&path, &message)).await?;
-        self.announce_write(
-            stream_id_from(stream_id).as_ref(),
-            RefreshKinds {
-                statuses: true,
-                branches: true,
-                conflict: true,
-                ..Default::default()
-            },
-        );
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
@@ -1072,15 +542,7 @@ impl GitService {
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::add_path(&path, &relpath)).await?;
-        self.announce_write(
-            stream_id_from(stream_id).as_ref(),
-            RefreshKinds {
-                statuses: true,
-                branches: false,
-                conflict: false,
-                ..Default::default()
-            },
-        );
+        self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(result)
     }
 
@@ -1091,15 +553,7 @@ impl GitService {
     ) -> std::io::Result<()> {
         let path = self.resolve_repo_dir(stream_id).await;
         run_blocking(move || oxplow_git::restore_path(&path, &relpath)).await?;
-        self.announce_write(
-            stream_id_from(stream_id).as_ref(),
-            RefreshKinds {
-                statuses: true,
-                branches: false,
-                conflict: false,
-                ..Default::default()
-            },
-        );
+        self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(())
     }
 
@@ -1110,14 +564,14 @@ impl GitService {
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::fetch(&path, remote.as_deref())).await?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), RefreshKinds::all());
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
     pub async fn pull(&self, stream_id: Option<&str>) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::pull(&path)).await?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), RefreshKinds::all());
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
@@ -1131,24 +585,15 @@ impl GitService {
         let result =
             run_blocking(move || oxplow_git::pull_remote_into_current(&path, &remote, &branch))
                 .await?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), RefreshKinds::all());
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
     pub async fn push(&self, stream_id: Option<&str>) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::push(&path)).await?;
-        // Push doesn't change local refs; just nudge the renderer in
-        // case it cares about ahead/behind.
-        self.announce_write(
-            stream_id_from(stream_id).as_ref(),
-            RefreshKinds {
-                statuses: false,
-                branches: true,
-                conflict: false,
-                ..Default::default()
-            },
-        );
+        // Push doesn't change local refs but ahead/behind shifts.
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
@@ -1161,15 +606,7 @@ impl GitService {
         let path = self.resolve_repo_dir(stream_id).await;
         let result =
             run_blocking(move || oxplow_git::push_current_to(&path, &remote, &branch)).await?;
-        self.announce_write(
-            stream_id_from(stream_id).as_ref(),
-            RefreshKinds {
-                statuses: false,
-                branches: true,
-                conflict: false,
-                ..Default::default()
-            },
-        );
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
@@ -1180,7 +617,7 @@ impl GitService {
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::merge(&path, &source)).await?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), RefreshKinds::all());
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
@@ -1191,7 +628,7 @@ impl GitService {
     ) -> std::io::Result<GitOpResult> {
         let path = self.resolve_repo_dir(stream_id).await;
         let result = run_blocking(move || oxplow_git::rebase(&path, &onto)).await?;
-        self.announce_write(stream_id_from(stream_id).as_ref(), RefreshKinds::all());
+        self.announce_write(stream_id_from(stream_id).as_ref(), true);
         Ok(result)
     }
 
@@ -1202,7 +639,6 @@ impl GitService {
     ) -> Result<(), oxplow_git::BranchOpError> {
         let path = self.project_dir.clone();
         run_blocking_branch(move || oxplow_git::rename_branch(&path, &from, &to)).await?;
-        // Affects every registered stream (the project root's refs).
         self.broadcast_refs_change_all().await;
         Ok(())
     }
@@ -1225,39 +661,19 @@ impl GitService {
     ) -> std::io::Result<()> {
         let path = self.resolve_repo_dir(stream_id).await;
         run_blocking(move || oxplow_git::append_to_gitignore(&path, &entry)).await?;
-        self.announce_write(
-            stream_id_from(stream_id).as_ref(),
-            RefreshKinds {
-                statuses: true,
-                branches: false,
-                conflict: false,
-                ..Default::default()
-            },
-        );
+        self.announce_write(stream_id_from(stream_id).as_ref(), false);
         Ok(())
     }
 
-    async fn snapshot_for(&self, stream_id: Option<&str>) -> Option<Arc<RwLock<StreamSnapshot>>> {
-        let id = stream_id?;
-        let inner = self.inner.read().await;
-        inner.snapshots.get(&StreamId::from(id)).cloned()
-    }
-
+    /// Project-wide refs change — fan out a `GitRefsChanged` for
+    /// every registered stream so per-stream subscribers (snapshot
+    /// capture, history panel, branch picker) all refresh.
     async fn broadcast_refs_change_all(&self) {
         let ids: Vec<StreamId> = {
-            let inner = self.inner.read().await;
-            inner.snapshots.keys().cloned().collect()
+            let map = self.worktrees.read().await;
+            map.keys().cloned().collect()
         };
         for id in ids {
-            self.schedule(
-                &id,
-                RefreshKinds {
-                    statuses: false,
-                    branches: true,
-                    conflict: true,
-                    ..Default::default()
-                },
-            );
             self.events
                 .emit(OxplowEvent::GitRefsChanged { stream_id: id });
         }
@@ -1301,10 +717,4 @@ where
     tokio::task::spawn_blocking(f)
         .await
         .expect("branch op join")
-}
-
-#[cfg(debug_assertions)]
-#[allow(dead_code)]
-fn _trace(s: &str) {
-    debug!(target: "git_service", "{s}");
 }

@@ -156,72 +156,56 @@ walk completes.
 
 Every read of git state and every mutating git op routes through
 `oxplow_app::git_service::GitService`, held on `Services` as
-`Arc<GitService>`. There is one of these for the whole app, not one
-per stream. It owns:
+`Arc<GitService>`. One per app, not per stream.
 
-- A per-stream snapshot cache (`HashMap<StreamId, StreamSnapshot>`)
-  of the slow-to-recompute slices: `WorkspaceStatusSummary`, the
-  `path → GitFileStatus` map, the branch list, and
-  `RepoConflictState`. `None` slots mean "not yet hydrated"; a read
-  falls back to a live query and writes the result back.
-- A debounced refresh worker (200ms window) fed by an unbounded
-  mpsc. The worker coalesces consecutive tasks for the same stream
-  into a single git walk.
-- A bus listener that translates `OxplowEvent::WorkspaceChanged` /
-  `GitRefsChanged` into refresh tasks: workspace events refresh
-  statuses + conflict state; refs events refresh branches + conflict
-  state.
-- An internal `broadcast::Sender<SnapshotChanged>` for in-process
-  consumers that want fine-grained cache update events; renderer
-  clients keep using the existing `OxplowEvent` channel.
+**It is a thin facade.** Every read shells out live via
+`tokio::task::spawn_blocking(oxplow_git::*)`; every write delegates to
+the matching `oxplow_git::*` op and then emits the renderer-facing
+`OxplowEvent`. There is no shared mutable cache. The only state the
+service keeps is a `HashMap<StreamId, PathBuf>` routing table
+(`worktrees`) maintained by `register/deregister`.
+
+### Why no cache
+
+The previous design cached statuses / branches / log / ahead-behind /
+remote-branches and **subscribed to its own invalidation triggers**
+(`WorkspaceChanged` / `GitRefsChanged`). Subscribers on the same
+broadcast channel have no ordering guarantees, so any other consumer
+of those events that read from the GitService cache could land on the
+pre-event snapshot before the invalidation hop ran. That race silently
+broke snapshot capture's commit-record path.
+
+The wrapped `oxplow_git::*` ops are sub-10ms libgit2 calls. The cache
+wasn't worth the correctness cost. If a future profile shows a real
+hotspot, **add caching inside the facade** (per-method memo, request
+coalescer, whatever) — never let cached state leak through the API.
+Callers must not be able to tell whether anything is cached.
+
+### Lifecycle hooks
 
 `GitService::register(stream_id, worktree)` and `deregister(stream_id)`
 are called from the stream lifecycle commands (`create_worktree`,
-`adopt_worktree`, `delete_stream`, `archive_stream`) so the snapshot
-map stays in sync with the stream list. At boot, `GitService::spawn`
+`adopt_worktree`, `delete_stream`, `archive_stream`) so the routing
+table stays in sync with the stream list. At boot, `GitService::spawn`
 seeds itself from `streams.list()` asynchronously — readers against
-unseeded streams just take the live-query path until the seed lands.
+unseeded streams fall back to the project root via `resolve_repo_dir`.
 
-### What's cached vs. pass-through
+A small bus listener subscribes to `GitRefsChanged` for one purpose
+only: re-running `reconcile_branch` so the per-stream `branch` field
+in the stream record follows the live HEAD. That's persistent state
+in the stream record (used by the bottom-bar branch chip and agent
+prompts), not a cache.
 
-Cached today: `status_summary`, `statuses`, `branches_for`,
-`conflict_state`, `git_log` (top `RECENT_LOG_LIMIT` HEAD-only commits
-per stream — slices to serve smaller-limit reads; the cached
-`branchHeads` and `tags` overlay arrays travel with every slice so
-both `HistoryPanel` and the dashboard's `RecentCommitsCard` get the
-ref badges next to each row), `ahead_behind`
-(per-stream `(base, head) → AheadBehind` memo, cleared whenever refs
-or HEAD move), and `list_recent_remote_branches` (project-wide,
-`RECENT_REMOTE_BRANCHES_LIMIT` entries). All cached slices are warmed
-on `register()` via `RefreshKinds::all()` and re-fetched from the
-debounced refresh worker on `WorkspaceChanged` / `GitRefsChanged`.
-
-Pass-through (no cache yet, but routed through the service so caching
-can be layered in later without touching call sites):
-`commit_detail`, `commits_ahead_of`, `blame`, `local_blame`,
-`list_file_commits`, `read_file_at_ref`, `branch_changes`,
-`change_scopes`, `search_workspace_text`, `list_all_refs`,
-`list_existing_worktrees`, `list_adoptable_worktrees`,
-`detect_default_branch`. Workspace-file ops
-(`list_workspace_entries` / `read_workspace_file` /
-`write_workspace_file` / etc.) also go through the service.
-
-### Mutating ops auto-refresh
+### Mutating ops emit events
 
 `commit_all`, `add_path`, `restore_path`, `fetch`, `pull`,
 `pull_remote_into_current`, `push`, `push_current_to`, `merge`,
-`rebase`, `rename_branch`, `delete_branch`, `append_to_gitignore` are
-all pass-through wrappers around `oxplow_git::*` that, on success:
-
-1. Schedule a snapshot refresh of the affected slices (full refresh
-   for merge/rebase/pull/fetch; just statuses for add/restore;
-   branches+conflict for branch ops; etc.).
-2. Emit `OxplowEvent::WorkspaceChanged` and/or `GitRefsChanged` so
-   the renderer's existing subscribers update without waiting for the
-   fs-watch debounce window.
-
-This is why hitting "Pull" in the UI doesn't sit on the watcher's
-~250ms debounce before the rail catches up.
+`rebase`, `rename_branch`, `delete_branch`, `append_to_gitignore`,
+plus the `*_workspace_*` write ops, all pass through to `oxplow_git::*`
+and emit `OxplowEvent::WorkspaceChanged` (always) plus
+`GitRefsChanged` (when the op may have moved HEAD or any ref).
+Subscribers refetch on receipt; no cache is being invalidated because
+there is no cache.
 
 ## Runtime git operations
 
@@ -363,17 +347,16 @@ representation of disk; it just now also corresponds to a new commit
 (common after `git commit`, `git commit --amend`, or a fast-forward
 pull that moves HEAD without altering the working tree).
 
-Both the re-stamp path and `capture_inner`'s post-capture commit-record
-step **bypass GitService's status/HEAD caches** and shell out to
-`oxplow_git::list_git_statuses` / `head_commit_sha` directly. Reason:
-GitService subscribes to the same `GitRefsChanged` event and its
-cache invalidation runs concurrently with the snapshot listener.
-Reading the cache risks seeing pre-event statuses and either skipping
-the re-stamp (cache still shows the worktree as dirty) or recording
-the old HEAD. After the re-stamp the service emits a 0-file
+After the re-stamp the service emits a 0-file
 `FileSnapshotsBatchCreated` event so renderer subscribers (Local
 History dashboard, change analysis) refetch and pick up the new
 `git_commit`.
+
+The cleanliness check uses `oxplow_git::list_git_statuses` directly
+(via `spawn_blocking`) rather than going back through GitService.
+That's a holdover from when GitService cached statuses and the cache
+could race the event; now that the facade is uncached, both paths
+return the same data — direct is just one less hop.
 
 ## Related
 
