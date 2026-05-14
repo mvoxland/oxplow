@@ -232,21 +232,135 @@ export function LocalHistoryDashboardPage({
         {error ? <div style={errorBanner}>{error}</div> : null}
         {loading && !data ? <div style={muted}>Loading…</div> : null}
         {data ? (
-          <>
-            <RecentSnapshotsCard
-              rows={data.rows}
-              onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
-              refLabels={data.refLabels}
-            />
-            {byBranch.length > 0 ? (
-              <ByBranchCard groups={byBranch}
-              onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
-              refLabels={data.refLabels} onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))} />
-            ) : null}
-          </>
+          <DashboardBody
+            data={data}
+            byBranch={byBranch}
+            onOpenPage={onOpenPage}
+          />
         ) : null}
       </div>
     </Page>
+  );
+}
+
+type GroupingMode = "recent" | "by-commit";
+
+function DashboardBody({
+  data,
+  byBranch,
+  onOpenPage,
+}: {
+  data: DashboardData;
+  byBranch: Array<{ commit: string; rows: SnapshotRow[] }>;
+  onOpenPage(ref: TabRef, opts?: { newTab?: boolean; siblings?: NavSiblings }): void;
+}) {
+  const byCommitAvailable = byBranch.length > 0;
+  const [mode, setMode] = useState<GroupingMode>("recent");
+  // If the user selected "by-commit" and the underlying groups
+  // disappear (e.g. all snapshots had their git_commit cleared),
+  // fall back to the recent view rather than rendering an empty
+  // panel.
+  const effectiveMode: GroupingMode =
+    mode === "by-commit" && !byCommitAvailable ? "recent" : mode;
+  return (
+    <>
+      <GroupingToggle
+        mode={effectiveMode}
+        onChange={setMode}
+        byCommitAvailable={byCommitAvailable}
+      />
+      {effectiveMode === "recent" ? (
+        <RecentSnapshotsCard
+          rows={data.rows}
+          onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
+          refLabels={data.refLabels}
+        />
+      ) : (
+        <ByBranchCard
+          groups={byBranch}
+          onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
+          refLabels={data.refLabels}
+          onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))}
+        />
+      )}
+    </>
+  );
+}
+
+function GroupingToggle({
+  mode,
+  onChange,
+  byCommitAvailable,
+}: {
+  mode: GroupingMode;
+  onChange(next: GroupingMode): void;
+  byCommitAvailable: boolean;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Local history grouping"
+      style={{
+        display: "inline-flex",
+        alignSelf: "flex-start",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 6,
+        overflow: "hidden",
+      }}
+    >
+      <ToggleButton
+        active={mode === "recent"}
+        onClick={() => onChange("recent")}
+        label="Recent snapshots"
+      />
+      <ToggleButton
+        active={mode === "by-commit"}
+        onClick={() => onChange("by-commit")}
+        label="By git commit"
+        disabled={!byCommitAvailable}
+        disabledTitle="No snapshots with two or more rows sharing a git commit yet."
+      />
+    </div>
+  );
+}
+
+function ToggleButton({
+  active,
+  onClick,
+  label,
+  disabled,
+  disabledTitle,
+}: {
+  active: boolean;
+  onClick(): void;
+  label: string;
+  disabled?: boolean;
+  disabledTitle?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? disabledTitle : undefined}
+      style={{
+        padding: "4px 12px",
+        fontSize: "var(--text-xs)",
+        background: active ? "var(--surface-rail, var(--surface-app))" : "transparent",
+        color: disabled
+          ? "var(--text-muted)"
+          : active
+          ? "var(--text-primary)"
+          : "var(--text-secondary)",
+        fontWeight: active ? 600 : 400,
+        border: "none",
+        cursor: disabled ? "not-allowed" : "pointer",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
