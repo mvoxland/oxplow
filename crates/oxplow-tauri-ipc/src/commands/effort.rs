@@ -35,3 +35,21 @@ pub async fn list_efforts_at_snapshots(
         .list_efforts_at_snapshots(snapshot_ids)
         .await?)
 }
+
+/// All distinct file paths whose `file_snapshot` rows fall inside
+/// this effort's snapshot bracket — the "all changes during this
+/// effort" reference list. Returns empty when the effort has no
+/// start/end snapshot pin yet. Drives the reference view shown
+/// alongside the canonical `task_effort_file` list on
+/// `SnapshotDetailPage`.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_changed_paths_for_effort(
+    state: tauri::State<'_, AppState>,
+    effort_id: EffortId,
+) -> Result<Vec<String>, IpcError> {
+    Ok(state
+        .effort_store
+        .list_changed_paths_for_effort(&effort_id)
+        .await?)
+}

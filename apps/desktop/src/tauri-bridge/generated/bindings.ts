@@ -467,6 +467,15 @@ export const commands = {
 	listTaskEfforts: (itemId: TaskId) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_task_efforts", { itemId })),
 	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
 	listEffortsAtSnapshots: (snapshotIds: number[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
+	/**
+	 *  All distinct file paths whose `file_snapshot` rows fall inside
+	 *  this effort's snapshot bracket — the "all changes during this
+	 *  effort" reference list. Returns empty when the effort has no
+	 *  start/end snapshot pin yet. Drives the reference view shown
+	 *  alongside the canonical `task_effort_file` list on
+	 *  `SnapshotDetailPage`.
+	 */
+	listChangedPathsForEffort: (effortId: EffortId) => typedError<string[], IpcError>(__TAURI_INVOKE("list_changed_paths_for_effort", { effortId })),
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	getCommitDetail: (streamId: string | null, sha: string) => typedError<{
 	sha: string,

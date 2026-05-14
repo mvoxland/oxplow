@@ -1,6 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { EffortAtSnapshot, Snapshot, Stream } from "../api.js";
-import { getTaskSummaries, listEffortFiles, listEffortsAtSnapshots, listSnapshots } from "../api.js";
+import {
+  getTaskSummaries,
+  listChangedPathsForEffort,
+  listEffortFiles,
+  listEffortsAtSnapshots,
+  listSnapshots,
+} from "../api.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page } from "../tabs/Page.js";
@@ -42,6 +48,11 @@ interface CompletedEffortRow {
   effort: EffortAtSnapshot;
   taskTitle: string;
   files: Array<{ path: string; change: "created" | "updated" | "deleted" }>;
+  /** Auto-diff between start_snapshot_id and end_snapshot_id —
+   *  every path that changed during the effort window regardless of
+   *  whether the agent claimed it. Reference list shown alongside
+   *  the canonical `files` so the user can spot omissions. */
+  autoDiff: string[];
 }
 
 export function SnapshotDetailPage({
@@ -150,12 +161,28 @@ export function SnapshotDetailPage({
           }),
         );
         const filesById = new Map<string, EffortFileRow[]>(filesByEffort);
+        const diffsByEffort: Array<[string, string[]]> = await Promise.all(
+          completed.map(async (e) => {
+            try {
+              const paths = await listChangedPathsForEffort(e.effortId);
+              return [e.effortId, paths] as [string, string[]];
+            } catch (err) {
+              logUi("warn", "effort auto-diff fetch failed", {
+                error: String(err),
+                effortId: e.effortId,
+              });
+              return [e.effortId, [] as string[]] as [string, string[]];
+            }
+          }),
+        );
+        const diffById = new Map<string, string[]>(diffsByEffort);
         if (cancelled) return;
         setCompletedEfforts(
           completed.map((effort) => ({
             effort,
             taskTitle: titleByTask.get(effort.tasksId) ?? `task ${effort.tasksId}`,
             files: filesById.get(effort.effortId) ?? [],
+            autoDiff: diffById.get(effort.effortId) ?? [],
           })),
         );
       } catch (err) {
@@ -254,74 +281,132 @@ function CompletedEffortsSection({
         Efforts completed at this snapshot
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {rows.map(({ effort, taskTitle, files }) => (
-          <div key={effort.effortId} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => onOpenTask(effort.tasksId)}
-                style={{ ...linkButton, fontFamily: "inherit", fontWeight: 600 }}
-              >
-                {taskTitle}
-              </button>
-              {effort.startSnapshotId !== null ? (
-                <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
-                  · started at{" "}
-                  <button
-                    type="button"
-                    onClick={() => onOpenSnapshot(effort.startSnapshotId!)}
-                    style={linkButton}
+        {rows.map(({ effort, taskTitle, files, autoDiff }) => {
+          const claimedSet = new Set(files.map((f) => f.path));
+          const referenceOnly = autoDiff.filter((p) => !claimedSet.has(p));
+          return (
+            <div
+              key={effort.effortId}
+              style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => onOpenTask(effort.tasksId)}
+                  style={{ ...linkButton, fontFamily: "inherit", fontWeight: 600 }}
+                >
+                  {taskTitle}
+                </button>
+                {effort.startSnapshotId !== null ? (
+                  <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
+                    · started at{" "}
+                    <button
+                      type="button"
+                      onClick={() => onOpenSnapshot(effort.startSnapshotId!)}
+                      style={linkButton}
+                    >
+                      snapshot {effort.startSnapshotId}
+                    </button>
+                  </span>
+                ) : null}
+              </div>
+              {files.length === 0 && autoDiff.length === 0 ? (
+                <div style={{ color: "var(--text-muted)", fontSize: 11, paddingLeft: 4 }}>
+                  No files declared and no diff in the effort window.
+                </div>
+              ) : null}
+              {files.length > 0 ? (
+                <div>
+                  <div
+                    style={{
+                      color: "var(--text-muted)",
+                      fontSize: 10,
+                      paddingLeft: 4,
+                      marginBottom: 2,
+                    }}
                   >
-                    snapshot {effort.startSnapshotId}
-                  </button>
-                </span>
+                    Claimed (canonical authorship)
+                  </div>
+                  <ul style={listStyle}>
+                    {files.map((f) => (
+                      <li key={f.path}>
+                        {onOpenFile ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenFile(f.path)}
+                            style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
+                            title={`${f.change}: ${f.path}`}
+                          >
+                            {f.path}
+                          </button>
+                        ) : (
+                          <span style={{ fontFamily: "var(--mono, monospace)" }}>{f.path}</span>
+                        )}
+                        <span style={{ marginLeft: 6, color: "var(--text-muted)" }}>
+                          {f.change}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {referenceOnly.length > 0 ? (
+                <div>
+                  <div
+                    style={{
+                      color: "var(--text-muted)",
+                      fontSize: 10,
+                      paddingLeft: 4,
+                      marginBottom: 2,
+                    }}
+                    title="All paths whose file_snapshot rows fall in (start_snapshot, end_snapshot] but the agent didn't claim. Could be parallel efforts, formatters, or omissions."
+                  >
+                    Also changed in window (reference, not claimed)
+                  </div>
+                  <ul style={referenceListStyle}>
+                    {referenceOnly.map((path) => (
+                      <li key={path}>
+                        {onOpenFile ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenFile(path)}
+                            style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
+                          >
+                            {path}
+                          </button>
+                        ) : (
+                          <span style={{ fontFamily: "var(--mono, monospace)" }}>{path}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
             </div>
-            {files.length === 0 ? (
-              <div style={{ color: "var(--text-muted)", fontSize: 11, paddingLeft: 4 }}>
-                No files declared via touched_files. The auto-diff
-                between snapshots may still show what changed during
-                the effort window — see the file list below.
-              </div>
-            ) : (
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: 18,
-                  fontSize: 11,
-                  color: "var(--text-secondary)",
-                }}
-              >
-                {files.map((f) => (
-                  <li key={f.path}>
-                    {onOpenFile ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenFile(f.path)}
-                        style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
-                        title={`${f.change}: ${f.path}`}
-                      >
-                        {f.path}
-                      </button>
-                    ) : (
-                      <span style={{ fontFamily: "var(--mono, monospace)" }}>{f.path}</span>
-                    )}
-                    <span style={{ marginLeft: 6, color: "var(--text-muted)" }}>{f.change}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 8 }}>
-        Files shown are the canonical (LLM-declared) authorship list.
-        The full snapshot diff below shows everything that changed in
-        this snapshot regardless of which effort touched it.
+        "Claimed" is the agent's declared authorship via
+        {" "}<code>complete_task</code>/<code>amend_effort</code>.
+        "Also changed in window" is the auto-diff between the
+        effort's start and end snapshots — included for reference so
+        you can spot omissions or contributions from another actor.
       </div>
     </section>
   );
 }
+
+const listStyle: React.CSSProperties = {
+  margin: 0,
+  paddingLeft: 18,
+  fontSize: 11,
+  color: "var(--text-secondary)",
+};
+const referenceListStyle: React.CSSProperties = {
+  ...listStyle,
+  color: "var(--text-muted)",
+};
 
 interface SnapshotMetaProps {
   snapshot: Snapshot;

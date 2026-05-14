@@ -1632,6 +1632,16 @@ export async function listWikiSlugsForSnapshots(
   return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
 }
 
+/** All distinct file paths whose `file_snapshot` rows fall inside
+ *  this effort's snapshot bracket — the auto-diff "all changes
+ *  during this effort" reference list. Returns empty when the
+ *  effort has no start/end snapshot pin yet. */
+export async function listChangedPathsForEffort(
+  effortId: string,
+): Promise<string[]> {
+  return unwrap(await commands.listChangedPathsForEffort(effortId)) as string[];
+}
+
 export async function listEffortsAtSnapshots(
   snapshotIds: number[],
 ): Promise<EffortAtSnapshot[]> {
