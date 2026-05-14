@@ -579,6 +579,12 @@ function ByBranchGroup({
 function groupByBranch(
   rows: SnapshotRow[],
 ): Array<{ commit: string; rows: SnapshotRow[] }> {
+  // `rows` arrives newest-first from listSnapshots, so the first
+  // occurrence of each commit is its most recent snapshot — Map
+  // insertion order naturally yields "most recent commit first."
+  // Don't drop single-snapshot groups: with the re-stamp logic each
+  // commit typically has exactly one snapshot, and dropping them
+  // would leave the view nearly empty.
   const byCommit = new Map<string, SnapshotRow[]>();
   for (const row of rows) {
     const commit = row.snapshot.gitCommit;
@@ -587,9 +593,10 @@ function groupByBranch(
     existing.push(row);
     byCommit.set(commit, existing);
   }
-  return Array.from(byCommit.entries())
-    .filter(([, rs]) => rs.length >= 2)
-    .map(([commit, rs]) => ({ commit, rows: rs }));
+  return Array.from(byCommit.entries()).map(([commit, rs]) => ({
+    commit,
+    rows: rs,
+  }));
 }
 
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
