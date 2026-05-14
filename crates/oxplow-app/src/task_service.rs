@@ -181,7 +181,7 @@ impl TaskService {
         // Filing directly in `in_progress` (the path CLAUDE.md
         // recommends to "start the work in the same call") needs the
         // same lifecycle hook that update() runs on a Ready →
-        // InProgress transition — otherwise complete_task's TaskEnd
+        // InProgress transition — otherwise complete_task's EffortEnd
         // snapshot has no open effort to land on and gets orphaned.
         if matches!(item.status, TaskStatus::InProgress) {
             self.apply_lifecycle_snapshot(&item, true).await;
@@ -264,9 +264,9 @@ impl TaskService {
             return;
         };
         let source = if entering {
-            crate::events::SnapshotSourceKind::TaskStart
+            crate::events::SnapshotSourceKind::EffortStart
         } else {
-            crate::events::SnapshotSourceKind::TaskEnd
+            crate::events::SnapshotSourceKind::EffortEnd
         };
         let snap_id = match snapshot.request_snapshot(source).await {
             Ok(id) => id,

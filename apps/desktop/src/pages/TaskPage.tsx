@@ -68,7 +68,7 @@ export function TaskPage({
         kind: "snapshot" as const,
         snapshotId: d.effort.end_snapshot_id!,
         label: `Effort ${i + 1} end snapshot`,
-        source: "task-end",
+        source: "effort-end",
         snapshotLabel: null,
         tasksId: itemId,
         subtitle: `${d.changed_paths.length} file${d.changed_paths.length === 1 ? "" : "s"}`,

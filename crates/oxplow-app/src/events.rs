@@ -30,13 +30,17 @@ pub enum WorkspaceChangeKind {
 }
 
 /// Snapshot trigger source. The renderer renders these differently in
-/// the Snapshots panel ("startup" rows are dimmer than "task-end").
+/// the Snapshots panel ("startup" rows are dimmer than "effort-end").
+///
+/// Tasks themselves don't have a start/end — only efforts do. The
+/// Effort* variants are the snapshot bracket for a single effort
+/// row's lifetime.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum SnapshotSourceKind {
-    TaskStart,
-    TaskEnd,
-    TaskEvent,
+    EffortStart,
+    EffortEnd,
+    EffortEvent,
     Startup,
     Manual,
     /// Triggered by a HEAD/refs change (commit, branch switch, pull,

@@ -20,7 +20,7 @@ export interface SnapshotBacklinkEntry {
   kind: "snapshot";
   snapshotId: string;
   label: string;
-  /** Optional pre-known source ("task-end", "task-start", …) for header. */
+  /** Optional pre-known source ("effort-end", "effort-start", …) for header. */
   source?: string;
   /** Optional pre-known free-form label for the header. */
   snapshotLabel?: string | null;

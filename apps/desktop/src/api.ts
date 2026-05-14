@@ -271,10 +271,12 @@ import type { TaskEvent } from "./tauri-bridge/index.js";
 export type { TaskEvent };
 
 export type SnapshotSource =
-  | "task-start"
-  | "task-end"
-  | "task-event"
-  | "startup";
+  | "effort-start"
+  | "effort-end"
+  | "effort-event"
+  | "startup"
+  | "manual"
+  | "git-refs";
 
 export interface FileSnapshot {
   id: string;
@@ -1606,7 +1608,7 @@ export function subscribeSnapshotEvents(
     fn({
       streamId: eventStreamId ?? streamId,
       snapshotId: String(event.snapshotId),
-      kind: (event.source as SnapshotSource) ?? "task-event",
+      kind: (event.source as SnapshotSource) ?? "effort-event",
       effortId: (event.effortId as string | null | undefined) ?? null,
       threadId: (event.threadId as string | null | undefined) ?? null,
     });
