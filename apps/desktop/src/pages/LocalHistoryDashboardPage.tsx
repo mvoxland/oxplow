@@ -7,6 +7,7 @@ import {
   listSnapshots,
   listWikiSlugsForSnapshots,
   resolveCommitRefLabels,
+  subscribeGitRefsEvents,
   subscribeSnapshotEvents,
 } from "../api.js";
 import { Card, cardLinkButton } from "../components/Card.js";
@@ -211,6 +212,19 @@ export function LocalHistoryDashboardPage({
   useEffect(() => {
     if (!streamId) return;
     const unsub = subscribeSnapshotEvents(streamId, () => {
+      void refresh();
+    });
+    return () => unsub();
+  }, [streamId, refresh]);
+
+  // Git refs events: a branch can move (or get created/deleted/
+  // pulled) without any snapshot row changing. resolveCommitRefLabels
+  // is a live git2 query, so we re-run refresh on refs events too —
+  // otherwise an existing snapshot's chip would render as the
+  // short-sha fallback even after the branch tip catches up to it.
+  useEffect(() => {
+    if (!streamId) return;
+    const unsub = subscribeGitRefsEvents(streamId, () => {
       void refresh();
     });
     return () => unsub();
