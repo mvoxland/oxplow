@@ -1,131 +1,170 @@
 # Writing tone — blog posts & user docs
 
 Applies to everything in `docs/` (the MkDocs site: blog posts, guides,
-reference, philosophy) and any other reader-facing prose we ship —
-release notes, changelogs, README copy.
+reference, philosophy) and other reader-facing prose we ship — release
+notes, changelogs, README copy.
 
 Code comments and `.context/` docs are exempt; they're for ourselves
 and follow different rules (see `CLAUDE.md`'s "default to writing no
 comments" guidance).
 
-The rules below are condensed from <https://tropes.fyi/tropes-md>.
-They exist because LLM-generated prose has a recognisable shape: lots
-of false drama, hedged grandiosity, and recycled scaffolding. Avoiding
-that shape is most of what makes our writing readable.
+Blog posts skew personal and casual; docs skew terse and reference-
+style. Both share the voice rules and the AI-tropes section.
 
-## Meta-principle
+## Voice
 
-Any one of these patterns used once may read fine. The damage comes
-from stacking them or repeating one across a piece. **Vary, be
-specific, accept some imperfection.** If a sentence feels like it
-could open any blog post on any product, rewrite it.
+- **First person singular ("I")** for personal work, opinions,
+  decisions. **"We"** for project-level statements.
+- **Developer-to-developer.** Write like a technical forum post, not
+  a press release.
+- **Plainspoken.** No buzzwords, no hype adjectives ("revolutionary",
+  "game-changing", "excited to announce"). Say what the thing does.
+- **Comfortable with imperfection.** Admit missed milestones, known
+  issues, half-baked ideas. "Not yet production ready" is fine.
+- **Honest about uncertainty.** "I'm not sure if this is the right
+  approach" beats false confidence.
 
-## Word choice
+## Structure by post type
 
-- **No magic adverbs.** Drop "quietly", "deeply", "fundamentally",
-  "remarkably", "arguably". They inflate mundane statements.
-- **Banned vocabulary.** "delve", "utilize", "leverage" (verb),
-  "robust", "streamline", "harness", "certainly". Use the plain word.
-- **No grand nouns.** Avoid "tapestry", "landscape", "paradigm",
-  "synergy", "ecosystem", "framework" as decoration. Name the actual
-  thing.
-- **Prefer "is" over "serves as".** "X is a reminder that…" beats
-  "X serves as a reminder that…". Same for "stands as", "marks",
+### Release announcements
+- One- or two-sentence intro: what version, what's notable.
+- Bulleted list of changes — no paragraph-per-feature bloat.
+- Bug-fix-only releases get 2–3 sentences total. Don't pad them.
+
+### Roadmap / plans
+- State the goal plainly.
+- Numbered or bulleted plan.
+- Flag what's uncertain or might change.
+
+### Technical deep-dives
+- Get to the point in the first sentence.
+- Code examples over prose explanations.
+- Headers and lists, not long paragraphs.
+
+### General announcements
+- Short. Say the thing, link if relevant, done.
+
+### Guides & reference docs
+- Lead with the task or concept, not setup throat-clearing.
+- Show the command or screenshot before explaining it.
+- Cross-link to related pages instead of restating.
+
+## Do
+
+- Get to the point immediately. One-sentence intros, not three
+  paragraphs of context.
+- Use bulleted lists for features and changes.
+- Thank contributors by name.
+- Admit when something isn't done: "I was hoping to add X but wanted
+  to get this out first."
+- Casual phrasing where it fits: "worst case…", "hope to see you
+  there".
+- Self-deprecating humor when it lands: "The major improvement is
+  that it actually runs now."
+
+## Don't
+
+- Marketing or sales-pitch tone.
+- Superlatives: "amazing", "incredible", "excited to announce".
+- Pad short announcements into long posts.
+- Corporate speak: "We are pleased to inform you", "leveraging
+  synergies".
+- Over-polish. Should read like it was written quickly and honestly,
+  not workshopped by a comms team.
+- "Stay tuned" or other empty filler closings.
+- Sections added just to make a post look longer.
+
+## Closing conventions
+
+End with one of:
+- A casual call to action: "Let me know if you run into issues."
+- A specific ask: "Try the new filter syntax and tell me if it makes
+  sense."
+- Nothing — short posts don't need a closing.
+
+## Avoiding AI tropes
+
+LLM-assisted prose has a recognisable shape: false drama, hedged
+grandiosity, recycled scaffolding. One trope occasionally is fine;
+clusters, or any one pattern repeated, give the game away.
+**Vary, be specific, accept some imperfection.** If a sentence could
+open any blog post on any product, rewrite it.
+
+Source: <https://tropes.fyi/tropes-md>.
+
+### Word choice
+- No magic adverbs: "quietly", "deeply", "fundamentally",
+  "remarkably", "arguably".
+- Banned vocabulary: "delve", "utilize", "leverage" (verb), "robust",
+  "streamline", "harness", "seamless", "certainly".
+- No grand nouns as decoration: "tapestry", "landscape", "paradigm",
+  "synergy", "ecosystem", "framework". Name the thing.
+- Plain copulas. "X is Y", not "X serves as Y" / "stands as" /
   "represents".
 
-## Sentence structure
+### Sentence structure
+- No negative parallelism: "It's not X — it's Y", "not because X but
+  because Y", "The question isn't X. The question is Y."
+- No dramatic countdowns: "Not X. Not Y. Just Z."
+- No self-answered rhetorical questions: "The result? Devastating."
+- Don't open multiple sentences identically ("They assume… They
+  assume…").
+- Rule of three sparingly. Stacked tricolons read as AI.
+- Cut filler transitions: "It's worth noting", "Importantly",
+  "Notably", "Interestingly".
+- Cut hollow `-ing` tails: "highlighting its importance",
+  "reflecting broader trends".
+- Avoid fake "from X to Y" ranges when X and Y aren't on a real
+  spectrum.
 
-- **No "not X — it's Y" reframes.** Includes "not because X, but
-  because Y" and "Not a bug. Not a feature. A design flaw." Just
-  state Y.
-- **No self-posed rhetorical questions.** "The result? Devastating."
-  is a tell. If the reader wasn't asking, don't ask for them.
-- **Don't repeat sentence openings.** "They assume… They assume…
-  They assume…" reads like filler. Vary.
-- **Use the rule of three sparingly.** One tricolon in a piece is
-  fine; three in a row signals padding.
-- **Cut filler transitions.** "It's worth noting", "Importantly",
-  "Notably", "Interestingly", "bears mentioning". If the next
-  sentence matters, just write it.
-- **No `-ing` tail clauses for fake depth.** "…highlighting its
-  importance", "…reflecting broader trends". Either say something
-  substantive or end the sentence.
-- **No fake ranges.** "From innovation to cultural transformation"
-  isn't a spectrum. Only use "from X to Y" when X and Y sit on a
-  real scale.
+### Paragraph & list structure
+- Don't manufacture emphasis with one-sentence paragraphs.
+  "He published this. Openly. In a book." is theatrical.
+- If it's a list, format it as a list. Don't disguise enumeration as
+  prose with "The first… The second… The third…".
 
-## Paragraph & list structure
+### Tone
+- No false suspense: "Here's the kicker", "Here's the thing", "Here's
+  where it gets interesting".
+- No patronising analogies: "Think of it as…", "It's like a…" —
+  unless the analogy is actually load-bearing.
+- No "imagine a world where…" futurism.
+- No performative vulnerability ("And honestly, I'll admit…"). Real
+  vulnerability is specific and uncomfortable.
+- Don't assert something is "clear", "simple", or "obvious" without
+  showing it.
+- Don't inflate stakes. Most features are not world-historical.
+- Cut "Let's break this down" / "Let's unpack" / "Let's explore".
+- Name sources. Not "experts argue" or "observers note".
+- Don't coin compound labels ("the supervision paradox") without
+  defining and earning them.
 
-- **Don't manufacture emphasis with one-sentence paragraphs.**
-  "He published this. Openly. In a book." is theatrical. Vary length
-  naturally.
-- **If it's a list, format it as a list.** Don't disguise enumeration
-  as prose with "The first… The second… The third…". Either write
-  real connected paragraphs or use bullets.
+### Formatting
+- Em dashes: a few per piece, not twenty. When in doubt use `--` or
+  a comma.
+- Don't bold-prefix every bullet (`**Thing**: description` on every
+  line). Mix it up; bold when one item genuinely needs to stand out.
+- Straight quotes and ASCII arrows (`->`), not smart quotes or `→`.
 
-## Tone
+### Composition
+- Don't announce structure ("In this section we'll explore…") and
+  don't recap it ("As we've seen…").
+- Introduce a metaphor once. Don't run "ecosystem" or "engine"
+  through every paragraph.
+- Don't rapid-fire historical analogies ("Apple didn't build Uber.
+  Facebook didn't build Spotify…").
+- Don't restate one idea ten different ways. A 4000-word piece that
+  says one 800-word thing five different ways is worse than the 800
+  words.
+- Never duplicate paragraphs. Reread long pieces; AI-assisted drafts
+  often repeat sections verbatim.
+- No signposted conclusions: "In conclusion", "To sum up",
+  "As we've seen".
+- No "despite its challenges, X remains promising" closer.
 
-- **No "Here's the kicker" / "Here's the thing" / "Here's where it
-  gets interesting".** Manufactured suspense before an unremarkable
-  point.
-- **No "Think of it like…" analogies by default.** They patronise
-  technical readers. If a metaphor genuinely clarifies, use it once
-  and move on.
-- **No "Imagine a world where…"** openings.
-- **No performative vulnerability.** "And honestly, I'll admit…"
-  reads as polished, not honest. Real vulnerability is specific and
-  uncomfortable.
-- **Don't assert that something is obvious.** "The truth is simple",
-  "History is clear", "The reality is…". Show the reader; don't
-  announce.
-- **Don't inflate stakes.** "Will fundamentally reshape", "define
-  the next era", "something entirely new". Match the claim to the
-  topic.
-- **Don't lecture peers.** "Let's unpack this", "Let's dive in",
-  "Let's break this down". Just say what you mean.
-- **No vague attributions.** "Experts say", "industry reports
-  suggest", "observers have noted". Name the source or cut the
-  claim.
-- **Don't invent jargon.** "The supervision paradox", "workload
-  creep" used as if they're established terms. If you mint a phrase,
-  define it; better, don't mint it.
+## Editing pass
 
-## Formatting
-
-- **Em dashes: ~2–3 per piece, max.** They're a strong tell when
-  overused. Save them for genuine pauses.
-- **Don't bold-prefix every bullet.** `**Thing**: description` on
-  every line of a list looks like AI output. Use bolding when one
-  item genuinely needs to stand out.
-- **Plain ASCII.** `->` not `→`, straight quotes not curly,
-  straight apostrophes. Match what a human types.
-
-## Composition
-
-- **Don't summarise at every level.** Intro that previews the piece,
-  section recaps, conclusion that restates the intro — pick one,
-  usually none. Trust the reader.
-- **Introduce a metaphor once.** Don't run "ecosystem" or "engine"
-  through every paragraph. If you find yourself reaching for the
-  same image five times, the image isn't doing the work — the prose
-  around it is.
-- **Don't stack historical analogies.** "Apple didn't… Facebook
-  didn't… Netflix didn't…" One example, if any.
-- **Make the point once.** A 4000-word piece that says one 800-word
-  thing five different ways is worse than the 800 words. Each
-  paragraph should add information, not rephrase the prior one.
-- **Never duplicate paragraphs.** Reread long pieces; AI-assisted
-  drafts often repeat sections verbatim.
-- **No signposted conclusions.** "In conclusion", "To sum up",
-  "As we've seen". The structure should make the ending obvious.
-- **No "Despite its challenges…" closer.** Acknowledging a problem
-  only to dismiss it in the same sentence is a tell. Engage the
-  tension or don't raise it.
-
-## When you're editing
-
-A practical pass after drafting: search the file for `delve`,
-`tapestry`, `landscape`, `leverage`, `serves as`, `worth noting`,
-`Imagine`, `In conclusion`, `Despite`, `—`, `→`. Each hit is a
-question, not necessarily a fix — but each one earns its place or
-gets cut.
+After drafting, search for: `delve`, `tapestry`, `landscape`,
+`leverage`, `serves as`, `worth noting`, `Imagine`, `In conclusion`,
+`Despite`, `seamless`, `excited`, `—`, `→`. Each hit is a question,
+not necessarily a fix — but each one earns its place or gets cut.
