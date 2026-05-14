@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CommitRefLabel, EndingEffort, Snapshot, Stream } from "../api.js";
+import type { CommitRefLabel, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
 import {
   getSnapshotStats,
   getTaskSummaries,
-  listEffortsEndingAtSnapshots,
+  listEffortsAtSnapshots,
   listSnapshots,
   resolveCommitRefLabels,
   subscribeSnapshotEvents,
@@ -34,7 +34,11 @@ interface SnapshotRowEffort {
 interface SnapshotRow {
   snapshot: Snapshot;
   summary: { created: number; modified: number; deleted: number; total: number } | null;
-  efforts: SnapshotRowEffort[];
+  /** Efforts that ended exactly at this snapshot (just-completed). */
+  completedEfforts: SnapshotRowEffort[];
+  /** Efforts that were active at this snapshot but ended later (or
+   *  are still open). Surfaces as "in flight" labels on the row. */
+  inFlightEfforts: SnapshotRowEffort[];
   /** True when this is the very first snapshot recorded for the
    *  stream — rendered as "Initial Snapshot" rather than the
    *  catch-all "External change" label. We can only assert this
@@ -44,12 +48,24 @@ interface SnapshotRow {
 }
 
 /** Pure label resolver for the snapshot row subject text. Extracted
- *  so the if/else logic is testable without a Card render. */
+ *  so the if/else logic is testable without a Card render.
+ *
+ *  Composition rule: completed efforts win the prefix; in-flight
+ *  efforts are appended; "External change" only fires when neither
+ *  list has anything (and the row isn't the very first snapshot). */
 export function formatSnapshotSubject(
-  efforts: ReadonlyArray<{ title: string }>,
+  completed: ReadonlyArray<{ title: string }>,
+  inFlight: ReadonlyArray<{ title: string }>,
   isInitial: boolean,
 ): string {
-  if (efforts.length > 0) return efforts.map((e) => e.title).join(" · ");
+  const parts: string[] = [];
+  if (completed.length > 0) {
+    parts.push(`completed: ${completed.map((e) => e.title).join(", ")}`);
+  }
+  if (inFlight.length > 0) {
+    parts.push(`in flight: ${inFlight.map((e) => e.title).join(", ")}`);
+  }
+  if (parts.length > 0) return parts.join(" · ");
   if (isInitial) return "Initial Snapshot";
   return "External change";
 }
@@ -90,7 +106,7 @@ export function LocalHistoryDashboardPage({
       setError(null);
       const snapshots = await listSnapshots(streamId, RECENT_LIMIT);
       const snapshotIds = snapshots.map((s) => s.id);
-      const [summaries, endingEfforts] = await Promise.all([
+      const [summaries, effortsAt] = await Promise.all([
         Promise.all(
           snapshotIds.map(async (id) => {
             try {
@@ -101,8 +117,8 @@ export function LocalHistoryDashboardPage({
             }
           }),
         ),
-        listEffortsEndingAtSnapshots(snapshotIds).catch((err): EndingEffort[] => {
-          logUi("warn", "ending efforts fetch failed", { error: String(err) });
+        listEffortsAtSnapshots(snapshotIds).catch((err): EffortAtSnapshot[] => {
+          logUi("warn", "efforts-at-snapshots fetch failed", { error: String(err) });
           return [];
         }),
       ]);
@@ -112,7 +128,7 @@ export function LocalHistoryDashboardPage({
       }
       // Resolve task titles for every effort the dashboard will show
       // — the efforts IPC only carries effort columns, no task title.
-      const uniqueTaskIds = Array.from(new Set(endingEfforts.map((e) => e.tasksId)));
+      const uniqueTaskIds = Array.from(new Set(effortsAt.map((e) => e.tasksId)));
       const taskSummaries = await getTaskSummaries(uniqueTaskIds).catch((err) => {
         logUi("warn", "task summaries fetch failed", { error: String(err) });
         return [] as Array<{ id: number; title: string }>;
@@ -120,15 +136,17 @@ export function LocalHistoryDashboardPage({
       const titleByTaskId = new Map<number, string>(
         taskSummaries.map((t) => [t.id, t.title] as [number, string]),
       );
-      const effortsBySnapshot = new Map<number, SnapshotRowEffort[]>();
-      for (const e of endingEfforts) {
-        const list = effortsBySnapshot.get(e.endSnapshotId) ?? [];
+      const completedBySnap = new Map<number, SnapshotRowEffort[]>();
+      const inFlightBySnap = new Map<number, SnapshotRowEffort[]>();
+      for (const e of effortsAt) {
+        const target = e.completedHere ? completedBySnap : inFlightBySnap;
+        const list = target.get(e.snapshotId) ?? [];
         list.push({
           effortId: e.effortId,
           tasksId: e.tasksId,
           title: titleByTaskId.get(e.tasksId) ?? `task ${e.tasksId}`,
         });
-        effortsBySnapshot.set(e.endSnapshotId, list);
+        target.set(e.snapshotId, list);
       }
       // The earliest snapshot in our window is the stream's first
       // snapshot only when we've fetched the entire history (no
@@ -141,7 +159,8 @@ export function LocalHistoryDashboardPage({
       const rows: SnapshotRow[] = snapshots.map((snapshot) => ({
         snapshot,
         summary: summaryById.get(snapshot.id) ?? null,
-        efforts: effortsBySnapshot.get(snapshot.id) ?? [],
+        completedEfforts: completedBySnap.get(snapshot.id) ?? [],
+        inFlightEfforts: inFlightBySnap.get(snapshot.id) ?? [],
         isInitial: earliestId !== null && snapshot.id === earliestId,
       }));
       const commitShas = Array.from(
@@ -216,7 +235,7 @@ export function LocalHistoryDashboardPage({
 function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
   return rows.map((row) => ({
     ref: snapshotRef(row.snapshot.id),
-    label: formatSnapshotSubject(row.efforts, row.isInitial),
+    label: formatSnapshotSubject(row.completedEfforts, row.inFlightEfforts, row.isInitial),
   }));
 }
 
@@ -259,8 +278,8 @@ function SnapshotRowItem({
   onSelect(id: number): void;
   labels: CommitRefLabel[];
 }) {
-  const { snapshot, summary, efforts, isInitial } = row;
-  const subjectish = formatSnapshotSubject(efforts, isInitial);
+  const { snapshot, summary, completedEfforts, inFlightEfforts, isInitial } = row;
+  const subjectish = formatSnapshotSubject(completedEfforts, inFlightEfforts, isInitial);
   return (
     <button
       type="button"
@@ -370,8 +389,16 @@ function RecentEffortsCard({
   onOpenSnapshot(id: number, siblings: NavSiblings): void;
   onOpenTask(itemId: number): void;
 }) {
+  // "Recent Task Efforts" lists efforts as they completed — that
+  // matches the row's `completedEfforts` (ended exactly at this
+  // snapshot). In-flight efforts are shown on their own row labels
+  // but not duplicated here.
   const flat = rows.flatMap((row) =>
-    row.efforts.map((e) => ({ snapshot: row.snapshot, effort: e, isInitial: row.isInitial })),
+    row.completedEfforts.map((e) => ({
+      snapshot: row.snapshot,
+      effort: e,
+      isInitial: row.isInitial,
+    })),
   );
   const entries = useMemo<NavSiblingEntry[]>(
     () => flat.map((f) => ({

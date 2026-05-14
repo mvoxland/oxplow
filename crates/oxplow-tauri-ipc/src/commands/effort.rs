@@ -1,6 +1,6 @@
 //! task effort tracking commands.
 
-use oxplow_db::{EffortFile, TaskEffort, TaskEffortStore as _};
+use oxplow_db::{EffortAtSnapshot, EffortFile, TaskEffort, TaskEffortStore as _};
 use oxplow_domain::{EffortId, TaskId};
 
 use crate::error::IpcError;
@@ -26,12 +26,12 @@ pub async fn get_effort_files(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_efforts_ending_at_snapshots(
+pub async fn list_efforts_at_snapshots(
     state: tauri::State<'_, AppState>,
     snapshot_ids: Vec<i64>,
-) -> Result<Vec<TaskEffort>, IpcError> {
+) -> Result<Vec<EffortAtSnapshot>, IpcError> {
     Ok(state
         .effort_store
-        .list_ending_at_snapshots(snapshot_ids)
+        .list_efforts_at_snapshots(snapshot_ids)
         .await?)
 }

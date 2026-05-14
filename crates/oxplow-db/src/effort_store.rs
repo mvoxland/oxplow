@@ -48,6 +48,16 @@ pub struct EffortFile {
     pub change: EffortFileChange,
 }
 
+/// One (snapshot, effort) pair returned from
+/// `list_efforts_at_snapshots`. The renderer derives
+/// `completed_here` as `effort.end_snapshot_id == Some(snapshot_id)`;
+/// every other row is "in flight at this snapshot."
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct EffortAtSnapshot {
+    pub snapshot_id: i64,
+    pub effort: TaskEffort,
+}
+
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
         .unwrap()
@@ -150,11 +160,16 @@ pub trait TaskEffortStore: Send + Sync {
         path: &str,
         change: EffortFileChange,
     ) -> Result<(), DomainError>;
-    /// Efforts whose end_snapshot_id is in the given list.
-    async fn list_ending_at_snapshots(
+    /// For each snapshot in `snapshot_ids`, return every effort that
+    /// was either active at that snapshot OR ending exactly at it.
+    /// "Active at S" = `start_snapshot_id <= S` AND
+    /// (`end_snapshot_id IS NULL` OR `end_snapshot_id >= S`).
+    /// This is the labeling source for the Local History dashboard:
+    /// each row shows in-flight + just-completed efforts.
+    async fn list_efforts_at_snapshots(
         &self,
         snapshot_ids: Vec<i64>,
-    ) -> Result<Vec<TaskEffort>, DomainError>;
+    ) -> Result<Vec<EffortAtSnapshot>, DomainError>;
 }
 
 #[derive(Clone)]
@@ -535,30 +550,50 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         Ok(())
     }
 
-    async fn list_ending_at_snapshots(
+    async fn list_efforts_at_snapshots(
         &self,
         snapshot_ids: Vec<i64>,
-    ) -> Result<Vec<TaskEffort>, DomainError> {
+    ) -> Result<Vec<EffortAtSnapshot>, DomainError> {
         if snapshot_ids.is_empty() {
             return Ok(vec![]);
         }
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
-                let placeholders: Vec<String> =
-                    (1..=snapshot_ids.len()).map(|i| format!("?{i}")).collect();
+                // Build a derived "wanted" set of snapshot ids via
+                // SELECT…UNION ALL so the join can compare each input
+                // snapshot against every effort interval.
+                let mut union_parts: Vec<String> = Vec::with_capacity(snapshot_ids.len());
+                for i in 1..=snapshot_ids.len() {
+                    if i == 1 {
+                        union_parts.push(format!("SELECT ?{i} AS snapshot_id"));
+                    } else {
+                        union_parts.push(format!("SELECT ?{i}"));
+                    }
+                }
                 let sql = format!(
-                    "SELECT * FROM task_effort WHERE end_snapshot_id IN ({})
-                     ORDER BY ended_at DESC",
-                    placeholders.join(",")
+                    "SELECT s.snapshot_id, e.* \
+                     FROM ({}) s \
+                     JOIN task_effort e \
+                       ON e.start_snapshot_id IS NOT NULL \
+                      AND e.start_snapshot_id <= s.snapshot_id \
+                      AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id >= s.snapshot_id) \
+                     ORDER BY s.snapshot_id DESC, e.started_at ASC",
+                    union_parts.join(" UNION ALL ")
                 );
                 let mut stmt = conn.prepare(&sql)?;
                 let params_iter: Vec<&dyn rusqlite::ToSql> = snapshot_ids
                     .iter()
                     .map(|id| id as &dyn rusqlite::ToSql)
                     .collect();
-                let rows =
-                    stmt.query_map(rusqlite::params_from_iter(params_iter), row_to_effort)?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
+                    let snapshot_id: i64 = row.get("snapshot_id")?;
+                    let effort = row_to_effort(row)?;
+                    Ok(EffortAtSnapshot {
+                        snapshot_id,
+                        effort,
+                    })
+                })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
         })
@@ -838,7 +873,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_ending_at_snapshots_filters() {
+    async fn list_efforts_at_snapshots_buckets_active_and_completed() {
         let db = Database::in_memory();
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
@@ -905,14 +940,31 @@ mod tests {
         let snap_store = crate::SqliteSnapshotStore::new(db.clone());
         let snap1 = snap_store.create_snapshot(s.id.clone()).await.unwrap();
         let snap2 = snap_store.create_snapshot(s.id.clone()).await.unwrap();
+        let snap3 = snap_store.create_snapshot(s.id.clone()).await.unwrap();
 
         let store = SqliteTaskEffortStore::new(db);
-        let a = store.start(tid, &t.id, None).await.unwrap();
-        let b = store.start(tid, &t.id, None).await.unwrap();
-        store.finish(&a.id, Some(snap1), None).await.unwrap();
-        store.finish(&b.id, Some(snap2), None).await.unwrap();
-        let matches = store.list_ending_at_snapshots(vec![snap1]).await.unwrap();
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].id, a.id);
+        // Effort A: start@snap1, end@snap2 — active at snap1 AND snap2
+        // (ends exactly there); not active at snap3.
+        let a = store.start(tid, &t.id, Some(snap1)).await.unwrap();
+        store.finish(&a.id, Some(snap2), None).await.unwrap();
+        // Effort B: start@snap2, still open — active at snap2 and
+        // snap3.
+        let b = store.start(tid, &t.id, Some(snap2)).await.unwrap();
+
+        let rows = store
+            .list_efforts_at_snapshots(vec![snap1, snap2, snap3])
+            .await
+            .unwrap();
+        let bucket = |s: i64| -> Vec<&EffortId> {
+            rows.iter()
+                .filter(|r| r.snapshot_id == s)
+                .map(|r| &r.effort.id)
+                .collect()
+        };
+        assert_eq!(bucket(snap1), vec![&a.id]);
+        // snap2 sees both — A ends here, B starts here.
+        let at_snap2 = bucket(snap2);
+        assert!(at_snap2.contains(&&a.id) && at_snap2.contains(&&b.id));
+        assert_eq!(bucket(snap3), vec![&b.id]);
     }
 }

@@ -1549,36 +1549,45 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
   ) as unknown as SnapshotSummary | null;
 }
 
-/** Flat efforts whose end snapshot matched one of the requested
- *  snapshot ids. Callers group by `endSnapshotId` themselves
- *  — the IPC only carries effort columns (no task title), so any
- *  display label has to be resolved via `getTaskSummaries`. */
-export interface EndingEffort {
+/** One (snapshot, effort) pair. `completedHere` is true when the
+ *  effort ended exactly at this snapshot; otherwise the effort was
+ *  in flight at this snapshot. Callers group by `snapshotId` and
+ *  resolve task titles via `getTaskSummaries` (the IPC only carries
+ *  effort columns). */
+export interface EffortAtSnapshot {
+  snapshotId: number;
   effortId: string;
   tasksId: number;
   threadId: string;
-  endSnapshotId: number;
+  startSnapshotId: number | null;
+  endSnapshotId: number | null;
+  completedHere: boolean;
 }
 
-export async function listEffortsEndingAtSnapshots(
+export async function listEffortsAtSnapshots(
   snapshotIds: number[],
-): Promise<EndingEffort[]> {
+): Promise<EffortAtSnapshot[]> {
   const rows = unwrap(
-    await commands.listEffortsEndingAtSnapshots(snapshotIds),
+    await commands.listEffortsAtSnapshots(snapshotIds),
   ) as unknown as Array<{
-    id: string;
-    task_id: number;
-    thread_id: string;
-    end_snapshot_id: number | null;
+    snapshot_id: number;
+    effort: {
+      id: string;
+      task_id: number;
+      thread_id: string;
+      start_snapshot_id: number | null;
+      end_snapshot_id: number | null;
+    };
   }>;
-  return rows
-    .filter((r) => r.end_snapshot_id != null)
-    .map((r) => ({
-      effortId: r.id,
-      tasksId: r.task_id,
-      threadId: r.thread_id,
-      endSnapshotId: r.end_snapshot_id!,
-    }));
+  return rows.map((r) => ({
+    snapshotId: r.snapshot_id,
+    effortId: r.effort.id,
+    tasksId: r.effort.task_id,
+    threadId: r.effort.thread_id,
+    startSnapshotId: r.effort.start_snapshot_id,
+    endSnapshotId: r.effort.end_snapshot_id,
+    completedHere: r.effort.end_snapshot_id === r.snapshot_id,
+  }));
 }
 
 export async function restoreFileFromSnapshot(

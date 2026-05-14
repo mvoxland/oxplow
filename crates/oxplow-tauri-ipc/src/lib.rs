@@ -174,7 +174,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // efforts
         commands::effort::list_task_efforts,
         commands::effort::get_effort_files,
-        commands::effort::list_efforts_ending_at_snapshots,
+        commands::effort::list_efforts_at_snapshots,
         // log
         commands::log::get_git_log,
         commands::log::get_commit_detail,

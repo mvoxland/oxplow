@@ -25,7 +25,8 @@ pub use analytics_stores::{
 };
 pub use database::{Database, DbInitError};
 pub use effort_store::{
-    EffortFile, EffortFileChange, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
+    EffortAtSnapshot, EffortFile, EffortFileChange, SqliteTaskEffortStore, TaskEffort,
+    TaskEffortStore,
 };
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use stream_store::SqliteStreamStore;

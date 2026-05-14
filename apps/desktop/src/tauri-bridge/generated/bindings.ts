@@ -459,7 +459,7 @@ export const commands = {
 	teardownAgentPanes: (streamId: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("teardown_agent_panes", { streamId })),
 	listTaskEfforts: (itemId: TaskId) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_task_efforts", { itemId })),
 	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
-	listEffortsEndingAtSnapshots: (snapshotIds: number[]) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_efforts_ending_at_snapshots", { snapshotIds })),
+	listEffortsAtSnapshots: (snapshotIds: number[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	getCommitDetail: (streamId: string | null, sha: string) => typedError<{
 	sha: string,
@@ -921,6 +921,17 @@ export type CreateWorktreeRequest = {
 	title: string,
 	branch: string,
 	branchSource: string,
+};
+
+/**
+ *  One (snapshot, effort) pair returned from
+ *  `list_efforts_at_snapshots`. The renderer derives
+ *  `completed_here` as `effort.end_snapshot_id == Some(snapshot_id)`;
+ *  every other row is "in flight at this snapshot."
+ */
+export type EffortAtSnapshot = {
+	snapshot_id: number,
+	effort: TaskEffort,
 };
 
 export type EffortFile = {
