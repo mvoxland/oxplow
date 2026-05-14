@@ -204,6 +204,22 @@ pub struct CompleteTaskParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AmendEffortParams {
+    /// Effort id (the `id` returned on `task_effort` rows). Find it
+    /// via `get_task` → `efforts[].id` or by inspecting the
+    /// reconciliation payload returned from `complete_task`.
+    pub effort_id: String,
+    /// Repo-relative paths to ADD to the effort's touched_files
+    /// list. Use these to claim files the auto-diff missed.
+    pub add_files: Option<Vec<String>>,
+    /// Repo-relative paths to REMOVE from the effort's touched_files
+    /// list. Use these to disclaim files the auto-diff thought were
+    /// yours but actually came from another actor (formatter, parallel
+    /// effort, the user, etc.).
+    pub remove_files: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinktasksParams {
     pub thread_id: String,
     pub from_id: String,
@@ -976,7 +992,16 @@ impl OxplowMcp {
                        created/updated/deleted, tasks you completed/reopened, commits you \
                        referenced, findings you resolved. Each is projected into the cross-page \
                        backlink graph so e.g. a new wiki page lists this task as its origin \
-                       without relying on summary-body text parsing."
+                       without relying on summary-body text parsing. \
+                       \n\nReturns `{ task, file_review }`. When `file_review` is non-null \
+                       the snapshot bracket diff disagreed with `touched_files`: \
+                       `claimed_but_not_changed` lists files you said you edited but the \
+                       worktree didn't change, and `changed_but_not_claimed` lists files \
+                       that did change but you didn't list. Inspect both, then call \
+                       `amend_effort(effort_id, add_files, remove_files)` to correct the \
+                       attribution. If you genuinely meant your original list (e.g. you \
+                       edited then reverted, or another actor changed those files), no \
+                       amend is needed."
     )]
     async fn complete_task(
         &self,
@@ -1010,6 +1035,7 @@ impl OxplowMcp {
             })
             .collect();
         let summary_has_body = !p.summary.trim().is_empty();
+        let mut review: Option<EffortFileReview> = None;
         if (summary_has_body || !touched.is_empty() || !impacts.is_empty())
             && item.thread_id.is_some()
         {
@@ -1035,10 +1061,65 @@ impl OxplowMcp {
                 .await
             {
                 tracing::warn!(?err, "complete_task: effort record failed");
+            } else {
+                review = compute_effort_file_review(&self.services, item.id, &touched).await;
             }
         }
         self.emit_tasks_changed(item.thread_id.clone());
-        json_result(&item)
+        let payload = CompleteTaskResult {
+            task: item,
+            file_review: review,
+        };
+        json_result(&payload)
+    }
+
+    #[tool(
+        description = "Adjust an effort's `task_effort_file` rows after the fact. Use to \
+                       reconcile the file-attribution list when the auto-diff disagreed \
+                       with your declared `touched_files` on `complete_task`. \
+                       `add_files` claims paths the diff thought weren't yours; \
+                       `remove_files` disclaims paths the diff thought were yours but \
+                       actually came from another actor (formatter, parallel effort, the \
+                       user). Either list may be empty/omitted; passing both empty is a no-op."
+    )]
+    async fn amend_effort(
+        &self,
+        params: Parameters<AmendEffortParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_db::TaskEffortStore as _;
+        let p = params.0;
+        let effort_id = oxplow_domain::EffortId::from(p.effort_id);
+        let add = p.add_files.unwrap_or_default();
+        let remove = p.remove_files.unwrap_or_default();
+        for path in &remove {
+            if path.is_empty() {
+                continue;
+            }
+            self.services
+                .effort_store
+                .remove_file(&effort_id, path)
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+        }
+        for path in &add {
+            if path.is_empty() {
+                continue;
+            }
+            // change_kind defaults to Updated — the agent's amend
+            // doesn't carry stat info, and the per-file change kind
+            // is informational only (UI shows it; backlinks don't
+            // discriminate).
+            self.services
+                .effort_store
+                .record_file(&effort_id, path, oxplow_db::EffortFileChange::Updated)
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+        }
+        json_result(&serde_json::json!({
+            "effort_id": effort_id.as_str(),
+            "added": add,
+            "removed": remove,
+        }))
     }
 
     #[tool(description = "Create a typed link between two tasks.")]
@@ -1809,6 +1890,97 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
     out.join("\n")
 }
 
+/// Set-wise diff between what the agent claimed in `touched_files`
+/// and what the snapshot bracket actually shows changed during the
+/// effort. Returned alongside the task on `complete_task` so the
+/// agent can choose to amend its claim. Skipped (None) entirely when
+/// the auto-diff matches the claim, or when no snapshot bracket is
+/// available (effort has no start/end snapshot pin yet).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EffortFileReview {
+    pub effort_id: String,
+    /// Paths the agent claimed but the auto-diff doesn't see as
+    /// changed. The agent should disclaim these via
+    /// `amend_effort(remove_files=…)` if it actually didn't touch
+    /// them, OR leave them be if it did (e.g. the file was a
+    /// scratchpad it edited and reverted).
+    pub claimed_but_not_changed: Vec<String>,
+    /// Paths the auto-diff sees as changed but the agent didn't
+    /// claim. Capped at `MAX_UNCLAIMED_FOR_REVIEW`; when larger,
+    /// the field is empty and `unclaimed_overflow` is set so the
+    /// agent isn't asked to triage a wall of paths from parallel
+    /// efforts/formatters. The agent should claim relevant ones via
+    /// `amend_effort(add_files=…)`.
+    pub changed_but_not_claimed: Vec<String>,
+    /// Number of changed-but-not-claimed paths the diff actually
+    /// contained, before any cap was applied. `None` means within
+    /// the cap (so `changed_but_not_claimed` is the full list).
+    pub unclaimed_overflow: Option<usize>,
+}
+
+/// Cap on the "files in the diff that the agent didn't claim" list
+/// surfaced to the agent. Above this volume something else is
+/// happening (overlapping efforts, formatter, codegen, user edits)
+/// and the agent can't be expected to triage a wall of paths.
+const MAX_UNCLAIMED_FOR_REVIEW: usize = 10;
+
+#[derive(Debug, serde::Serialize)]
+pub struct CompleteTaskResult {
+    pub task: oxplow_domain::Task,
+    pub file_review: Option<EffortFileReview>,
+}
+
+async fn compute_effort_file_review(
+    services: &Services,
+    task_id: oxplow_domain::TaskId,
+    claimed: &[String],
+) -> Option<EffortFileReview> {
+    use oxplow_db::TaskEffortStore as _;
+    let effort = services
+        .effort_store
+        .most_recent_for_task(task_id)
+        .await
+        .ok()
+        .flatten()?;
+    // Need both snapshot ids to compute a diff.
+    if effort.start_snapshot_id.is_none() || effort.end_snapshot_id.is_none() {
+        return None;
+    }
+    let changed = services
+        .effort_store
+        .list_changed_paths_for_effort(&effort.id)
+        .await
+        .ok()?;
+    let claimed_set: std::collections::HashSet<&str> = claimed.iter().map(|s| s.as_str()).collect();
+    let changed_set: std::collections::HashSet<&str> = changed.iter().map(|s| s.as_str()).collect();
+    let mut claimed_but_not_changed: Vec<String> = claimed_set
+        .difference(&changed_set)
+        .map(|s| (*s).to_string())
+        .collect();
+    let mut changed_but_not_claimed: Vec<String> = changed_set
+        .difference(&claimed_set)
+        .map(|s| (*s).to_string())
+        .collect();
+    claimed_but_not_changed.sort();
+    changed_but_not_claimed.sort();
+    if claimed_but_not_changed.is_empty() && changed_but_not_claimed.is_empty() {
+        return None;
+    }
+    let overflow = if changed_but_not_claimed.len() > MAX_UNCLAIMED_FOR_REVIEW {
+        let total = changed_but_not_claimed.len();
+        changed_but_not_claimed.clear();
+        Some(total)
+    } else {
+        None
+    };
+    Some(EffortFileReview {
+        effort_id: effort.id.as_str().to_string(),
+        claimed_but_not_changed,
+        changed_but_not_claimed,
+        unclaimed_overflow: overflow,
+    })
+}
+
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let json = serde_json::to_string_pretty(value).map_err(internal)?;
     Ok(CallToolResult::success(vec![Content::text(json)]))
@@ -1973,6 +2145,61 @@ mod tests {
         assert!(
             !body.contains(&format!("\"id\":{}", id.value())),
             "soft-deleted item should not appear in backlog: {body}",
+        );
+    }
+
+    #[tokio::test]
+    async fn amend_effort_adds_and_removes_files() {
+        use oxplow_db::{EffortFileChange, TaskEffortStore as _};
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        // Reuse the writer thread that boot's primary stream created.
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("primary stream must have a writer thread");
+        let mut item = make_task(Some(thread.id.clone()), "amend test");
+        let task_id = services.task_store.insert(&item).await.unwrap();
+        item.id = task_id;
+        // Open an effort for this task with a pre-recorded file.
+        let effort = services
+            .effort_store
+            .start(task_id, &thread.id, None)
+            .await
+            .unwrap();
+        services
+            .effort_store
+            .record_file(&effort.id, "src/keep.rs", EffortFileChange::Updated)
+            .await
+            .unwrap();
+        services
+            .effort_store
+            .record_file(&effort.id, "src/disclaim.rs", EffortFileChange::Updated)
+            .await
+            .unwrap();
+
+        // Disclaim disclaim.rs, claim a new file.
+        server
+            .amend_effort(Parameters(AmendEffortParams {
+                effort_id: effort.id.as_str().to_string(),
+                add_files: Some(vec!["src/added.rs".into()]),
+                remove_files: Some(vec!["src/disclaim.rs".into()]),
+            }))
+            .await
+            .unwrap();
+
+        let files = services.effort_store.list_files(&effort.id).await.unwrap();
+        let paths: std::collections::BTreeSet<_> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["src/added.rs", "src/keep.rs"]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
         );
     }
 

@@ -170,6 +170,20 @@ pub trait TaskEffortStore: Send + Sync {
         &self,
         snapshot_ids: Vec<i64>,
     ) -> Result<Vec<EffortAtSnapshot>, DomainError>;
+    /// All distinct file paths whose `file_snapshot` rows fall inside
+    /// this effort's snapshot bracket — i.e. the auto-diff for the
+    /// effort. Returns empty when either `start_snapshot_id` or
+    /// `end_snapshot_id` is NULL. Used by the effort-end
+    /// reconciliation to compare against the LLM's claimed
+    /// `touched_files`.
+    async fn list_changed_paths_for_effort(
+        &self,
+        id: &EffortId,
+    ) -> Result<Vec<String>, DomainError>;
+    /// Remove specific `task_effort_file` rows. Companion to
+    /// `record_file`. Used by the `amend_effort` MCP tool when the
+    /// agent disclaims a path that the auto-diff thought was theirs.
+    async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError>;
 }
 
 #[derive(Clone)]
@@ -536,6 +550,58 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                        (effort_id, path, change_kind)
                      VALUES (?1, ?2, ?3)",
                     params![id_clone.as_str(), path_clone, change_to_str(change)],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()?;
+        if self.page_refs.is_some() {
+            if let Some(tid) = self.task_for_effort(id).await? {
+                self.project_effort_slice(tid).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn list_changed_paths_for_effort(
+        &self,
+        id: &EffortId,
+    ) -> Result<Vec<String>, DomainError> {
+        let db = self.db.clone();
+        let id_clone = id.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT fs.path
+                     FROM task_effort e
+                     JOIN snapshot s_start ON s_start.id = e.start_snapshot_id
+                     JOIN file_snapshot fs ON fs.stream_id = s_start.stream_id
+                     WHERE e.id = ?1
+                       AND e.start_snapshot_id IS NOT NULL
+                       AND e.end_snapshot_id IS NOT NULL
+                       AND fs.snapshot_id > e.start_snapshot_id
+                       AND fs.snapshot_id <= e.end_snapshot_id
+                     ORDER BY fs.path",
+                )?;
+                let rows =
+                    stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id_clone = id.clone();
+        let path_clone = path.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "DELETE FROM task_effort_file WHERE effort_id = ?1 AND path = ?2",
+                    params![id_clone.as_str(), path_clone],
                 )?;
                 Ok(())
             })

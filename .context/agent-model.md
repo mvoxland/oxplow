@@ -449,7 +449,19 @@ intermediate `ready` step.
   `get_task`, `delete_task`, `reorder_tasks`,
   `link_tasks`, `list_recent_file_changes`,
   `dispatch_task`, `file_epic_with_children`, `complete_task`,
-  `transition_tasks`
+  `amend_effort`, `transition_tasks`
+- `complete_task` returns `{ task, file_review }`. When `file_review`
+  is non-null the snapshot bracket diff disagreed with the agent's
+  declared `touched_files`: `claimed_but_not_changed` lists files
+  the agent said it edited but the worktree didn't change;
+  `changed_but_not_claimed` lists files that did change but the
+  agent didn't declare. The latter is capped at 10 entries
+  (`unclaimed_overflow` carries the original count when truncated)
+  so the agent isn't asked to triage a wall of paths from parallel
+  efforts or formatters. `amend_effort(effort_id, add_files,
+  remove_files)` is the corrective tool — adds/removes
+  `task_effort_file` rows. Persisted authorship is always the
+  agent's declared list (after any amend), never the raw diff.
 - `dispatch_task({ threadId, itemId, extraContext?, autoStart? })` composes
   a subagent brief server-side (preamble + item fields + children + last notes
   + optional extra context) so the orchestrator doesn't have to Read the item

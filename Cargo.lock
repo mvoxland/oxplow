@@ -3068,6 +3068,7 @@ dependencies = [
  "async-trait",
  "git2",
  "oxplow-app",
+ "oxplow-db",
  "oxplow-domain",
  "rmcp",
  "schemars 1.2.1",
