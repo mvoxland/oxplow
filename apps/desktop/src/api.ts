@@ -1549,6 +1549,20 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
   ) as unknown as SnapshotSummary | null;
 }
 
+/** Per-effort touched_files list — the canonical authorship list
+ *  (LLM-declared via `complete_task` + any subsequent `amend_effort`
+ *  corrections). Distinct from getEffortFiles, which had a misleading
+ *  return-type annotation; this is the well-typed wrapper. */
+export async function listEffortFiles(
+  effortId: string,
+): Promise<Array<{ path: string; change: "created" | "updated" | "deleted" }>> {
+  const rows = unwrap(await commands.getEffortFiles(effortId)) as unknown as Array<{
+    path: string;
+    change: "created" | "updated" | "deleted";
+  }>;
+  return rows.map((r) => ({ path: r.path, change: r.change }));
+}
+
 /** One (snapshot, effort) pair. `completedHere` is true when the
  *  effort ended exactly at this snapshot; otherwise the effort was
  *  in flight at this snapshot. Callers group by `snapshotId` and

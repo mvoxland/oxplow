@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Snapshot, Stream } from "../api.js";
-import { listSnapshots } from "../api.js";
+import type { EffortAtSnapshot, Snapshot, Stream } from "../api.js";
+import { getTaskSummaries, listEffortFiles, listEffortsAtSnapshots, listSnapshots } from "../api.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, snapshotRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
@@ -38,6 +38,12 @@ export interface SnapshotDetailPageProps {
  * file lookups + content reads through the snapshot store instead
  * of git refs.
  */
+interface CompletedEffortRow {
+  effort: EffortAtSnapshot;
+  taskTitle: string;
+  files: Array<{ path: string; change: "created" | "updated" | "deleted" }>;
+}
+
 export function SnapshotDetailPage({
   stream,
   snapshotId,
@@ -48,6 +54,7 @@ export function SnapshotDetailPage({
 }: SnapshotDetailPageProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loadingSnapshot, setLoadingSnapshot] = useState(false);
+  const [completedEfforts, setCompletedEfforts] = useState<CompletedEffortRow[]>([]);
   const refForGraph = snapshotRef(snapshotId);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
@@ -107,6 +114,60 @@ export function SnapshotDetailPage({
     };
   }, [stream?.id, snapshotId]);
 
+  // Efforts that ENDED at this snapshot (the "this is what shipped"
+  // view). Each row carries the canonical task_effort_file list —
+  // the LLM-declared authorship (after any amend_effort), not the
+  // raw snapshot diff.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const all = await listEffortsAtSnapshots([snapshotId]);
+        const completed = all.filter((e) => e.completedHere);
+        if (completed.length === 0) {
+          if (!cancelled) setCompletedEfforts([]);
+          return;
+        }
+        const titles = await getTaskSummaries(
+          Array.from(new Set(completed.map((e) => e.tasksId))),
+        ).catch(() => [] as Array<{ id: number; title: string }>);
+        const titleByTask = new Map<number, string>(
+          titles.map((t) => [t.id, t.title] as [number, string]),
+        );
+        type EffortFileRow = { path: string; change: "created" | "updated" | "deleted" };
+        const filesByEffort: Array<[string, EffortFileRow[]]> = await Promise.all(
+          completed.map(async (e) => {
+            try {
+              const files = await listEffortFiles(e.effortId);
+              return [e.effortId, files] as [string, EffortFileRow[]];
+            } catch (err) {
+              logUi("warn", "effort files fetch failed", {
+                error: String(err),
+                effortId: e.effortId,
+              });
+              return [e.effortId, [] as EffortFileRow[]] as [string, EffortFileRow[]];
+            }
+          }),
+        );
+        const filesById = new Map<string, EffortFileRow[]>(filesByEffort);
+        if (cancelled) return;
+        setCompletedEfforts(
+          completed.map((effort) => ({
+            effort,
+            taskTitle: titleByTask.get(effort.tasksId) ?? `task ${effort.tasksId}`,
+            files: filesById.get(effort.effortId) ?? [],
+          })),
+        );
+      } catch (err) {
+        logUi("warn", "completed efforts fetch failed", { error: String(err) });
+        if (!cancelled) setCompletedEfforts([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshotId]);
+
   const headerTitle = useMemo(() => {
     if (!snapshot) return `Snapshot ${snapshotId}`;
     return `Snapshot ${snapshotId} · ${formatFullDateTime(snapshot.createdAt)}`;
@@ -151,6 +212,15 @@ export function SnapshotDetailPage({
           </div>
         </div>
 
+        {completedEfforts.length > 0 ? (
+          <CompletedEffortsSection
+            rows={completedEfforts}
+            onOpenTask={(taskId) => onOpenPage(taskRef(taskId))}
+            onOpenSnapshot={(id) => onOpenPage(snapshotRef(id))}
+            onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
+          />
+        ) : null}
+
         {snapshot && stream && onOpenFile ? (
           <ChangeAnalysisPanel
             analysis={analysis}
@@ -164,6 +234,92 @@ export function SnapshotDetailPage({
         ) : null}
       </div>
     </Page>
+  );
+}
+
+function CompletedEffortsSection({
+  rows,
+  onOpenTask,
+  onOpenSnapshot,
+  onOpenFile,
+}: {
+  rows: CompletedEffortRow[];
+  onOpenTask(taskId: number): void;
+  onOpenSnapshot(snapshotId: number): void;
+  onOpenFile?: (path: string) => void;
+}) {
+  return (
+    <section style={card}>
+      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: "var(--text-sm)" }}>
+        Efforts completed at this snapshot
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {rows.map(({ effort, taskTitle, files }) => (
+          <div key={effort.effortId} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => onOpenTask(effort.tasksId)}
+                style={{ ...linkButton, fontFamily: "inherit", fontWeight: 600 }}
+              >
+                {taskTitle}
+              </button>
+              {effort.startSnapshotId !== null ? (
+                <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
+                  · started at{" "}
+                  <button
+                    type="button"
+                    onClick={() => onOpenSnapshot(effort.startSnapshotId!)}
+                    style={linkButton}
+                  >
+                    snapshot {effort.startSnapshotId}
+                  </button>
+                </span>
+              ) : null}
+            </div>
+            {files.length === 0 ? (
+              <div style={{ color: "var(--text-muted)", fontSize: 11, paddingLeft: 4 }}>
+                No files declared via touched_files. The auto-diff
+                between snapshots may still show what changed during
+                the effort window — see the file list below.
+              </div>
+            ) : (
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: 18,
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {files.map((f) => (
+                  <li key={f.path}>
+                    {onOpenFile ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenFile(f.path)}
+                        style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
+                        title={`${f.change}: ${f.path}`}
+                      >
+                        {f.path}
+                      </button>
+                    ) : (
+                      <span style={{ fontFamily: "var(--mono, monospace)" }}>{f.path}</span>
+                    )}
+                    <span style={{ marginLeft: 6, color: "var(--text-muted)" }}>{f.change}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 8 }}>
+        Files shown are the canonical (LLM-declared) authorship list.
+        The full snapshot diff below shows everything that changed in
+        this snapshot regardless of which effort touched it.
+      </div>
+    </section>
   );
 }
 
