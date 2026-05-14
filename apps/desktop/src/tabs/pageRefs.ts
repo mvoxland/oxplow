@@ -90,7 +90,7 @@ export function findingRef(findingId: string): TabRef {
   return { id: `finding:${findingId}`, kind: "finding", payload: { findingId } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "code-quality" | "local-history" | "git-history" | "hook-events" | "subsystem-docs" | "settings"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "code-quality" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "subsystem-docs" | "settings"): TabRef {
   return { id: kind, kind, payload: null };
 }
 

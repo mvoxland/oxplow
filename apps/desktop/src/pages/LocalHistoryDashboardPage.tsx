@@ -18,13 +18,35 @@ import { logUi } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext.js";
-import { gitCommitRef, snapshotRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, indexRef, snapshotRef } from "../tabs/pageRefs.js";
 
 const RECENT_LIMIT = 20;
+/** Cap on the number of commit groups rendered in the dashboard's
+ *  "By git commit" view. Older groups are dropped (Uncommitted
+ *  always stays at the top regardless of cap). The dedicated
+ *  "All commits" page lifts this cap. */
+const BY_COMMIT_GROUP_LIMIT = 10;
+/** Cap used by the dedicated full-history pages (both list and
+ *  by-commit). Larger than the dashboard's RECENT_LIMIT but still
+ *  bounded — pagination would come next when this stops being
+ *  enough. */
+const FULL_HISTORY_LIMIT = 500;
+
+/** "dashboard" — the default landing view with both modes available
+ *  via toggle, capped lists.
+ *  "full-list" — dedicated page locked to the recent-snapshots
+ *  layout with all snapshots up to FULL_HISTORY_LIMIT.
+ *  "full-by-commit" — same idea, locked to the by-commit grouping. */
+export type LocalHistoryMode = "dashboard" | "full-list" | "full-by-commit";
 
 export interface LocalHistoryDashboardPageProps {
   stream: Stream | null;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean; siblings?: NavSiblings }): void;
+  /** Controls layout + fetch limits. Defaults to "dashboard"
+   *  (capped, toggle-able). The "full-*" modes are used by the
+   *  dedicated index pages reachable via the dashboard's footer
+   *  links. */
+  mode?: LocalHistoryMode;
 }
 
 interface SnapshotRowEffort {
@@ -103,11 +125,13 @@ interface DashboardData {
 export function LocalHistoryDashboardPage({
   stream,
   onOpenPage,
+  mode = "dashboard",
 }: LocalHistoryDashboardPageProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const streamId = stream?.id ?? null;
+  const fetchLimit = mode === "dashboard" ? RECENT_LIMIT : FULL_HISTORY_LIMIT;
 
   const refresh = useCallback(async () => {
     if (!streamId) {
@@ -117,7 +141,7 @@ export function LocalHistoryDashboardPage({
     }
     try {
       setError(null);
-      const snapshots = await listSnapshots(streamId, RECENT_LIMIT);
+      const snapshots = await listSnapshots(streamId, fetchLimit);
       const snapshotIds = snapshots.map((s) => s.id);
       const [summaries, effortsAt, wikiPairs] = await Promise.all([
         Promise.all(
@@ -173,9 +197,9 @@ export function LocalHistoryDashboardPage({
       }
       // The earliest snapshot in our window is the stream's first
       // snapshot only when we've fetched the entire history (no
-      // older rows scrolled past RECENT_LIMIT). Without that guard
+      // older rows scrolled past `fetchLimit`). Without that guard
       // we'd falsely label the oldest visible row as "Initial".
-      const sawFullHistory = snapshots.length < RECENT_LIMIT;
+      const sawFullHistory = snapshots.length < fetchLimit;
       const earliestId = sawFullHistory && snapshots.length > 0
         ? snapshots.reduce((min, s) => (s.id < min ? s.id : min), snapshots[0].id)
         : null;
@@ -197,7 +221,7 @@ export function LocalHistoryDashboardPage({
     } finally {
       setLoading(false);
     }
-  }, [streamId]);
+  }, [streamId, fetchLimit]);
 
   useEffect(() => {
     setLoading(true);
@@ -232,21 +256,29 @@ export function LocalHistoryDashboardPage({
 
   const byBranch = useMemo(() => groupByBranch(data?.rows ?? []), [data?.rows]);
 
+  const pageTitle =
+    mode === "full-list"
+      ? "All snapshots"
+      : mode === "full-by-commit"
+      ? "All commits"
+      : "Local History";
+
   if (!streamId) {
     return (
-      <Page testId="page-local-history" title="Local History">
+      <Page testId="page-local-history" title={pageTitle}>
         <div style={muted}>No stream selected.</div>
       </Page>
     );
   }
 
   return (
-    <Page testId="page-local-history" title="Local History">
+    <Page testId="page-local-history" title={pageTitle}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
         {error ? <div style={errorBanner}>{error}</div> : null}
         {loading && !data ? <div style={muted}>Loading…</div> : null}
         {data ? (
           <DashboardBody
+            mode={mode}
             data={data}
             byBranch={byBranch}
             onOpenPage={onOpenPage}
@@ -260,39 +292,83 @@ export function LocalHistoryDashboardPage({
 type GroupingMode = "recent" | "by-commit";
 
 function DashboardBody({
+  mode: pageMode,
   data,
   byBranch,
   onOpenPage,
 }: {
+  mode: LocalHistoryMode;
   data: DashboardData;
   byBranch: Array<{ commit: string; rows: SnapshotRow[] }>;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean; siblings?: NavSiblings }): void;
 }) {
+  // Full-history pages lock the layout to a single view (no toggle,
+  // no caps, no "view full" link — they ARE the full view). The
+  // dashboard mode keeps the toggle + caps + footer links.
+  const isFullList = pageMode === "full-list";
+  const isFullByCommit = pageMode === "full-by-commit";
+  const isDashboard = !isFullList && !isFullByCommit;
+
   const byCommitAvailable = byBranch.length > 0;
-  const [mode, setMode] = useState<GroupingMode>("recent");
-  // If the user selected "by-commit" and the underlying groups
-  // disappear (e.g. all snapshots had their git_commit cleared),
-  // fall back to the recent view rather than rendering an empty
-  // panel.
-  const effectiveMode: GroupingMode =
-    mode === "by-commit" && !byCommitAvailable ? "recent" : mode;
+  const [toggleMode, setToggleMode] = useState<GroupingMode>("recent");
+  const effectiveMode: GroupingMode = isFullList
+    ? "recent"
+    : isFullByCommit
+    ? "by-commit"
+    : toggleMode === "by-commit" && !byCommitAvailable
+    ? "recent"
+    : toggleMode;
+
+  // Cap the by-commit list to the last N commit groups. Uncommitted
+  // (if present) sits at the top and is not counted against the cap
+  // since it's not really a commit. The full page lifts the cap.
+  const cappedByBranch = useMemo(() => {
+    if (isFullByCommit) return byBranch;
+    const uncommitted = byBranch.filter((g) => g.commit === UNCOMMITTED_GROUP_KEY);
+    const commits = byBranch.filter((g) => g.commit !== UNCOMMITTED_GROUP_KEY);
+    return [...uncommitted, ...commits.slice(0, BY_COMMIT_GROUP_LIMIT)];
+  }, [byBranch, isFullByCommit]);
+  const commitOverflow = useMemo(
+    () =>
+      isFullByCommit
+        ? 0
+        : Math.max(
+            0,
+            byBranch.filter((g) => g.commit !== UNCOMMITTED_GROUP_KEY).length -
+              BY_COMMIT_GROUP_LIMIT,
+          ),
+    [byBranch, isFullByCommit],
+  );
+  // The recent-list cap mirrors RECENT_LIMIT for the dashboard. The
+  // full page renders all fetched rows.
+  const recentRows = data.rows;
+  const recentOverflow = 0; // RECENT_LIMIT is the fetch ceiling so there's nothing past it to count.
+
   return (
     <>
-      <GroupingToggle
-        mode={effectiveMode}
-        onChange={setMode}
-        byCommitAvailable={byCommitAvailable}
-      />
+      {isDashboard ? (
+        <GroupingToggle
+          mode={effectiveMode}
+          onChange={setToggleMode}
+          byCommitAvailable={byCommitAvailable}
+        />
+      ) : null}
       {effectiveMode === "recent" ? (
         <RecentSnapshotsCard
-          rows={data.rows}
+          rows={recentRows}
+          overflowCount={recentOverflow}
+          showViewAllLink={isDashboard}
           onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
+          onViewAll={() => onOpenPage(indexRef("local-history-full"))}
           refLabels={data.refLabels}
         />
       ) : (
         <ByBranchCard
-          groups={byBranch}
+          groups={cappedByBranch}
+          overflowCount={commitOverflow}
+          showViewAllLink={isDashboard}
           onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
+          onViewAll={() => onOpenPage(indexRef("local-history-by-commit-full"))}
           refLabels={data.refLabels}
           onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))}
         />
@@ -310,30 +386,44 @@ function GroupingToggle({
   onChange(next: GroupingMode): void;
   byCommitAvailable: boolean;
 }) {
+  // Sticky to the top of the scroll area so the toggle stays
+  // reachable as the user scrolls through long lists. Without this
+  // the toggle scrolls off and the only way back to the other view
+  // is browser-back (or reloading the tab).
   return (
     <div
-      role="tablist"
-      aria-label="Local history grouping"
       style={{
-        display: "inline-flex",
-        alignSelf: "flex-start",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-        overflow: "hidden",
+        position: "sticky",
+        top: 0,
+        zIndex: 1,
+        background: "var(--surface-card)",
+        paddingBottom: 4,
+        marginBottom: -4,
       }}
     >
-      <ToggleButton
-        active={mode === "recent"}
-        onClick={() => onChange("recent")}
-        label="Recent snapshots"
-      />
-      <ToggleButton
-        active={mode === "by-commit"}
-        onClick={() => onChange("by-commit")}
-        label="By git commit"
-        disabled={!byCommitAvailable}
-        disabledTitle="No snapshots with two or more rows sharing a git commit yet."
-      />
+      <div
+        role="tablist"
+        aria-label="Local history grouping"
+        style={{
+          display: "inline-flex",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: 6,
+          overflow: "hidden",
+        }}
+      >
+        <ToggleButton
+          active={mode === "recent"}
+          onClick={() => onChange("recent")}
+          label="Recent snapshots"
+        />
+        <ToggleButton
+          active={mode === "by-commit"}
+          onClick={() => onChange("by-commit")}
+          label="By git commit"
+          disabled={!byCommitAvailable}
+          disabledTitle="No snapshots with two or more rows sharing a git commit yet."
+        />
+      </div>
     </div>
   );
 }
@@ -403,11 +493,21 @@ function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
 
 function RecentSnapshotsCard({
   rows,
+  overflowCount,
+  showViewAllLink,
   onSelect,
+  onViewAll,
   refLabels,
 }: {
   rows: SnapshotRow[];
+  /** Snapshots that exist past the visible window. Currently always
+   *  0 in practice — RECENT_LIMIT is the fetch ceiling. Accepted
+   *  here for symmetry with ByBranchCard's overflow indicator. */
+  overflowCount: number;
+  /** When true, render the "View all snapshots →" footer link. */
+  showViewAllLink: boolean;
   onSelect(id: number, siblings: NavSiblings): void;
+  onViewAll(): void;
   refLabels: Record<string, CommitRefLabel[]>;
 }) {
   const entries = useMemo(() => snapshotSiblingEntries(rows), [rows]);
@@ -427,6 +527,19 @@ function RecentSnapshotsCard({
           ))}
         </div>
       )}
+      {showViewAllLink ? (
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={onViewAll}
+            style={cardLinkButton}
+            title="Open the full snapshot history in its own tab"
+          >
+            View all snapshots →
+            {overflowCount > 0 ? ` (${overflowCount} more)` : ""}
+          </button>
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -435,16 +548,24 @@ function SnapshotRowItem({
   row,
   onSelect,
   labels,
+  hideVersionChip = false,
 }: {
   row: SnapshotRow;
   onSelect(id: number): void;
   labels: CommitRefLabel[];
+  /** When true, suppress the per-row branch/tag/sha chip. Used by
+   *  the "By git commit" view where the group header already shows
+   *  it for every row in the group. */
+  hideVersionChip?: boolean;
 }) {
   const { snapshot, summary, completedEfforts, inFlightEfforts, wikiSlugs, isInitial } = row;
   // A git_commit on the snapshot always renders at least a short-sha
   // chip (or branch/tag chips when ref labels resolve), and wiki
   // badges similarly carry meaning on their own — both suppress the
   // "External change" fallback because the chips speak for themselves.
+  // The suppression still applies even when the chip itself is
+  // hidden via hideVersionChip — the group header above carries the
+  // version context.
   const hasOtherBadges = !!snapshot.gitCommit || wikiSlugs.length > 0;
   const subjectish = formatSnapshotSubject(
     completedEfforts,
@@ -463,7 +584,7 @@ function SnapshotRowItem({
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {subjectish}
       </span>
-      {labels.length > 0
+      {hideVersionChip ? null : labels.length > 0
         ? labels.map((l) => (
             <RefBadge key={`${l.kind}-${l.name}`} label={l.name} tone={l.kind} />
           ))
@@ -490,12 +611,21 @@ function SnapshotRowItem({
 
 function ByBranchCard({
   groups,
+  overflowCount,
+  showViewAllLink,
   onSelect,
+  onViewAll,
   onOpenCommit,
   refLabels,
 }: {
   groups: Array<{ commit: string; rows: SnapshotRow[] }>;
+  /** Commit groups beyond the visible cap. When non-zero and
+   *  showViewAllLink is true, the "View all commits →" link
+   *  surfaces the count. */
+  overflowCount: number;
+  showViewAllLink: boolean;
   onSelect(id: number, siblings: NavSiblings): void;
+  onViewAll(): void;
   onOpenCommit(sha: string): void;
   refLabels: Record<string, CommitRefLabel[]>;
 }) {
@@ -512,6 +642,19 @@ function ByBranchCard({
           />
         ))}
       </div>
+      {showViewAllLink ? (
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={onViewAll}
+            style={cardLinkButton}
+            title="Open the full by-commit history in its own tab"
+          >
+            View all commits →
+            {overflowCount > 0 ? ` (${overflowCount} more)` : ""}
+          </button>
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -528,15 +671,31 @@ function ByBranchGroup({
   refLabels: Record<string, CommitRefLabel[]>;
 }) {
   const entries = useMemo(() => snapshotSiblingEntries(group.rows), [group.rows]);
-  const groupLabels = refLabels[group.commit] ?? [];
-  const headerName = groupLabels.length > 0
+  const isUncommitted = group.commit === UNCOMMITTED_GROUP_KEY;
+  const groupLabels = isUncommitted ? [] : refLabels[group.commit] ?? [];
+  const headerName = isUncommitted
+    ? "Uncommitted"
+    : groupLabels.length > 0
     ? groupLabels.map((l) => l.name).join(", ")
     : group.commit.slice(0, 7);
-  const title = `Snapshots at ${headerName}`;
+  const title = isUncommitted
+    ? "Uncommitted snapshots"
+    : `Snapshots at ${headerName}`;
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-        {groupLabels.length > 0 ? (
+        {isUncommitted ? (
+          <span
+            style={{
+              fontWeight: 600,
+              fontSize: 12,
+              color: "var(--text-secondary)",
+            }}
+            title="Snapshots taken while the worktree had uncommitted changes — no git commit recorded yet."
+          >
+            Uncommitted
+          </span>
+        ) : groupLabels.length > 0 ? (
           groupLabels.map((l) => (
             <RefBadge key={`${l.kind}-${l.name}`} label={l.name} tone={l.kind} />
           ))
@@ -549,7 +708,7 @@ function ByBranchGroup({
             {group.commit.slice(0, 7)}
           </button>
         )}
-        {groupLabels.length > 0 ? (
+        {!isUncommitted && groupLabels.length > 0 ? (
           <button
             type="button"
             onClick={() => onOpenCommit(group.commit)}
@@ -568,6 +727,7 @@ function ByBranchGroup({
             row={row}
             onSelect={(id) => onSelect(id, { entries, index: idx, title })}
             labels={row.snapshot.gitCommit ? refLabels[row.snapshot.gitCommit] ?? [] : []}
+            hideVersionChip
           />
         ))}
       </div>
@@ -576,27 +736,39 @@ function ByBranchGroup({
 }
 
 
+/** Sentinel `commit` value used by groupByBranch for snapshots
+ *  with no recorded git_commit (worktree was dirty at capture). The
+ *  ByBranchGroup renderer detects this and shows an "Uncommitted"
+ *  header instead of a sha. */
+export const UNCOMMITTED_GROUP_KEY = "__uncommitted__";
+
 function groupByBranch(
   rows: SnapshotRow[],
 ): Array<{ commit: string; rows: SnapshotRow[] }> {
-  // `rows` arrives newest-first from listSnapshots, so the first
-  // occurrence of each commit is its most recent snapshot — Map
-  // insertion order naturally yields "most recent commit first."
-  // Don't drop single-snapshot groups: with the re-stamp logic each
-  // commit typically has exactly one snapshot, and dropping them
-  // would leave the view nearly empty.
+  // `rows` arrives newest-first from listSnapshots. The first
+  // occurrence of each commit (or the uncommitted sentinel) is its
+  // most recent snapshot, so Map insertion order yields
+  // "most recent first." Snapshots without a git_commit cluster
+  // under the sentinel; when present, that group is hoisted to the
+  // top so "what's happened since the last commit" reads first.
   const byCommit = new Map<string, SnapshotRow[]>();
   for (const row of rows) {
-    const commit = row.snapshot.gitCommit;
-    if (!commit) continue;
-    const existing = byCommit.get(commit) ?? [];
+    const key = row.snapshot.gitCommit ?? UNCOMMITTED_GROUP_KEY;
+    const existing = byCommit.get(key) ?? [];
     existing.push(row);
-    byCommit.set(commit, existing);
+    byCommit.set(key, existing);
   }
-  return Array.from(byCommit.entries()).map(([commit, rs]) => ({
+  const groups = Array.from(byCommit.entries()).map(([commit, rs]) => ({
     commit,
     rows: rs,
   }));
+  // Hoist Uncommitted to the top regardless of insertion order.
+  groups.sort((a, b) => {
+    if (a.commit === UNCOMMITTED_GROUP_KEY) return -1;
+    if (b.commit === UNCOMMITTED_GROUP_KEY) return 1;
+    return 0;
+  });
+  return groups;
 }
 
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };

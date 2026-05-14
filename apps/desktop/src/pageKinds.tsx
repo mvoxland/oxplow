@@ -111,6 +111,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "code-quality":
       return Gauge;
     case "local-history":
+    case "local-history-full":
+    case "local-history-by-commit-full":
       return History;
     case "git-history":
       return GitMerge;
@@ -186,6 +188,10 @@ export function pageKindLabel(kind: string): string {
       return "code quality";
     case "local-history":
       return "local history";
+    case "local-history-full":
+      return "all snapshots";
+    case "local-history-by-commit-full":
+      return "all commits";
     case "git-history":
       return "git history";
     case "git-dashboard":
@@ -225,6 +231,8 @@ const INDEX_KINDS = new Set<string>([
   "files",
   "code-quality",
   "local-history",
+  "local-history-full",
+  "local-history-by-commit-full",
   "git-history",
   "git-dashboard",
   "hook-events",

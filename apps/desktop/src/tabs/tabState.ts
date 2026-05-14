@@ -26,6 +26,8 @@ export type PageKind =
   | "files"
   | "code-quality"
   | "local-history"
+  | "local-history-full"
+  | "local-history-by-commit-full"
   | "git-history"
   | "git-dashboard"
   | "git-commit"

@@ -2668,6 +2668,32 @@ export function App() {
             />
           ),
         });
+      } else if (ref.kind === "local-history-full") {
+        tabs.push({
+          id: ref.id,
+          label: "All snapshots",
+          closable: true,
+          render: () => (
+            <LocalHistoryDashboardPage
+              stream={stream}
+              onOpenPage={navOpen}
+              mode="full-list"
+            />
+          ),
+        });
+      } else if (ref.kind === "local-history-by-commit-full") {
+        tabs.push({
+          id: ref.id,
+          label: "All commits",
+          closable: true,
+          render: () => (
+            <LocalHistoryDashboardPage
+              stream={stream}
+              onOpenPage={navOpen}
+              mode="full-by-commit"
+            />
+          ),
+        });
       } else if (ref.kind === "snapshot") {
         const payload = (ref.payload as { snapshotId?: number } | null) ?? null;
         const snapshotId = payload?.snapshotId ?? 0;
