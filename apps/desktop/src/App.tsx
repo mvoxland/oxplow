@@ -1858,12 +1858,6 @@ export function App() {
     }).catch(() => {});
   };
 
-  const handleShowSnapshotInHistory = (snapshotId: string) => {
-    const id = Number(snapshotId);
-    if (!Number.isFinite(id)) return;
-    handleOpenPage(snapshotRef(id));
-  };
-
   const closeDiffTab = (id: string) => {
     setDiffTabs((prev) => prev.filter((tab) => tab.id !== id));
     // Diffs live in threadPageTabs now — close from the unified list
@@ -2972,7 +2966,10 @@ export function App() {
               threadWork={selectedThreadWork}
               onOpenPage={navOpen}
               onOpenFile={(p) => navOpenFile(p)}
-              onShowInHistory={handleShowSnapshotInHistory}
+              onShowInHistory={(snapshotId) => {
+                const id = Number(snapshotId);
+                if (Number.isFinite(id)) navOpen(snapshotRef(id));
+              }}
             />
           ),
         });

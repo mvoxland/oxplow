@@ -1411,22 +1411,37 @@ export async function readFileAtRef(
 
 export async function listTaskEfforts(itemId: number): Promise<EffortDetail[]> {
   // The Tauri command returns flat `TaskEffort` rows. Consumers
-  // (TaskPage activity timeline, useBacklinks, TaskDetail)
-  // expect the richer `EffortDetail` shape with snapshots + changed
-  // paths + counts. Wrap each row defensively so a missing detail
-  // doesn't crash the page (the previous lying cast caused
-  // "undefined is not an object (evaluating 'd.effort.end_snapshot_id')"
-  // when the renderer reached for `.effort` on a flat row). Snapshots
-  // and file lists default to empty until a backend command exists to
-  // populate them.
+  // (TaskPage activity timeline, useBacklinks, TaskDetail) expect
+  // the richer `EffortDetail` shape with changed paths + counts.
+  // Pull the per-effort `task_effort_file` rows in parallel —
+  // that's the canonical authorship list (what the agent declared
+  // via `complete_task` / `amend_effort`). start_snapshot and
+  // end_snapshot are still null until a "snapshot by id" IPC
+  // exists; consumers tolerate that.
   const rows = unwrap(await commands.listTaskEfforts(itemId)) as unknown as TaskEffort[];
-  return rows.map((effort) => ({
-    effort,
-    start_snapshot: null,
-    end_snapshot: null,
-    changed_paths: [],
-    counts: { created: 0, updated: 0, deleted: 0 },
-  }));
+  const filesByEffort = await Promise.all(
+    rows.map(async (effort) => {
+      try {
+        const files = await listEffortFiles(effort.id);
+        return [effort.id, files] as const;
+      } catch {
+        return [effort.id, [] as Array<{ path: string; change: "created" | "updated" | "deleted" }>] as const;
+      }
+    }),
+  );
+  const filesById = new Map(filesByEffort);
+  return rows.map((effort) => {
+    const files = filesById.get(effort.id) ?? [];
+    const counts = { created: 0, updated: 0, deleted: 0 };
+    for (const f of files) counts[f.change]++;
+    return {
+      effort,
+      start_snapshot: null,
+      end_snapshot: null,
+      changed_paths: files.map((f) => f.path),
+      counts,
+    };
+  });
 }
 
 export async function listFileSnapshots(
