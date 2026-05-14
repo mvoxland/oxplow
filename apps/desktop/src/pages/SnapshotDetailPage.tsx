@@ -44,14 +44,15 @@ export interface SnapshotDetailPageProps {
  * file lookups + content reads through the snapshot store instead
  * of git refs.
  */
-interface CompletedEffortRow {
+interface EffortRow {
   effort: EffortAtSnapshot;
   taskTitle: string;
   files: Array<{ path: string; change: "created" | "updated" | "deleted" }>;
   /** Auto-diff between start_snapshot_id and end_snapshot_id —
    *  every path that changed during the effort window regardless of
    *  whether the agent claimed it. Reference list shown alongside
-   *  the canonical `files` so the user can spot omissions. */
+   *  the canonical `files` so the user can spot omissions. Empty
+   *  for in-flight efforts (end snapshot id isn't pinned yet). */
   autoDiff: string[];
 }
 
@@ -65,7 +66,8 @@ export function SnapshotDetailPage({
 }: SnapshotDetailPageProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loadingSnapshot, setLoadingSnapshot] = useState(false);
-  const [completedEfforts, setCompletedEfforts] = useState<CompletedEffortRow[]>([]);
+  const [completedEfforts, setCompletedEfforts] = useState<EffortRow[]>([]);
+  const [inFlightEfforts, setInFlightEfforts] = useState<EffortRow[]>([]);
   const refForGraph = snapshotRef(snapshotId);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
@@ -125,29 +127,37 @@ export function SnapshotDetailPage({
     };
   }, [stream?.id, snapshotId]);
 
-  // Efforts that ENDED at this snapshot (the "this is what shipped"
-  // view). Each row carries the canonical task_effort_file list —
-  // the LLM-declared authorship (after any amend_effort), not the
-  // raw snapshot diff.
+  // Efforts active at this snapshot, partitioned into "completed
+  // here" (end_snapshot_id == this snapshot — the "this is what
+  // shipped" view) and "in flight" (start_snapshot_id <= this AND
+  // end is later or NULL). Each row carries the canonical
+  // task_effort_file list — the LLM-declared authorship (after
+  // any amend_effort), not the raw snapshot diff. The auto-diff
+  // is only fetched for completed efforts (it requires both start
+  // and end snapshot ids).
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const all = await listEffortsAtSnapshots([snapshotId]);
-        const completed = all.filter((e) => e.completedHere);
-        if (completed.length === 0) {
-          if (!cancelled) setCompletedEfforts([]);
+        if (all.length === 0) {
+          if (!cancelled) {
+            setCompletedEfforts([]);
+            setInFlightEfforts([]);
+          }
           return;
         }
+        const completed = all.filter((e) => e.completedHere);
+        const inFlight = all.filter((e) => !e.completedHere);
         const titles = await getTaskSummaries(
-          Array.from(new Set(completed.map((e) => e.tasksId))),
+          Array.from(new Set(all.map((e) => e.tasksId))),
         ).catch(() => [] as Array<{ id: number; title: string }>);
         const titleByTask = new Map<number, string>(
           titles.map((t) => [t.id, t.title] as [number, string]),
         );
         type EffortFileRow = { path: string; change: "created" | "updated" | "deleted" };
         const filesByEffort: Array<[string, EffortFileRow[]]> = await Promise.all(
-          completed.map(async (e) => {
+          all.map(async (e) => {
             try {
               const files = await listEffortFiles(e.effortId);
               return [e.effortId, files] as [string, EffortFileRow[]];
@@ -177,17 +187,20 @@ export function SnapshotDetailPage({
         );
         const diffById = new Map<string, string[]>(diffsByEffort);
         if (cancelled) return;
-        setCompletedEfforts(
-          completed.map((effort) => ({
-            effort,
-            taskTitle: titleByTask.get(effort.tasksId) ?? `task ${effort.tasksId}`,
-            files: filesById.get(effort.effortId) ?? [],
-            autoDiff: diffById.get(effort.effortId) ?? [],
-          })),
-        );
+        const toRow = (effort: EffortAtSnapshot): EffortRow => ({
+          effort,
+          taskTitle: titleByTask.get(effort.tasksId) ?? `task ${effort.tasksId}`,
+          files: filesById.get(effort.effortId) ?? [],
+          autoDiff: diffById.get(effort.effortId) ?? [],
+        });
+        setCompletedEfforts(completed.map(toRow));
+        setInFlightEfforts(inFlight.map(toRow));
       } catch (err) {
-        logUi("warn", "completed efforts fetch failed", { error: String(err) });
-        if (!cancelled) setCompletedEfforts([]);
+        logUi("warn", "efforts at snapshot fetch failed", { error: String(err) });
+        if (!cancelled) {
+          setCompletedEfforts([]);
+          setInFlightEfforts([]);
+        }
       }
     })();
     return () => {
@@ -240,8 +253,21 @@ export function SnapshotDetailPage({
         </div>
 
         {completedEfforts.length > 0 ? (
-          <CompletedEffortsSection
+          <EffortsSection
+            title="Efforts completed at this snapshot"
             rows={completedEfforts}
+            showAutoDiff
+            onOpenTask={(taskId) => onOpenPage(taskRef(taskId))}
+            onOpenSnapshot={(id) => onOpenPage(snapshotRef(id))}
+            onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
+          />
+        ) : null}
+
+        {inFlightEfforts.length > 0 ? (
+          <EffortsSection
+            title="Efforts in progress at this snapshot"
+            rows={inFlightEfforts}
+            showAutoDiff={false}
             onOpenTask={(taskId) => onOpenPage(taskRef(taskId))}
             onOpenSnapshot={(id) => onOpenPage(snapshotRef(id))}
             onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
@@ -264,13 +290,20 @@ export function SnapshotDetailPage({
   );
 }
 
-function CompletedEffortsSection({
+function EffortsSection({
+  title,
   rows,
+  showAutoDiff,
   onOpenTask,
   onOpenSnapshot,
   onOpenFile,
 }: {
-  rows: CompletedEffortRow[];
+  title: string;
+  rows: EffortRow[];
+  /** Show the "Also changed in window" reference list per row.
+   *  Only meaningful for completed efforts (in-flight ones have no
+   *  end snapshot pinned yet). */
+  showAutoDiff: boolean;
   onOpenTask(taskId: number): void;
   onOpenSnapshot(snapshotId: number): void;
   onOpenFile?: (path: string) => void;
@@ -278,12 +311,14 @@ function CompletedEffortsSection({
   return (
     <section style={card}>
       <div style={{ fontWeight: 600, marginBottom: 8, fontSize: "var(--text-sm)" }}>
-        Efforts completed at this snapshot
+        {title}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {rows.map(({ effort, taskTitle, files, autoDiff }) => {
           const claimedSet = new Set(files.map((f) => f.path));
-          const referenceOnly = autoDiff.filter((p) => !claimedSet.has(p));
+          const referenceOnly = showAutoDiff
+            ? autoDiff.filter((p) => !claimedSet.has(p))
+            : [];
           return (
             <div
               key={effort.effortId}
@@ -310,9 +345,11 @@ function CompletedEffortsSection({
                   </span>
                 ) : null}
               </div>
-              {files.length === 0 && autoDiff.length === 0 ? (
+              {files.length === 0 && referenceOnly.length === 0 ? (
                 <div style={{ color: "var(--text-muted)", fontSize: 11, paddingLeft: 4 }}>
-                  No files declared and no diff in the effort window.
+                  {showAutoDiff
+                    ? "No files declared and no diff in the effort window."
+                    : "No files declared yet for this effort."}
                 </div>
               ) : null}
               {files.length > 0 ? (
@@ -387,11 +424,23 @@ function CompletedEffortsSection({
         })}
       </div>
       <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 8 }}>
-        "Claimed" is the agent's declared authorship via
-        {" "}<code>complete_task</code>/<code>amend_effort</code>.
-        "Also changed in window" is the auto-diff between the
-        effort's start and end snapshots — included for reference so
-        you can spot omissions or contributions from another actor.
+        {showAutoDiff ? (
+          <>
+            "Claimed" is the agent's declared authorship via{" "}
+            <code>complete_task</code>/<code>amend_effort</code>.
+            "Also changed in window" is the auto-diff between the
+            effort's start and end snapshots — included for reference
+            so you can spot omissions or contributions from another
+            actor.
+          </>
+        ) : (
+          <>
+            Files shown are the agent's declared authorship via{" "}
+            <code>complete_task</code>/<code>amend_effort</code>{" "}
+            so far. The effort hasn't ended yet, so the start↔end
+            auto-diff isn't computable for these rows.
+          </>
+        )}
       </div>
     </section>
   );
