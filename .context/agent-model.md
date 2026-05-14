@@ -462,6 +462,15 @@ intermediate `ready` step.
   remove_files)` is the corrective tool — adds/removes
   `task_effort_file` rows. Persisted authorship is always the
   agent's declared list (after any amend), never the raw diff.
+- The Stop hook also surfaces unresolved file reviews as a
+  one-shot directive (priority: between stale-epic-children and
+  in-progress audit). MCP `complete_task` stashes the effort id in
+  `ThreadRuntimeRegistry::pending_effort_reviews`; the Stop hook
+  drains it via `take_pending_effort_reviews`, recomputes the diff
+  fresh against the current `task_effort_file` rows (so an agent
+  that already called `amend_effort` doesn't get a stale prompt),
+  and fires the directive. Drained = one-shot — silent agreement
+  is fine; the prompt won't repeat.
 - `dispatch_task({ threadId, itemId, extraContext?, autoStart? })` composes
   a subagent brief server-side (preamble + item fields + children + last notes
   + optional extra context) so the orchestrator doesn't have to Read the item

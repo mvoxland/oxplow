@@ -1035,7 +1035,7 @@ impl OxplowMcp {
             })
             .collect();
         let summary_has_body = !p.summary.trim().is_empty();
-        let mut review: Option<EffortFileReview> = None;
+        let mut review: Option<oxplow_app::task_service::EffortFileReview> = None;
         if (summary_has_body || !touched.is_empty() || !impacts.is_empty())
             && item.thread_id.is_some()
         {
@@ -1062,7 +1062,23 @@ impl OxplowMcp {
             {
                 tracing::warn!(?err, "complete_task: effort record failed");
             } else {
-                review = compute_effort_file_review(&self.services, item.id, &touched).await;
+                review = oxplow_app::task_service::compute_effort_file_review(
+                    &self.services.effort_store,
+                    item.id,
+                    &touched,
+                )
+                .await;
+                // Stash the effort id so the Stop hook can fire a
+                // one-shot directive prompting the agent to amend
+                // (or silently agree). Recomputed at stop time so a
+                // subsequent amend_effort that already reconciled
+                // the discrepancy doesn't trigger a stale prompt.
+                if let (Some(r), Some(tid)) = (review.as_ref(), item.thread_id.clone()) {
+                    self.services.thread_runtime.record_pending_effort_review(
+                        &tid,
+                        oxplow_domain::EffortId::from(r.effort_id.clone()),
+                    );
+                }
             }
         }
         self.emit_tasks_changed(item.thread_id.clone());
@@ -1890,95 +1906,13 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
     out.join("\n")
 }
 
-/// Set-wise diff between what the agent claimed in `touched_files`
-/// and what the snapshot bracket actually shows changed during the
-/// effort. Returned alongside the task on `complete_task` so the
-/// agent can choose to amend its claim. Skipped (None) entirely when
-/// the auto-diff matches the claim, or when no snapshot bracket is
-/// available (effort has no start/end snapshot pin yet).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct EffortFileReview {
-    pub effort_id: String,
-    /// Paths the agent claimed but the auto-diff doesn't see as
-    /// changed. The agent should disclaim these via
-    /// `amend_effort(remove_files=…)` if it actually didn't touch
-    /// them, OR leave them be if it did (e.g. the file was a
-    /// scratchpad it edited and reverted).
-    pub claimed_but_not_changed: Vec<String>,
-    /// Paths the auto-diff sees as changed but the agent didn't
-    /// claim. Capped at `MAX_UNCLAIMED_FOR_REVIEW`; when larger,
-    /// the field is empty and `unclaimed_overflow` is set so the
-    /// agent isn't asked to triage a wall of paths from parallel
-    /// efforts/formatters. The agent should claim relevant ones via
-    /// `amend_effort(add_files=…)`.
-    pub changed_but_not_claimed: Vec<String>,
-    /// Number of changed-but-not-claimed paths the diff actually
-    /// contained, before any cap was applied. `None` means within
-    /// the cap (so `changed_but_not_claimed` is the full list).
-    pub unclaimed_overflow: Option<usize>,
-}
-
-/// Cap on the "files in the diff that the agent didn't claim" list
-/// surfaced to the agent. Above this volume something else is
-/// happening (overlapping efforts, formatter, codegen, user edits)
-/// and the agent can't be expected to triage a wall of paths.
-const MAX_UNCLAIMED_FOR_REVIEW: usize = 10;
-
+/// `complete_task` wire shape — the task plus an optional review
+/// payload when the agent's `touched_files` claim disagreed with
+/// the snapshot bracket diff.
 #[derive(Debug, serde::Serialize)]
 pub struct CompleteTaskResult {
     pub task: oxplow_domain::Task,
-    pub file_review: Option<EffortFileReview>,
-}
-
-async fn compute_effort_file_review(
-    services: &Services,
-    task_id: oxplow_domain::TaskId,
-    claimed: &[String],
-) -> Option<EffortFileReview> {
-    use oxplow_db::TaskEffortStore as _;
-    let effort = services
-        .effort_store
-        .most_recent_for_task(task_id)
-        .await
-        .ok()
-        .flatten()?;
-    // Need both snapshot ids to compute a diff.
-    if effort.start_snapshot_id.is_none() || effort.end_snapshot_id.is_none() {
-        return None;
-    }
-    let changed = services
-        .effort_store
-        .list_changed_paths_for_effort(&effort.id)
-        .await
-        .ok()?;
-    let claimed_set: std::collections::HashSet<&str> = claimed.iter().map(|s| s.as_str()).collect();
-    let changed_set: std::collections::HashSet<&str> = changed.iter().map(|s| s.as_str()).collect();
-    let mut claimed_but_not_changed: Vec<String> = claimed_set
-        .difference(&changed_set)
-        .map(|s| (*s).to_string())
-        .collect();
-    let mut changed_but_not_claimed: Vec<String> = changed_set
-        .difference(&claimed_set)
-        .map(|s| (*s).to_string())
-        .collect();
-    claimed_but_not_changed.sort();
-    changed_but_not_claimed.sort();
-    if claimed_but_not_changed.is_empty() && changed_but_not_claimed.is_empty() {
-        return None;
-    }
-    let overflow = if changed_but_not_claimed.len() > MAX_UNCLAIMED_FOR_REVIEW {
-        let total = changed_but_not_claimed.len();
-        changed_but_not_claimed.clear();
-        Some(total)
-    } else {
-        None
-    };
-    Some(EffortFileReview {
-        effort_id: effort.id.as_str().to_string(),
-        claimed_but_not_changed,
-        changed_but_not_claimed,
-        unclaimed_overflow: overflow,
-    })
+    pub file_review: Option<oxplow_app::task_service::EffortFileReview>,
 }
 
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {

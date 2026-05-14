@@ -138,6 +138,9 @@ pub trait TaskEffortStore: Send + Sync {
     /// `page_ref` immediately.
     async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError>;
     async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEffort>, DomainError>;
+    /// Fetch a single effort row by id. Returns `None` when the row
+    /// doesn't exist (e.g. cleared during snapshot prune).
+    async fn get_effort(&self, id: &EffortId) -> Result<Option<TaskEffort>, DomainError>;
     /// Open effort (`ended_at IS NULL`) for `task`, if any. Used by
     /// the lifecycle path that opens an effort on in_progress entry
     /// and finishes it on exit, and by `record_effort` to merge
@@ -444,6 +447,20 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 )?;
                 let rows = stmt.query_map(params![item.value()], row_to_effort)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn get_effort(&self, id: &EffortId) -> Result<Option<TaskEffort>, DomainError> {
+        let db = self.db.clone();
+        let id = id.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare("SELECT * FROM task_effort WHERE id = ?1")?;
+                let mut rows = stmt.query_map(params![id.as_str()], row_to_effort)?;
+                rows.next().transpose()
             })
         })
         .await

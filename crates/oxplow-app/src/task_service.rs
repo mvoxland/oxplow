@@ -21,6 +21,7 @@ use thiserror::Error;
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::{EffortFileChange, SqliteTaskEffortStore, TaskEffortStore};
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
+use oxplow_domain::EffortId;
 use oxplow_domain::{
     DomainError, Task, TaskActorKind, TaskAuthor, TaskId, TaskImpact, TaskLinkType, TaskPriority,
     TaskStatus, ThreadId, Timestamp,
@@ -402,7 +403,123 @@ impl TaskService {
     pub async fn list_backlog(&self) -> Result<Vec<Task>, TaskServiceError> {
         Ok(self.store.list_backlog().await?)
     }
+}
 
+/// Set-wise diff between what the agent claimed in `touched_files`
+/// and what the snapshot bracket actually shows changed during the
+/// effort. Returned alongside the task on `complete_task` and
+/// surfaced via the Stop hook so the agent can choose to amend.
+/// Skipped (None) entirely when the auto-diff matches the claim, or
+/// when no snapshot bracket is available (effort has no start/end
+/// snapshot pin yet).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EffortFileReview {
+    pub effort_id: String,
+    pub task_id: i64,
+    /// Paths the agent claimed but the auto-diff doesn't see as
+    /// changed. Disclaim via `amend_effort(remove_files=…)` if not
+    /// actually touched.
+    pub claimed_but_not_changed: Vec<String>,
+    /// Paths the auto-diff sees as changed but the agent didn't
+    /// claim. Capped at `MAX_UNCLAIMED_FOR_REVIEW`; when larger,
+    /// the field is empty and `unclaimed_overflow` is set.
+    pub changed_but_not_claimed: Vec<String>,
+    /// Number of changed-but-not-claimed paths the diff actually
+    /// contained, before any cap was applied. `None` means the
+    /// list is the full set.
+    pub unclaimed_overflow: Option<usize>,
+}
+
+/// Cap on the "files in the diff that the agent didn't claim" list
+/// surfaced to the agent. Above this volume something else is
+/// happening (overlapping efforts, formatter, codegen, user edits)
+/// and the agent can't be expected to triage a wall of paths.
+pub const MAX_UNCLAIMED_FOR_REVIEW: usize = 10;
+
+/// Compare the agent's declared `touched_files` for a task's
+/// most-recent effort against the auto-diff between
+/// start_snapshot_id and end_snapshot_id. Returns `None` when
+/// nothing's worth showing the agent — claim and diff agree, or no
+/// snapshot bracket exists yet.
+pub async fn compute_effort_file_review(
+    effort_store: &SqliteTaskEffortStore,
+    task_id: TaskId,
+    claimed: &[String],
+) -> Option<EffortFileReview> {
+    let effort = effort_store
+        .most_recent_for_task(task_id)
+        .await
+        .ok()
+        .flatten()?;
+    if effort.start_snapshot_id.is_none() || effort.end_snapshot_id.is_none() {
+        return None;
+    }
+    let changed = effort_store
+        .list_changed_paths_for_effort(&effort.id)
+        .await
+        .ok()?;
+    review_from_lists(&effort.id, task_id, claimed, &changed)
+}
+
+/// Recompute a review for a specific effort id. The Stop hook
+/// uses this to refresh a stale review after the agent may have
+/// called `amend_effort`. Returns `None` when the effort no longer
+/// has a discrepancy (or doesn't exist / has no snapshot bracket).
+pub async fn recompute_effort_file_review(
+    effort_store: &SqliteTaskEffortStore,
+    effort_id: &EffortId,
+) -> Option<EffortFileReview> {
+    let effort = effort_store.get_effort(effort_id).await.ok().flatten()?;
+    if effort.start_snapshot_id.is_none() || effort.end_snapshot_id.is_none() {
+        return None;
+    }
+    let files = effort_store.list_files(effort_id).await.ok()?;
+    let claimed: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+    let changed = effort_store
+        .list_changed_paths_for_effort(effort_id)
+        .await
+        .ok()?;
+    review_from_lists(effort_id, effort.task_id, &claimed, &changed)
+}
+
+fn review_from_lists(
+    effort_id: &EffortId,
+    task_id: TaskId,
+    claimed: &[String],
+    changed: &[String],
+) -> Option<EffortFileReview> {
+    let claimed_set: std::collections::HashSet<&str> = claimed.iter().map(|s| s.as_str()).collect();
+    let changed_set: std::collections::HashSet<&str> = changed.iter().map(|s| s.as_str()).collect();
+    let mut claimed_but_not_changed: Vec<String> = claimed_set
+        .difference(&changed_set)
+        .map(|s| (*s).to_string())
+        .collect();
+    let mut changed_but_not_claimed: Vec<String> = changed_set
+        .difference(&claimed_set)
+        .map(|s| (*s).to_string())
+        .collect();
+    claimed_but_not_changed.sort();
+    changed_but_not_claimed.sort();
+    if claimed_but_not_changed.is_empty() && changed_but_not_claimed.is_empty() {
+        return None;
+    }
+    let overflow = if changed_but_not_claimed.len() > MAX_UNCLAIMED_FOR_REVIEW {
+        let total = changed_but_not_claimed.len();
+        changed_but_not_claimed.clear();
+        Some(total)
+    } else {
+        None
+    };
+    Some(EffortFileReview {
+        effort_id: effort_id.as_str().to_string(),
+        task_id: task_id.value(),
+        claimed_but_not_changed,
+        changed_but_not_claimed,
+        unclaimed_overflow: overflow,
+    })
+}
+
+impl TaskService {
     /// Return the next dispatch unit for the orchestrator.
     pub async fn read_task_options(
         &self,

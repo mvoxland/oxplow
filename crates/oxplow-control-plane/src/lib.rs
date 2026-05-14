@@ -45,7 +45,8 @@ use oxplow_domain::stores::{AgentTurnStore, StreamStore, TaskStore, ThreadStore}
 use oxplow_domain::{HookKind, StreamId, TaskStatus, ThreadId};
 use oxplow_runtime::filing::{build_filing_enforcement_pre_tool_deny, FilingEnforcementContext};
 use oxplow_runtime::stop_hook::{
-    decide_stop_directive, DirectiveBuilders, StopHookSideEffect, ThreadSnapshot,
+    decide_stop_directive, DirectiveBuilders, PendingEffortReview, StopHookSideEffect,
+    ThreadSnapshot,
 };
 use oxplow_runtime::write_guard::{build_write_guard_response, WriteGuardContext};
 
@@ -720,6 +721,46 @@ async fn stop_directive(
         .copied()
         .unwrap_or(false);
 
+    // Drain any pending effort review ids the MCP `complete_task`
+    // handler stashed for this thread. For each, recompute the
+    // review against the live `task_effort_file` rows so an agent
+    // that already amended doesn't get a stale prompt. Drop the ones
+    // that no longer carry a discrepancy. Title resolution joins
+    // each effort's task title for the directive text.
+    let pending_ids = ctx
+        .services
+        .thread_runtime
+        .take_pending_effort_reviews(thread_id);
+    let mut pending_reviews: Vec<PendingEffortReview> = Vec::new();
+    if !pending_ids.is_empty() {
+        let titles_by_id: std::collections::HashMap<i64, String> = tasks
+            .iter()
+            .map(|t| (t.id.value(), t.title.clone()))
+            .collect();
+        for eid in pending_ids {
+            let Some(review) = oxplow_app::task_service::recompute_effort_file_review(
+                &ctx.services.effort_store,
+                &eid,
+            )
+            .await
+            else {
+                continue;
+            };
+            let title = titles_by_id
+                .get(&review.task_id)
+                .cloned()
+                .unwrap_or_else(|| format!("task {}", review.task_id));
+            pending_reviews.push(PendingEffortReview {
+                effort_id: review.effort_id,
+                task_id: review.task_id,
+                task_title: title,
+                claimed_but_not_changed: review.claimed_but_not_changed,
+                changed_but_not_claimed: review.changed_but_not_claimed,
+                unclaimed_overflow: review.unclaimed_overflow,
+            });
+        }
+    }
+
     let snapshot = ThreadSnapshot {
         thread: Some(&thread),
         tasks: &tasks,
@@ -744,6 +785,7 @@ async fn stop_directive(
         turn_had_filing: false,
         turn_filed_ready_item: false,
         filed_but_didnt_ship_fired,
+        pending_effort_reviews: &pending_reviews,
     };
 
     let outcome = decide_stop_directive(
@@ -752,6 +794,7 @@ async fn stop_directive(
             build_in_progress_audit_reason: Some(&build_in_progress_audit_reason),
             build_filed_but_didnt_ship_reason: Some(&build_filed_but_didnt_ship_reason),
             build_stale_epic_children_reason: None,
+            build_effort_file_review_reason: Some(&build_effort_file_review_reason),
         },
     );
 
@@ -790,6 +833,47 @@ fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
         items.len(),
         titles.join("\n")
     )
+}
+
+fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
+    let mut out = String::from(
+        "EFFORT FILE REVIEW: one or more efforts you just closed have a discrepancy \
+         between your declared `touched_files` and the snapshot diff. For each:\n\n",
+    );
+    for r in reviews {
+        out.push_str(&format!(
+            "  • [{}] {} (effort {})\n",
+            r.task_id, r.task_title, r.effort_id
+        ));
+        if !r.claimed_but_not_changed.is_empty() {
+            out.push_str("      You claimed these files but the worktree didn't change:\n");
+            for p in &r.claimed_but_not_changed {
+                out.push_str(&format!("        - {p}\n"));
+            }
+        }
+        if !r.changed_but_not_claimed.is_empty() {
+            out.push_str(
+                "      These files changed during your effort but you didn't list them:\n",
+            );
+            for p in &r.changed_but_not_claimed {
+                out.push_str(&format!("        - {p}\n"));
+            }
+        }
+        if let Some(total) = r.unclaimed_overflow {
+            out.push_str(&format!(
+                "      ({total} files changed during your effort that you didn't claim — \
+                 too many to triage; skipping. Likely from another effort, formatter, \
+                 or external activity.)\n"
+            ));
+        }
+    }
+    out.push_str(
+        "\nIf any are wrong, call `mcp__oxplow__amend_effort(effort_id, add_files, \
+         remove_files)` to correct. If you genuinely meant your original list \
+         (e.g. you edited then reverted, or another actor changed those files), no \
+         amend is needed — silent agreement is fine and the prompt won't repeat.",
+    );
+    out
 }
 
 fn build_filed_but_didnt_ship_reason() -> String {

@@ -17,14 +17,14 @@
 //! the trait objects it already had — only the wiring in
 //! `Services::boot` changes.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_domain::{
-    AgentStatus, AgentStatusState, DomainError, HookEvent, HookKind, ThreadId, Timestamp,
+    AgentStatus, AgentStatusState, DomainError, EffortId, HookEvent, HookKind, ThreadId, Timestamp,
 };
 
 /// Default per-thread cap on the hook ring. Sized so the typical
@@ -39,6 +39,12 @@ struct ThreadRuntime {
     hooks: VecDeque<HookEvent>,
     /// Keyed by pane_target.
     statuses: HashMap<String, AgentStatus>,
+    /// Effort ids whose touched_files claim disagreed with the auto-
+    /// diff at complete_task time. Drained by the Stop hook to fire
+    /// a one-shot directive prompting the agent to call
+    /// `amend_effort` (or silently agree). Cleared after the
+    /// directive fires so a single review never repeats.
+    pending_effort_reviews: HashSet<EffortId>,
 }
 
 pub struct ThreadRuntimeRegistry {
@@ -63,6 +69,28 @@ impl ThreadRuntimeRegistry {
     /// referencing the same backing state.
     pub fn into_arc(self) -> Arc<Self> {
         Arc::new(self)
+    }
+
+    /// Stash an effort id whose touched_files claim disagreed with
+    /// the snapshot diff. The Stop hook drains the per-thread set
+    /// and surfaces a directive listing each. Idempotent.
+    pub fn record_pending_effort_review(&self, thread: &ThreadId, effort: EffortId) {
+        let mut m = self.inner.lock().expect("registry mutex");
+        let runtime = m.entry(thread.clone()).or_default();
+        runtime.pending_effort_reviews.insert(effort);
+    }
+
+    /// Take + clear all pending effort review ids for a thread. The
+    /// Stop hook calls this when building its directive — once
+    /// surfaced, the review doesn't re-fire. If the agent ignored
+    /// the prompt that's fine; this matches the "silent agreement"
+    /// path in the design.
+    pub fn take_pending_effort_reviews(&self, thread: &ThreadId) -> Vec<EffortId> {
+        let mut m = self.inner.lock().expect("registry mutex");
+        let Some(runtime) = m.get_mut(thread) else {
+            return Vec::new();
+        };
+        runtime.pending_effort_reviews.drain().collect()
     }
 }
 

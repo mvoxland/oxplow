@@ -34,6 +34,25 @@ pub struct ThreadSnapshot<'a> {
     pub turn_had_filing: bool,
     pub turn_filed_ready_item: bool,
     pub filed_but_didnt_ship_fired: bool,
+    /// Efforts whose touched_files claim disagreed with the snapshot
+    /// diff and haven't been reviewed by the agent yet. The Stop hook
+    /// fires a one-shot directive surfacing the discrepancies; once
+    /// fired, the runtime drops these so the prompt doesn't repeat.
+    pub pending_effort_reviews: &'a [PendingEffortReview],
+}
+
+/// Minimal review summary the Stop hook needs to render its
+/// directive. Mirrors `oxplow_app::task_service::EffortFileReview`
+/// but lives in the runtime crate so stop_hook stays free of an
+/// upstream dependency.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingEffortReview {
+    pub effort_id: String,
+    pub task_id: i64,
+    pub task_title: String,
+    pub claimed_but_not_changed: Vec<String>,
+    pub changed_but_not_claimed: Vec<String>,
+    pub unclaimed_overflow: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -69,6 +88,7 @@ pub struct DirectiveBuilders<'a> {
     pub build_in_progress_audit_reason: Option<&'a dyn Fn(&[Task]) -> String>,
     pub build_filed_but_didnt_ship_reason: Option<&'a dyn Fn() -> String>,
     pub build_stale_epic_children_reason: Option<&'a dyn Fn(&[StaleEpicPair]) -> String>,
+    pub build_effort_file_review_reason: Option<&'a dyn Fn(&[PendingEffortReview]) -> String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -126,6 +146,17 @@ pub fn decide_stop_directive(
     if !stale.is_empty() {
         if let Some(build) = builders.build_stale_epic_children_reason {
             outcome.directive = Some(StopDirective::block(build(&stale)));
+            return outcome;
+        }
+    }
+
+    if !snapshot.pending_effort_reviews.is_empty() {
+        if let Some(build) = builders.build_effort_file_review_reason {
+            outcome.directive = Some(StopDirective::block(build(snapshot.pending_effort_reviews)));
+            // No side-effect needed — control-plane already drained
+            // the pending set via `take_pending_effort_reviews` when
+            // building the snapshot, so the prompt is one-shot by
+            // construction.
             return outcome;
         }
     }
@@ -320,6 +351,40 @@ mod tests {
             outcome.side_effects.first(),
             Some(StopHookSideEffect::RecordAuditSignature(_))
         ));
+    }
+
+    #[test]
+    fn pending_effort_review_branch_fires_before_audit() {
+        let t = active_thread();
+        // Both an in_progress item AND a pending review — review wins
+        // because it's about something the agent JUST did and is more
+        // time-sensitive than the audit nudge.
+        let items = vec![item(1, TaskStatus::InProgress, None)];
+        let reviews = vec![PendingEffortReview {
+            effort_id: "e-1".into(),
+            task_id: 7,
+            task_title: "ship the thing".into(),
+            claimed_but_not_changed: vec!["src/typo.rs".into()],
+            changed_but_not_claimed: vec!["src/extra.rs".into()],
+            unclaimed_overflow: None,
+        }];
+        let snap = ThreadSnapshot {
+            thread: Some(&t),
+            tasks: &items,
+            pending_effort_reviews: &reviews,
+            ..Default::default()
+        };
+        let build_audit = |_: &[Task]| "AUDIT".to_string();
+        let build_review = |rs: &[PendingEffortReview]| format!("REVIEW {} efforts", rs.len());
+        let builders = DirectiveBuilders {
+            build_in_progress_audit_reason: Some(&build_audit),
+            build_effort_file_review_reason: Some(&build_review),
+            ..Default::default()
+        };
+        let outcome = decide_stop_directive(snap, builders);
+        let dir = outcome.directive.expect("review directive");
+        assert!(dir.reason.contains("REVIEW 1 efforts"));
+        assert!(!dir.reason.contains("AUDIT"));
     }
 
     #[test]
