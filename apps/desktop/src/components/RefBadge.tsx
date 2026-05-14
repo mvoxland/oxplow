@@ -1,12 +1,13 @@
 import type { CSSProperties } from "react";
 
-export type RefBadgeTone = "branch" | "current" | "tag" | "sha";
+export type RefBadgeTone = "branch" | "current" | "tag" | "sha" | "wiki";
 
 const TONE_STYLES: Record<RefBadgeTone, CSSProperties> = {
   branch: { borderColor: "#4a9eff", color: "#4a9eff" },
   current: { borderColor: "#86efac", color: "#86efac", fontWeight: 600 },
   tag: { borderColor: "#fcd34d", color: "#fcd34d" },
   sha: { borderColor: "#4a9eff", color: "#4a9eff" },
+  wiki: { borderColor: "#c084fc", color: "#c084fc" },
 };
 
 /**
@@ -29,9 +30,17 @@ export function RefBadge({ label, tone }: { label: string; tone: RefBadgeTone })
         fontFamily: tone === "sha" ? "var(--mono, monospace)" : undefined,
         ...TONE_STYLES[tone],
       }}
-      title={tone === "tag" ? `tag: ${label}` : tone === "sha" ? `commit ${label}` : label}
+      title={
+        tone === "tag"
+          ? `tag: ${label}`
+          : tone === "sha"
+          ? `commit ${label}`
+          : tone === "wiki"
+          ? `wiki page: ${label}`
+          : label
+      }
     >
-      {tone === "tag" ? "🏷 " : ""}
+      {tone === "tag" ? "🏷 " : tone === "wiki" ? "📝 " : ""}
       {label}
     </span>
   );

@@ -1228,6 +1228,50 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
+    /// For each input snapshot id, return the set of wiki slugs whose
+    /// `.md` body changed in that snapshot's file_snapshot rows.
+    /// Cheap targeted query for the Local History dashboard's wiki
+    /// badges — avoids fetching the full file list per snapshot.
+    pub async fn list_wiki_slugs_for_snapshots(
+        &self,
+        snapshot_ids: Vec<i64>,
+    ) -> Result<Vec<(i64, String)>, DomainError> {
+        if snapshot_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let placeholders: Vec<String> =
+                    (1..=snapshot_ids.len()).map(|i| format!("?{i}")).collect();
+                let sql = format!(
+                    "SELECT snapshot_id, path FROM file_snapshot \
+                     WHERE snapshot_id IN ({}) \
+                       AND path LIKE '.oxplow/wiki/%.md'",
+                    placeholders.join(",")
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let params_iter: Vec<&dyn rusqlite::ToSql> = snapshot_ids
+                    .iter()
+                    .map(|id| id as &dyn rusqlite::ToSql)
+                    .collect();
+                let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
+                    let sid: i64 = row.get("snapshot_id")?;
+                    let path: String = row.get("path")?;
+                    let slug = path
+                        .strip_prefix(".oxplow/wiki/")
+                        .and_then(|s| s.strip_suffix(".md"))
+                        .map(|s| s.to_string())
+                        .unwrap_or(path);
+                    Ok((sid, slug))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     pub async fn list_files_for_snapshot(
         &self,
         snapshot_id: i64,

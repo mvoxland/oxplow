@@ -5,6 +5,7 @@ import {
   getTaskSummaries,
   listEffortsAtSnapshots,
   listSnapshots,
+  listWikiSlugsForSnapshots,
   resolveCommitRefLabels,
   subscribeSnapshotEvents,
 } from "../api.js";
@@ -39,6 +40,8 @@ interface SnapshotRow {
   /** Efforts that were active at this snapshot but ended later (or
    *  are still open). Surfaces as "in flight" labels on the row. */
   inFlightEfforts: SnapshotRowEffort[];
+  /** Wiki page slugs whose `.md` body changed in this snapshot. */
+  wikiSlugs: string[];
   /** True when this is the very first snapshot recorded for the
    *  stream — rendered as "Initial Snapshot" rather than the
    *  catch-all "External change" label. We can only assert this
@@ -115,7 +118,7 @@ export function LocalHistoryDashboardPage({
       setError(null);
       const snapshots = await listSnapshots(streamId, RECENT_LIMIT);
       const snapshotIds = snapshots.map((s) => s.id);
-      const [summaries, effortsAt] = await Promise.all([
+      const [summaries, effortsAt, wikiPairs] = await Promise.all([
         Promise.all(
           snapshotIds.map(async (id) => {
             try {
@@ -130,7 +133,17 @@ export function LocalHistoryDashboardPage({
           logUi("warn", "efforts-at-snapshots fetch failed", { error: String(err) });
           return [];
         }),
+        listWikiSlugsForSnapshots(snapshotIds).catch((err) => {
+          logUi("warn", "wiki-slugs-for-snapshots fetch failed", { error: String(err) });
+          return [] as Array<{ snapshotId: number; slug: string }>;
+        }),
       ]);
+      const wikiBySnap = new Map<number, string[]>();
+      for (const { snapshotId, slug } of wikiPairs) {
+        const list = wikiBySnap.get(snapshotId) ?? [];
+        if (!list.includes(slug)) list.push(slug);
+        wikiBySnap.set(snapshotId, list);
+      }
       const summaryById = new Map<number, { created: number; modified: number; deleted: number; total: number }>();
       for (const [id, s] of summaries) {
         if (s) summaryById.set(id, s);
@@ -170,6 +183,7 @@ export function LocalHistoryDashboardPage({
         summary: summaryById.get(snapshot.id) ?? null,
         completedEfforts: completedBySnap.get(snapshot.id) ?? [],
         inFlightEfforts: inFlightBySnap.get(snapshot.id) ?? [],
+        wikiSlugs: wikiBySnap.get(snapshot.id) ?? [],
         isInitial: earliestId !== null && snapshot.id === earliestId,
       }));
       const commitShas = Array.from(
@@ -243,19 +257,23 @@ export function LocalHistoryDashboardPage({
 
 function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
   return rows.map((row) => {
-    const hasOtherBadges = !!row.snapshot.gitCommit;
+    const hasOtherBadges =
+      !!row.snapshot.gitCommit || row.wikiSlugs.length > 0;
     const label = formatSnapshotSubject(
       row.completedEfforts,
       row.inFlightEfforts,
       row.isInitial,
       hasOtherBadges,
     );
+    // When the subject is suppressed (badges-only row), fall back to
+    // a short-sha or wiki-slug label so the prev/next tooltip still
+    // says something meaningful.
+    const fallback =
+      row.snapshot.gitCommit?.slice(0, 7) ??
+      (row.wikiSlugs.length > 0 ? `wiki:${row.wikiSlugs[0]}` : "snapshot");
     return {
       ref: snapshotRef(row.snapshot.id),
-      // When the subject is suppressed (badges-only row), fall back
-      // to a short-sha label so the prev/next tooltip still says
-      // something meaningful.
-      label: label || (row.snapshot.gitCommit?.slice(0, 7) ?? "snapshot"),
+      label: label || fallback,
     };
   });
 }
@@ -299,12 +317,12 @@ function SnapshotRowItem({
   onSelect(id: number): void;
   labels: CommitRefLabel[];
 }) {
-  const { snapshot, summary, completedEfforts, inFlightEfforts, isInitial } = row;
+  const { snapshot, summary, completedEfforts, inFlightEfforts, wikiSlugs, isInitial } = row;
   // A git_commit on the snapshot always renders at least a short-sha
-  // chip (or branch/tag chips when ref labels resolve), so suppress
-  // the "External change" fallback in that case — the chip carries
-  // the meaning. Wiki badges (step 4) will OR in here too.
-  const hasOtherBadges = !!snapshot.gitCommit;
+  // chip (or branch/tag chips when ref labels resolve), and wiki
+  // badges similarly carry meaning on their own — both suppress the
+  // "External change" fallback because the chips speak for themselves.
+  const hasOtherBadges = !!snapshot.gitCommit || wikiSlugs.length > 0;
   const subjectish = formatSnapshotSubject(
     completedEfforts,
     inFlightEfforts,
@@ -329,6 +347,9 @@ function SnapshotRowItem({
         : snapshot.gitCommit
         ? <RefBadge label={snapshot.gitCommit.slice(0, 7)} tone="sha" />
         : null}
+      {wikiSlugs.map((slug) => (
+        <RefBadge key={`wiki-${slug}`} label={slug} tone="wiki" />
+      ))}
       {summary ? (
         <FileStatusCounts
           filesAdded={summary.created}

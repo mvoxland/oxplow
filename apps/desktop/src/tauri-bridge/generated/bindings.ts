@@ -326,6 +326,13 @@ export const commands = {
 	 *  snapshot id (i.e. one batch of `request_snapshot()`).
 	 */
 	listFilesForSnapshot: (snapshotId: number) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
+	/**
+	 *  For each snapshot id in the input list, the wiki slugs whose
+	 *  body changed in that snapshot. Drives the Local History
+	 *  dashboard's wiki badges. Cheaper than fetching the full
+	 *  `file_snapshot` rows per snapshot.
+	 */
+	listWikiSlugsForSnapshots: (snapshotIds: number[]) => typedError<([number, string])[], IpcError>(__TAURI_INVOKE("list_wiki_slugs_for_snapshots", { snapshotIds })),
 	getSnapshot: (id: number) => typedError<{
 	id: number,
 	stream_id: StreamId,

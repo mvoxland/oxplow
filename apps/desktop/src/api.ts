@@ -1564,6 +1564,18 @@ export interface EffortAtSnapshot {
   completedHere: boolean;
 }
 
+/** For each snapshot id in the input list, the wiki slugs whose
+ *  body changed in that snapshot. Drives wiki badges on the
+ *  Local History dashboard. */
+export async function listWikiSlugsForSnapshots(
+  snapshotIds: number[],
+): Promise<Array<{ snapshotId: number; slug: string }>> {
+  const rows = unwrap(
+    await commands.listWikiSlugsForSnapshots(snapshotIds),
+  ) as unknown as Array<[number, string]>;
+  return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
+}
+
 export async function listEffortsAtSnapshots(
   snapshotIds: number[],
 ): Promise<EffortAtSnapshot[]> {

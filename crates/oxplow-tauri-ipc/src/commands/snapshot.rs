@@ -114,6 +114,22 @@ pub async fn get_blob_storage_bytes(state: tauri::State<'_, AppState>) -> Result
     Ok(total as i64)
 }
 
+/// For each snapshot id in the input list, the wiki slugs whose
+/// body changed in that snapshot. Drives the Local History
+/// dashboard's wiki badges. Cheaper than fetching the full
+/// `file_snapshot` rows per snapshot.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_wiki_slugs_for_snapshots(
+    state: tauri::State<'_, AppState>,
+    snapshot_ids: Vec<i64>,
+) -> Result<Vec<(i64, String)>, IpcError> {
+    Ok(state
+        .snapshot_store
+        .list_wiki_slugs_for_snapshots(snapshot_ids)
+        .await?)
+}
+
 /// Every `file_snapshot` row captured under a single parent
 /// snapshot id (i.e. one batch of `request_snapshot()`).
 #[tauri::command]
