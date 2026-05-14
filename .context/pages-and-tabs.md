@@ -26,7 +26,7 @@ existing IDE-style chrome until later phases migrate the panels into pages.
 | `apps/desktop/src/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
 | `apps/desktop/src/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `wikiPageRef(slug)`, `taskRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
-| `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. Reads only semantic CSS variables (skin via theme). |
+| `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. **Body layout** is chosen via `layout?: "full" \| "details"` (default `"full"`); details layout pairs a 760px reading-width center column with a 320px sticky right rail (`rightRail` prop) that auto-hides below ~960px body width — purely responsive, no manual toggle. Reads only semantic CSS variables (skin via theme). |
 | `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks dropdown (popover). Mounted by `Page` when context or explicit `navBar` prop is present. |
 | `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. |
 | `apps/desktop/src/pages/FilePage.tsx` | Thin Page wrapper around `EditorPane`. Calls `usePageTitle(basename + ● dirty)` so the file's name flows into the shared chrome title, and `useBacklinks(fileRef(path))` so wiki pages, tasks, commits, and findings that reference the file appear in the nav-bar Backlinks dropdown. EditorPane keeps owning Monaco / blame / context menus; the wrapper only provides chrome above. |
@@ -96,6 +96,36 @@ versions of what today are left-rail or bottom-drawer panels.
 | thread-settings | `thread-settings:<threadId>` | `thread-settings:t-3` |
 | op-error | `op-error:<errorId>` | `op-error:oe-abc123` |
 | external-url | `external-url:<url>` | `external-url:https://example.com/path` |
+
+## Body layouts
+
+`<Page>` takes a `layout?: "full" | "details"` prop (default `"full"`).
+The tab-level chrome (nav bar, header, legacy backlinks footer) is the
+same for both layouts — only the body region differs.
+
+- **`"full"`** — today's behavior. Body region is `flex: 1; overflow:
+  auto` with no width cap and no padding; children own their own
+  padding. Dashboards, lists, history tables, the agent terminal,
+  file/diff editors, and anything that wants every available pixel
+  stay full.
+- **`"details"`** — two-column CSS grid: a center column capped at
+  `max-width: 760px` (justified to center within its track) plus a
+  `320px` sticky right rail (`position: sticky; top: 0`). Outer
+  padding `24px`, gap `24px`. The page provides rail content via the
+  `rightRail` prop; the layout owns widths, padding, and sticky
+  positioning.
+
+The rail is **purely responsive — no user toggle**. A `ResizeObserver`
+on the body container watches its width; below `960px` the rail is
+unmounted entirely and the grid collapses to one column (the center
+re-centers in the freed space). There is no persistent collapsed
+state. Pages that want a rail but have no rail content for some
+condition just pass `rightRail={undefined}`; the layout treats that
+identically to a sub-threshold viewport.
+
+**Opt-in rule:** detail pages (single record — wiki page, task,
+finding, …) use `layout="details"`. Lists / dashboards / editors stay
+on `"full"`. Adopters today: see WikiPage and TaskPage migrations.
 
 ## Rail HUD contract
 

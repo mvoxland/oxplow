@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { EffortDetail, Task, TaskPriority, TaskStatus } from "../../api.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
-import { deleteButtonStyle, inputStyle, miniButtonStyle } from "./plan-utils.js";
+import { inputStyle, miniButtonStyle } from "./plan-utils.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 
@@ -50,48 +50,22 @@ function statusOptionsFor(current: TaskStatus): TaskStatus[] {
 }
 
 /**
- * Expanded view of a tasks row — inline edit of title / description /
- * acceptance, status + priority pickers, delete button. Each field commits
- * on blur or Enter; Escape reverts.
+ * Body half of the tasks detail view — title, description, acceptance.
+ * Status / priority / category / tags / timestamps / destructive actions
+ * live in `TaskDetailRail`, rendered as the page's right rail.
  */
 export function TaskDetail({
   item,
   onUpdateTask,
-  onRequestDelete,
-  headerActions,
 }: {
   item: Task;
   onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
-  onRequestDelete(): void;
-  /** Optional buttons rendered before Delete in the header row. */
-  headerActions?: ReactNode;
 }) {
   return (
     <div
-      style={{ padding: "6px 10px 10px 10px", background: "var(--bg-detail)", borderBottom: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6, fontSize: "var(--text-xs)" }}
+      style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: "var(--text-xs)" }}
       onClick={(event) => event.stopPropagation()}
     >
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11 }}>
-        <span style={{ color: "var(--muted)" }}>task</span>
-        <span style={{ color: "var(--muted)" }}>·</span>
-        <InlineSelect
-          value={item.status}
-          options={statusOptionsFor(item.status)}
-          onChange={(value) => void onUpdateTask(item.id, { status: value as TaskStatus })}
-        />
-        <span style={{ color: "var(--muted)" }}>·</span>
-        <InlineSelect
-          value={item.priority}
-          options={PRIORITY_OPTIONS}
-          onChange={(value) => void onUpdateTask(item.id, { priority: value as TaskPriority })}
-          suffix=" priority"
-        />
-        <span style={{ color: "var(--muted)" }}>·</span>
-        <span style={{ color: "var(--muted)" }}>by {item.created_by}</span>
-        <span style={{ flex: 1 }} />
-        {headerActions}
-        <button type="button" onClick={onRequestDelete} style={deleteButtonStyle} title="Delete tasks">Delete</button>
-      </div>
       <EditableField
         key={`title-${item.id}-${item.updated_at}`}
         label="Title"
@@ -129,11 +103,114 @@ export function TaskDetail({
           void onUpdateTask(item.id, { acceptanceCriteria: next });
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * Rail half of the tasks detail view — status + priority pickers,
+ * category, tags, timestamps, created-by, and an overflow menu for
+ * destructive / scope actions. Mirror image of `TaskDetail` body fields.
+ */
+export function TaskDetailRail({
+  item,
+  onUpdateTask,
+  onRequestDelete,
+  extraMenuItems,
+  formatTimestamp = (iso) => new Date(iso).toLocaleString(),
+}: {
+  item: Task;
+  onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  onRequestDelete(): void;
+  /** Additional items rendered above Delete in the overflow menu —
+   *  e.g. "Send to backlog" / "Bring to this thread". */
+  extraMenuItems?: Array<{ label: string; onSelect(): void }>;
+  formatTimestamp?(iso: string): string;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  return (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 14, fontSize: "var(--text-xs)" }}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: -8, position: "relative" }}>
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-label="More actions"
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            padding: "2px 6px",
+            fontSize: 16,
+            lineHeight: 1,
+          }}
+          title="More actions"
+        >
+          ⋯
+        </button>
+        {menuOpen ? (
+          <div
+            role="menu"
+            onMouseLeave={() => setMenuOpen(false)}
+            style={{
+              position: "absolute",
+              top: 24,
+              right: 0,
+              background: "var(--surface-elevated, var(--surface-card))",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 4,
+              padding: 4,
+              display: "flex",
+              flexDirection: "column",
+              minWidth: 160,
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
+              zIndex: 10,
+            }}
+          >
+            {extraMenuItems?.map((entry) => (
+              <button
+                key={entry.label}
+                type="button"
+                onClick={() => { setMenuOpen(false); entry.onSelect(); }}
+                style={menuItemStyle}
+              >
+                {entry.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => { setMenuOpen(false); onRequestDelete(); }}
+              style={{ ...menuItemStyle, color: "var(--severity-critical)" }}
+            >
+              Delete
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <RailFieldRow label="Status">
+        <InlineSelect
+          value={item.status}
+          options={statusOptionsFor(item.status)}
+          onChange={(value) => void onUpdateTask(item.id, { status: value as TaskStatus })}
+        />
+      </RailFieldRow>
+      <RailFieldRow label="Priority">
+        <InlineSelect
+          value={item.priority}
+          options={PRIORITY_OPTIONS}
+          onChange={(value) => void onUpdateTask(item.id, { priority: value as TaskPriority })}
+        />
+      </RailFieldRow>
+
       <EditableField
         key={`category-${item.id}-${item.updated_at}`}
         label="Category"
         value={item.category ?? ""}
-        placeholder="Backlog grouping bucket (e.g. UI / UX, Infra)"
+        placeholder="Backlog bucket (e.g. UI, Infra)"
         multiline={false}
         onCommit={(value) => {
           const trimmed = value.trim();
@@ -155,9 +232,51 @@ export function TaskDetail({
           void onUpdateTask(item.id, { tags: next });
         }}
       />
+
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        borderTop: "1px solid var(--border-subtle)",
+        paddingTop: 12,
+        color: "var(--text-muted)",
+      }}>
+        <RailMetaRow label="Created">{formatTimestamp(item.created_at)}</RailMetaRow>
+        <RailMetaRow label="Updated">{formatTimestamp(item.updated_at)}</RailMetaRow>
+        <RailMetaRow label="By">{item.created_by}</RailMetaRow>
+      </div>
     </div>
   );
 }
+
+function RailFieldRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <div style={{ textTransform: "uppercase", letterSpacing: 0.4, fontSize: 10, color: "var(--muted)" }}>{label}</div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function RailMetaRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 8, fontSize: 11 }}>
+      <span style={{ width: 56, color: "var(--text-muted)" }}>{label}</span>
+      <span style={{ color: "var(--text-secondary)" }}>{children}</span>
+    </div>
+  );
+}
+
+const menuItemStyle: CSSProperties = {
+  background: "transparent",
+  border: "none",
+  textAlign: "left",
+  padding: "6px 10px",
+  fontSize: "var(--text-xs)",
+  color: "var(--text-primary)",
+  cursor: "pointer",
+  borderRadius: 3,
+};
 
 /**
  * Single chronological list (newest first) mixing tasks notes and

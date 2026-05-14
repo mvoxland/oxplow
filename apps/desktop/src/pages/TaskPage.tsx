@@ -8,11 +8,10 @@ import {
   subscribeOxplowEvents,
   updateTask,
 } from "../api.js";
-import { miniButtonStyle } from "../components/Plan/plan-utils.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
-import { ActivityTimeline, TaskDetail } from "../components/Plan/TaskDetail.js";
+import { ActivityTimeline, TaskDetail, TaskDetailRail } from "../components/Plan/TaskDetail.js";
 import { BacklinksList, type SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 
@@ -29,38 +28,27 @@ export interface TaskPageProps {
 }
 
 /**
- * Single-record page for a tasks. Shows the full editable detail
- * (title, description, acceptance, status, priority) plus the merged
- * activity timeline (notes + efforts). Phase 4 entry point — replaces
- * the modal-only edit flow when callers route via `onOpenPage`.
- *
- * Read-only fallback: if the item isn't in the loaded thread state
- * (e.g. it lives in another thread), the page renders just the title
- * row and a hint to open it from its owning thread.
+ * Single-record page for a task. Adopts `layout="details"`: title /
+ * description / acceptance / activity live in the center column;
+ * status / priority / category / tags / timestamps / overflow menu
+ * (Send to backlog, Delete) live in the right rail. Activity timeline
+ * sits below the editable body.
  */
 export function TaskPage({
   stream,
   thread,
   itemId,
   items,
-  threadWork,
   onOpenPage,
   onOpenFile,
   onShowInHistory,
 }: TaskPageProps) {
-  // Fallback for items not in the current thread's loaded buckets — backlog
-  // rows and items owned by another thread won't appear in `items`. Fetch
-  // the row directly so the page renders the full editor regardless.
   const [fetchedItem, setFetchedItem] = useState<Task | null>(null);
   const item = items.find((i) => i.id === itemId) ?? fetchedItem;
   const refForGraph = taskRef(itemId);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
   const [efforts, setEfforts] = useState<EffortDetail[]>([]);
-  // Synthesize snapshot backlinks from this item's efforts. Each completed
-  // effort's `end_snapshot_id` becomes a clickable row that opens the
-  // SnapshotDetailPage in a new tab. Skipped when no end snapshot
-  // (effort still in progress) so the row never lands without a target.
   const snapshotBacklinks = useMemo<SnapshotBacklinkEntry[]>(() => {
     return efforts
       .filter((d) => !!d.effort.end_snapshot_id)
@@ -98,9 +86,6 @@ export function TaskPage({
         }
       : undefined;
 
-  // Refresh the fallback row whenever this item id is missing from the live
-  // thread state, or when the runtime fires a change event for it. This
-  // covers backlog rows, foreign-thread rows, and moves between scopes.
   const inThreadItems = items.some((i) => i.id === itemId);
   useEffect(() => {
     let cancelled = false;
@@ -144,17 +129,12 @@ export function TaskPage({
 
   const handleUpdate = async (
     targetId: number,
-    changes: { title?: string; description?: string; acceptanceCriteria?: string | null; status?: TaskStatus; priority?: TaskPriority },
+    changes: { title?: string; description?: string; acceptanceCriteria?: string | null; status?: TaskStatus; priority?: TaskPriority; category?: string | null; tags?: string | null },
   ) => {
     if (!stream || !thread) return;
     await updateTask(stream.id, thread.id, targetId, changes);
   };
 
-  // Backlog ↔ thread scope toggle. The button label/handler depend on the
-  // item's current `thread_id`: a thread-attached row offers "Send to
-  // backlog"; a backlog row offers "Bring to thread" against the active
-  // thread. Items owned by another thread show no action — the user would
-  // need to navigate there to move them.
   const itemThreadId = item?.thread_id ?? null;
   const scopeAction: { label: string; run: () => Promise<void> } | null = (() => {
     if (!item || !stream) return null;
@@ -187,30 +167,29 @@ export function TaskPage({
     );
   }
 
-  const chips = [
-    { label: item.status },
-    { label: `${item.priority} priority` },
-  ];
+  const rail = (
+    <TaskDetailRail
+      item={item}
+      onUpdateTask={handleUpdate}
+      onRequestDelete={() => {}}
+      extraMenuItems={
+        scopeAction ? [{ label: scopeAction.label, onSelect: () => void scopeAction.run() }] : undefined
+      }
+    />
+  );
 
   return (
-    <Page testId="page-tasks" title={item.title} kind="task" chips={chips} backlinks={backlinks} outbound={outbound}>
-      <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-        <TaskDetail
-          item={item}
-          onUpdateTask={handleUpdate}
-          onRequestDelete={() => {}}
-          headerActions={
-            scopeAction ? (
-              <button
-                type="button"
-                style={miniButtonStyle}
-                onClick={() => void scopeAction.run()}
-              >
-                {scopeAction.label}
-              </button>
-            ) : undefined
-          }
-        />
+    <Page
+      testId="page-tasks"
+      title={item.title}
+      kind="task"
+      backlinks={backlinks}
+      outbound={outbound}
+      layout="details"
+      rightRail={rail}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <TaskDetail item={item} onUpdateTask={handleUpdate} />
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>
             Activity

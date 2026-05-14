@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
@@ -93,7 +93,19 @@ export interface PageProps {
   /** When false, suppress the title/chips/actions header. Defaults
    *  to true. */
   showHeader?: boolean;
+  /** Body layout. `"full"` (default) renders edge-to-edge — today's
+   *  behavior. `"details"` renders a two-column grid: a reading-width
+   *  center column (capped at 760px) plus a sticky right rail
+   *  (`rightRail`). Below ~960px body-container width the rail
+   *  unmounts and the center column reflows. Purely responsive — no
+   *  user-controlled toggle. */
+  layout?: "full" | "details";
+  /** Right-rail content for `layout="details"`. Ignored otherwise. */
+  rightRail?: ReactNode;
 }
+
+/** Body-container width below which the right rail is unmounted. */
+const DETAILS_RAIL_THRESHOLD_PX = 960;
 
 /**
  * Shared chrome for every page rendered inside a tab body. Provides:
@@ -104,7 +116,7 @@ export interface PageProps {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, navBar, testId, showNavBar = true, showHeader = true }: PageProps) {
+export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, navBar, testId, showNavBar = true, showHeader = true, layout = "full", rightRail }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -303,9 +315,13 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           ) : null}
         </div>
       ) : null}
-      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        {children}
-      </div>
+      {layout === "details" ? (
+        <DetailsBody rightRail={rightRail}>{children}</DetailsBody>
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
+          {children}
+        </div>
+      )}
       {backlinksBody !== undefined && !navBarOwnsBacklinks ? (
         <div
           data-testid="page-backlinks"
@@ -339,6 +355,69 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
             </div>
           ) : null}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DetailsBody({ children, rightRail }: { children: ReactNode; rightRail?: ReactNode }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [showRail, setShowRail] = useState(true);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? el.clientWidth;
+      setShowRail(width >= DETAILS_RAIL_THRESHOLD_PX);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const railVisible = showRail && rightRail !== undefined && rightRail !== null;
+
+  return (
+    <div
+      ref={scrollRef}
+      data-testid="page-details-body"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        minWidth: 0,
+        overflow: "auto",
+        display: "grid",
+        gridTemplateColumns: railVisible ? "1fr 320px" : "1fr",
+        gap: railVisible ? 24 : 0,
+        padding: 24,
+        alignItems: "start",
+      }}
+    >
+      <div
+        data-testid="page-details-center"
+        style={{
+          maxWidth: 760,
+          width: "100%",
+          justifySelf: "center",
+          minWidth: 0,
+        }}
+      >
+        {children}
+      </div>
+      {railVisible ? (
+        <aside
+          data-testid="page-details-rail"
+          style={{
+            position: "sticky",
+            top: 0,
+            alignSelf: "start",
+            maxHeight: "calc(100vh - 48px)",
+            overflow: "auto",
+            minWidth: 0,
+          }}
+        >
+          {rightRail}
+        </aside>
       ) : null}
     </div>
   );
