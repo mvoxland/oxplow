@@ -17,7 +17,7 @@ import { logUi } from "../logger.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext.js";
-import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
+import { gitCommitRef, snapshotRef } from "../tabs/pageRefs.js";
 
 const RECENT_LIMIT = 20;
 
@@ -243,11 +243,6 @@ export function LocalHistoryDashboardPage({
               onSelect={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
               refLabels={data.refLabels} onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))} />
             ) : null}
-            <RecentEffortsCard
-              rows={data.rows}
-              onOpenSnapshot={(id, siblings) => onOpenPage(snapshotRef(id), { siblings })}
-              onOpenTask={(itemId) => onOpenPage(taskRef(itemId))}
-            />
           </>
         ) : null}
       </div>
@@ -432,76 +427,6 @@ function ByBranchGroup({
   );
 }
 
-function RecentEffortsCard({
-  rows,
-  onOpenSnapshot,
-  onOpenTask,
-}: {
-  rows: SnapshotRow[];
-  onOpenSnapshot(id: number, siblings: NavSiblings): void;
-  onOpenTask(itemId: number): void;
-}) {
-  // "Recent Task Efforts" lists efforts as they completed — that
-  // matches the row's `completedEfforts` (ended exactly at this
-  // snapshot). In-flight efforts are shown on their own row labels
-  // but not duplicated here.
-  const flat = rows.flatMap((row) =>
-    row.completedEfforts.map((e) => ({
-      snapshot: row.snapshot,
-      effort: e,
-      isInitial: row.isInitial,
-    })),
-  );
-  const entries = useMemo<NavSiblingEntry[]>(
-    () => flat.map((f) => ({
-      ref: snapshotRef(f.snapshot.id),
-      label: f.effort.title,
-    })),
-    [flat],
-  );
-  return (
-    <Card testId="local-history-efforts" title="Recent Task Efforts">
-      {flat.length === 0 ? (
-        <div style={muted}>No task efforts landed in the recent snapshot window.</div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          {flat.map(({ snapshot, effort }, idx) => (
-            <div
-              key={effort.effortId}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "4px 0",
-                borderBottom: "1px solid var(--border-subtle)",
-              }}
-            >
-              <span style={{ ...subtle, width: 130, flexShrink: 0 }}>
-                {formatShortDateTime(snapshot.createdAt)}
-              </span>
-              <button
-                type="button"
-                onClick={() => onOpenTask(effort.tasksId)}
-                style={{ ...cardLinkButton, flex: 1, minWidth: 0, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                title={`task ${effort.tasksId}`}
-              >
-                {effort.title}
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenSnapshot(snapshot.id, { entries, index: idx, title: "Recent task efforts" })}
-                style={cardLinkButton}
-                title="Open snapshot detail"
-              >
-                snapshot {snapshot.id} →
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
 
 function groupByBranch(
   rows: SnapshotRow[],
