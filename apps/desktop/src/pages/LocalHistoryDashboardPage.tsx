@@ -50,13 +50,21 @@ interface SnapshotRow {
 /** Pure label resolver for the snapshot row subject text. Extracted
  *  so the if/else logic is testable without a Card render.
  *
- *  Composition rule: completed efforts win the prefix; in-flight
- *  efforts are appended; "External change" only fires when neither
- *  list has anything (and the row isn't the very first snapshot). */
+ *  Composition rule:
+ *  - Completed efforts win the prefix; in-flight efforts are
+ *    appended.
+ *  - When neither list has anything, fall back to "Initial Snapshot"
+ *    (only on the first snapshot in the stream) OR "External change"
+ *    (otherwise) — but only when no other badge on the row carries
+ *    meaning. `hasOtherBadges` (true for rows tagged with a git
+ *    commit ref label or wiki page edit) suppresses the
+ *    "External change" string and returns empty so the badges speak
+ *    on their own. */
 export function formatSnapshotSubject(
   completed: ReadonlyArray<{ title: string }>,
   inFlight: ReadonlyArray<{ title: string }>,
   isInitial: boolean,
+  hasOtherBadges: boolean = false,
 ): string {
   const parts: string[] = [];
   if (completed.length > 0) {
@@ -67,6 +75,7 @@ export function formatSnapshotSubject(
   }
   if (parts.length > 0) return parts.join(" · ");
   if (isInitial) return "Initial Snapshot";
+  if (hasOtherBadges) return "";
   return "External change";
 }
 
@@ -233,10 +242,22 @@ export function LocalHistoryDashboardPage({
 }
 
 function snapshotSiblingEntries(rows: SnapshotRow[]): NavSiblingEntry[] {
-  return rows.map((row) => ({
-    ref: snapshotRef(row.snapshot.id),
-    label: formatSnapshotSubject(row.completedEfforts, row.inFlightEfforts, row.isInitial),
-  }));
+  return rows.map((row) => {
+    const hasOtherBadges = !!row.snapshot.gitCommit;
+    const label = formatSnapshotSubject(
+      row.completedEfforts,
+      row.inFlightEfforts,
+      row.isInitial,
+      hasOtherBadges,
+    );
+    return {
+      ref: snapshotRef(row.snapshot.id),
+      // When the subject is suppressed (badges-only row), fall back
+      // to a short-sha label so the prev/next tooltip still says
+      // something meaningful.
+      label: label || (row.snapshot.gitCommit?.slice(0, 7) ?? "snapshot"),
+    };
+  });
 }
 
 function RecentSnapshotsCard({
@@ -279,7 +300,17 @@ function SnapshotRowItem({
   labels: CommitRefLabel[];
 }) {
   const { snapshot, summary, completedEfforts, inFlightEfforts, isInitial } = row;
-  const subjectish = formatSnapshotSubject(completedEfforts, inFlightEfforts, isInitial);
+  // A git_commit on the snapshot always renders at least a short-sha
+  // chip (or branch/tag chips when ref labels resolve), so suppress
+  // the "External change" fallback in that case — the chip carries
+  // the meaning. Wiki badges (step 4) will OR in here too.
+  const hasOtherBadges = !!snapshot.gitCommit;
+  const subjectish = formatSnapshotSubject(
+    completedEfforts,
+    inFlightEfforts,
+    isInitial,
+    hasOtherBadges,
+  );
   return (
     <button
       type="button"

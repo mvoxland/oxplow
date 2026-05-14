@@ -37,4 +37,18 @@ describe("formatSnapshotSubject", () => {
   test("later snapshot with no efforts → External change", () => {
     expect(formatSnapshotSubject([], [], false)).toBe("External change");
   });
+
+  test("hasOtherBadges suppresses External change fallback", () => {
+    expect(formatSnapshotSubject([], [], false, true)).toBe("");
+  });
+
+  test("hasOtherBadges does NOT suppress effort labels", () => {
+    expect(
+      formatSnapshotSubject([{ title: "fix" }], [], false, true),
+    ).toBe("completed: fix");
+  });
+
+  test("hasOtherBadges does NOT suppress Initial Snapshot", () => {
+    expect(formatSnapshotSubject([], [], true, true)).toBe("Initial Snapshot");
+  });
 });
