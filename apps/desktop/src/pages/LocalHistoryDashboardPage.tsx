@@ -528,17 +528,37 @@ function ByBranchGroup({
   refLabels: Record<string, CommitRefLabel[]>;
 }) {
   const entries = useMemo(() => snapshotSiblingEntries(group.rows), [group.rows]);
-  const title = `Snapshots at ${group.commit.slice(0, 7)}`;
+  const groupLabels = refLabels[group.commit] ?? [];
+  const headerName = groupLabels.length > 0
+    ? groupLabels.map((l) => l.name).join(", ")
+    : group.commit.slice(0, 7);
+  const title = `Snapshots at ${headerName}`;
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-        <button
-          type="button"
-          onClick={() => onOpenCommit(group.commit)}
-          style={{ ...cardLinkButton, fontFamily: "monospace" }}
-        >
-          {group.commit.slice(0, 7)}
-        </button>
+        {groupLabels.length > 0 ? (
+          groupLabels.map((l) => (
+            <RefBadge key={`${l.kind}-${l.name}`} label={l.name} tone={l.kind} />
+          ))
+        ) : (
+          <button
+            type="button"
+            onClick={() => onOpenCommit(group.commit)}
+            style={{ ...cardLinkButton, fontFamily: "monospace" }}
+          >
+            {group.commit.slice(0, 7)}
+          </button>
+        )}
+        {groupLabels.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => onOpenCommit(group.commit)}
+            style={{ ...cardLinkButton, fontFamily: "monospace", fontSize: 11 }}
+            title={`commit ${group.commit}`}
+          >
+            {group.commit.slice(0, 7)}
+          </button>
+        ) : null}
         <span style={subtle}>· {group.rows.length} snapshots</span>
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
