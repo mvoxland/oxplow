@@ -36,6 +36,9 @@ export interface PageNavBarConfig {
    *  when they want to surface what they point AT in addition to
    *  what points at them. */
   outbound?: { count: number; body: ReactNode };
+  /** Optional snapshots dropdown — same shape. FilePage uses this
+   *  to expose the file's per-snapshot history. */
+  snapshots?: { count: number; body: ReactNode };
   actions?: ReactNode;
 }
 
@@ -73,6 +76,10 @@ export interface PageProps {
    *  sibling dropdown next to Backlinks in the nav bar. Sibling to
    *  backlinks; same shape. */
   outbound?: { count: number; body: ReactNode };
+  /** Optional snapshots list — for pages where per-snapshot
+   *  history is meaningful (currently just FilePage). Renders as a
+   *  sibling dropdown next to Backlinks/Outbound. */
+  snapshots?: { count: number; body: ReactNode };
   /** Optional nav-bar config. When supplied, the browser-style nav bar
    *  renders between header and body, and (if it carries a `backlinks`
    *  block) suppresses the legacy footer panel. */
@@ -97,7 +104,7 @@ export interface PageProps {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, outbound, navBar, testId, showNavBar = true, showHeader = true }: PageProps) {
+export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, navBar, testId, showNavBar = true, showHeader = true }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -160,6 +167,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
             ? { count: backlinksCount ?? 0, body: backlinksBody }
             : undefined),
         outbound: baseNavBar.outbound ?? outbound,
+        snapshots: baseNavBar.snapshots ?? snapshots,
       }
     : undefined;
   const navBarOwnsBacklinks = effectiveNavBar?.backlinks !== undefined;
@@ -188,6 +196,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
           outbound={effectiveNavBar.outbound}
+          snapshots={effectiveNavBar.snapshots}
           actions={effectiveNavBar.actions}
         />
       ) : null}

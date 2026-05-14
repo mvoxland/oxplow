@@ -1448,6 +1448,48 @@ export interface Snapshot {
   gitCommit: string | null;
 }
 
+/** Per-file snapshot history — every `file_snapshot` row for this
+ *  path across every snapshot, newest first. Drives the per-file
+ *  history surface on FilePage. */
+export interface FileSnapshotRow {
+  id: number;
+  streamId: string;
+  path: string;
+  blobHash: string | null;
+  sizeBytes: number;
+  capturedAt: string;
+  oversize: boolean;
+  snapshotId: number | null;
+  mtimeMs: number | null;
+}
+
+export async function listFileSnapshotsForPath(
+  path: string,
+): Promise<FileSnapshotRow[]> {
+  const rows = unwrap(await commands.listSnapshots(path)) as unknown as Array<{
+    id: number;
+    stream_id: string;
+    path: string;
+    blob_hash: string | null;
+    size_bytes: number;
+    captured_at: string;
+    oversize: boolean;
+    snapshot_id: number | null;
+    mtime_ms: number | null;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    streamId: r.stream_id,
+    path: r.path,
+    blobHash: r.blob_hash,
+    sizeBytes: r.size_bytes,
+    capturedAt: r.captured_at,
+    oversize: r.oversize,
+    snapshotId: r.snapshot_id,
+    mtimeMs: r.mtime_ms,
+  }));
+}
+
 /** List snapshot rows for a stream, newest first. */
 export async function listSnapshots(streamId: string, limit?: number): Promise<Snapshot[]> {
   const rows = unwrap(

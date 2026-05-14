@@ -1,10 +1,15 @@
 import type { ComponentProps } from "react";
+import { useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { EditorPane } from "../components/EditorPane.js";
 import { usePageTitle, useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
-import { fileRef } from "../tabs/pageRefs.js";
+import { fileRef, snapshotRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
+import type { SnapshotBacklinkEntry } from "../tabs/BacklinksList.js";
+import { listFileSnapshotsForPath } from "../api.js";
+import { logUi } from "../logger.js";
+import { formatShortDateTime } from "../components/format.js";
 
 export interface FilePageProps extends ComponentProps<typeof EditorPane> {
   /** True when the file's draft differs from saved content. Drives the
@@ -34,6 +39,46 @@ export function FilePage({ dirty, ...editorProps }: FilePageProps) {
   const ref = fileRef(path);
   const backlinkEntries = useBacklinks(ref);
   const outboundEntries = usePageOutbound(ref);
+  const [snapshotEntries, setSnapshotEntries] = useState<SnapshotBacklinkEntry[]>([]);
+
+  // Per-file snapshot history. Driven off `file_snapshot` rows for
+  // this path — every prior capture of the file's content. The
+  // dropdown lets the user open SnapshotDetailSlideover for any
+  // historical version. Refetches on path change only; the
+  // snapshot service emits events on every capture but FilePage
+  // doesn't subscribe yet (small list, infrequent reads).
+  useEffect(() => {
+    if (!path) {
+      setSnapshotEntries([]);
+      return;
+    }
+    let cancelled = false;
+    void listFileSnapshotsForPath(path)
+      .then((rows) => {
+        if (cancelled) return;
+        setSnapshotEntries(
+          rows.map((row) => ({
+            kind: "snapshot" as const,
+            snapshotId: String(row.snapshotId ?? row.id),
+            label: row.snapshotId
+              ? `Snapshot ${row.snapshotId}`
+              : `file_snapshot ${row.id}`,
+            subtitle: formatShortDateTime(row.capturedAt),
+          })),
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        logUi("warn", "file snapshot history fetch failed", {
+          error: String(err),
+          path,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
   const onOpen = (r: Parameters<NonNullable<typeof ctxNav>["navigate"]>[0]) =>
     ctxNav?.navigate(r);
   const backlinks =
@@ -50,8 +95,31 @@ export function FilePage({ dirty, ...editorProps }: FilePageProps) {
           body: <BacklinksList entries={outboundEntries} onOpenPage={onOpen} />,
         }
       : undefined;
+  const snapshots =
+    snapshotEntries.length > 0
+      ? {
+          count: snapshotEntries.length,
+          body: (
+            <BacklinksList
+              entries={[]}
+              snapshotEntries={snapshotEntries}
+              onOpenPage={onOpen}
+              onOpenSnapshot={({ snapshotId }) => {
+                const numeric = Number(snapshotId);
+                if (Number.isFinite(numeric)) onOpen(snapshotRef(numeric));
+              }}
+            />
+          ),
+        }
+      : undefined;
   return (
-    <Page testId="page-file" kind="file" backlinks={backlinks} outbound={outbound}>
+    <Page
+      testId="page-file"
+      kind="file"
+      backlinks={backlinks}
+      outbound={outbound}
+      snapshots={snapshots}
+    >
       <EditorPane {...editorProps} />
     </Page>
   );
