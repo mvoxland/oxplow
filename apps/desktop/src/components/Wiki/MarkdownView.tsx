@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MediaLightbox, type LightboxContent } from "./MediaLightbox.js";
 
 /**
  * react-markdown's defaultUrlTransform only allows
@@ -41,7 +42,7 @@ function loadMermaid() {
 // runtime default-import gives us the callable instance directly.
 type SvgPanZoomFn = (typeof import("svg-pan-zoom"));
 let svgPanZoomPromise: Promise<SvgPanZoomFn> | null = null;
-function loadSvgPanZoom() {
+export function loadSvgPanZoom() {
   if (!svgPanZoomPromise) {
     svgPanZoomPromise = import("svg-pan-zoom").then((mod) => {
       // Vite's CJS interop wraps the export under `.default`; native
@@ -89,7 +90,7 @@ function waitForVisible(host: HTMLElement): Promise<void> {
   });
 }
 
-async function attachPanZoom(host: HTMLElement): Promise<(() => void) | null> {
+async function attachPanZoom(host: HTMLElement, onExpand?: () => void): Promise<(() => void) | null> {
   const svg = host.querySelector<SVGSVGElement>("svg");
   if (!svg) return null;
   // svg-pan-zoom requires the SVG to have a width/height set.
@@ -156,6 +157,9 @@ async function attachPanZoom(host: HTMLElement): Promise<(() => void) | null> {
   toolbar.appendChild(makeBtn("−", "Zoom out", () => instance.zoomOut()));
   toolbar.appendChild(makeBtn("+", "Zoom in", () => instance.zoomIn()));
   toolbar.appendChild(makeBtn("Reset", "Reset view", () => { instance.resetZoom(); instance.center(); instance.fit(); }));
+  if (onExpand) {
+    toolbar.appendChild(makeBtn("⛶", "Open in lightbox", () => onExpand()));
+  }
   host.appendChild(toolbar);
   return () => {
     try { instance.destroy(); } catch { /* ignore */ }
@@ -482,6 +486,11 @@ export function MarkdownView({
 }: MarkdownViewProps) {
   const processedBody = useMemo(() => preprocessWikilinks(body), [body]);
   const ref = useRef<HTMLDivElement | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxContent | null>(null);
+  // Keep a stable handle to setLightbox so the imperative mermaid
+  // effect can read it without re-running on every render.
+  const openLightboxRef = useRef<(content: LightboxContent) => void>(() => {});
+  openLightboxRef.current = setLightbox;
   // Page-context chokepoint: when this MarkdownView renders inside a
   // page, plain-click follows browser-tab semantics (in-tab nav).
   // Modifier-click + middle/right-click always escape to a new tab.
@@ -651,7 +660,9 @@ export function MarkdownView({
           });
         }
         sweepStrayMermaidNodes();
-        const cleanup = await attachPanZoom(host);
+        const cleanup = await attachPanZoom(host, () => {
+          openLightboxRef.current({ kind: "svg", html: svg });
+        });
         if (cancelled) {
           cleanup?.();
           return;
@@ -695,6 +706,20 @@ export function MarkdownView({
         remarkPlugins={[remarkGfm]}
         urlTransform={urlTransform}
         components={{
+          img: ({ node, ...props }) => {
+            const src = (props.src as string | undefined) ?? "";
+            if (!src) return <img {...props} />;
+            return (
+              <img
+                {...props}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setLightbox({ kind: "image", src, alt: (props.alt as string | undefined) ?? "" });
+                }}
+                style={{ ...(props.style as CSSProperties | undefined), cursor: "zoom-in", maxWidth: "100%" }}
+              />
+            );
+          },
           a: ({ node, ...props }) => {
             const href = (props.href as string | undefined) ?? "";
             const parsed = parseMarkdownLink(href);
@@ -724,6 +749,7 @@ export function MarkdownView({
       >
         {processedBody}
       </ReactMarkdown>
+      <MediaLightbox content={lightbox} onClose={() => setLightbox(null)} />
     </div>
   );
 }
