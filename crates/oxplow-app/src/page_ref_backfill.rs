@@ -235,7 +235,6 @@ mod tests {
                 parent_id: None,
                 title: "fix".into(),
                 description: "see [[src/app.rs]]".into(),
-                acceptance_criteria: None,
                 status: TaskStatus::Ready,
                 priority: TaskPriority::Medium,
                 sort_index: 0,

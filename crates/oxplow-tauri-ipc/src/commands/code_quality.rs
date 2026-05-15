@@ -60,9 +60,15 @@ pub async fn run_code_quality_scan(
         scope: scope.clone(),
         phase: CodeQualityScanPhase::Started,
     });
+    let workspace_filter = {
+        let cfg = state.config.read();
+        cfg.as_ref()
+            .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+            .unwrap_or_default()
+    };
     let findings_result = match tool.as_str() {
-        "metrics" => run_metrics_scan(&project, opts).await,
-        "duplication" => run_duplication_scan(&project, opts).await,
+        "metrics" => run_metrics_scan(&project, opts, workspace_filter.clone()).await,
+        "duplication" => run_duplication_scan(&project, opts, workspace_filter.clone()).await,
         other => {
             state
                 .code_quality_store
@@ -247,7 +253,13 @@ pub async fn run_duplication_scan_at(
         progress: None,
     });
 
-    match run_duplication_scan_scoped(source, filter, None, None).await {
+    let workspace_filter = {
+        let cfg = state.config.read();
+        cfg.as_ref()
+            .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+            .unwrap_or_default()
+    };
+    match run_duplication_scan_scoped(source, filter, workspace_filter, None, None).await {
         Ok(findings) => {
             for f in findings {
                 state

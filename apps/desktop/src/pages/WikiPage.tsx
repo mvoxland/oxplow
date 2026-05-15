@@ -143,7 +143,7 @@ function WikiPageRail({
   controller: ReturnType<typeof useWikiPageController>;
   scrollHost: HTMLElement | null;
 }) {
-  const { summary, body, editing, notFound, loadError, isDirty, enterEdit, enterView, save, revert, create, remove } = controller;
+  const { summary, body, notFound, loadError, create, remove } = controller;
 
   return (
     <div style={{
@@ -193,19 +193,7 @@ function WikiPageRail({
         {notFound ? (
           <RailButton onClick={() => void create()} variant="primary">Create page</RailButton>
         ) : loadError ? null : (
-          <>
-            {!editing && <RailButton onClick={enterEdit} variant="primary">Edit</RailButton>}
-            {editing && (
-              <>
-                <RailButton onClick={() => void save()} variant="primary" disabled={!isDirty}>
-                  Save
-                </RailButton>
-                <RailButton onClick={revert} disabled={!isDirty}>Revert</RailButton>
-                <RailButton onClick={enterView}>Done editing</RailButton>
-              </>
-            )}
-            <RailButton onClick={() => void remove()} variant="danger">Delete</RailButton>
-          </>
+          <RailButton onClick={() => void remove()} variant="danger">Delete</RailButton>
         )}
       </div>
     </div>

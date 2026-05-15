@@ -302,4 +302,68 @@ mod tests {
         );
         assert!(r.is_err(), "task_note with both parents should fail CHECK");
     }
+
+    /// Regression: the first version of V18 rebuilt the `task` table
+    /// via `task_new` + `DROP TABLE task` + rename, which under
+    /// `PRAGMA foreign_keys = ON` cascaded and wiped every
+    /// `task_effort` row (`task_effort.task_id REFERENCES task(id)
+    /// ON DELETE CASCADE`). The fixed migration uses
+    /// `ALTER TABLE … DROP COLUMN` instead, which leaves child rows
+    /// untouched. This test asserts a `task_effort` row created
+    /// AFTER all migrations have run (including V18) coexists with
+    /// its parent and the `acceptance_criteria` column is gone.
+    #[test]
+    fn v18_does_not_cascade_to_task_effort() {
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        let now = "2026-04-29T00:00:00Z";
+        conn.execute(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+             VALUES ('s-1', 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
+            [now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+             VALUES ('b-1', 's-1', 't', 'active', ?1, ?1)",
+            [now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at)
+             VALUES ('b-1', 't', 'in_progress', 'medium', 'user', ?1, ?1)",
+            [now],
+        )
+        .unwrap();
+        let task_id: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO task_effort (id, task_id, thread_id, started_at)
+             VALUES ('ef-test', ?1, 'b-1', ?2)",
+            (task_id, now),
+        )
+        .unwrap();
+
+        // task_effort row survives alongside its parent.
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM task_effort WHERE task_id = ?1",
+                [task_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "task_effort row must coexist with its parent task");
+
+        // acceptance_criteria column is gone.
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(task)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(
+            !cols.iter().any(|c| c == "acceptance_criteria"),
+            "task.acceptance_criteria column must be dropped by V18 (cols: {cols:?})"
+        );
+    }
 }

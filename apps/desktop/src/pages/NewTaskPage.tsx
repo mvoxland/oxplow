@@ -53,7 +53,6 @@ export interface NewTaskPageProps {
   onSubmit(input: {
     title: string;
     description?: string;
-    acceptanceCriteria?: string | null;
     parentId?: number | null;
     status?: TaskStatus;
     priority?: TaskPriority;
@@ -92,7 +91,6 @@ export function NewTaskPage({
   const [parentId, setParentId] = useState<number | null>(resolved.parentId);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [acceptance, setAcceptance] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
@@ -111,13 +109,12 @@ export function NewTaskPage({
       await onSubmit({
         title: title.trim(),
         description: description.trim() ? description : undefined,
-        acceptanceCriteria: acceptance.trim() ? acceptance : null,
         parentId: parentId ?? null,
         priority,
         status,
       });
-      // Save-and-Another resets the title/description/acceptance fields
-      // but keeps the kind/priority/parent so the user doesn't have to
+      // Save-and-Another resets the title/description fields but
+      // keeps the kind/priority/parent so the user doesn't have to
       // re-pick them for a series of similar items.
       setLastKind(kind);
       setLastPriority(priority);
@@ -125,7 +122,6 @@ export function NewTaskPage({
       if (andAnother) {
         setTitle("");
         setDescription("");
-        setAcceptance("");
         titleRef.current?.focus();
       } else {
         onClose?.();
@@ -172,19 +168,9 @@ export function NewTaskPage({
             data-testid="tasks-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Description"
+            placeholder="Description (markdown — include a ## Acceptance criteria section if helpful)"
             style={textareaStyle}
-            rows={5}
-          />
-        </Field>
-        <Field label="Acceptance criteria">
-          <textarea
-            data-testid="tasks-acceptance"
-            value={acceptance}
-            onChange={(e) => setAcceptance(e.target.value)}
-            placeholder="One per line"
-            style={textareaStyle}
-            rows={3}
+            rows={6}
           />
         </Field>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>

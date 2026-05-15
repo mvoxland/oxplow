@@ -20,7 +20,6 @@ function item(id: number, status: TaskStatus, sort_index: number): Task {
     parent_id: null,
     title: id,
     description: "",
-    acceptance_criteria: null,
     status,
     priority: "medium",
     sort_index,

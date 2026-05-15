@@ -37,7 +37,6 @@ export interface Task {
   kind: TaskKind;
   title: string;
   description: string;
-  acceptance_criteria: string | null;
   status: TaskStatus;
   priority: TaskPriority;
   sort_index: number;
@@ -366,7 +365,7 @@ export interface OxplowConfig {
   agentPromptAppend: string;
   snapshotRetentionDays: number;
   snapshotMaxFileBytes: number;
-  generatedDirs: string[];
+  generated: string[];
   injectSessionContext: boolean;
 }
 

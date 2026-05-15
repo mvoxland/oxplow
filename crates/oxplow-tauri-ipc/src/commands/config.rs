@@ -52,12 +52,12 @@ pub async fn set_snapshot_max_file_bytes(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn set_generated_dirs(
+pub async fn set_generated(
     state: tauri::State<'_, AppState>,
-    dirs: Vec<String>,
+    entries: Vec<String>,
 ) -> Result<OxplowConfig, IpcError> {
     let project = state.layout.project_dir.clone();
-    mutate_config(&state.config, &project, |c| c.generated_dirs = dirs)
+    mutate_config(&state.config, &project, |c| c.generated = entries)
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 

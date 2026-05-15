@@ -7,14 +7,14 @@ export interface FilesPageProps {
   stream: Stream | null;
   gitEnabled: boolean;
   selectedFilePath: string | null;
-  generatedDirs: string[];
+  generated: string[];
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(request: DiffRequest): void;
   onCreateFile(path: string): Promise<void>;
   onCreateDirectory(path: string): Promise<void>;
   onRenamePath(fromPath: string, toPath: string): Promise<void>;
   onDeletePath(path: string): Promise<void>;
-  onToggleGeneratedDir(name: string, mark: boolean): Promise<void>;
+  onToggleGenerated(entry: string, mark: boolean): Promise<void>;
   commitRequest?: number;
 }
 

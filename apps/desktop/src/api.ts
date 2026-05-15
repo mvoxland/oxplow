@@ -447,8 +447,8 @@ export async function setAgentPromptAppend(text: string): Promise<import("./api-
   return unwrap(await commands.setAgentPromptAppend(text)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
-export async function setGeneratedDirs(dirs: string[]): Promise<import("./api-types.js").OxplowConfig> {
-  return unwrap(await commands.setGeneratedDirs(dirs)) as unknown as import("./api-types.js").OxplowConfig;
+export async function setGenerated(entries: string[]): Promise<import("./api-types.js").OxplowConfig> {
+  return unwrap(await commands.setGenerated(entries)) as unknown as import("./api-types.js").OxplowConfig;
 }
 
 export async function setSnapshotRetentionDays(days: number): Promise<import("./api-types.js").OxplowConfig> {
@@ -715,7 +715,6 @@ export async function createTask(
   input: {
     title: string;
     description?: string;
-    acceptanceCriteria?: string | null;
     parentId?: number | null;
     status?: TaskStatus;
     priority?: TaskPriority;
@@ -732,7 +731,6 @@ export async function updateTask(
   changes: {
     title?: string;
     description?: string;
-    acceptanceCriteria?: string | null;
     parentId?: number | null;
     status?: TaskStatus;
     priority?: TaskPriority;
@@ -784,7 +782,6 @@ export async function getBacklogState(): Promise<BacklogState> {
 export async function createBacklogItem(input: {
   title: string;
   description?: string;
-  acceptanceCriteria?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
   category?: string | null;
@@ -799,7 +796,6 @@ export async function updateBacklogItem(
   changes: {
     title?: string;
     description?: string;
-    acceptanceCriteria?: string | null;
     status?: TaskStatus;
     priority?: TaskPriority;
     category?: string | null;

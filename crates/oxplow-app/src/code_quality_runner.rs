@@ -77,9 +77,14 @@ pub struct RunOptions {
 }
 
 /// Build the file list to analyze: either the explicit list, or every
-/// supported file under `project_dir`. Skips dotdirs (`.git`,
-/// `.cargo`, …) and the usual build/dep folders.
-fn collect_supported_files(project_dir: &Path, opts: &RunOptions) -> Vec<PathBuf> {
+/// supported file under `project_dir`. Honors the shared
+/// `WorkspaceFilter` (defaults + user `generated` config) and also
+/// skips dotdirs the filter doesn't already cover.
+fn collect_supported_files(
+    project_dir: &Path,
+    opts: &RunOptions,
+    filter: &oxplow_fs_watch::WorkspaceFilter,
+) -> Vec<PathBuf> {
     if !opts.files.is_empty() {
         return opts
             .files
@@ -88,18 +93,21 @@ fn collect_supported_files(project_dir: &Path, opts: &RunOptions) -> Vec<PathBuf
             .filter(|p| oxplow_code_metrics::is_supported_path(p))
             .collect();
     }
-    let skip = ["target", "node_modules", "dist", "build", ".git"];
     WalkDir::new(project_dir)
         .into_iter()
         .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
             if e.depth() == 0 {
                 return true;
             }
+            let name = e.file_name().to_string_lossy();
+            // Skip dotdirs the WorkspaceFilter doesn't already cover —
+            // editors, language tooling, OS metadata all dump under
+            // `.foo/` directories that aren't worth analyzing.
             if name.starts_with('.') && e.file_type().is_dir() {
                 return false;
             }
-            !(e.file_type().is_dir() && skip.contains(&name.as_ref()))
+            let rel = e.path().strip_prefix(project_dir).unwrap_or(e.path());
+            !filter.ignore(rel)
         })
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
@@ -165,13 +173,14 @@ fn metrics_to_findings(
 pub async fn run_metrics_scan(
     project_dir: &Path,
     opts: RunOptions,
+    workspace_filter: oxplow_fs_watch::WorkspaceFilter,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let project = project_dir.to_path_buf();
     let timeout = opts.timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
     // The metric pass is CPU-bound; punt to a blocking pool so we
     // don't stall the tokio runtime on large repos.
     let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
-        let files = collect_supported_files(&project, &opts);
+        let files = collect_supported_files(&project, &opts, &workspace_filter);
         let mut metrics = Vec::new();
         for path in files {
             let source = match std::fs::read_to_string(&path) {
@@ -210,11 +219,13 @@ pub async fn run_metrics_scan(
 pub async fn run_duplication_scan_with(
     source: Arc<dyn TreeSource>,
     filter: Arc<dyn FileFilter>,
+    workspace_filter: oxplow_fs_watch::WorkspaceFilter,
     timeout: Option<std::time::Duration>,
     dup_options: Option<DupOptions>,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let timeout = timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
     let dup_opts = dup_options.unwrap_or_default();
+    let filter: Arc<dyn FileFilter> = Arc::new(WorkspaceFileFilter::new(filter, workspace_filter));
     let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
         let corpus = collect_corpus(source.as_ref(), filter.as_ref())?;
         // Drop entries the metrics layer can't parse — the detector
@@ -252,18 +263,22 @@ pub async fn run_duplication_scan_with(
 pub async fn run_duplication_scan_scoped(
     source: Arc<dyn TreeSource>,
     scope_filter: Arc<dyn FileFilter>,
+    workspace_filter: oxplow_fs_watch::WorkspaceFilter,
     timeout: Option<std::time::Duration>,
     dup_options: Option<DupOptions>,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let timeout = timeout.unwrap_or(DEFAULT_SCAN_TIMEOUT);
     let dup_opts = dup_options.unwrap_or_default();
     let task = tokio::task::spawn_blocking(move || -> Result<_, CodeQualityError> {
-        // The corpus deliberately uses AllFiles — the scope filter
-        // determines which findings we keep, NOT which files we
-        // walk. A copy-paste from an unchanged file only surfaces
-        // when that unchanged file is in the corpus.
-        let all = AllFiles;
-        let corpus = collect_corpus(source.as_ref(), &all)?;
+        // The corpus deliberately uses AllFiles (modulo the workspace
+        // ignore list) — the scope filter determines which findings
+        // we keep, NOT which files we walk. A copy-paste from an
+        // unchanged file only surfaces when that unchanged file is in
+        // the corpus. Generated files are kept OUT of the corpus too:
+        // their duplication is by construction (build output, vendored
+        // code) and surfacing it is noise.
+        let corpus_filter = WorkspaceFileFilter::new(Arc::new(AllFiles), workspace_filter);
+        let corpus = collect_corpus(source.as_ref(), &corpus_filter)?;
         let inputs: Vec<(String, String)> = corpus
             .into_iter()
             .filter(|(p, _)| oxplow_code_metrics::is_supported_path(Path::new(p)))
@@ -292,6 +307,7 @@ pub async fn run_duplication_scan_scoped(
 pub async fn run_duplication_scan(
     project_dir: &Path,
     opts: RunOptions,
+    workspace_filter: oxplow_fs_watch::WorkspaceFilter,
 ) -> Result<Vec<CodeQualityFinding>, CodeQualityError> {
     let source: Arc<dyn TreeSource> = Arc::new(DiskTreeSource::new(project_dir.to_path_buf()));
     let filter: Arc<dyn FileFilter> = if opts.files.is_empty() {
@@ -301,7 +317,31 @@ pub async fn run_duplication_scan(
             opts.files.iter().cloned(),
         ))
     };
-    run_duplication_scan_with(source, filter, opts.timeout, opts.dup_options).await
+    run_duplication_scan_with(source, filter, workspace_filter, opts.timeout, opts.dup_options).await
+}
+
+/// `FileFilter` adapter: keeps a path iff the wrapped inner filter
+/// keeps it AND the `WorkspaceFilter` doesn't ignore it. Used to
+/// fold the user's `generated` config into the duplication-scan
+/// corpus without changing the `FileFilter` abstraction.
+struct WorkspaceFileFilter {
+    inner: Arc<dyn FileFilter>,
+    workspace: oxplow_fs_watch::WorkspaceFilter,
+}
+
+impl WorkspaceFileFilter {
+    fn new(inner: Arc<dyn FileFilter>, workspace: oxplow_fs_watch::WorkspaceFilter) -> Self {
+        Self { inner, workspace }
+    }
+}
+
+impl FileFilter for WorkspaceFileFilter {
+    fn keep(&self, path: &str) -> bool {
+        if !self.inner.keep(path) {
+            return false;
+        }
+        !self.workspace.ignore(Path::new(path))
+    }
 }
 
 fn blocks_to_findings(blocks: Vec<oxplow_code_dup::DuplicateBlock>) -> Vec<CodeQualityFinding> {
@@ -352,9 +392,13 @@ fn classify(x: i32) -> &'static str {
 "#,
         )
         .unwrap();
-        let findings = run_metrics_scan(dir.path(), RunOptions::default())
-            .await
-            .unwrap();
+        let findings = run_metrics_scan(
+            dir.path(),
+            RunOptions::default(),
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await
+        .unwrap();
         assert!(findings.iter().any(|f| f.kind == "complexity"));
         assert!(findings.iter().any(|f| f.kind == "function-length"));
         assert!(findings.iter().any(|f| f.kind == "parameter-count"));
@@ -364,9 +408,13 @@ fn classify(x: i32) -> &'static str {
     async fn metrics_scan_skips_unsupported_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("README.md"), "# heading").unwrap();
-        let findings = run_metrics_scan(dir.path(), RunOptions::default())
-            .await
-            .unwrap();
+        let findings = run_metrics_scan(
+            dir.path(),
+            RunOptions::default(),
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await
+        .unwrap();
         assert!(findings.is_empty());
     }
 
@@ -397,7 +445,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             }),
             ..RunOptions::default()
         };
-        let findings = run_duplication_scan(dir.path(), opts).await.unwrap();
+        let findings = run_duplication_scan(dir.path(), opts, oxplow_fs_watch::WorkspaceFilter::default()).await.unwrap();
         let dups: Vec<_> = findings
             .iter()
             .filter(|f| f.kind == "duplicate-block")
@@ -455,7 +503,13 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             timeout: Some(std::time::Duration::from_nanos(1)),
             dup_options: None,
         };
-        let err = run_metrics_scan(dir.path(), opts).await.unwrap_err();
+        let err = run_metrics_scan(
+            dir.path(),
+            opts,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(err, CodeQualityError::Timeout(_)),
             "expected Timeout, got {err:?}"
@@ -514,7 +568,10 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
         std::fs::create_dir_all(dir.path().join("target/debug")).unwrap();
         std::fs::write(dir.path().join("target/debug/should_skip.rs"), "fn x() {}").unwrap();
 
-        let metrics = run_metrics_scan(dir.path(), RunOptions::default())
+        // `target/` is the user's call now — pass it explicitly so
+        // the skipped-dir fixture still gets skipped.
+        let filter = oxplow_fs_watch::WorkspaceFilter::with_user_entries(["target"]);
+        let metrics = run_metrics_scan(dir.path(), RunOptions::default(), filter.clone())
             .await
             .unwrap();
         // Two functions × three metric kinds = 6 findings.
@@ -559,7 +616,7 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             }),
             ..RunOptions::default()
         };
-        let duplication = run_duplication_scan(dir.path(), dup_opts).await.unwrap();
+        let duplication = run_duplication_scan(dir.path(), dup_opts, filter).await.unwrap();
         let dups: Vec<_> = duplication
             .iter()
             .filter(|f| f.kind == "duplicate-block")
@@ -612,9 +669,13 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
         )
         .unwrap();
 
-        let metrics = run_metrics_scan(dir.path(), RunOptions::default())
-            .await
-            .unwrap();
+        let metrics = run_metrics_scan(
+            dir.path(),
+            RunOptions::default(),
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await
+        .unwrap();
         let clj_findings: Vec<_> = metrics
             .iter()
             .filter(|f| f.path == "a.clj" || f.path == "b.clj")
@@ -633,7 +694,7 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             }),
             ..RunOptions::default()
         };
-        let duplication = run_duplication_scan(dir.path(), dup_opts).await.unwrap();
+        let duplication = run_duplication_scan(dir.path(), dup_opts, oxplow_fs_watch::WorkspaceFilter::default()).await.unwrap();
         let clj_dups: Vec<_> = duplication
             .iter()
             .filter(|f| f.kind == "duplicate-block" && (f.path == "a.clj" || f.path == "b.clj"))
@@ -657,7 +718,7 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             "fn unrelated() { println!(\"hi\"); }",
         )
         .unwrap();
-        let findings = run_duplication_scan(dir.path(), RunOptions::default())
+        let findings = run_duplication_scan(dir.path(), RunOptions::default(), oxplow_fs_watch::WorkspaceFilter::default())
             .await
             .unwrap();
         assert!(findings.is_empty());
@@ -703,6 +764,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         let findings = run_duplication_scan_scoped(
             source,
             scope,
+            oxplow_fs_watch::WorkspaceFilter::default(),
             None,
             Some(DupOptions {
                 min_lines: 5,
@@ -759,7 +821,7 @@ fn case_b(items: Vec<i32>) -> Vec<i32> {
         std::fs::write(dir.path().join("only.rs"), body_with_repeat).unwrap();
         let source: Arc<dyn TreeSource> = Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
         let scope: Arc<dyn FileFilter> = Arc::new(ExplicitPaths::new(vec!["only.rs".to_string()]));
-        let findings = run_duplication_scan_scoped(source, scope, None, None)
+        let findings = run_duplication_scan_scoped(source, scope, oxplow_fs_watch::WorkspaceFilter::default(), None, None)
             .await
             .unwrap();
         // Even if the engine surfaces in-file matches, the scoped
@@ -824,6 +886,7 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
         let findings = run_duplication_scan_with(
             source,
             filter,
+            oxplow_fs_watch::WorkspaceFilter::default(),
             None,
             Some(DupOptions {
                 min_lines: 5,

@@ -43,14 +43,14 @@ interface Props {
   stream: Stream | null;
   gitEnabled: boolean;
   selectedFilePath: string | null;
-  generatedDirs: string[];
+  generated: string[];
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(request: DiffRequest): void;
   onCreateFile(path: string): Promise<void>;
   onCreateDirectory(path: string): Promise<void>;
   onRenamePath(fromPath: string, toPath: string): Promise<void>;
   onDeletePath(path: string): Promise<void>;
-  onToggleGeneratedDir(name: string, mark: boolean): Promise<void>;
+  onToggleGenerated(entry: string, mark: boolean): Promise<void>;
   commitRequest?: number;
 }
 
@@ -58,14 +58,14 @@ export function ProjectPanel({
   stream,
   gitEnabled,
   selectedFilePath,
-  generatedDirs,
+  generated,
   onOpenFile,
   onOpenDiff,
   onCreateFile,
   onCreateDirectory,
   onRenamePath,
   onDeletePath,
-  onToggleGeneratedDir,
+  onToggleGenerated,
   commitRequest,
 }: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({ "": true });
@@ -192,7 +192,6 @@ export function ProjectPanel({
   // — they don't exist on disk, so we inject them into the tree manually.
   const [scopedDeletions, setScopedDeletions] = useState<Set<string>>(() => new Set());
   const rootEntries = useMemo(() => entriesByDir[""] ?? [], [entriesByDir]);
-  const generatedSet = useMemo(() => new Set(generatedDirs), [generatedDirs]);
   const uncommittedPaths = useMemo(
     () => indexedFiles.filter((f) => f.gitStatus !== null).map((f) => f.path),
     [indexedFiles],
@@ -585,10 +584,10 @@ export function ProjectPanel({
           break;
         }
         case "mark-generated":
-          await onToggleGeneratedDir(contextMenu.name, true);
+          await onToggleGenerated(contextMenu.name, true);
           break;
         case "unmark-generated":
-          await onToggleGeneratedDir(contextMenu.name, false);
+          await onToggleGenerated(contextMenu.name, false);
           break;
       }
       setError(null);
@@ -602,7 +601,7 @@ export function ProjectPanel({
   const isUntracked = contextMenu?.kind === "file"
     && indexedFiles.some((f) => f.path === contextMenu.path && f.gitStatus === "untracked");
   const isDirMarkedGenerated = contextMenu?.kind === "directory"
-    && generatedDirs.includes(contextMenu.name);
+    && generated.includes(contextMenu.name);
   const contextMenuItems: MenuItem[] = contextMenu
     ? [
       ...(contextMenu.kind === "file"
@@ -757,7 +756,7 @@ export function ProjectPanel({
               expandedDirs={expandedDirs}
               loadingDirs={loadingDirs}
               selectedFilePath={selectedFilePath}
-              generatedSet={generatedSet}
+              generated={generated}
               onToggleDirectory={toggleDirectory}
               onOpenFile={openForCurrentFilter}
               onOpenMenu={setContextMenu}

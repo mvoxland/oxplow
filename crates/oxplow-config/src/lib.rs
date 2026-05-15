@@ -52,10 +52,15 @@ pub struct OxplowConfig {
     /// File-snapshot retention window in days. 0 disables pruning.
     #[serde(rename = "snapshotRetentionDays")]
     pub snapshot_retention_days: u32,
-    /// Directory names (matched at any path segment) treated as
-    /// generated output and excluded from fs-watch + snapshots.
-    #[serde(rename = "generatedDirs")]
-    pub generated_dirs: Vec<String>,
+    /// Generated paths excluded from fs-watch / snapshot capture /
+    /// code-quality scans. Entries are either a single segment name
+    /// (matched anywhere — e.g. `target` filters every `target/`) or
+    /// a repo-relative path (matched exactly or as a directory
+    /// prefix — e.g. `apps/desktop/dist`, `docs/generated/out.txt`).
+    /// Defaults like `.git`, `node_modules`, `target` apply
+    /// automatically; this list extends them.
+    #[serde(rename = "generated")]
+    pub generated: Vec<String>,
     /// Maximum blob size for content-addressed snapshotting; larger
     /// files get a stat-only entry. Default 5 MiB.
     #[serde(rename = "snapshotMaxFileBytes")]
@@ -91,8 +96,10 @@ struct RawConfig {
     agent_prompt_append: Option<String>,
     #[serde(rename = "snapshotRetentionDays", default)]
     snapshot_retention_days: Option<f64>,
-    #[serde(rename = "generatedDirs", default)]
-    generated_dirs: Option<Vec<String>>,
+    // Accept the canonical `generated` key AND the legacy
+    // `generatedDirs` alias on read. We always write `generated`.
+    #[serde(rename = "generated", default, alias = "generatedDirs")]
+    generated: Option<Vec<String>>,
     #[serde(rename = "snapshotMaxFileBytes", default)]
     snapshot_max_file_bytes: Option<f64>,
     #[serde(rename = "injectSessionContext", default)]
@@ -175,11 +182,16 @@ pub fn write_project_config(
     // Schema-managed keys we own. Anything outside this set found
     // in an existing file is copied through verbatim (best-effort,
     // since YAML→serde_yaml::Value→YAML is still lossy on style).
+    // Both `generated` (canonical) and `generatedDirs` (legacy alias)
+    // are managed — we strip either form from existing-extras so a
+    // user upgrading from the old key doesn't end up with both
+    // sitting in the file.
     const MANAGED_KEYS: &[&str] = &[
         "agent",
         "projectName",
         "agentPromptAppend",
         "snapshotRetentionDays",
+        "generated",
         "generatedDirs",
         "snapshotMaxFileBytes",
         "injectSessionContext",
@@ -226,10 +238,10 @@ pub fn write_project_config(
             config.snapshot_retention_days.into(),
         );
     }
-    if !config.generated_dirs.is_empty() {
+    if !config.generated.is_empty() {
         doc.insert(
-            "generatedDirs".into(),
-            serde_yaml::to_value(&config.generated_dirs).unwrap(),
+            "generated".into(),
+            serde_yaml::to_value(&config.generated).unwrap(),
         );
     }
     if config.snapshot_max_file_bytes != DEFAULT_SNAPSHOT_MAX_FILE_BYTES {
@@ -285,7 +297,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         lsp_servers: Vec::new(),
         agent_prompt_append: String::new(),
         snapshot_retention_days: DEFAULT_SNAPSHOT_RETENTION_DAYS,
-        generated_dirs: Vec::new(),
+        generated: Vec::new(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
     }
@@ -319,19 +331,26 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         None => DEFAULT_SNAPSHOT_RETENTION_DAYS,
     };
 
-    let generated_dirs = match raw.generated_dirs {
+    let generated = match raw.generated {
         Some(list) => {
             let mut out = Vec::with_capacity(list.len());
             for (i, entry) in list.into_iter().enumerate() {
                 let trimmed = entry.trim().trim_matches('/').to_string();
                 if trimmed.is_empty() {
                     return Err(ConfigError::Invalid(format!(
-                        "generatedDirs[{i}] must be a non-empty string"
+                        "generated[{i}] must be a non-empty string"
                     )));
                 }
-                if trimmed.contains('/') {
+                // Reject absolute paths and parent-escape sequences —
+                // entries must be repo-relative.
+                if entry.trim().starts_with('/') {
                     return Err(ConfigError::Invalid(format!(
-                        "generatedDirs[{i}] must be a single directory name, not a path (got \"{entry}\")"
+                        "generated[{i}] must be a repo-relative path, not absolute (got \"{entry}\")"
+                    )));
+                }
+                if trimmed.split('/').any(|seg| seg == "..") {
+                    return Err(ConfigError::Invalid(format!(
+                        "generated[{i}] must not contain `..` (got \"{entry}\")"
                     )));
                 }
                 out.push(trimmed);
@@ -401,7 +420,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         lsp_servers,
         agent_prompt_append,
         snapshot_retention_days,
-        generated_dirs,
+        generated,
         snapshot_max_file_bytes,
         inject_session_context,
     })
@@ -520,15 +539,85 @@ lsp:
     }
 
     #[test]
-    fn rejects_generated_dirs_with_path_separator() {
+    fn generated_accepts_segment_and_path_entries() {
         let dir = tempdir().unwrap();
         std::fs::write(
             dir.path().join(OXPLOW_CONFIG_FILE),
-            "generatedDirs: [foo/bar]\n",
+            "generated:\n  - target\n  - .idea\n  - apps/desktop/dist\n  - docs/generated/out.txt\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            cfg.generated,
+            vec![
+                "target".to_string(),
+                ".idea".to_string(),
+                "apps/desktop/dist".to_string(),
+                "docs/generated/out.txt".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn generated_accepts_legacy_generated_dirs_key() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "generatedDirs:\n  - target\n  - .idea\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            cfg.generated,
+            vec!["target".to_string(), ".idea".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_generated_absolute_path() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "generated: [\"/etc/passwd\"]\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("single directory")));
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("repo-relative")));
+    }
+
+    #[test]
+    fn rejects_generated_parent_escape() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "generated: [\"../sibling\"]\n",
+        )
+        .unwrap();
+        let err = load_project_config(dir.path()).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("..")));
+    }
+
+    #[test]
+    fn write_emits_generated_key_not_legacy_alias() {
+        let dir = tempdir().unwrap();
+        // Pre-populate with the legacy key so we exercise the
+        // "rewrite on save" path.
+        std::fs::write(
+            dir.path().join(OXPLOW_CONFIG_FILE),
+            "generatedDirs: [target, .idea]\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        write_project_config(dir.path(), &cfg).unwrap();
+        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        assert!(
+            raw.contains("generated:"),
+            "expected canonical `generated:` key on write, got:\n{raw}"
+        );
+        assert!(
+            !raw.contains("generatedDirs"),
+            "legacy alias must not survive a round-trip, got:\n{raw}"
+        );
     }
 
     #[test]

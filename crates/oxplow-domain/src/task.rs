@@ -68,7 +68,6 @@ pub struct Task {
     pub parent_id: Option<TaskId>,
     pub title: String,
     pub description: String,
-    pub acceptance_criteria: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     pub sort_index: i64,
@@ -100,7 +99,6 @@ pub struct TaskLink {
 pub mod limits {
     pub const TITLE_MAX_LEN: usize = 500;
     pub const DESCRIPTION_MAX_LEN: usize = 20_000;
-    pub const ACCEPTANCE_CRITERIA_MAX_LEN: usize = 20_000;
     pub const NOTE_MAX_LEN: usize = 20_000;
 }
 
@@ -186,7 +184,6 @@ mod tests {
             parent_id: None,
             title: "ship it".into(),
             description: String::new(),
-            acceptance_criteria: None,
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,
@@ -211,7 +208,7 @@ mod tests {
         let item: Task = serde_json::from_str(
             r#"{
                 "id":7,"thread_id":null,"parent_id":null,
-                "title":"t","description":"","acceptance_criteria":null,
+                "title":"t","description":"",
                 "status":"ready","priority":"medium","sort_index":0,
                 "created_by":"user",
                 "created_at":"2026-04-29T12:00:00Z","updated_at":"2026-04-29T12:00:00Z",

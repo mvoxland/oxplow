@@ -44,7 +44,7 @@ import {
   getRepoConflictState,
   subscribeGitRefsEvents,
   getConfig,
-  setGeneratedDirs,
+  setGenerated,
   selectThread,
   promoteThread,
   recordUsage,
@@ -438,7 +438,7 @@ export function App() {
   const [streamCreateRequest, setStreamCreateRequest] = useState(0);
   const [threadCreateRequest, setThreadCreateRequest] = useState(0);
   const [commitFilesRequest, setCommitFilesRequest] = useState(0);
-  const [generatedDirs, setGeneratedDirsState] = useState<string[]>([]);
+  const [generated, setGeneratedState] = useState<string[]>([]);
   const opErrorsStore = getOpErrorsStore();
   const opErrorsAll = useSyncExternalStore(opErrorsStore.subscribe, opErrorsStore.getSnapshot);
   const daemonDownLogged = useRef(false);
@@ -929,7 +929,6 @@ export function App() {
   async function handleCreateTask(input: {
     title: string;
     description?: string;
-    acceptanceCriteria?: string | null;
     parentId?: number | null;
     status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
     priority?: "low" | "medium" | "high" | "urgent";
@@ -950,7 +949,6 @@ export function App() {
     changes: {
       title?: string;
       description?: string;
-      acceptanceCriteria?: string | null;
       parentId?: number | null;
       status?: "ready" | "in_progress" | "blocked" | "done" | "canceled" | "archived";
       priority?: "low" | "medium" | "high" | "urgent";
@@ -1445,7 +1443,7 @@ export function App() {
       void getConfig()
         .then((cfg) => {
           if (cancelled) return;
-          setGeneratedDirsState(cfg.generatedDirs);
+          setGeneratedState(cfg.generated);
         })
         .catch((error) => {
           logUi("warn", "failed to load config", { error: String(error) });
@@ -1461,15 +1459,15 @@ export function App() {
     };
   }, []);
 
-  const handleToggleGeneratedDir = async (name: string, mark: boolean) => {
+  const handleToggleGenerated = async (entry: string, mark: boolean) => {
     const next = mark
-      ? Array.from(new Set([...generatedDirs, name])).sort()
-      : generatedDirs.filter((entry) => entry !== name);
+      ? Array.from(new Set([...generated, entry])).sort()
+      : generated.filter((e) => e !== entry);
     try {
-      const cfg = await setGeneratedDirs(next);
-      setGeneratedDirsState(cfg.generatedDirs);
+      const cfg = await setGenerated(next);
+      setGeneratedState(cfg.generated);
     } catch (err) {
-      setError(`Failed to update generated dirs: ${String(err)}`);
+      setError(`Failed to update generated paths: ${String(err)}`);
     }
   };
 
@@ -2804,14 +2802,14 @@ export function App() {
               stream={stream}
               gitEnabled={workspaceContext.gitEnabled}
               selectedFilePath={selectedFilePath}
-              generatedDirs={generatedDirs}
+              generated={generated}
               onOpenFile={navOpenFile}
               onOpenDiff={navOpenDiff}
               onCreateFile={handleCreateFile}
               onCreateDirectory={handleCreateDirectory}
               onRenamePath={handleRenamePath}
               onDeletePath={handleDeletePath}
-              onToggleGeneratedDir={handleToggleGeneratedDir}
+              onToggleGenerated={handleToggleGenerated}
               commitRequest={commitFilesRequest}
             />
           ),
@@ -3095,7 +3093,6 @@ export function App() {
                 await handleCreateTask({
                   title: input.title,
                   description: input.description,
-                  acceptanceCriteria: input.acceptanceCriteria ?? null,
                   parentId: input.parentId ?? null,
                   status: input.status ?? "ready",
                   priority: input.priority ?? "medium",
@@ -3220,7 +3217,7 @@ export function App() {
     bookmarksStore,
     workspaceContext.gitEnabled,
     selectedFilePath,
-    generatedDirs,
+    generated,
     commitFilesRequest,
     centerActive,
     currentThreadState.activeThreadId,

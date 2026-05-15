@@ -163,7 +163,6 @@ export const commands = {
 	parent_id: TaskId | null,
 	title: string,
 	description: string,
-	acceptance_criteria: string | null,
 	status: TaskStatus,
 	priority: TaskPriority,
 	sort_index: number,
@@ -460,7 +459,7 @@ export const commands = {
 	setAgentPromptAppend: (text: string) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_prompt_append", { text })),
 	setSnapshotRetentionDays: (days: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_retention_days", { days })),
 	setSnapshotMaxFileBytes: (bytes: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_max_file_bytes", { bytes })),
-	setGeneratedDirs: (dirs: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated_dirs", { dirs })),
+	setGenerated: (entries: string[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated", { entries })),
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
 	ensureAgentPane: (req: EnsureAgentPaneRequest) => typedError<EnsureAgentPaneResponse, IpcError>(__TAURI_INVOKE("ensure_agent_pane", { req })),
 	teardownAgentPanes: (streamId: StreamId) => typedError<null, IpcError>(__TAURI_INVOKE("teardown_agent_panes", { streamId })),
@@ -912,7 +911,6 @@ export type CommitRefLabelKind = "branch" | "tag";
 export type CreateTaskInput = {
 	title: string,
 	description: string | null,
-	acceptance_criteria: string | null,
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,
@@ -1227,10 +1225,15 @@ export type OxplowConfig = {
 	// File-snapshot retention window in days. 0 disables pruning.
 	snapshotRetentionDays: number,
 	/**
-	 *  Directory names (matched at any path segment) treated as
-	 *  generated output and excluded from fs-watch + snapshots.
+	 *  Generated paths excluded from fs-watch / snapshot capture /
+	 *  code-quality scans. Entries are either a single segment name
+	 *  (matched anywhere — e.g. `target` filters every `target/`) or
+	 *  a repo-relative path (matched exactly or as a directory
+	 *  prefix — e.g. `apps/desktop/dist`, `docs/generated/out.txt`).
+	 *  Defaults like `.git`, `node_modules`, `target` apply
+	 *  automatically; this list extends them.
 	 */
-	generatedDirs: string[],
+	generated: string[],
 	/**
 	 *  Maximum blob size for content-addressed snapshotting; larger
 	 *  files get a stat-only entry. Default 5 MiB.
@@ -1463,7 +1466,6 @@ export type Task = {
 	parent_id: TaskId | null,
 	title: string,
 	description: string,
-	acceptance_criteria: string | null,
 	status: TaskStatus,
 	priority: TaskPriority,
 	sort_index: number,
@@ -1647,7 +1649,6 @@ export type UiLogEntry = {
 export type UpdateTaskChanges = {
 	title: string | null,
 	description: string | null,
-	acceptance_criteria: string | null,
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,

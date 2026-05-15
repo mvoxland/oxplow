@@ -131,10 +131,11 @@ pub struct CreateTaskMcpParams {
     #[serde(default)]
     pub backlog: bool,
     pub title: String,
+    /// Markdown body. If acceptance criteria would help reviewers (or
+    /// future-you) know when this task is done, write them inline here
+    /// as a `## Acceptance criteria` subsection. There is no separate
+    /// AC field — the description is the single source of truth.
     pub description: Option<String>,
-    /// One observable criterion per line. Authoritative completion
-    /// signal; reviewers + complete_task scan for it.
-    pub acceptance_criteria: Option<String>,
     pub kind: Option<String>,
     pub priority: Option<String>,
     pub category: Option<String>,
@@ -158,8 +159,6 @@ pub struct UpdateTaskMcpParams {
     pub id: String,
     pub title: Option<String>,
     pub description: Option<String>,
-    /// Replace the AC list. Pass an empty string to clear.
-    pub acceptance_criteria: Option<String>,
     /// Reparent (or detach with empty string).
     pub parent_id: Option<String>,
     pub status: Option<String>,
@@ -857,7 +856,6 @@ impl OxplowMcp {
                 CreateTaskInput {
                     title: p.title,
                     description: p.description,
-                    acceptance_criteria: p.acceptance_criteria,
                     parent_id: parent_task_id,
                     status,
                     priority,
@@ -905,8 +903,7 @@ impl OxplowMcp {
     #[tool(
         description = "Update fields on an existing task (partial-patch). Pass `touched_files` \
                        alongside a `status` transition to `done`/`blocked` to attribute the closing \
-                       effort. Pass `acceptance_criteria` (empty string clears) to update the AC list. \
-                       `parent_id` reparents (empty string detaches)."
+                       effort. `parent_id` reparents (empty string detaches)."
     )]
     async fn update_task(
         &self,
@@ -928,12 +925,9 @@ impl OxplowMcp {
             Some(s) => Some(parse_priority(s)?),
             None => None,
         };
-        // Acceptance-criteria + parent: `Option<Option<…>>` semantics
-        // — outer Some means "the field was passed", inner None means
-        // "clear it". Empty string = clear; non-empty = set.
-        let acceptance_criteria: Option<Option<String>> =
-            p.acceptance_criteria
-                .map(|s| if s.is_empty() { None } else { Some(s) });
+        // Parent: `Option<Option<…>>` semantics — outer Some means
+        // "the field was passed", inner None means "clear it". Empty
+        // string = clear; non-empty = set.
         let parent_id: Option<Option<TaskId>> = match p.parent_id {
             Some(s) if s.is_empty() => Some(None),
             Some(s) => Some(Some(parse_task_id("update_task", "parent_id", &s)?)),
@@ -947,7 +941,6 @@ impl OxplowMcp {
                 UpdateTaskChanges {
                     title: p.title,
                     description: p.description,
-                    acceptance_criteria,
                     parent_id,
                     status,
                     priority,
@@ -1884,13 +1877,6 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
         out.push(item.description.clone());
         out.push(String::new());
     }
-    if let Some(ac) = item.acceptance_criteria.as_deref() {
-        if !ac.is_empty() {
-            out.push("## Acceptance criteria".into());
-            out.push(ac.to_string());
-            out.push(String::new());
-        }
-    }
     if !extra_context.is_empty() {
         out.push("## Extra context".into());
         out.push(extra_context.to_string());
@@ -1977,7 +1963,6 @@ mod tests {
             parent_id: None,
             title: title.into(),
             description: String::new(),
-            acceptance_criteria: None,
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,
@@ -2146,7 +2131,6 @@ mod tests {
                 backlog: false,
                 title: "x".into(),
                 description: None,
-                acceptance_criteria: None,
                 kind: None,
                 priority: None,
                 status: None,
@@ -2174,7 +2158,6 @@ mod tests {
                 backlog: false,
                 title: "x".into(),
                 description: None,
-                acceptance_criteria: None,
                 kind: None,
                 priority: None,
                 status: None,
@@ -2342,14 +2325,12 @@ mod tests {
     fn dispatch_brief_includes_identity_and_protocol() {
         let mut item = make_task(None, "ship the thing");
         item.description = String::new();
-        item.acceptance_criteria = None;
         let s = compose_dispatch_brief(&item, "");
         assert!(s.contains("Task: ship the thing"));
         assert!(s.contains(&format!("itemId: {}", item.id.value())));
         assert!(s.contains("priority:"));
         assert!(s.contains("## Protocol"));
         assert!(!s.contains("## Description"));
-        assert!(!s.contains("## Acceptance criteria"));
         assert!(!s.contains("## Extra context"));
     }
 
@@ -2360,25 +2341,6 @@ mod tests {
         let s = compose_dispatch_brief(&item, "");
         assert!(s.contains("## Description"));
         assert!(s.contains("do the thing carefully"));
-    }
-
-    #[test]
-    fn dispatch_brief_includes_acceptance_criteria_when_non_empty() {
-        let mut item = make_task(None, "x");
-        item.acceptance_criteria = Some("- it works".into());
-        let s = compose_dispatch_brief(&item, "");
-        assert!(s.contains("## Acceptance criteria"));
-        assert!(s.contains("it works"));
-    }
-
-    #[test]
-    fn dispatch_brief_skips_empty_acceptance_criteria_string() {
-        // Some callers pass Some(""), which should still be treated
-        // as "no AC" rather than rendering an empty section header.
-        let mut item = make_task(None, "x");
-        item.acceptance_criteria = Some(String::new());
-        let s = compose_dispatch_brief(&item, "");
-        assert!(!s.contains("## Acceptance criteria"));
     }
 
     #[test]

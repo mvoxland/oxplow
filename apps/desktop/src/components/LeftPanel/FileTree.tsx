@@ -8,6 +8,42 @@ import { fileRef } from "../../tabs/pageRefs.js";
 import type { NavSiblings } from "../../tabs/PageNavigationContext.js";
 
 /**
+ * Mirror of the Rust `WorkspaceFilter` matching semantics for the
+ * UI's visual "this row is generated" hint. Segment entries (no `/`)
+ * match anywhere by component name; path entries (containing `/`)
+ * match the exact path or a directory prefix.
+ *
+ * `selfOnly = true` returns true only when the row's exact path /
+ * name is the marked entry (i.e. don't count "marked by ancestor").
+ * `selfOnly = false` returns true if either the row itself or any
+ * ancestor matches.
+ */
+function matchesGenerated(
+  rowPath: string,
+  rowName: string,
+  generated: readonly string[],
+  selfOnly: boolean,
+): boolean {
+  const segments = rowPath.split("/");
+  for (const entry of generated) {
+    if (!entry.includes("/")) {
+      if (selfOnly) {
+        if (entry === rowName) return true;
+      } else if (segments.includes(entry)) {
+        return true;
+      }
+    } else {
+      if (selfOnly) {
+        if (entry === rowPath) return true;
+      } else if (rowPath === entry || rowPath.startsWith(entry + "/")) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * `requestMenu` opens a menu anchored at the kebab's bottom-right
  * corner. The parent (ProjectPanel) renders the actual menu using
  * its existing ContextMenuTarget-keyed `contextMenuItems` builder.
@@ -91,7 +127,7 @@ export function TreeEntries({
   expandedDirs,
   loadingDirs,
   selectedFilePath,
-  generatedSet,
+  generated,
   onToggleDirectory,
   onOpenFile,
   onOpenMenu,
@@ -103,7 +139,7 @@ export function TreeEntries({
   expandedDirs: Record<string, boolean>;
   loadingDirs: Record<string, boolean>;
   selectedFilePath: string | null;
-  generatedSet: Set<string>;
+  generated: readonly string[];
   onToggleDirectory(path: string): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenMenu(target: ContextMenuTarget | null): void;
@@ -128,11 +164,15 @@ export function TreeEntries({
               title: parentPath ? `Files in ${parentPath}` : "Files at the project root",
             }
           : undefined;
-        // "Marked" = this directory's name itself is in the config list.
-        // "Inside" = some ancestor segment matches, so this path is being
-        // ignored by inheritance even if its own name isn't in the list.
-        const markedSelf = entry.kind === "directory" && generatedSet.has(entry.name);
-        const insideGenerated = entry.path.split("/").some((seg) => generatedSet.has(seg));
+        // "Marked" = this row's path (or, for legacy segment entries,
+        // its name) is itself in the config list.
+        // "Inside" = some ancestor matches, so this row is being
+        // ignored by inheritance even if it isn't a marked path itself.
+        // Mirrors the Rust WorkspaceFilter semantics: segment entries
+        // (no `/`) match anywhere by component name; path entries
+        // (containing `/`) match the exact path or a directory prefix.
+        const markedSelf = entry.kind === "directory" && matchesGenerated(entry.path, entry.name, generated, true);
+        const insideGenerated = matchesGenerated(entry.path, entry.name, generated, false);
         return (
           <div key={entry.path}>
             <TreeEntryRow
@@ -158,7 +198,7 @@ export function TreeEntries({
                     expandedDirs={expandedDirs}
                     loadingDirs={loadingDirs}
                     selectedFilePath={selectedFilePath}
-                    generatedSet={generatedSet}
+                    generated={generated}
                     onToggleDirectory={onToggleDirectory}
                     onOpenFile={onOpenFile}
                     onOpenMenu={onOpenMenu}

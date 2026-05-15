@@ -129,7 +129,6 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let parent_id: Option<i64> = row.get("parent_id")?;
     let title: String = row.get("title")?;
     let description: String = row.get("description")?;
-    let acceptance_criteria: Option<String> = row.get("acceptance_criteria")?;
     let status: String = row.get("status")?;
     let priority: String = row.get("priority")?;
     let sort_index: i64 = row.get("sort_index")?;
@@ -158,7 +157,6 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         parent_id: parent_id.map(TaskId::new),
         title,
         description,
-        acceptance_criteria,
         status: str_to_status(&status).map_err(map_err)?,
         priority: str_to_priority(&priority).map_err(map_err)?,
         sort_index,
@@ -284,16 +282,15 @@ impl TaskStore for SqliteTaskStore {
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT INTO task (
-                        thread_id, parent_id, title, description, acceptance_criteria,
+                        thread_id, parent_id, title, description,
                         status, priority, sort_index, created_by, created_at, updated_at,
                         completed_at, deleted_at, author, category, tags
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                     params![
                         item.thread_id.as_ref().map(|t| t.as_str()),
                         item.parent_id.map(|p| p.value()),
                         item.title,
                         item.description,
-                        item.acceptance_criteria,
                         status_to_str(item.status),
                         priority_to_str(item.priority),
                         item.sort_index,
@@ -340,16 +337,15 @@ impl TaskStore for SqliteTaskStore {
                         parent_id = ?3,
                         title = ?4,
                         description = ?5,
-                        acceptance_criteria = ?6,
-                        status = ?7,
-                        priority = ?8,
-                        sort_index = ?9,
-                        updated_at = ?10,
-                        completed_at = ?11,
-                        deleted_at = ?12,
-                        author = ?13,
-                        category = ?14,
-                        tags = ?15
+                        status = ?6,
+                        priority = ?7,
+                        sort_index = ?8,
+                        updated_at = ?9,
+                        completed_at = ?10,
+                        deleted_at = ?11,
+                        author = ?12,
+                        category = ?13,
+                        tags = ?14
                      WHERE id = ?1 AND deleted_at IS NULL",
                     params![
                         item.id.value(),
@@ -357,7 +353,6 @@ impl TaskStore for SqliteTaskStore {
                         item.parent_id.map(|p| p.value()),
                         item.title,
                         item.description,
-                        item.acceptance_criteria,
                         status_to_str(item.status),
                         priority_to_str(item.priority),
                         item.sort_index,
@@ -479,7 +474,6 @@ mod tests {
             parent_id: None,
             title: "ship it".into(),
             description: String::new(),
-            acceptance_criteria: None,
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,

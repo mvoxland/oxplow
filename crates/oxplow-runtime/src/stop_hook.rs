@@ -259,7 +259,6 @@ mod tests {
             parent_id: parent.map(TaskId::new),
             title: format!("t{id}"),
             description: String::new(),
-            acceptance_criteria: None,
             status,
             priority: TaskPriority::Medium,
             sort_index: 0,

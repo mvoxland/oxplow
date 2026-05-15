@@ -66,6 +66,7 @@ open questions.
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
 | `EditorPane`, Monaco models/decorations/context menu, blame overlay, diff editor, LSP bridge | `.context/editor-and-monaco.md` |
+| `RichTextField`, Tiptap surface, MermaidBlock + InternalLink extensions, mermaidRender helper | `.context/rich-text-editor.md` |
 | `TerminalPane`, xterm.js setup, file-path link provider | `.context/terminal.md` |
 | Code quality scans (in-process metrics + duplication detector + findings store + Code quality panel) | `.context/code-quality.md` |
 | Tab store, page chrome, rail HUD (in-flight IA redesign) | `.context/pages-and-tabs.md` |

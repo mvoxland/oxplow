@@ -258,11 +258,17 @@ impl Services {
         // start/end ids on the effort row when a task transitions
         // through in_progress). The fs-watcher, startup sweep, and
         // cleanup loop are spawned by the host binary (main.rs).
-        let max_bytes = {
+        let (max_bytes, workspace_filter) = {
             let g = config_arc.read();
-            g.as_ref()
+            let max_bytes = g
+                .as_ref()
                 .map(|c| c.snapshot_max_file_bytes)
-                .unwrap_or(5 * 1024 * 1024)
+                .unwrap_or(5 * 1024 * 1024);
+            let filter = g
+                .as_ref()
+                .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+                .unwrap_or_default();
+            (max_bytes, filter)
         };
         // Snapshot capture is stream-scoped (a worktree belongs to a
         // single stream), so ensure the project's primary stream
@@ -275,6 +281,7 @@ impl Services {
                 layout.project_dir.clone(),
                 primary_stream.id.clone(),
                 max_bytes,
+                workspace_filter,
             )
             .with_events(event_bus.clone()),
         );
@@ -405,6 +412,12 @@ impl Services {
             event_bus.clone(),
         );
         let primary_stream = futures::executor::block_on(streams.ensure_primary())?;
+        let workspace_filter = {
+            let g = config_arc.read();
+            g.as_ref()
+                .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
+                .unwrap_or_default()
+        };
         let snapshot_capture = Arc::new(
             snapshot_capture::SnapshotCaptureService::new(
                 snapshot_store.clone(),
@@ -412,6 +425,7 @@ impl Services {
                 layout.project_dir.clone(),
                 primary_stream.id.clone(),
                 5 * 1024 * 1024,
+                workspace_filter,
             )
             .with_events(event_bus.clone()),
         );

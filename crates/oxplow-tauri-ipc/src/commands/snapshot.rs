@@ -1,11 +1,28 @@
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use oxplow_db::{FileSnapshot, Snapshot, SnapshotChangeEntry, SnapshotStats};
 use oxplow_domain::StreamId;
+use oxplow_fs_watch::WorkspaceFilter;
 
 use crate::error::IpcError;
 use crate::state::AppState;
+
+/// Build a `WorkspaceFilter` from the project's currently-live
+/// `generated` config. Used by the snapshot-list IPCs so that paths
+/// matching the user's current ignore list are stripped from the
+/// returned list — even if those paths were captured under an older
+/// config (or before they were marked generated). The capture
+/// pipeline already filters going forward via this same struct; this
+/// is the read-side complement.
+fn current_filter(state: &AppState) -> WorkspaceFilter {
+    let cfg = state.config.read();
+    cfg.as_ref()
+        .map(|c| WorkspaceFilter::with_user_entries(&c.generated))
+        .unwrap_or_default()
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -13,6 +30,14 @@ pub async fn list_snapshots(
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> Result<Vec<FileSnapshot>, IpcError> {
+    // Whole-path filter: if the queried path itself is currently
+    // marked generated, return an empty history rather than the
+    // pre-config captures. The UI shouldn't surface a "history" view
+    // for a path the user has declared they don't care about.
+    let filter = current_filter(&state);
+    if filter.ignore(Path::new(&path)) {
+        return Ok(Vec::new());
+    }
     Ok(state.snapshot_store.list_for_path(&path).await?)
 }
 
@@ -23,10 +48,15 @@ pub async fn list_file_snapshots_for_stream(
     stream_id: StreamId,
     limit: Option<usize>,
 ) -> Result<Vec<FileSnapshot>, IpcError> {
-    Ok(state
+    let filter = current_filter(&state);
+    let rows = state
         .snapshot_store
         .list_for_stream(stream_id.as_str(), limit.unwrap_or(200))
-        .await?)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| !filter.ignore(Path::new(&r.path)))
+        .collect())
 }
 
 /// `snapshot` rows for a stream — one entry per `request_snapshot()`
@@ -65,10 +95,15 @@ pub async fn list_snapshot_change_entries(
     state: tauri::State<'_, AppState>,
     snapshot_id: i64,
 ) -> Result<Vec<SnapshotChangeEntry>, IpcError> {
-    Ok(state
+    let filter = current_filter(&state);
+    let rows = state
         .snapshot_store
         .list_changes_for_snapshot(snapshot_id)
-        .await?)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| !filter.ignore(Path::new(&r.path)))
+        .collect())
 }
 
 /// Read a `file_snapshot` row's blob content as a UTF-8 string.
@@ -138,10 +173,15 @@ pub async fn list_files_for_snapshot(
     state: tauri::State<'_, AppState>,
     snapshot_id: i64,
 ) -> Result<Vec<FileSnapshot>, IpcError> {
-    Ok(state
+    let filter = current_filter(&state);
+    let rows = state
         .snapshot_store
         .list_files_for_snapshot(snapshot_id)
-        .await?)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| !filter.ignore(Path::new(&r.path)))
+        .collect())
 }
 
 #[tauri::command]

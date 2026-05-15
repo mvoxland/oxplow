@@ -53,7 +53,7 @@ fn mtime_to_unix_ms(m: &std::fs::Metadata) -> Option<i64> {
         .map(|d| d.as_millis() as i64)
 }
 use oxplow_domain::{StreamId, Timestamp};
-use oxplow_fs_watch::{should_ignore_workspace_watch_path, FsWatcher, WatchEventKind};
+use oxplow_fs_watch::{FsWatcher, WatchEventKind, WorkspaceFilter};
 
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
@@ -98,6 +98,13 @@ struct Inner {
     /// Files larger than this skip blob hashing and are flagged
     /// `oversize`. Pulled from `OxplowConfig::snapshot_max_file_bytes`.
     max_file_bytes: u64,
+    /// Workspace-relative path filter — drives BOTH the fs-watch
+    /// event handler's "should I react to this change" check and the
+    /// startup-sweep WalkDir's filter_entry. Built from the project's
+    /// `generated` config at bootstrap; the default segments
+    /// (`.git`, `.oxplow`, `target`, `node_modules`, …) are always
+    /// in effect even with an empty user list.
+    workspace_filter: WorkspaceFilter,
     /// Optional event bus. When set, each captured snapshot fires a
     /// `FileSnapshotCreated` event so the renderer can refresh the
     /// Snapshots panel without polling.
@@ -139,6 +146,7 @@ impl SnapshotCaptureService {
         project_dir: PathBuf,
         stream_id: StreamId,
         max_file_bytes: u64,
+        workspace_filter: WorkspaceFilter,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -147,6 +155,7 @@ impl SnapshotCaptureService {
                 project_dir,
                 stream_id,
                 max_file_bytes,
+                workspace_filter,
                 events: RwLock::new(None),
                 dirty: Mutex::new(HashMap::new()),
                 settle_duration: DEFAULT_SETTLE_DURATION,
@@ -317,7 +326,7 @@ impl SnapshotCaptureService {
                 Ok(event) => {
                     let path = event.path;
                     let rel = path.strip_prefix(&self.inner.project_dir).unwrap_or(&path);
-                    if should_ignore_workspace_watch_path(rel) {
+                    if self.inner.workspace_filter.ignore(rel) {
                         continue;
                     }
                     self.mark_dirty(path, event.kind);
@@ -463,7 +472,7 @@ impl SnapshotCaptureService {
     /// had a non-deleted latest snapshot but are no longer on disk —
     /// those get a deletion row when the dirty set is captured.
     ///
-    /// Honors `should_ignore_workspace_watch_path`, so build dirs
+    /// Honors the service's `WorkspaceFilter`, so build dirs
     /// and `.oxplow/` internals are skipped (wiki pages pass through
     /// because the filter explicitly allows `.oxplow/wiki/`).
     ///
@@ -484,6 +493,7 @@ impl SnapshotCaptureService {
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
+        let filter = self.inner.workspace_filter.clone();
 
         // Walk + stat off the async runtime — it's all blocking I/O.
         // The walk + per-file stat-shortcircuit stays single-threaded
@@ -520,7 +530,7 @@ impl SnapshotCaptureService {
                         return true;
                     }
                     let rel = e.path().strip_prefix(&project_dir).unwrap_or(e.path());
-                    !should_ignore_workspace_watch_path(rel)
+                    !filter.ignore(rel)
                 })
                 .filter_map(Result::ok)
             {
@@ -1115,6 +1125,7 @@ mod tests {
             project.to_path_buf(),
             StreamId::from(TEST_STREAM),
             1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
         )
         .with_settle_duration(Duration::ZERO);
         (svc, store)
@@ -1471,6 +1482,7 @@ mod tests {
             project.path().to_path_buf(),
             StreamId::from(TEST_STREAM),
             1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
         )
         .with_settle_duration(Duration::from_millis(100));
 
@@ -1514,6 +1526,7 @@ mod tests {
             project.path().to_path_buf(),
             StreamId::from(TEST_STREAM),
             1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
         )
         .with_settle_duration(Duration::from_secs(60));
 
@@ -1769,6 +1782,7 @@ mod tests {
             project.path().to_path_buf(),
             StreamId::from(TEST_STREAM),
             512, // 512 byte cap → 1KB is oversize
+            oxplow_fs_watch::WorkspaceFilter::default(),
         )
         .with_settle_duration(Duration::ZERO);
         svc.mark_dirty(file, WatchEventKind::Other);

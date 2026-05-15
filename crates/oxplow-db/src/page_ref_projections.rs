@@ -274,16 +274,12 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
     out
 }
 
-/// Edges contributed by a task's title + description + AC text.
+/// Edges contributed by a task's title + description text.
 pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
     let mut combined = String::new();
     combined.push_str(&item.title);
     combined.push('\n');
     combined.push_str(&item.description);
-    if let Some(ac) = &item.acceptance_criteria {
-        combined.push('\n');
-        combined.push_str(ac);
-    }
     let refs = extract(&combined);
     let id = item.id.to_string();
     let mut out = Vec::new();
@@ -479,14 +475,13 @@ mod tests {
         Timestamp::from_unix_ms(1_700_000_000_000)
     }
 
-    fn item(id: i64, title: &str, description: &str, ac: Option<&str>) -> Task {
+    fn item(id: i64, title: &str, description: &str) -> Task {
         Task {
             id: TaskId::new(id),
             thread_id: None,
             parent_id: None,
             title: title.into(),
             description: description.into(),
-            acceptance_criteria: ac.map(|s| s.to_string()),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
             sort_index: 0,
@@ -517,12 +512,11 @@ mod tests {
     }
 
     #[test]
-    fn task_edges_parse_ac_and_description() {
+    fn task_edges_parse_description() {
         let it = item(
             1,
             "fix something",
-            "see [[src/app.rs]] for context, blocked by task:2",
-            Some("touches finding:fnd-9"),
+            "see [[src/app.rs]] for context, blocked by task:2, touches finding:fnd-9",
         );
         let edges = task_edges(&it);
         let targets: Vec<_> = edges

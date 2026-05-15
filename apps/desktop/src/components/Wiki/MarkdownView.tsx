@@ -287,6 +287,75 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
 }
 
 /**
+ * Inverse of `preprocessWikilinks` — converts standard markdown links
+ * with our internal URL schemes back into `[[ ]]` wikilink form so the
+ * on-disk file keeps its authored shape after a round-trip through the
+ * RichText editor.
+ *
+ * Mappings:
+ * - `[label](file:path)`        → `[[path]]`         if label === path
+ *                              → `[[path|label]]`   otherwise
+ * - `[label](dir:path)`         → `[[dir:path]]`     if label === path
+ *                              → `[[dir:path|label]]` otherwise
+ * - `[label](gitcommit:sha)`    → `[[git:sha]]`      if label is the
+ *                                                    7-char-or-longer
+ *                                                    hex prefix of sha
+ *                              → `[[git:sha|label]]` otherwise
+ *
+ * Plain markdown links (http/https/internal wiki slug with no scheme,
+ * etc.) are left alone — round-tripping those into `[[ ]]` would be
+ * lossy and ambiguous. Image links (`![alt](url)`) are skipped.
+ *
+ * Fenced code blocks and inline code spans are protected, matching
+ * `preprocessWikilinks`'s skip pattern.
+ */
+export function postprocessWikilinks(body: string): string {
+  const segments = body.split(/(```[\s\S]*?```)/g);
+  return segments.map((seg, idx) => {
+    if (idx % 2 === 1) return seg;
+    return collapseLinksOutsideInlineCode(seg);
+  }).join("");
+}
+
+function collapseLinksOutsideInlineCode(text: string): string {
+  const parts = text.split(/(`[^`\n]*`)/g);
+  return parts.map((part, idx) => {
+    if (idx % 2 === 1) return part;
+    // Match `[label](url)` but NOT `![alt](url)`.
+    return part.replace(
+      /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|gitcommit):[^)\s]+)\)/g,
+      (_match, lead: string, label: string, url: string) => {
+        const collapsed = collapseInternalLink(label, url);
+        return collapsed == null ? _match : `${lead}${collapsed}`;
+      },
+    );
+  }).join("");
+}
+
+function collapseInternalLink(label: string, url: string): string | null {
+  if (url.startsWith("file:")) {
+    const path = url.slice("file:".length);
+    if (!path) return null;
+    return label === path ? `[[${path}]]` : `[[${path}|${label}]]`;
+  }
+  if (url.startsWith("dir:")) {
+    const path = url.slice("dir:".length);
+    if (!path) return null;
+    return label === path ? `[[dir:${path}]]` : `[[dir:${path}|${label}]]`;
+  }
+  if (url.startsWith("gitcommit:")) {
+    const sha = url.slice("gitcommit:".length);
+    if (!sha) return null;
+    // If the label is a prefix of the SHA (the bare `[[<sha>]]` form
+    // renders as the short 7-char SHA), drop the label and emit the
+    // bare wikilink. Otherwise preserve it.
+    const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
+    return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
+  }
+  return null;
+}
+
+/**
  * Heuristic: does a wikilink target look like a repo file path rather
  * than a wiki note slug? File paths contain a slash or end in a recognizable
  * extension; bare slugs like `architecture` are routed to wiki navigation.

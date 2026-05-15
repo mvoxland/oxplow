@@ -326,6 +326,65 @@
       .oxplow-md tbody tr { background: var(--surface-card, #1f242c); }
       .oxplow-md tbody tr:nth-child(even) { background: var(--surface-app, #161a20); }
       .oxplow-md tbody tr:hover { background: var(--surface-tab-inactive, #2a313a); }
+
+      /* Rich-text editor surface. The .ProseMirror element is what
+         Tiptap renders into; we inherit the .oxplow-md prose styles
+         and only add the editor-specific affordances (hover tint,
+         pencil reveal, placeholder copy, focus outline). */
+      .oxplow-rt-field {
+        max-width: 78ch;
+        margin: 0 auto;
+      }
+      .oxplow-rt-field:hover { background: var(--surface-card); }
+      .oxplow-rt-field:focus-within {
+        background: var(--surface-card);
+        outline: 1px solid var(--border-strong);
+      }
+      .oxplow-rt-field:hover .oxplow-rt-pencil,
+      .oxplow-rt-field:focus-within .oxplow-rt-pencil { opacity: 0.85 !important; }
+      .oxplow-rt-editor.ProseMirror { outline: none; min-height: 1.4em; }
+      .oxplow-rt-editor.ProseMirror p.is-editor-empty:first-child::before {
+        content: attr(data-placeholder);
+        float: left;
+        height: 0;
+        color: var(--text-muted);
+        pointer-events: none;
+      }
+      /* Within an editor surface, MarkdownView's centering / max-width
+         is already applied by .oxplow-rt-field; cancel the inner one
+         so we don't double-cap. */
+      .oxplow-rt-editor.oxplow-md { max-width: none; margin: 0; }
+
+      /* Task detail page: section subheadings (Acceptance criteria,
+         etc.). Lighter weight than .oxplow-md h3 so the page reads as
+         one document rather than a stack of nested forms. */
+      .task-section-heading {
+        font-family: var(--font-ui);
+        font-size: var(--text-sm);
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: var(--text-secondary);
+        font-weight: var(--weight-medium);
+        margin: 0 0 4px;
+        padding: 0 8px;
+      }
+      .task-title-field::placeholder { color: var(--text-muted); }
+
+      /* Task detail page section heading — matches the wiki prose
+         H2: UI font, bold, soft underline against --border-subtle.
+         Used for "Activity" (and any future per-section heading on
+         the task page) so the page reads as one document, not a
+         stack of labeled chrome. */
+      .task-activity-heading {
+        font-family: var(--font-ui);
+        font-size: var(--text-2xl);
+        font-weight: var(--weight-bold);
+        line-height: var(--leading-tight);
+        color: var(--text-primary);
+        margin: 0 0 12px;
+        padding-bottom: 0.25em;
+        border-bottom: 1px solid var(--border-subtle);
+      }
     </style>
   </head>
   <body>

@@ -114,64 +114,131 @@ fn classify(event: &notify::Event) -> WatchEventKind {
     }
 }
 
-/// Path segments that should never trigger workspace-level watch
-/// reactions (snapshot capture, indexing). These are either oxplow's
-/// own state directories, git's internal write spool (which churns
-/// faster than we can capture and produces ephemeral lock/tmp files
-/// that always race the watcher to a NotFound), or common build /
-/// cache dirs whose churn is enormous and uninteresting.
-const IGNORED_WORKSPACE_SEGMENTS: &[&str] = &[
-    ".git",
-    ".oxplow",
-    "target",
-    "node_modules",
-    "dist",
-    "build",
-    ".next",
-    ".turbo",
-    ".cache",
-    ".venv",
-    "__pycache__",
-];
+/// Path segments that ALWAYS trigger a watch-ignore, regardless of
+/// user config. Limited to `.git` — git's internal write spool
+/// churns faster than we can capture and produces ephemeral
+/// lock/tmp files that always race the watcher to a NotFound, so
+/// watching it is never useful. Everything else (build outputs,
+/// language caches, IDE state) is the user's call via the
+/// `generated` config; we don't pretend to know which dirs each
+/// project actually treats as generated. `.oxplow` is handled
+/// separately above with a `.oxplow/wiki/` carve-out, not via this
+/// segment list.
+const DEFAULT_IGNORED_SEGMENTS: &[&str] = &[".git"];
 
-/// True if any path component of `relative` matches an ignored
-/// workspace segment. `relative` should already be made relative to
-/// the workspace root; absolute paths still work but match conserva-
-/// tively against the same segment list (`.git/...` anywhere in the
-/// chain is treated as ignored).
+/// Workspace-relative path filter. Constructed once at app startup
+/// from the project's `generated` config and shared (by value clone —
+/// the entry vec is short) across snapshot capture, code-quality
+/// scans, fs-watch consumers, etc.
 ///
-/// Exception: paths under `.oxplow/wiki/` pass through. Wiki pages
-/// are authored content and the snapshot system tracks their
-/// history alongside source files. The rest of `.oxplow/`
-/// (`snapshots/`, `state.sqlite*`, `runtime/`, etc.) remains
-/// ignored — those churn fast and are oxplow's own internal state.
-pub fn should_ignore_workspace_watch_path(path: &Path) -> bool {
-    use std::path::Component;
-    let mut comps = path.components().peekable();
-    while let Some(c) = comps.next() {
-        if let Component::Normal(seg) = c {
-            let s = match seg.to_str() {
-                Some(s) => s,
-                None => continue,
-            };
-            if s == ".oxplow" {
-                // Allow `.oxplow/wiki/...` through; ignore everything
-                // else under `.oxplow/`.
-                let next = comps.peek().and_then(|c| match c {
-                    Component::Normal(n) => n.to_str(),
-                    _ => None,
-                });
-                if next == Some("wiki") {
-                    return false;
+/// Match semantics:
+/// - A **single-segment entry** (no `/`) matches if any path component
+///   equals it. So `target` filters `target/`, `crates/foo/target/`,
+///   etc. Mirrors the legacy hardcoded behavior for build dirs.
+/// - A **multi-segment entry** (contains `/`) matches the path exactly
+///   OR as a prefix (`apps/desktop/dist` filters that directory and
+///   everything under it, but NOT `crates/foo/apps/desktop/dist`).
+///
+/// The always-on `.git` ignore and `.oxplow/` (with `.oxplow/wiki/`
+/// carve-out) handling apply regardless of user config; everything
+/// else — build outputs, IDE state, language caches — must be
+/// listed in `generated` explicitly.
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceFilter {
+    user_entries: Vec<FilterEntry>,
+}
+
+#[derive(Debug, Clone)]
+enum FilterEntry {
+    Segment(String),
+    Path(PathBuf),
+}
+
+impl WorkspaceFilter {
+    /// Build a filter from the user's `generated` config list.
+    /// Entries may be a single dir/file name (matches anywhere) or a
+    /// repo-relative path (matches that exact path + everything
+    /// under it).
+    pub fn with_user_entries<I, S>(entries: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let user_entries = entries
+            .into_iter()
+            .filter_map(|raw| {
+                let trimmed = raw.as_ref().trim().trim_matches('/');
+                if trimmed.is_empty() {
+                    return None;
                 }
-                return true;
-            }
-            if IGNORED_WORKSPACE_SEGMENTS.contains(&s) {
-                return true;
+                if trimmed.contains('/') {
+                    Some(FilterEntry::Path(PathBuf::from(trimmed)))
+                } else {
+                    Some(FilterEntry::Segment(trimmed.to_string()))
+                }
+            })
+            .collect();
+        Self { user_entries }
+    }
+
+    /// True if `path` (workspace-relative) should be ignored.
+    pub fn ignore(&self, path: &Path) -> bool {
+        use std::path::Component;
+
+        // Always-on defaults: walk components, match by segment with
+        // the `.oxplow/wiki/` carve-out.
+        let mut comps = path.components().peekable();
+        while let Some(c) = comps.next() {
+            if let Component::Normal(seg) = c {
+                let s = match seg.to_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                if s == ".oxplow" {
+                    let next = comps.peek().and_then(|c| match c {
+                        Component::Normal(n) => n.to_str(),
+                        _ => None,
+                    });
+                    if next == Some("wiki") {
+                        return false;
+                    }
+                    return true;
+                }
+                if DEFAULT_IGNORED_SEGMENTS.contains(&s) {
+                    return true;
+                }
             }
         }
+
+        // User entries: segments match any component, paths match
+        // exact-or-prefix.
+        for entry in &self.user_entries {
+            match entry {
+                FilterEntry::Segment(seg) => {
+                    if path.components().any(
+                        |c| matches!(c, Component::Normal(n) if n.to_str() == Some(seg.as_str())),
+                    ) {
+                        return true;
+                    }
+                }
+                FilterEntry::Path(p) => {
+                    if path == p.as_path() || path.starts_with(p) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
-    false
+}
+
+/// Default-only shorthand for callers that don't have a configured
+/// filter handy (e.g. the snapshot-sweep example binary). Equivalent
+/// to `WorkspaceFilter::default().ignore(path)` — applies the always-
+/// on defaults only, no user entries.
+pub fn should_ignore_workspace_watch_path(path: &Path) -> bool {
+    WorkspaceFilter::default().ignore(path)
 }
 
 #[cfg(test)]
@@ -319,25 +386,27 @@ mod tests {
     }
 
     #[test]
-    fn should_ignore_filters_oxplow_git_and_build_dirs() {
+    fn should_ignore_filters_oxplow_and_git() {
+        // Always-on: anything under `.oxplow/` except `.oxplow/wiki/`,
+        // and anything under `.git/`. Everything else is the user's
+        // call via the `generated` config.
         assert!(should_ignore_workspace_watch_path(Path::new(
             ".oxplow/snapshots/aa/foo.tmp"
         )));
-        // Wiki pages under .oxplow/wiki/ are tracked, not ignored.
         assert!(!should_ignore_workspace_watch_path(Path::new(
             ".oxplow/wiki/local-snapshots.md"
         )));
-        // Other .oxplow/* paths stay ignored.
         assert!(should_ignore_workspace_watch_path(Path::new(
             ".oxplow/state.sqlite"
         )));
         assert!(should_ignore_workspace_watch_path(Path::new(
             ".git/index.lock"
         )));
-        assert!(should_ignore_workspace_watch_path(Path::new(
+        // Build dirs are NOT default-ignored; users opt in via `generated`.
+        assert!(!should_ignore_workspace_watch_path(Path::new(
             "target/debug/x.bin"
         )));
-        assert!(should_ignore_workspace_watch_path(Path::new(
+        assert!(!should_ignore_workspace_watch_path(Path::new(
             "node_modules/foo/index.js"
         )));
         assert!(!should_ignore_workspace_watch_path(Path::new(
@@ -346,6 +415,60 @@ mod tests {
         assert!(!should_ignore_workspace_watch_path(Path::new(
             "docs/README.md"
         )));
+    }
+
+    #[test]
+    fn workspace_filter_user_segment_matches_anywhere() {
+        let f = WorkspaceFilter::with_user_entries([".idea"]);
+        assert!(f.ignore(Path::new(".idea/workspace.xml")));
+        assert!(f.ignore(Path::new("nested/.idea/foo")));
+        assert!(!f.ignore(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn workspace_filter_user_path_matches_prefix_only() {
+        // Use a path entry whose segments don't collide with the
+        // always-on defaults (no `dist`, `target`, etc.). That lets
+        // us isolate the "matches prefix only" semantics.
+        let f = WorkspaceFilter::with_user_entries(["apps/desktop/generated"]);
+        assert!(f.ignore(Path::new("apps/desktop/generated")));
+        assert!(f.ignore(Path::new("apps/desktop/generated/index.js")));
+        assert!(!f.ignore(Path::new("apps/desktop")));
+        // Not a free-floating match — only the exact prefix counts.
+        assert!(!f.ignore(Path::new("crates/foo/apps/desktop/generated/x")));
+    }
+
+    #[test]
+    fn workspace_filter_user_file_path_matches_exact() {
+        let f = WorkspaceFilter::with_user_entries(["docs/generated/output.txt"]);
+        assert!(f.ignore(Path::new("docs/generated/output.txt")));
+        assert!(!f.ignore(Path::new("docs/generated/other.txt")));
+    }
+
+    #[test]
+    fn workspace_filter_defaults_apply_even_with_empty_user_list() {
+        // Defaults are `.git` (segment) and `.oxplow/*` (with a
+        // `.oxplow/wiki/` carve-out). Build dirs are NOT defaults —
+        // they require the user to add them to `generated`.
+        let f = WorkspaceFilter::default();
+        assert!(f.ignore(Path::new(".git/HEAD")));
+        assert!(f.ignore(Path::new("crates/foo/.git/HEAD")));
+        assert!(!f.ignore(Path::new("node_modules/x")));
+        assert!(!f.ignore(Path::new("target/debug")));
+        assert!(!f.ignore(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn workspace_filter_oxplow_wiki_passes_through() {
+        let f = WorkspaceFilter::default();
+        assert!(!f.ignore(Path::new(".oxplow/wiki/page.md")));
+        assert!(f.ignore(Path::new(".oxplow/state.sqlite")));
+    }
+
+    #[test]
+    fn workspace_filter_empty_entries_are_dropped() {
+        let f = WorkspaceFilter::with_user_entries(["", "  ", "/"]);
+        assert!(!f.ignore(Path::new("foo.txt")));
     }
 
     #[tokio::test]

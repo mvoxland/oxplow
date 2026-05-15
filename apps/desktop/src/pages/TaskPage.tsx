@@ -129,7 +129,7 @@ export function TaskPage({
 
   const handleUpdate = async (
     targetId: number,
-    changes: { title?: string; description?: string; acceptanceCriteria?: string | null; status?: TaskStatus; priority?: TaskPriority; category?: string | null; tags?: string | null },
+    changes: { title?: string; description?: string; status?: TaskStatus; priority?: TaskPriority; category?: string | null; tags?: string | null },
   ) => {
     if (!stream || !thread) return;
     await updateTask(stream.id, thread.id, targetId, changes);
@@ -188,19 +188,17 @@ export function TaskPage({
       layout="details"
       rightRail={rail}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         <TaskDetail item={item} onUpdateTask={handleUpdate} />
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>
-            Activity
-          </div>
+        <section>
+          <h2 className="task-activity-heading">Activity</h2>
           <ActivityTimeline
             efforts={efforts}
             formatTimestamp={(iso) => new Date(iso).toLocaleString()}
             onOpenFile={onOpenFile}
             onShowInHistory={onShowInHistory}
           />
-        </div>
+        </section>
       </div>
     </Page>
   );

@@ -1,2 +1,7 @@
 generatedDirs:
-- Target
+- target
+- .idea
+- node_modules
+- site
+- target
+- oxplow.iml

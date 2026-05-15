@@ -73,7 +73,6 @@ pub enum ReadWorkOptionsResult {
 pub struct CreateTaskInput {
     pub title: String,
     pub description: Option<String>,
-    pub acceptance_criteria: Option<String>,
     pub parent_id: Option<TaskId>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
@@ -91,7 +90,6 @@ pub struct CreateTaskInput {
 pub struct UpdateTaskChanges {
     pub title: Option<String>,
     pub description: Option<String>,
-    pub acceptance_criteria: Option<Option<String>>,
     pub parent_id: Option<Option<TaskId>>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
@@ -163,7 +161,6 @@ impl TaskService {
             parent_id: input.parent_id,
             title: input.title,
             description: input.description.unwrap_or_default(),
-            acceptance_criteria: input.acceptance_criteria,
             status: input.status.unwrap_or(TaskStatus::Ready),
             priority: input.priority.unwrap_or(TaskPriority::Medium),
             sort_index: next_sort,
@@ -204,9 +201,6 @@ impl TaskService {
         }
         if let Some(d) = changes.description {
             item.description = d;
-        }
-        if let Some(ac) = changes.acceptance_criteria {
-            item.acceptance_criteria = ac;
         }
         if let Some(p) = changes.parent_id {
             item.parent_id = p;
@@ -791,6 +785,7 @@ mod tests {
                 project.path().to_path_buf(),
                 s.id.clone(),
                 1_000_000,
+                oxplow_fs_watch::WorkspaceFilter::default(),
             )
             // Tests bypass the settle gate; the gate is independently
             // covered in `snapshot_capture::tests::settle_window_*`.
@@ -1225,7 +1220,6 @@ mod tests {
             parent_id: None,
             title: id.to_string(),
             description: String::new(),
-            acceptance_criteria: None,
             status,
             priority: TaskPriority::Medium,
             sort_index: 0,
@@ -1261,7 +1255,6 @@ mod tests {
             parent_id: None,
             title: id.to_string(),
             description: String::new(),
-            acceptance_criteria: None,
             status,
             priority: TaskPriority::Medium,
             sort_index: 0,

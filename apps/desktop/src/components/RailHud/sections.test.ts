@@ -14,7 +14,6 @@ function makeItem(partial: Partial<Task> & { id: number; status: Task["status"];
     parent_id: null,
     title: String(partial.id),
     description: "",
-    acceptance_criteria: null,
     status: partial.status,
     priority: "medium",
     sort_index: 0,

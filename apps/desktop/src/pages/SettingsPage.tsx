@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import {
   getConfig,
   setAgentPromptAppend,
-  setGeneratedDirs,
+  setGenerated,
   setSnapshotMaxFileBytes,
   setSnapshotRetentionDays,
 } from "../api.js";
@@ -24,7 +24,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [promptAppend, setPromptAppend] = useState("");
   const [retentionDays, setRetentionDays] = useState("7");
   const [maxFileMiB, setMaxFileMiB] = useState("5");
-  const [generatedDirsText, setGeneratedDirsText] = useState("");
+  const [generatedText, setGeneratedText] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         setPromptAppend(config.agentPromptAppend ?? "");
         setRetentionDays(String(config.snapshotRetentionDays));
         setMaxFileMiB((config.snapshotMaxFileBytes / (1024 * 1024)).toString());
-        setGeneratedDirsText((config.generatedDirs ?? []).join("\n"));
+        setGeneratedText((config.generated ?? []).join("\n"));
         setLoaded(true);
       })
       .catch((e) => {
@@ -65,7 +65,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       if (bytes < 1024) {
         throw new Error("Snapshot max file size must be at least 1 KiB.");
       }
-      const dirs = generatedDirsText
+      const entries = generatedText
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
@@ -73,7 +73,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
       await setAgentPromptAppend(promptAppend);
       await setSnapshotRetentionDays(days);
       await setSnapshotMaxFileBytes(bytes);
-      await setGeneratedDirs(dirs);
+      await setGenerated(entries);
       setSavedMessage("Saved. Agent prompt applies to newly-started sessions.");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -154,8 +154,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             snapshot tracking. Added on top of the built-in list (node_modules, dist, build, .git, etc.).
           </Hint>
           <textarea
-            value={generatedDirsText}
-            onChange={(event) => setGeneratedDirsText(event.target.value)}
+            value={generatedText}
+            onChange={(event) => setGeneratedText(event.target.value)}
             disabled={!loaded || saving}
             rows={5}
             placeholder={"e.g.\ncoverage\n.cache"}

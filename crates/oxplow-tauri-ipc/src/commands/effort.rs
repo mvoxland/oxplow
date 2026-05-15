@@ -1,10 +1,20 @@
 //! task effort tracking commands.
 
+use std::path::Path;
+
 use oxplow_db::{EffortAtSnapshot, EffortFile, TaskEffort, TaskEffortStore as _};
 use oxplow_domain::{EffortId, TaskId};
+use oxplow_fs_watch::WorkspaceFilter;
 
 use crate::error::IpcError;
 use crate::state::AppState;
+
+fn current_filter(state: &AppState) -> WorkspaceFilter {
+    let cfg = state.config.read();
+    cfg.as_ref()
+        .map(|c| WorkspaceFilter::with_user_entries(&c.generated))
+        .unwrap_or_default()
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -21,7 +31,12 @@ pub async fn get_effort_files(
     state: tauri::State<'_, AppState>,
     effort_id: EffortId,
 ) -> Result<Vec<EffortFile>, IpcError> {
-    Ok(state.effort_store.list_files(&effort_id).await?)
+    let filter = current_filter(&state);
+    let rows = state.effort_store.list_files(&effort_id).await?;
+    Ok(rows
+        .into_iter()
+        .filter(|f| !filter.ignore(Path::new(&f.path)))
+        .collect())
 }
 
 #[tauri::command]
@@ -48,8 +63,13 @@ pub async fn list_changed_paths_for_effort(
     state: tauri::State<'_, AppState>,
     effort_id: EffortId,
 ) -> Result<Vec<String>, IpcError> {
-    Ok(state
+    let filter = current_filter(&state);
+    let paths = state
         .effort_store
         .list_changed_paths_for_effort(&effort_id)
-        .await?)
+        .await?;
+    Ok(paths
+        .into_iter()
+        .filter(|p| !filter.ignore(Path::new(p)))
+        .collect())
 }

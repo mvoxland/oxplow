@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseMarkdownLink, preprocessWikilinks } from "./MarkdownView.js";
+import { parseMarkdownLink, postprocessWikilinks, preprocessWikilinks } from "./MarkdownView.js";
 
 // parseMarkdownLink is shared by WikiPageTab and TaskDetail. WikiPageTab needs
 // to distinguish wiki-internal links (`./foo`, `bar.md`) from external
@@ -209,4 +209,63 @@ test("preprocessWikilinks: dir: prefix tolerates trailing slash on the path", ()
 test("preprocessWikilinks: dir: prefix with custom display label", () => {
   expect(preprocessWikilinks("[[dir:src/components|the components folder]]"))
     .toBe("[the components folder](dir:src/components)");
+});
+
+// postprocessWikilinks is the inverse used on RichTextField → disk.
+// It converts standard markdown links with our internal schemes back
+// into `[[ ]]` wikilink form so wiki pages keep their authored shape.
+
+test("postprocessWikilinks: file link with matching label collapses to bare wikilink", () => {
+  expect(postprocessWikilinks("see [src/foo.ts](file:src/foo.ts) here"))
+    .toBe("see [[src/foo.ts]] here");
+});
+
+test("postprocessWikilinks: file link with distinct label preserves the label", () => {
+  expect(postprocessWikilinks("see [the helper](file:src/foo.ts) here"))
+    .toBe("see [[src/foo.ts|the helper]] here");
+});
+
+test("postprocessWikilinks: dir link", () => {
+  expect(postprocessWikilinks("[src/components](dir:src/components)"))
+    .toBe("[[dir:src/components]]");
+  expect(postprocessWikilinks("[the components folder](dir:src/components)"))
+    .toBe("[[dir:src/components|the components folder]]");
+});
+
+test("postprocessWikilinks: gitcommit link with short-sha label drops the label", () => {
+  expect(postprocessWikilinks("see [abc1234](gitcommit:abc1234deadbeef) here"))
+    .toBe("see [[git:abc1234deadbeef]] here");
+});
+
+test("postprocessWikilinks: gitcommit link with custom label preserves it", () => {
+  expect(postprocessWikilinks("see [the fix](gitcommit:abc1234deadbeef) here"))
+    .toBe("see [[git:abc1234deadbeef|the fix]] here");
+});
+
+test("postprocessWikilinks: leaves plain http/https/internal-slug links alone", () => {
+  expect(postprocessWikilinks("see [docs](https://example.com) plus [arch](architecture)"))
+    .toBe("see [docs](https://example.com) plus [arch](architecture)");
+});
+
+test("postprocessWikilinks: skips image links and inline code", () => {
+  const src = "![alt](file:foo.png) and `[label](file:foo.ts)` literal";
+  expect(postprocessWikilinks(src)).toBe(src);
+});
+
+test("postprocessWikilinks: skips fenced code blocks", () => {
+  const src = "before\n```\n[label](file:foo.ts)\n```\nafter [label](file:foo.ts)";
+  expect(postprocessWikilinks(src))
+    .toBe("before\n```\n[label](file:foo.ts)\n```\nafter [[foo.ts|label]]");
+});
+
+test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported forms", () => {
+  const samples = [
+    "see [[src/foo.ts]] in the codebase",
+    "see [[src/foo.ts|the helper]] in the codebase",
+    "see [[dir:src/components]] for buttons",
+    "see [[dir:src/components|the folder]] for buttons",
+  ];
+  for (const sample of samples) {
+    expect(postprocessWikilinks(preprocessWikilinks(sample))).toBe(sample);
+  }
 });

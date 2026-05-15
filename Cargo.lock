@@ -3154,6 +3154,7 @@ dependencies = [
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-fs-watch",
  "oxplow-git",
  "oxplow-plugin",
  "oxplow-session",

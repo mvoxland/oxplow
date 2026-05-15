@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef } from "react";
 import {
+  writeWikiPageBody,
   type Stream,
   type WikiPageSummary,
 } from "../../api.js";
-import { MarkdownView } from "./MarkdownView.js";
+import { MarkdownView, preprocessWikilinks, postprocessWikilinks } from "./MarkdownView.js";
+import { RichTextField } from "../RichText/RichTextField.js";
+import { recordOpError } from "../opErrorsStore.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
@@ -39,6 +42,7 @@ interface Props {
 }
 
 export function WikiPageTab({
+  stream,
   slug,
   controller,
   onScrollHostMounted,
@@ -49,7 +53,11 @@ export function WikiPageTab({
   onOpenCommit,
   onOpenExternalUrl,
 }: Props) {
-  const { summary, body, draft, setDraft, draftInitialized, editing, notFound, loadError } = controller;
+  const { summary, body, setDraft, notFound, loadError } = controller;
+  // Pre-process `[[ ]]` wikilinks into standard markdown links before
+  // handing the body to Tiptap; post-process back to `[[ ]]` form on
+  // commit so the on-disk file keeps its authored shape.
+  const editorValue = useMemo(() => preprocessWikilinks(body), [body]);
 
   // Persist scroll position across restart — see original WikiPageTab
   // for the rationale (ref-based to avoid wheel-event setState loops).
@@ -95,34 +103,22 @@ export function WikiPageTab({
           </div>
         ) : loadError ? (
           <div style={{ color: "var(--severity-critical)" }}>Failed to load wiki page: {loadError}</div>
-        ) : editing ? (
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            style={{
-              width: "100%",
-              height: "100%",
-              minHeight: 300,
-              fontFamily: "var(--font-mono, monospace)",
-              fontSize: "var(--text-sm)",
-              background: "var(--surface-card)",
-              color: "var(--text-primary)",
-              border: "1px solid var(--border-subtle)",
-              padding: 8,
-              resize: "none",
-            }}
-          />
         ) : (
-          <MarkdownView
-            className="wiki-page-markdown"
-            body={draftInitialized ? draft : body}
-            onNavigateInternal={onNavigateInternalWikiPage}
-            onOpenInNewTab={onOpenWikiPageInNewTab}
-            onOpenFile={(path) => onOpenFile(path)}
-            onOpenDirectory={onOpenDirectory}
-            onOpenCommit={onOpenCommit}
-            onOpenExternalUrl={onOpenExternalUrl}
-            renderMermaid
+          <RichTextField
+            key={`wiki-${slug}`}
+            value={editorValue}
+            placeholder={`Start writing your wiki page (${slug})…`}
+            onCommit={(markdown) => {
+              const next = postprocessWikilinks(markdown);
+              if (next === body) return;
+              setDraft(next);
+              void writeWikiPageBody(stream.id, slug, next).catch((error) => {
+                recordOpError({
+                  label: `Save wiki page "${slug}"`,
+                  message: String(error),
+                });
+              });
+            }}
           />
         )}
       </div>
