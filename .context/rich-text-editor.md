@@ -46,8 +46,12 @@ show the pencil — that's the consistent signal "this is for reading."
 - **`InternalLink.ts`** — extends Tiptap's standard `Link` mark to
   allow `file:`, `dir:`, `gitcommit:` URL schemes through the URL
   sanitizer. `openOnClick: false` — click handling is owned by the
-  page-level handler (currently the read view; in-editor click
-  routing through `useOptionalPageNavigation` is a follow-up).
+  React layer: the `RichTextField` wrapper's `onClick` /
+  `onAuxClick` intercepts clicks on `<a>` descendants, parses the
+  href via `parseMarkdownLink` (reused from `MarkdownView`), and
+  routes through `useOptionalPageNavigation`. Plain click → in-tab
+  navigate; Cmd/Ctrl/middle/right click → new tab. Cursor placement
+  inside link text is sacrificed — arrow in from adjacent text.
 
 ## What's in `apps/desktop/src/components/Wiki/mermaidRender.ts`
 
@@ -89,11 +93,6 @@ alone — collapsing those into `[[ ]]` form would be lossy.
 
 ## What does NOT round-trip yet
 
-- **Internal-link click routing.** Inside the editor, clicking a
-  `file:`/`dir:`/`gitcommit:` link does nothing — `openOnClick:
-  false`. The read-only `MarkdownView` path still routes via
-  `useOptionalPageNavigation`. Adding in-editor click routing is a
-  follow-up.
 - **Per-link kebab menus / wiki title resolution.** `MarkdownView`
   attaches a hover-revealed kebab to every link (copy URL, open in
   new tab, etc.) and swaps bare `[[slug]]` text for the resolved

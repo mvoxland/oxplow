@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -7,6 +7,10 @@ import { Markdown } from "tiptap-markdown";
 import { Pencil } from "lucide-react";
 import { InternalLink } from "./InternalLink.js";
 import { MermaidBlock } from "./MermaidBlock.js";
+import { parseMarkdownLink } from "../Wiki/MarkdownView.js";
+import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
+import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
+import { DISK } from "../../file-version.js";
 
 /**
  * Shared rich-text editor surface. One instance per editable region
@@ -135,14 +139,62 @@ export function RichTextField({
     ...style,
   };
 
+  // Plain-click on a wikilink / file: / dir: / gitcommit: anchor inside
+  // the editable surface should follow the link, not place a cursor.
+  // Mirrors `MarkdownView`'s click semantics so the read-only and
+  // editable surfaces feel the same: in-tab navigate via
+  // `PageNavigationContext`, modifier/middle/right click escapes to a
+  // new tab. Cursor placement inside link text is sacrificed — arrow
+  // in from adjacent text — which is fine for wikilinks since the
+  // visible label is rarely the cursor target.
+  const ctxNav = useOptionalPageNavigation();
+  const handleAnchorIntent = (event: ReactMouseEvent<HTMLDivElement>, isAux: boolean): boolean => {
+    const target = event.target as HTMLElement | null;
+    const anchor = target?.closest?.("a");
+    if (!anchor) return false;
+    const href = anchor.getAttribute("href") ?? "";
+    const parsed = parseMarkdownLink(href);
+    if (parsed.kind === "anchor" || parsed.kind === "empty") return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const newTab = isAux || event.metaKey || event.ctrlKey || event.button === 1;
+    if (parsed.kind === "external") {
+      window.open(href, "_blank", "noopener,noreferrer");
+      return true;
+    }
+    if (parsed.kind === "file") {
+      const version = parsed.version ?? DISK;
+      ctxNav?.navigate(fileRef(parsed.path, version), { newTab });
+      return true;
+    }
+    if (parsed.kind === "directory") {
+      ctxNav?.navigate(directoryRef(parsed.path), { newTab });
+      return true;
+    }
+    if (parsed.kind === "git-commit") {
+      ctxNav?.navigate(gitCommitRef(parsed.sha), { newTab });
+      return true;
+    }
+    if (parsed.kind === "internal") {
+      ctxNav?.navigate(wikiPageRef(parsed.slug), { newTab });
+      return true;
+    }
+    return false;
+  };
+
   return (
     <div
       className={`oxplow-rt-field ${className ?? ""}`.trim()}
       style={wrapperStyle}
-      onClick={() => {
+      onClick={(event) => {
+        if (handleAnchorIntent(event, false)) return;
         // Clicking anywhere on the wrapper focuses the editor — keeps
         // the "the whole block is editable" feel from Linear.
         if (editor && !editor.isFocused) editor.commands.focus("end");
+      }}
+      onAuxClick={(event) => {
+        // Middle-click on a link → new-tab navigate.
+        if (event.button === 1) handleAnchorIntent(event, true);
       }}
     >
       {!hidePencil ? (

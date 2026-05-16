@@ -8,9 +8,10 @@ import Link from "@tiptap/extension-link";
  * link plugin.
  *
  * Click handling for these schemes still happens at the React layer
- * (the `RichTextField` editor surface wires `editorProps.handleClickOn`
- * to route to `useOptionalPageNavigation`), so the mark itself only
- * needs to *preserve* the URL through parse/serialize.
+ * (the `RichTextField` wrapper's `onClick` / `onAuxClick` intercepts
+ * clicks on `<a>` descendants and routes them through
+ * `useOptionalPageNavigation`, mirroring `MarkdownView`), so the mark
+ * itself only needs to *preserve* the URL through parse/serialize.
  */
 export const InternalLink = Link.extend({
   // Allow our schemes through the URL sanitizer.

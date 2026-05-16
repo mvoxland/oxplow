@@ -343,6 +343,11 @@
       .oxplow-rt-field:hover .oxplow-rt-pencil,
       .oxplow-rt-field:focus-within .oxplow-rt-pencil { opacity: 0.85 !important; }
       .oxplow-rt-editor.ProseMirror { outline: none; min-height: 1.4em; }
+      /* Wikilink / file: / dir: / gitcommit: anchors inside the editor
+         are click-to-navigate (handled by RichTextField's wrapper),
+         so they should advertise themselves as links rather than
+         showing the editor's text-insertion cursor. */
+      .oxplow-rt-editor a { cursor: pointer; }
       .oxplow-rt-editor.ProseMirror p.is-editor-empty:first-child::before {
         content: attr(data-placeholder);
         float: left;
