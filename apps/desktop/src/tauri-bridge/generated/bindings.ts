@@ -173,10 +173,6 @@ export const commands = {
 	deleted_at: Timestamp | null,
 	note_count: number,
 	author: TaskAuthor | null,
-	// Free-text grooming bucket used by the Backlog page's group-by.
-	category: string | null,
-	// Comma-separated tags used by the Backlog page filter chips.
-	tags: string | null,
 } | null, IpcError>(__TAURI_INVOKE("get_task", { id })),
 	/**
 	 *  Insert-or-update a Task. The id field acts as the discriminator —
@@ -914,8 +910,6 @@ export type CreateTaskInput = {
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,
-	category: string | null,
-	tags: string | null,
 	author: TaskAuthor | null,
 };
 
@@ -1476,10 +1470,6 @@ export type Task = {
 	deleted_at: Timestamp | null,
 	note_count: number,
 	author: TaskAuthor | null,
-	// Free-text grooming bucket used by the Backlog page's group-by.
-	category: string | null,
-	// Comma-separated tags used by the Backlog page filter chips.
-	tags: string | null,
 };
 
 // Who or what wrote a task row to the DB.
@@ -1641,10 +1631,7 @@ export type UiLogEntry = {
 
 /**
  *  Partial-patch for `update_task`. Each `Option` follows
- *  "missing -> keep, present -> replace" semantics. `category` and
- *  `tags` use a wrapping `Option<Option<…>>`-via-helper pattern to
- *  distinguish "keep" from "clear"; in this struct, `null` clears and
- *  missing keeps.
+ *  "missing -> keep, present -> replace" semantics.
  */
 export type UpdateTaskChanges = {
 	title: string | null,
@@ -1652,8 +1639,6 @@ export type UpdateTaskChanges = {
 	parent_id: TaskId | null,
 	status: TaskStatus | null,
 	priority: TaskPriority | null,
-	category: string | null,
-	tags: string | null,
 };
 
 export type UpdateTaskRequest = {

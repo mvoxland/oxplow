@@ -46,8 +46,6 @@ export interface Task {
   completed_at: string | null;
   note_count: number;
   author: "user" | "agent" | null;
-  category: string | null;
-  tags: string | null;
 }
 
 export interface TaskNote {

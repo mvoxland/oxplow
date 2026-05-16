@@ -76,16 +76,11 @@ pub struct CreateTaskInput {
     pub parent_id: Option<TaskId>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
-    pub category: Option<String>,
-    pub tags: Option<String>,
     pub author: Option<TaskAuthor>,
 }
 
 /// Partial-patch for `update_task`. Each `Option` follows
-/// "missing -> keep, present -> replace" semantics. `category` and
-/// `tags` use a wrapping `Option<Option<…>>`-via-helper pattern to
-/// distinguish "keep" from "clear"; in this struct, `null` clears and
-/// missing keeps.
+/// "missing -> keep, present -> replace" semantics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 pub struct UpdateTaskChanges {
     pub title: Option<String>,
@@ -93,8 +88,6 @@ pub struct UpdateTaskChanges {
     pub parent_id: Option<Option<TaskId>>,
     pub status: Option<TaskStatus>,
     pub priority: Option<TaskPriority>,
-    pub category: Option<Option<String>>,
-    pub tags: Option<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -171,8 +164,6 @@ impl TaskService {
             deleted_at: None,
             note_count: 0,
             author: input.author.or(Some(TaskAuthor::User)),
-            category: input.category,
-            tags: input.tags,
         };
         let id = self.store.insert(&item).await?;
         item.id = id;
@@ -216,12 +207,6 @@ impl TaskService {
         }
         if let Some(p) = changes.priority {
             item.priority = p;
-        }
-        if let Some(c) = changes.category {
-            item.category = c;
-        }
-        if let Some(t) = changes.tags {
-            item.tags = t;
         }
         item.updated_at = Timestamp::now();
         self.store.update(&item).await?;
@@ -1230,8 +1215,6 @@ mod tests {
             deleted_at: None,
             note_count: 0,
             author: Some(TaskAuthor::User),
-            category: None,
-            tags: None,
         };
         let rows = vec![
             mk(1, TaskStatus::Ready),
@@ -1265,8 +1248,6 @@ mod tests {
             deleted_at: None,
             note_count: 0,
             author: Some(TaskAuthor::User),
-            category: None,
-            tags: None,
         };
         let st = BacklogState::from_rows(vec![
             mk(1, TaskStatus::Done),

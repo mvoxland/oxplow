@@ -108,9 +108,6 @@ export function BacklogDrawer({
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {item.title}
                 </span>
-                {item.category ? (
-                  <span style={{ color: "var(--muted)", fontSize: 11 }}>{item.category}</span>
-                ) : null}
                 <button
                   type="button"
                   disabled={!activeThreadId}

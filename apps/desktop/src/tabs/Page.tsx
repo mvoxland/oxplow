@@ -396,9 +396,7 @@ function DetailsBody({ children, rightRail }: { children: ReactNode; rightRail?:
       <div
         data-testid="page-details-center"
         style={{
-          maxWidth: 760,
           width: "100%",
-          justifySelf: "center",
           minWidth: 0,
         }}
       >

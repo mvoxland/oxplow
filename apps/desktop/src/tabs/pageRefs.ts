@@ -212,8 +212,6 @@ export function dashboardRef(variant: DashboardKind): TabRef {
 export interface NewtasksPayload {
   /** Optional pre-selected parent epic id. */
   parentId?: number | null;
-  /** Optional default category (carried forward by "Save and Another"). */
-  initialCategory?: string | null;
   /** Optional default priority. */
   initialPriority?: string | null;
 }

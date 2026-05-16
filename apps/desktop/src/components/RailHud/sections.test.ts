@@ -23,8 +23,6 @@ function makeItem(partial: Partial<Task> & { id: number; status: Task["status"];
     completed_at: null,
     note_count: 0,
     author: "user",
-    category: null,
-    tags: null,
   };
   return { ...base, ...rest };
 }

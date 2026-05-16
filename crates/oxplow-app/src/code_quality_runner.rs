@@ -317,7 +317,14 @@ pub async fn run_duplication_scan(
             opts.files.iter().cloned(),
         ))
     };
-    run_duplication_scan_with(source, filter, workspace_filter, opts.timeout, opts.dup_options).await
+    run_duplication_scan_with(
+        source,
+        filter,
+        workspace_filter,
+        opts.timeout,
+        opts.dup_options,
+    )
+    .await
 }
 
 /// `FileFilter` adapter: keeps a path iff the wrapped inner filter
@@ -445,7 +452,13 @@ fn helper(items: Vec<i32>) -> Vec<i32> {
             }),
             ..RunOptions::default()
         };
-        let findings = run_duplication_scan(dir.path(), opts, oxplow_fs_watch::WorkspaceFilter::default()).await.unwrap();
+        let findings = run_duplication_scan(
+            dir.path(),
+            opts,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await
+        .unwrap();
         let dups: Vec<_> = findings
             .iter()
             .filter(|f| f.kind == "duplicate-block")
@@ -616,7 +629,9 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             }),
             ..RunOptions::default()
         };
-        let duplication = run_duplication_scan(dir.path(), dup_opts, filter).await.unwrap();
+        let duplication = run_duplication_scan(dir.path(), dup_opts, filter)
+            .await
+            .unwrap();
         let dups: Vec<_> = duplication
             .iter()
             .filter(|f| f.kind == "duplicate-block")
@@ -694,7 +709,13 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             }),
             ..RunOptions::default()
         };
-        let duplication = run_duplication_scan(dir.path(), dup_opts, oxplow_fs_watch::WorkspaceFilter::default()).await.unwrap();
+        let duplication = run_duplication_scan(
+            dir.path(),
+            dup_opts,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await
+        .unwrap();
         let clj_dups: Vec<_> = duplication
             .iter()
             .filter(|f| f.kind == "duplicate-block" && (f.path == "a.clj" || f.path == "b.clj"))
@@ -718,9 +739,13 @@ fn handle(values: Vec<i32>) -> Vec<i32> {
             "fn unrelated() { println!(\"hi\"); }",
         )
         .unwrap();
-        let findings = run_duplication_scan(dir.path(), RunOptions::default(), oxplow_fs_watch::WorkspaceFilter::default())
-            .await
-            .unwrap();
+        let findings = run_duplication_scan(
+            dir.path(),
+            RunOptions::default(),
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .await
+        .unwrap();
         assert!(findings.is_empty());
     }
 
@@ -821,9 +846,15 @@ fn case_b(items: Vec<i32>) -> Vec<i32> {
         std::fs::write(dir.path().join("only.rs"), body_with_repeat).unwrap();
         let source: Arc<dyn TreeSource> = Arc::new(DiskTreeSource::new(dir.path().to_path_buf()));
         let scope: Arc<dyn FileFilter> = Arc::new(ExplicitPaths::new(vec!["only.rs".to_string()]));
-        let findings = run_duplication_scan_scoped(source, scope, oxplow_fs_watch::WorkspaceFilter::default(), None, None)
-            .await
-            .unwrap();
+        let findings = run_duplication_scan_scoped(
+            source,
+            scope,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         // Even if the engine surfaces in-file matches, the scoped
         // runner's same-path filter must drop them.
         for f in &findings {

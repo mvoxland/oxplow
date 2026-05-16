@@ -757,8 +757,6 @@ mod tests {
                 deleted_at: None,
                 note_count: 0,
                 author: Some(TaskAuthor::User),
-                category: None,
-                tags: None,
             })
             .await
             .unwrap();
@@ -1010,8 +1008,6 @@ mod tests {
                 deleted_at: None,
                 note_count: 0,
                 author: Some(TaskAuthor::User),
-                category: None,
-                tags: None,
             })
             .await
             .unwrap();

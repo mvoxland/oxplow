@@ -138,8 +138,6 @@ pub struct CreateTaskMcpParams {
     pub description: Option<String>,
     pub kind: Option<String>,
     pub priority: Option<String>,
-    pub category: Option<String>,
-    pub tags: Option<String>,
     pub parent_id: Option<String>,
     /// Initial status — defaults to `ready`. Pass `in_progress`
     /// when starting the work in the same call (filing-enforcement
@@ -859,8 +857,6 @@ impl OxplowMcp {
                     parent_id: parent_task_id,
                     status,
                     priority,
-                    category: p.category,
-                    tags: p.tags,
                     author: Some(oxplow_domain::TaskAuthor::Agent),
                 },
             )
@@ -944,8 +940,6 @@ impl OxplowMcp {
                     parent_id,
                     status,
                     priority,
-                    category: None,
-                    tags: None,
                 },
             )
             .await
@@ -1973,8 +1967,6 @@ mod tests {
             deleted_at: None,
             note_count: 0,
             author: Some(TaskAuthor::User),
-            category: None,
-            tags: None,
         }
     }
 
@@ -2134,8 +2126,6 @@ mod tests {
                 kind: None,
                 priority: None,
                 status: None,
-                category: None,
-                tags: None,
                 parent_id: None,
                 touched_files: None,
             }))
@@ -2161,8 +2151,6 @@ mod tests {
                 kind: None,
                 priority: None,
                 status: None,
-                category: None,
-                tags: None,
                 parent_id: None,
                 touched_files: None,
             }))

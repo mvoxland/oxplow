@@ -138,8 +138,6 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let completed_at: Option<String> = row.get("completed_at")?;
     let deleted_at: Option<String> = row.get("deleted_at")?;
     let author: Option<String> = row.get("author")?;
-    let category: Option<String> = row.get("category")?;
-    let tags: Option<String> = row.get("tags")?;
 
     let note_count: i64 = row
         .get::<_, Option<i64>>("note_count")
@@ -173,8 +171,6 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .map_err(map_err)?,
         note_count,
         author: author.and_then(|a| str_to_author(&a).ok()),
-        category,
-        tags,
     })
 }
 
@@ -284,8 +280,8 @@ impl TaskStore for SqliteTaskStore {
                     "INSERT INTO task (
                         thread_id, parent_id, title, description,
                         status, priority, sort_index, created_by, created_at, updated_at,
-                        completed_at, deleted_at, author, category, tags
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                        completed_at, deleted_at, author
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                     params![
                         item.thread_id.as_ref().map(|t| t.as_str()),
                         item.parent_id.map(|p| p.value()),
@@ -300,8 +296,6 @@ impl TaskStore for SqliteTaskStore {
                         item.completed_at.map(ts_to_string),
                         item.deleted_at.map(ts_to_string),
                         item.author.map(author_to_str),
-                        item.category,
-                        item.tags,
                     ],
                 )?;
                 let id = conn.last_insert_rowid();
@@ -343,9 +337,7 @@ impl TaskStore for SqliteTaskStore {
                         updated_at = ?9,
                         completed_at = ?10,
                         deleted_at = ?11,
-                        author = ?12,
-                        category = ?13,
-                        tags = ?14
+                        author = ?12
                      WHERE id = ?1 AND deleted_at IS NULL",
                     params![
                         item.id.value(),
@@ -360,8 +352,6 @@ impl TaskStore for SqliteTaskStore {
                         item.completed_at.map(ts_to_string),
                         item.deleted_at.map(ts_to_string),
                         item.author.map(author_to_str),
-                        item.category,
-                        item.tags,
                     ],
                 )?;
                 Ok(rows)
@@ -484,8 +474,6 @@ mod tests {
             deleted_at: None,
             note_count: 0,
             author: Some(TaskAuthor::User),
-            category: None,
-            tags: None,
         }
     }
 

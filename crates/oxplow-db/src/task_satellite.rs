@@ -656,8 +656,6 @@ mod tests {
             deleted_at: None,
             note_count: 0,
             author: Some(TaskAuthor::User),
-            category: None,
-            tags: None,
         };
         let item_id = items.insert(&item).await.unwrap();
         (db, t.id, item_id)
@@ -773,8 +771,6 @@ mod tests {
             deleted_at: None,
             note_count: 0,
             author: Some(TaskAuthor::User),
-            category: None,
-            tags: None,
         };
         let to_id = items.insert(&to).await.unwrap();
 
@@ -838,8 +834,6 @@ mod tests {
             deleted_at: None,
             note_count: 0,
             author: Some(TaskAuthor::User),
-            category: None,
-            tags: None,
         };
         let to_id = items.insert(&to).await.unwrap();
         let store = SqliteTaskLinkStore::new(db);

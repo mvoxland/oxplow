@@ -734,8 +734,6 @@ export async function updateTask(
     parentId?: number | null;
     status?: TaskStatus;
     priority?: TaskPriority;
-    category?: string | null;
-    tags?: string | null;
   },
 ): Promise<ThreadWorkState> {
   unwrap(await commands.updateTask({ id: itemId, changes: changes as never }));
@@ -784,8 +782,6 @@ export async function createBacklogItem(input: {
   description?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
-  category?: string | null;
-  tags?: string | null;
 }): Promise<BacklogState> {
   unwrap(await commands.createTask({ threadId: null, input: input as never }));
   return getBacklogState();
@@ -798,8 +794,6 @@ export async function updateBacklogItem(
     description?: string;
     status?: TaskStatus;
     priority?: TaskPriority;
-    category?: string | null;
-    tags?: string | null;
   },
 ): Promise<BacklogState> {
   unwrap(await commands.updateTask({ id: itemId, changes: changes as never }));

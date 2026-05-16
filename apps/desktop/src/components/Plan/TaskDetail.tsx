@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { Pencil } from "lucide-react";
 import type { EffortDetail, Task, TaskPriority, TaskStatus } from "../../api.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { RichTextField } from "../RichText/RichTextField.js";
@@ -16,6 +17,25 @@ import { fileRef } from "../../tabs/pageRefs.js";
  */
 export type ActivityRow =
   { kind: "effort"; id: string; timestamp: string; active: boolean; detail: EffortDetail };
+
+/**
+ * Render an effort's end timestamp. When start and end fall on the
+ * same calendar day, the date is implied by the start half — drop it
+ * and show only the time, so the user reads `5/15, 5:12 PM → 5:13 PM`
+ * instead of repeating the date.
+ */
+export function formatEffortEnd(
+  startedIso: string,
+  endedIso: string,
+  formatTimestamp: (iso: string) => string,
+): string {
+  const start = new Date(startedIso);
+  const end = new Date(endedIso);
+  if (start.toDateString() === end.toDateString()) {
+    return end.toLocaleTimeString();
+  }
+  return formatTimestamp(endedIso);
+}
 
 export function buildActivityTimeline(efforts: EffortDetail[]): ActivityRow[] {
   const rows: ActivityRow[] = [];
@@ -34,10 +54,6 @@ export interface TaskDetailChanges {
   parentId?: number | null;
   status?: TaskStatus;
   priority?: TaskPriority;
-  /** Backlog grooming bucket. Pass `null` to clear, omit to keep. */
-  category?: string | null;
-  /** Backlog grooming tags (comma-separated; normalized server-side). */
-  tags?: string | null;
 }
 
 const STATUS_OPTIONS_BASE: TaskStatus[] = [
@@ -83,6 +99,7 @@ export function TaskDetail({
         key={`desc-${item.id}`}
         value={item.description}
         placeholder="Add a description… include a ## Acceptance criteria section if helpful."
+        style={{ paddingLeft: 0, paddingRight: 22 }}
         onCommit={(value) => {
           if (value === item.description) return;
           void onUpdateTask(item.id, { description: value });
@@ -111,53 +128,67 @@ function TitleField({
   const cancelRequested = useRef(false);
   useEffect(() => { setDraft(value); }, [value]);
   return (
-    <textarea
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      placeholder="Untitled"
-      rows={1}
-      onBlur={() => {
-        if (cancelRequested.current) {
-          cancelRequested.current = false;
-          setDraft(value);
-          return;
-        }
-        if (draft.trim() && draft !== value) onCommit(draft);
-        else setDraft(value);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          cancelRequested.current = true;
-          (e.target as HTMLTextAreaElement).blur();
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          (e.target as HTMLTextAreaElement).blur();
-        }
-      }}
-      className="task-title-field"
-      style={{
-        width: "100%",
-        background: "transparent",
-        border: "none",
-        outline: "none",
-        resize: "none",
-        color: "var(--text-primary)",
-        fontFamily: "var(--font-ui)",
-        fontSize: "var(--text-2xl)",
-        fontWeight: "var(--weight-bold)",
-        lineHeight: "var(--leading-tight)",
-        padding: "4px 0",
-        overflow: "hidden",
-      }}
-      ref={(el) => {
-        if (!el) return;
-        // Auto-grow textarea to fit content (single visual line per
-        // wrap). Run on next frame so the value has rendered.
-        el.style.height = "auto";
-        el.style.height = `${el.scrollHeight}px`;
-      }}
-    />
+    <div className="oxplow-rt-field" style={{ position: "relative", paddingLeft: 0, paddingRight: 22, maxWidth: "none", margin: 0 }}>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Untitled"
+        rows={1}
+        onBlur={() => {
+          if (cancelRequested.current) {
+            cancelRequested.current = false;
+            setDraft(value);
+            return;
+          }
+          if (draft.trim() && draft !== value) onCommit(draft);
+          else setDraft(value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            cancelRequested.current = true;
+            (e.target as HTMLTextAreaElement).blur();
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            (e.target as HTMLTextAreaElement).blur();
+          }
+        }}
+        className="task-title-field"
+        style={{
+          width: "100%",
+          background: "transparent",
+          border: "none",
+          outline: "none",
+          resize: "none",
+          color: "var(--text-primary)",
+          fontFamily: "var(--font-ui)",
+          fontSize: "var(--text-2xl)",
+          fontWeight: "var(--weight-bold)",
+          lineHeight: "var(--leading-tight)",
+          padding: "4px 0",
+          overflow: "hidden",
+        }}
+        ref={(el) => {
+          if (!el) return;
+          el.style.height = "auto";
+          el.style.height = `${el.scrollHeight}px`;
+        }}
+      />
+      <Pencil
+        size={14}
+        aria-hidden
+        className="oxplow-rt-pencil"
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 4,
+          color: "var(--text-secondary)",
+          opacity: 0.35,
+          pointerEvents: "none",
+          transition: "opacity 120ms ease",
+        }}
+      />
+    </div>
   );
 }
 
@@ -259,29 +290,6 @@ export function TaskDetailRail({
           options={PRIORITY_OPTIONS}
           color={priorityColor(item.priority)}
           onChange={(value) => void onUpdateTask(item.id, { priority: value as TaskPriority })}
-        />
-      </RailPillRow>
-      <RailPillRow label="Category">
-        <InlineChipText
-          value={item.category ?? ""}
-          placeholder="+ Add category"
-          onCommit={(value) => {
-            const trimmed = value.trim();
-            const next = trimmed.length === 0 ? null : trimmed;
-            if (next === (item.category ?? null)) return;
-            void onUpdateTask(item.id, { category: next });
-          }}
-        />
-      </RailPillRow>
-      <RailPillRow label="Tags">
-        <TagChipList
-          value={item.tags ?? ""}
-          onCommit={(value) => {
-            const trimmed = value.trim();
-            const next = trimmed.length === 0 ? null : trimmed;
-            if (next === (item.tags ?? null)) return;
-            void onUpdateTask(item.id, { tags: next });
-          }}
         />
       </RailPillRow>
 
@@ -407,124 +415,6 @@ function PillSelect({
   );
 }
 
-/**
- * Inline-editable single-line chip text — used for Category in the
- * rail. Click the displayed value (or the placeholder) to swap to a
- * borderless input; Enter / blur commits, Escape reverts.
- */
-function InlineChipText({
-  value,
-  placeholder,
-  onCommit,
-}: {
-  value: string;
-  placeholder: string;
-  onCommit(value: string): void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const cancelRequested = useRef(false);
-  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        onClick={() => { setDraft(value); setEditing(true); }}
-        style={{
-          background: "transparent",
-          border: "none",
-          padding: 0,
-          color: value ? "var(--text-primary)" : "var(--text-muted)",
-          fontSize: "var(--text-xs)",
-          cursor: "text",
-          textAlign: "left",
-        }}
-      >
-        {value || placeholder}
-      </button>
-    );
-  }
-  return (
-    <input
-      autoFocus
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        if (cancelRequested.current) {
-          cancelRequested.current = false;
-          setDraft(value);
-          setEditing(false);
-          return;
-        }
-        setEditing(false);
-        if (draft !== value) onCommit(draft);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          cancelRequested.current = true;
-          (e.target as HTMLInputElement).blur();
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          (e.target as HTMLInputElement).blur();
-        }
-      }}
-      style={{
-        ...inputStyle,
-        width: "100%",
-        padding: "2px 6px",
-        fontSize: "var(--text-xs)",
-      }}
-    />
-  );
-}
-
-/**
- * Tag chip list — renders the comma-separated string as a row of
- * small chips when not editing; clicking the row swaps to a single
- * input where the user can edit the raw comma-separated form.
- *
- * Per-chip editing (add/remove individually) is a follow-up; for now
- * we just make the read-state visual.
- */
-function TagChipList({
-  value,
-  onCommit,
-}: {
-  value: string;
-  onCommit(value: string): void;
-}) {
-  const tags = value
-    .split(",")
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {tags.length > 0 ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              style={{
-                fontSize: "var(--text-xs)",
-                padding: "1px 8px",
-                borderRadius: 999,
-                background: "var(--accent-soft-bg)",
-                color: "var(--text-primary)",
-              }}
-            >{tag}</span>
-          ))}
-        </div>
-      ) : null}
-      <InlineChipText
-        value={value}
-        placeholder={tags.length > 0 ? "+ Add tag" : "+ Add tags"}
-        onCommit={onCommit}
-      />
-    </div>
-  );
-}
-
 function RailMetaRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ display: "flex", gap: 8 }}>
@@ -568,23 +458,25 @@ export function ActivityTimeline({
   const rows = buildActivityTimeline(efforts);
   if (rows.length === 0) {
     return (
-      <div style={{
-        color: "var(--text-muted)",
-        fontSize: "var(--text-xs)",
-        fontStyle: "italic",
-        padding: "8px 12px",
-      }}>
-        No activity yet — moving this item to "in progress" starts an effort.
+      <div
+        data-testid="tasks-activity"
+        style={{
+          color: "var(--text-muted)",
+          fontSize: "var(--text-sm)",
+          fontStyle: "italic",
+        }}
+      >
+        No recorded effort
       </div>
     );
   }
   return (
     <div
       data-testid="tasks-activity"
-      style={{ display: "flex", flexDirection: "column", gap: 10 }}
+      style={{ display: "flex", flexDirection: "column", gap: 28 }}
     >
       {rows.map((row) => (
-        <ActivityEffortCard
+        <ActivityEffortSection
           key={`effort-${row.id}`}
           detail={row.detail}
           active={row.active}
@@ -598,15 +490,15 @@ export function ActivityTimeline({
 }
 
 /**
- * Standalone card per effort. Header strip on top (effort label,
- * timestamps, +a ~b −c counts, In-history link) sits on a tinted band;
- * body below holds changed paths + the effort summary (rendered via
- * `MarkdownView` so mermaid + internal links keep working in
- * read-only effort summaries).
+ * One effort rendered as a page section: time-range subheader, summary
+ * note (markdown), changed-files list, and a "View snapshot" link at
+ * the bottom. No bordered card — these read as part of the page.
  *
- * No pencil affordance on these cards — they're read-only by design.
+ * For the active effort, the subheader reads "In progress since
+ * {started}" and the snapshot link is suppressed (no end snapshot
+ * yet).
  */
-function ActivityEffortCard({
+function ActivityEffortSection({
   detail,
   active,
   formatTimestamp,
@@ -625,133 +517,118 @@ function ActivityEffortCard({
     else void onOpenFile?.(path);
   };
   const endSnapshotId = detail.effort.end_snapshot_id;
-  const counts = detail.counts;
-  const totalChanged = counts.created + counts.updated + counts.deleted;
+  const subheader = active
+    ? `In progress · started ${formatTimestamp(detail.effort.started_at)}`
+    : `${formatTimestamp(detail.effort.started_at)} → ${formatEffortEnd(detail.effort.started_at, detail.effort.ended_at!, formatTimestamp)}`;
   return (
-    <div
+    <section
       data-testid={active ? "tasks-effort-in-progress" : `tasks-effort-${detail.effort.id}`}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--surface-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 6,
-        overflow: "hidden",
-      }}
+      style={{ display: "flex", flexDirection: "column", gap: 10 }}
     >
-      <div style={{
-        display: "flex",
-        gap: 8,
-        alignItems: "center",
-        flexWrap: "wrap",
-        padding: "6px 10px",
-        background: "var(--surface-tab-active)",
-        borderBottom: "1px solid var(--border-subtle)",
-        fontSize: 11,
-        color: "var(--text-secondary)",
-      }}>
-        <span style={{
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-          fontSize: 10,
-          fontWeight: 600,
-          color: "var(--text-primary)",
-        }}>Effort</span>
-        {active ? (
-          <span style={{
-            color: "var(--accent)",
-            fontWeight: 600,
-            fontSize: 10,
+      <header>
+        <h3 style={{
+          margin: 0,
+          fontSize: "var(--text-base)",
+          fontWeight: "var(--weight-semibold)",
+          color: active ? "var(--accent)" : "var(--text-primary)",
+        }}>
+          {subheader}
+        </h3>
+      </header>
+      {detail.effort.summary && detail.effort.summary.length > 0 ? (
+        <div data-testid={`tasks-effort-summary-${detail.effort.id}`}>
+          <MarkdownView body={detail.effort.summary} maxHeight={320} />
+        </div>
+      ) : !active ? (
+        <div
+          data-testid={`tasks-effort-summary-${detail.effort.id}`}
+          style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}
+        >
+          No summary recorded.
+        </div>
+      ) : null}
+      {detail.changed_paths.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <h4 style={{
+            margin: 0,
+            fontSize: "var(--text-xs)",
+            fontWeight: "var(--weight-semibold)",
             textTransform: "uppercase",
             letterSpacing: 0.4,
-            background: "var(--accent-soft-bg)",
-            padding: "1px 6px",
-            borderRadius: 999,
-          }}>in progress</span>
-        ) : null}
-        <span>{formatTimestamp(detail.effort.started_at)}</span>
-        {detail.effort.ended_at ? <span>→ {formatTimestamp(detail.effort.ended_at)}</span> : null}
-        <span style={{
-          marginLeft: "auto",
-          display: "flex",
-          gap: 8,
-          alignItems: "baseline",
-          fontFamily: "var(--font-mono)",
-        }}>
-          {counts.created > 0 ? <span style={{ color: "var(--diff-add-fg)" }}>+{counts.created}</span> : null}
-          {counts.updated > 0 ? <span style={{ color: "var(--priority-high)" }}>~{counts.updated}</span> : null}
-          {counts.deleted > 0 ? <span style={{ color: "var(--diff-remove-fg)" }}>−{counts.deleted}</span> : null}
-          {!active && totalChanged === 0 ? <span style={{ color: "var(--text-muted)" }}>0 files</span> : null}
-        </span>
-        {onShowInHistory && !active ? (
-          <button
-            type="button"
-            data-testid={`tasks-show-in-history-${detail.effort.id}`}
-            onClick={() => { if (endSnapshotId) onShowInHistory(endSnapshotId); }}
-            style={{ ...miniButtonStyle, padding: "1px 8px", fontSize: 10 }}
-            disabled={!endSnapshotId}
-            title={endSnapshotId ? "Open Local History at this effort's end snapshot" : "Effort is still open — no end snapshot yet"}
-          >
-            In history
-          </button>
-        ) : null}
-      </div>
-      <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
-        {detail.changed_paths.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {detail.changed_paths.map((path) => (
-              <div key={path} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                {onOpenFile ? (
-                  <button
-                    type="button"
-                    onClick={() => openFile(path)}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      padding: 0,
-                      color: "var(--accent)",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      font: "inherit",
-                      fontFamily: "var(--font-mono)",
-                      textDecoration: "underline",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      flex: 1,
-                      minWidth: 0,
-                    }}
-                  >
-                    {path}
-                  </button>
-                ) : (
-                  <span style={{
-                    flex: 1,
-                    minWidth: 0,
+            color: "var(--text-secondary)",
+          }}>
+            Modified files
+          </h4>
+          <ul style={{
+            listStyle: "none",
+            padding: 0,
+            margin: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}>
+          {detail.changed_paths.map((path) => (
+            <li key={path} style={{ fontSize: 12 }}>
+              {onOpenFile ? (
+                <button
+                  type="button"
+                  onClick={() => openFile(path)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    color: "var(--accent)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    font: "inherit",
+                    fontFamily: "var(--font-mono)",
+                    textDecoration: "underline",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    fontFamily: "var(--font-mono)",
-                  }}>{path}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {detail.effort.summary && detail.effort.summary.length > 0 ? (
-          <div data-testid={`tasks-effort-summary-${detail.effort.id}`}>
-            <MarkdownView body={detail.effort.summary} maxHeight={320} />
-          </div>
-        ) : !active ? (
-          <div
-            data-testid={`tasks-effort-summary-${detail.effort.id}`}
-            style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}
+                    maxWidth: "100%",
+                  }}
+                >
+                  {path}
+                </button>
+              ) : (
+                <span style={{
+                  fontFamily: "var(--font-mono)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  display: "inline-block",
+                  maxWidth: "100%",
+                }}>{path}</span>
+              )}
+            </li>
+          ))}
+          </ul>
+        </div>
+      ) : null}
+      {!active && onShowInHistory && endSnapshotId ? (
+        <div>
+          <button
+            type="button"
+            data-testid={`tasks-show-in-history-${detail.effort.id}`}
+            onClick={() => onShowInHistory(endSnapshotId)}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              color: "var(--accent)",
+              cursor: "pointer",
+              font: "inherit",
+              fontSize: 12,
+              textDecoration: "underline",
+            }}
+            title="Open Local History at this effort's end snapshot"
           >
-            No summary recorded for this effort.
-          </div>
-        ) : null}
-      </div>
-    </div>
+            View snapshot →
+          </button>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

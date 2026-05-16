@@ -170,16 +170,12 @@ continue to load under the narrowed enum.
 store (via COUNT subquery over `task_note`). It drives the note badge on
 list rows and is always 0 when no notes exist.
 
-`category` and `tags` (migration v48, nullable TEXT) — grooming
-metadata used by the Backlog page. `category` is a free-text bucket
-that drives the default group-by axis on the Backlog grooming surface
-(e.g. "UI / UX", "Infra", "Polish"); `tags` is a comma-separated
-list normalized on write (split, trim, dedupe, rejoin with `, `) that
-doubles as filter chips. Both columns live on every `tasks` row
-so a row keeps its grooming metadata when promoted from backlog into
-a thread or demoted back — there is no copy across tables. Caps:
-`category` 200 chars, `tags` 500 chars total. Pass `null` through
-`updateTask` / `updateBacklogItem` to clear; omit to keep.
+`category` and `tags` were removed in V19 (`drop_task_category_tags`).
+Both were settable via the rail UI and MCP create/update params but
+nothing read `tags`, only `BacklogDrawer` showed `category`, and
+nothing populated either automatically — they were vestigial. The
+Backlog page never actually grouped or filtered by them despite the
+old doc claim.
 
 ### `work_note` — thread-scoped notes only (`crates/oxplow-db/src/work_satellite.rs`)
 

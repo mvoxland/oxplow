@@ -78,10 +78,6 @@ pub struct Task {
     pub deleted_at: Option<Timestamp>,
     pub note_count: i64,
     pub author: Option<TaskAuthor>,
-    /// Free-text grooming bucket used by the Backlog page's group-by.
-    pub category: Option<String>,
-    /// Comma-separated tags used by the Backlog page filter chips.
-    pub tags: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -194,8 +190,6 @@ mod tests {
             deleted_at: None,
             note_count: 0,
             author: Some(TaskAuthor::User),
-            category: None,
-            tags: None,
         };
 
         let json = serde_json::to_string(&item).unwrap();
@@ -213,7 +207,7 @@ mod tests {
                 "created_by":"user",
                 "created_at":"2026-04-29T12:00:00Z","updated_at":"2026-04-29T12:00:00Z",
                 "completed_at":null,"deleted_at":null,"note_count":0,
-                "author":"user","category":null,"tags":null
+                "author":"user"
             }"#,
         )
         .unwrap();
