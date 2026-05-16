@@ -193,6 +193,7 @@ fn main() {
         let wiki_page_refs = state.page_ref_store.clone();
         let wiki_dir = state.layout.project_dir.clone();
         let wiki_events = event_bus.clone();
+        let wiki_snapshot_capture = state.snapshot_capture.clone();
         let bts = state.background_tasks.clone();
         let task = bts.start(StartInput {
             kind: BackgroundTaskKind::NotesResync,
@@ -206,6 +207,7 @@ fn main() {
                 wiki_store,
                 wiki_page_refs,
                 wiki_events,
+                Some(wiki_snapshot_capture),
             )
             .await
             {

@@ -355,12 +355,15 @@ impl TaskService {
             Some(e) => e,
             None => effort_store.start(item, thread, None).await?,
         };
+        let version = self.resolve_effort_file_version(&effort).await;
         for path in touched_files {
             if path.is_empty() {
                 continue;
             }
             let change = classify_change(worktree_root, path);
-            effort_store.record_file(&effort.id, path, change).await?;
+            effort_store
+                .record_file(&effort.id, path, change, version.as_ref())
+                .await?;
         }
         if !impacts.is_empty() {
             effort_store.set_impacts(&effort.id, impacts).await?;
@@ -381,6 +384,40 @@ impl TaskService {
 
     pub async fn list_backlog(&self) -> Result<Vec<Task>, TaskServiceError> {
         Ok(self.store.list_backlog().await?)
+    }
+
+    /// Pin the local snapshot id used by the effort's file-ref rows
+    /// and resolve its closest git commit. Falls back to a 0
+    /// snapshot id when neither end nor start is set (rare —
+    /// only happens for an effort opened without a snapshot pin and
+    /// no snapshot service attached). The cascade in
+    /// `set_snapshot_git_commit` will retroactively flip
+    /// `git_version_exact` to true if a commit lands on the chosen
+    /// snapshot later.
+    pub async fn resolve_effort_file_version(
+        &self,
+        effort: &oxplow_db::TaskEffort,
+    ) -> crate::file_ref_version::ResolvedFileVersion {
+        let snapshot_id = effort
+            .end_snapshot_id
+            .or(effort.start_snapshot_id)
+            .unwrap_or(0);
+        match self.snapshot_capture.as_ref() {
+            Some(svc) if snapshot_id != 0 => {
+                crate::file_ref_version::resolve(svc.store(), svc.project_dir(), snapshot_id)
+                    .await
+                    .unwrap_or(crate::file_ref_version::ResolvedFileVersion {
+                        local_snapshot_id: snapshot_id,
+                        closest_git_version: None,
+                        git_version_exact: false,
+                    })
+            }
+            _ => crate::file_ref_version::ResolvedFileVersion {
+                local_snapshot_id: snapshot_id,
+                closest_git_version: None,
+                git_version_exact: false,
+            },
+        }
     }
 }
 

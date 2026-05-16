@@ -22,7 +22,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use oxplow_db::page_ref_projections::{wiki_edges, KIND_WIKI};
+use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, KIND_WIKI};
 use oxplow_db::{SqlitePageRefStore, SqliteWikiPageStore, WikiPage};
 use oxplow_domain::{DomainError, Timestamp};
 
@@ -231,6 +231,23 @@ pub async fn sync_from_disk_with_refs(
     page_refs: Option<&SqlitePageRefStore>,
     slug: &str,
 ) -> Result<(), DomainError> {
+    sync_from_disk_with_refs_versioned(project_dir, store, page_refs, slug, None).await
+}
+
+/// Variant of [`sync_from_disk_with_refs`] that lets the caller pin
+/// a resolved file-version triple onto every file/directory edge
+/// emitted from this page. The watcher uses this to stamp the
+/// current snapshot id + git pin so backlinks know how out-of-date
+/// each ref is. Pass `None` when no snapshot is available (test
+/// fixtures, manual one-off syncs) — file edges then get NULL
+/// version columns.
+pub async fn sync_from_disk_with_refs_versioned(
+    project_dir: &Path,
+    store: &SqliteWikiPageStore,
+    page_refs: Option<&SqlitePageRefStore>,
+    slug: &str,
+    file_version: Option<crate::file_ref_version::ResolvedFileVersion>,
+) -> Result<(), DomainError> {
     let file_path = wiki_pages_dir(project_dir).join(format!("{slug}.md"));
     if !file_path.exists() {
         if let Some(refs) = page_refs {
@@ -261,7 +278,10 @@ pub async fn sync_from_disk_with_refs(
     };
     store.upsert(&note).await?;
     if let Some(page_refs) = page_refs {
-        let edges = wiki_edges(slug, &body);
+        let mut edges = wiki_edges(slug, &body);
+        if let Some(v) = file_version.as_ref() {
+            stamp_file_versions(&mut edges, v.as_ref());
+        }
         page_refs.replace_source(KIND_WIKI, slug, edges).await?;
     }
     Ok(())

@@ -190,6 +190,10 @@ impl SnapshotCaptureService {
         &self.inner.project_dir
     }
 
+    pub fn stream_id(&self) -> &str {
+        self.inner.stream_id.as_str()
+    }
+
     pub fn blobs(&self) -> &BlobStore {
         &self.inner.blobs
     }

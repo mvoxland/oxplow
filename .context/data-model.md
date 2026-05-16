@@ -233,7 +233,8 @@ Re-opening a task (done → in_progress) produces a second effort. At most one o
 
 `task_effort_file` (v22) records per-effort write paths so parallel
 subagents in one thread get distinct file lists instead of the union via
-the snapshot pair-diff. Columns: `effort_id`, `path`, `first_seen_at`,
+the snapshot pair-diff. Columns: `effort_id`, `path`, `change_kind`,
+`local_snapshot_id`, `closest_git_version`, `git_version_exact`,
 primary key `(effort_id, path)`. Rows come from the `touchedFiles`
 payload on the `update_task` transition to `done`, not
 from the PostToolUse hook (the previous heuristic couldn't attribute
@@ -450,11 +451,30 @@ points at me?") and outbound ("what do I point at?") are SQL
 queries against this table.
 
 Columns: `source_kind, source_id, target_kind, target_id, ref_type,
-source_extra` (PK on the first five). Indexes on
-`(target_kind, target_id)` for backlinks and `(source_kind,
-source_id)` for outbound. `kind` is denormalised next to `id` so
-kind-filtered queries don't need LIKE on a synthetic combined
-column.
+source_extra, local_snapshot_id, closest_git_version,
+git_version_exact` (PK on the first five). Indexes on
+`(target_kind, target_id)` for backlinks, `(source_kind,
+source_id)` for outbound, and `local_snapshot_id` for the
+cascade-on-commit-attach update. `kind` is denormalised next to
+`id` so kind-filtered queries don't need LIKE on a synthetic
+combined column.
+
+**File-ref versioning (V20).** Edges whose target is a file or
+directory carry a snapshot pin so callers can tell how out-of-date
+each reference is. `local_snapshot_id` always points at the
+`snapshot.id` the edge was captured against; `closest_git_version`
+is the closest known git commit at capture time
+(`snapshot.git_commit` when the worktree was clean, else HEAD);
+`git_version_exact = 1` when the local snapshot is byte-equal to
+that commit. Non-file edges leave all three columns NULL / 0. When
+`set_snapshot_git_commit` lands a commit on a snapshot later
+(e.g. the clean-restamp path in `SnapshotCaptureService`), the
+write cascades: both `task_effort_file` and `page_ref` rows
+pointing at that snapshot get their `closest_git_version` set and
+`git_version_exact` flipped to 1. The capture-time resolver lives
+in `oxplow_app::file_ref_version`; callers don't pass any of these
+fields by hand — `task_service::record_effort` and the wiki
+sync watcher fill them automatically.
 
 Canonical id shapes match the frontend's `TabRef.id`:
 - `wiki:<slug>` source kind uses just the slug as the id

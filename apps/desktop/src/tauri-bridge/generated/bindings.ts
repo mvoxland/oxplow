@@ -946,6 +946,24 @@ export type EffortFile = {
 	effort_id: EffortId,
 	path: string,
 	change: EffortFileChange,
+	/**
+	 *  The snapshot the file ref was captured at. Always set since
+	 *  V20; 0 only on pre-V20 rows whose owning effort had no
+	 *  snapshot pin.
+	 */
+	local_snapshot_id: number,
+	/**
+	 *  Closest known git commit at capture time. See V20 column
+	 *  docs. NULL when no git information is available (no commits
+	 *  yet, headless repo, etc.).
+	 */
+	closest_git_version: string | null,
+	/**
+	 *  `true` when `local_snapshot_id`'s snapshot is byte-equal to
+	 *  `closest_git_version` (clean worktree at capture, or
+	 *  auto-resolved later by `set_snapshot_git_commit`).
+	 */
+	git_version_exact: boolean,
 };
 
 export type EffortFileChange = "created" | "updated" | "deleted";

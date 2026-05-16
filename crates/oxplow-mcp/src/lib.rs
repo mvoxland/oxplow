@@ -1104,6 +1104,28 @@ impl OxplowMcp {
                 .await
                 .map_err(|e| internal(e.to_string()))?;
         }
+        // Compute the snapshot-version pin once for this effort —
+        // every added path inherits the same triple. Falls back to a
+        // 0 snapshot id when the effort has no snapshot pin (rare),
+        // matching the policy used by `record_effort`.
+        let effort = self
+            .services
+            .effort_store
+            .get_effort(&effort_id)
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        let version = if let Some(effort) = effort {
+            self.services
+                .tasks
+                .resolve_effort_file_version(&effort)
+                .await
+        } else {
+            oxplow_app::file_ref_version::ResolvedFileVersion {
+                local_snapshot_id: 0,
+                closest_git_version: None,
+                git_version_exact: false,
+            }
+        };
         for path in &add {
             if path.is_empty() {
                 continue;
@@ -1114,7 +1136,12 @@ impl OxplowMcp {
             // discriminate).
             self.services
                 .effort_store
-                .record_file(&effort_id, path, oxplow_db::EffortFileChange::Updated)
+                .record_file(
+                    &effort_id,
+                    path,
+                    oxplow_db::EffortFileChange::Updated,
+                    version.as_ref(),
+                )
                 .await
                 .map_err(|e| internal(e.to_string()))?;
         }
@@ -2083,14 +2110,19 @@ mod tests {
             .start(task_id, &thread.id, None)
             .await
             .unwrap();
+        let v = oxplow_db::FileRefVersion {
+            local_snapshot_id: 0,
+            closest_git_version: None,
+            git_version_exact: false,
+        };
         services
             .effort_store
-            .record_file(&effort.id, "src/keep.rs", EffortFileChange::Updated)
+            .record_file(&effort.id, "src/keep.rs", EffortFileChange::Updated, v)
             .await
             .unwrap();
         services
             .effort_store
-            .record_file(&effort.id, "src/disclaim.rs", EffortFileChange::Updated)
+            .record_file(&effort.id, "src/disclaim.rs", EffortFileChange::Updated, v)
             .await
             .unwrap();
 

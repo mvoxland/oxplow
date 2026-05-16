@@ -18,6 +18,7 @@
 use oxplow_domain::refs::{extract, RefVersion};
 use oxplow_domain::{Task, TaskImpact, TaskLink, TaskLinkType};
 
+use crate::effort_store::FileRefVersion;
 use crate::page_ref_store::PageRefEdge;
 
 pub const KIND_WIKI: &str = "wiki";
@@ -43,6 +44,23 @@ pub const RT_FINDING_PATH: &str = "finding_path";
 // slice (effort_store) can coexist under the same `(task, id)`
 // source without clobbering each other.
 pub const RT_SUMMARY_FILE: &str = "summary_file_ref";
+
+/// Stamp the supplied file-version triple onto every edge in
+/// `edges` whose target is a file or directory. Mutates in place
+/// because `with_version` consumes `self`. No-op for non-file
+/// targets — wiki↔task, wiki↔wiki, etc. don't carry a content
+/// version.
+pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_>) {
+    for edge in edges.iter_mut() {
+        let is_versioned = edge.target_kind == KIND_FILE || edge.target_kind == KIND_DIRECTORY;
+        if !is_versioned {
+            continue;
+        }
+        edge.local_snapshot_id = Some(version.local_snapshot_id);
+        edge.closest_git_version = version.closest_git_version.map(|s| s.to_string());
+        edge.git_version_exact = version.git_version_exact;
+    }
+}
 pub const RT_SUMMARY_DIR: &str = "summary_dir_ref";
 pub const RT_SUMMARY_WIKILINK: &str = "summary_wikilink";
 pub const RT_SUMMARY_TASK: &str = "summary_task_mention";

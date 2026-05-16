@@ -18,6 +18,7 @@ pub mod commit_indexer;
 pub mod config_service;
 pub mod diagnostics;
 pub mod events;
+pub mod file_ref_version;
 pub mod followup;
 pub mod git_service;
 pub mod hook_ingest;

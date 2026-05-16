@@ -46,6 +46,28 @@ pub struct EffortFile {
     pub effort_id: EffortId,
     pub path: String,
     pub change: EffortFileChange,
+    /// The snapshot the file ref was captured at. Always set since
+    /// V20; 0 only on pre-V20 rows whose owning effort had no
+    /// snapshot pin.
+    pub local_snapshot_id: i64,
+    /// Closest known git commit at capture time. See V20 column
+    /// docs. NULL when no git information is available (no commits
+    /// yet, headless repo, etc.).
+    pub closest_git_version: Option<String>,
+    /// `true` when `local_snapshot_id`'s snapshot is byte-equal to
+    /// `closest_git_version` (clean worktree at capture, or
+    /// auto-resolved later by `set_snapshot_git_commit`).
+    pub git_version_exact: bool,
+}
+
+/// Snapshot-pinned version data for a file reference. The
+/// store/service layer computes this from a snapshot id at capture
+/// time and stamps it onto every per-file ref row.
+#[derive(Debug, Clone, Copy)]
+pub struct FileRefVersion<'a> {
+    pub local_snapshot_id: i64,
+    pub closest_git_version: Option<&'a str>,
+    pub git_version_exact: bool,
 }
 
 /// One (snapshot, effort) pair returned from
@@ -162,6 +184,7 @@ pub trait TaskEffortStore: Send + Sync {
         id: &EffortId,
         path: &str,
         change: EffortFileChange,
+        version: FileRefVersion<'_>,
     ) -> Result<(), DomainError>;
     /// For each snapshot in `snapshot_ids`, return every effort that
     /// was either active at that snapshot OR ending exactly at it.
@@ -473,13 +496,18 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT effort_id, path, change_kind FROM task_effort_file
+                    "SELECT effort_id, path, change_kind,
+                            local_snapshot_id, closest_git_version, git_version_exact
+                     FROM task_effort_file
                      WHERE effort_id = ?1 ORDER BY path ASC",
                 )?;
                 let rows = stmt.query_map(params![id.as_str()], |r| {
                     let effort_id: String = r.get(0)?;
                     let path: String = r.get(1)?;
                     let kind: String = r.get(2)?;
+                    let local_snapshot_id: i64 = r.get(3)?;
+                    let closest_git_version: Option<String> = r.get(4)?;
+                    let git_version_exact: i64 = r.get(5)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -491,6 +519,9 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                         effort_id: EffortId::from(effort_id),
                         path,
                         change: str_to_change(&kind).map_err(map_err)?,
+                        local_snapshot_id,
+                        closest_git_version,
+                        git_version_exact: git_version_exact != 0,
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -556,17 +587,29 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         id: &EffortId,
         path: &str,
         change: EffortFileChange,
+        version: FileRefVersion<'_>,
     ) -> Result<(), DomainError> {
         let db = self.db.clone();
         let id_clone = id.clone();
         let path_clone = path.to_string();
+        let local_snapshot_id = version.local_snapshot_id;
+        let closest_git_version = version.closest_git_version.map(|s| s.to_string());
+        let exact = if version.git_version_exact { 1 } else { 0 };
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 conn.execute(
                     "INSERT OR REPLACE INTO task_effort_file
-                       (effort_id, path, change_kind)
-                     VALUES (?1, ?2, ?3)",
-                    params![id_clone.as_str(), path_clone, change_to_str(change)],
+                       (effort_id, path, change_kind,
+                        local_snapshot_id, closest_git_version, git_version_exact)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        id_clone.as_str(),
+                        path_clone,
+                        change_to_str(change),
+                        local_snapshot_id,
+                        closest_git_version,
+                        exact,
+                    ],
                 )?;
                 Ok(())
             })
@@ -782,12 +825,17 @@ mod tests {
     async fn record_then_list_files() {
         let (store, tid, t) = fixture().await;
         let eff = store.start(tid, &t, None).await.unwrap();
+        let v = FileRefVersion {
+            local_snapshot_id: 0,
+            closest_git_version: None,
+            git_version_exact: false,
+        };
         store
-            .record_file(&eff.id, "src/a.rs", EffortFileChange::Created)
+            .record_file(&eff.id, "src/a.rs", EffortFileChange::Created, v)
             .await
             .unwrap();
         store
-            .record_file(&eff.id, "src/b.rs", EffortFileChange::Updated)
+            .record_file(&eff.id, "src/b.rs", EffortFileChange::Updated, v)
             .await
             .unwrap();
         let files = store.list_files(&eff.id).await.unwrap();
@@ -937,8 +985,13 @@ mod tests {
             .unwrap();
 
         let second = store.start(tid, &t, None).await.unwrap();
+        let v = FileRefVersion {
+            local_snapshot_id: 0,
+            closest_git_version: None,
+            git_version_exact: false,
+        };
         store
-            .record_file(&second.id, "src/bar.rs", EffortFileChange::Updated)
+            .record_file(&second.id, "src/bar.rs", EffortFileChange::Updated, v)
             .await
             .unwrap();
 

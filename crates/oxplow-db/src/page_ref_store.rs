@@ -36,6 +36,12 @@ pub struct PageRefEdge {
     /// Optional JSON blob with edge-specific extras (line anchor,
     /// version pin, link sub-type, …). Opaque to the store.
     pub source_extra: Option<String>,
+    /// Version data for edges pointing at a file-like target. Set
+    /// by the writer via [`PageRefEdge::with_version`]; the store
+    /// persists it verbatim. See V20 for column semantics.
+    pub local_snapshot_id: Option<i64>,
+    pub closest_git_version: Option<String>,
+    pub git_version_exact: bool,
 }
 
 impl PageRefEdge {
@@ -53,11 +59,29 @@ impl PageRefEdge {
             target_id: target_id.into(),
             ref_type: ref_type.into(),
             source_extra: None,
+            local_snapshot_id: None,
+            closest_git_version: None,
+            git_version_exact: false,
         }
     }
 
     pub fn with_extra(mut self, extra: impl Into<String>) -> Self {
         self.source_extra = Some(extra.into());
+        self
+    }
+
+    /// Stamp a file-version pin on this edge. Callers only invoke
+    /// this for file-like targets (file / directory / git_commit);
+    /// the store doesn't enforce that.
+    pub fn with_version(
+        mut self,
+        local_snapshot_id: i64,
+        closest_git_version: Option<String>,
+        git_version_exact: bool,
+    ) -> Self {
+        self.local_snapshot_id = Some(local_snapshot_id);
+        self.closest_git_version = closest_git_version;
+        self.git_version_exact = git_version_exact;
         self
     }
 }
@@ -105,8 +129,10 @@ impl SqlitePageRefStore {
                 }
                 tx.execute(
                     "INSERT OR IGNORE INTO page_ref
-                       (source_kind, source_id, target_kind, target_id, ref_type, source_extra)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                       (source_kind, source_id, target_kind, target_id, ref_type,
+                        source_extra, local_snapshot_id, closest_git_version,
+                        git_version_exact)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         edge.source_kind,
                         edge.source_id,
@@ -114,6 +140,9 @@ impl SqlitePageRefStore {
                         edge.target_id,
                         edge.ref_type,
                         edge.source_extra,
+                        edge.local_snapshot_id,
+                        edge.closest_git_version,
+                        if edge.git_version_exact { 1 } else { 0 },
                     ],
                 )
                 .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
@@ -179,8 +208,10 @@ impl SqlitePageRefStore {
                 }
                 tx.execute(
                     "INSERT OR IGNORE INTO page_ref
-                       (source_kind, source_id, target_kind, target_id, ref_type, source_extra)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                       (source_kind, source_id, target_kind, target_id, ref_type,
+                        source_extra, local_snapshot_id, closest_git_version,
+                        git_version_exact)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         edge.source_kind,
                         edge.source_id,
@@ -188,6 +219,9 @@ impl SqlitePageRefStore {
                         edge.target_id,
                         edge.ref_type,
                         edge.source_extra,
+                        edge.local_snapshot_id,
+                        edge.closest_git_version,
+                        if edge.git_version_exact { 1 } else { 0 },
                     ],
                 )
                 .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
@@ -215,7 +249,9 @@ impl SqlitePageRefStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT source_kind, source_id, target_kind, target_id, ref_type, source_extra
+                    "SELECT source_kind, source_id, target_kind, target_id, ref_type,
+                            source_extra, local_snapshot_id, closest_git_version,
+                            git_version_exact
                      FROM page_ref
                      WHERE target_kind = ?1 AND target_id = ?2
                      ORDER BY source_kind, source_id, ref_type
@@ -244,7 +280,9 @@ impl SqlitePageRefStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT source_kind, source_id, target_kind, target_id, ref_type, source_extra
+                    "SELECT source_kind, source_id, target_kind, target_id, ref_type,
+                            source_extra, local_snapshot_id, closest_git_version,
+                            git_version_exact
                      FROM page_ref
                      WHERE source_kind = ?1 AND source_id = ?2
                      ORDER BY target_kind, target_id, ref_type
@@ -260,6 +298,7 @@ impl SqlitePageRefStore {
 }
 
 fn row_to_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<PageRefEdge> {
+    let git_version_exact: i64 = row.get(8)?;
     Ok(PageRefEdge {
         source_kind: row.get(0)?,
         source_id: row.get(1)?,
@@ -267,6 +306,9 @@ fn row_to_edge(row: &rusqlite::Row<'_>) -> rusqlite::Result<PageRefEdge> {
         target_id: row.get(3)?,
         ref_type: row.get(4)?,
         source_extra: row.get(5)?,
+        local_snapshot_id: row.get(6)?,
+        closest_git_version: row.get(7)?,
+        git_version_exact: git_version_exact != 0,
     })
 }
 

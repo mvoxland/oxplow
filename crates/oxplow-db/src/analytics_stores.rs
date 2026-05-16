@@ -1046,13 +1046,39 @@ impl SqliteSnapshotStore {
     ) -> Result<(), DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
-                conn.execute(
-                    "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
-                    params![sha, snapshot_id],
-                )?;
-                Ok(())
-            })
+            let mut conn = db
+                .conn()
+                .map_err(|e| DomainError::Invalid(format!("pool: {e}")))?;
+            let tx = conn
+                .transaction()
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            tx.execute(
+                "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
+                params![sha, snapshot_id],
+            )
+            .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            // Cascade: every file-ref row pointing at this snapshot
+            // now has an exact git pin. Flip both the version sha
+            // (in case capture-time wrote a different HEAD) and the
+            // exactness flag.
+            tx.execute(
+                "UPDATE task_effort_file
+                    SET closest_git_version = ?1,
+                        git_version_exact   = 1
+                  WHERE local_snapshot_id = ?2",
+                params![sha, snapshot_id],
+            )
+            .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            tx.execute(
+                "UPDATE page_ref
+                    SET closest_git_version = ?1,
+                        git_version_exact   = 1
+                  WHERE local_snapshot_id = ?2",
+                params![sha, snapshot_id],
+            )
+            .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            tx.commit()
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
         })
         .await
         .unwrap()
@@ -1461,6 +1487,111 @@ impl SqliteSnapshotStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn set_snapshot_git_commit_cascades_to_file_refs() {
+        // When `set_snapshot_git_commit` lands on a snapshot, every
+        // `task_effort_file` and `page_ref` row pointing at that
+        // snapshot must pick up the sha and flip
+        // `git_version_exact` to 1. We bypass the domain stores
+        // (FK setup noise) and seed the rows directly.
+        let db = Database::in_memory();
+        let snap_store = SqliteSnapshotStore::new(db.clone());
+        let db_for_snap = db.clone();
+        let snap_id: i64 = tokio::task::spawn_blocking(move || {
+            db_for_snap.with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO streams
+                       (id, kind, title, branch, branch_ref, branch_source,
+                        worktree_path, created_at, updated_at)
+                     VALUES ('s-1', 'primary', 's', 'main', 'refs/heads/main', 'origin',
+                             '/tmp', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO snapshot (stream_id, created_at)
+                     VALUES ('s-1', '2026-01-01T00:00:00Z')",
+                    [],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        // Seed one task_effort_file row pointing at this snapshot
+        // (skip the FK chain — fk on `task_effort` is enforced but
+        // we can disable it for the test by NOT joining via the
+        // store and writing through the raw connection.)
+        let db_for_seed = db.clone();
+        tokio::task::spawn_blocking(move || {
+            db_for_seed.with_conn(|conn| {
+                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+                conn.execute(
+                    "INSERT INTO task_effort (id, task_id, thread_id, started_at)
+                     VALUES ('ef-1', 1, 'b-1', '2026-01-01T00:00:00Z')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO task_effort_file
+                       (effort_id, path, change_kind,
+                        local_snapshot_id, closest_git_version, git_version_exact)
+                     VALUES (?1, ?2, 'updated', ?3, ?4, 0)",
+                    params!["ef-1", "src/a.rs", snap_id, "aaaa"],
+                )?;
+                conn.execute(
+                    "INSERT INTO page_ref
+                       (source_kind, source_id, target_kind, target_id, ref_type,
+                        source_extra, local_snapshot_id, closest_git_version, git_version_exact)
+                     VALUES ('wiki', 'intro', 'file', 'src/a.rs', 'wiki_file_ref',
+                             NULL, ?1, 'aaaa', 0)",
+                    params![snap_id],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+        snap_store
+            .set_snapshot_git_commit(snap_id, "bbbb".into())
+            .await
+            .unwrap();
+
+        let db_for_check = db.clone();
+        let (file_sha, file_exact, edge_sha, edge_exact): (
+            Option<String>,
+            i64,
+            Option<String>,
+            i64,
+        ) = tokio::task::spawn_blocking(move || {
+            db_for_check.with_conn(|conn| {
+                let mut row = conn.query_row(
+                    "SELECT closest_git_version, git_version_exact FROM task_effort_file
+                         WHERE effort_id = 'ef-1' AND path = 'src/a.rs'",
+                    [],
+                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+                )?;
+                let er = conn.query_row(
+                    "SELECT closest_git_version, git_version_exact FROM page_ref
+                         WHERE source_kind = 'wiki' AND source_id = 'intro'
+                           AND target_kind = 'file' AND target_id = 'src/a.rs'",
+                    [],
+                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+                )?;
+                row = (row.0, row.1);
+                Ok((row.0, row.1, er.0, er.1))
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(file_sha.as_deref(), Some("bbbb"));
+        assert_eq!(file_exact, 1);
+        assert_eq!(edge_sha.as_deref(), Some("bbbb"));
+        assert_eq!(edge_exact, 1);
+    }
 
     #[tokio::test]
     async fn page_visit_record_then_recent() {
