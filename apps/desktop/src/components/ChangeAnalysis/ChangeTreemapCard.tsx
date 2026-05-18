@@ -8,15 +8,15 @@ interface Props {
 }
 
 /**
- * Squarified treemap of the commit's file churn. One rectangle per
- * file, area proportional to `additions + deletions`, colour by
- * architectural zone (same palette as ZoneBarCard). Renders inline
- * SVG sized to the container width — no external graph library
- * dependency.
+ * Squarified treemap of the commit's file churn, grouped by
+ * architectural zone (WinDirStat-style). Each touched zone gets
+ * one contiguous block sized by its total churn; files within the
+ * zone are laid out as a sub-treemap inside that block sharing the
+ * zone colour. A header band labels each zone group when the rect
+ * is large enough to fit it.
  *
- * The visual gestalt answers "where is this commit's mass?" at a
- * glance: a UI-only commit and a UI+store+migration commit look
- * obviously different.
+ * Renders inline SVG sized to the container width — no external
+ * graph library dependency.
  */
 export function ChangeTreemapCard({ files, onOpenFile }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -33,12 +33,12 @@ export function ChangeTreemapCard({ files, onOpenFile }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  const cells = useMemo(
-    () => layoutTreemap(files, containerWidth, 240),
+  const layout = useMemo(
+    () => layoutTreemapByZone(files, containerWidth, 240),
     [files, containerWidth],
   );
 
-  if (cells.length === 0) {
+  if (layout.cells.length === 0) {
     return null;
   }
 
@@ -47,7 +47,7 @@ export function ChangeTreemapCard({ files, onOpenFile }: Props) {
       <header style={cardHeader}>
         <h3 style={cardTitle}>Change treemap</h3>
         <span style={muted}>
-          rectangle area ∝ churn, colour ∝ zone
+          grouped by zone · area ∝ churn
         </span>
       </header>
       <svg
@@ -55,9 +55,37 @@ export function ChangeTreemapCard({ files, onOpenFile }: Props) {
         height={240}
         style={{ display: "block" }}
         role="img"
-        aria-label="Treemap of files by churn and zone"
+        aria-label="Treemap of files by churn, grouped by architectural zone"
       >
-        {cells.map((cell) => (
+        {layout.zones.map((z) => (
+          <g key={`zone-${z.zone}`} pointerEvents="none">
+            {z.headerVisible ? (
+              <>
+                <rect
+                  x={z.x}
+                  y={z.y}
+                  width={z.w}
+                  height={HEADER_HEIGHT}
+                  fill="rgba(0,0,0,0.35)"
+                />
+                <text
+                  x={z.x + 6}
+                  y={z.y + 11}
+                  fontSize={10}
+                  fontWeight={600}
+                  fill="white"
+                  style={{ fontFamily: "var(--font-mono, monospace)" }}
+                >
+                  {truncate(
+                    `${ZONE_LABELS[z.zone]} · ${z.fileCount} file${z.fileCount === 1 ? "" : "s"} · ±${z.churn}`,
+                    Math.floor(z.w / 6),
+                  )}
+                </text>
+              </>
+            ) : null}
+          </g>
+        ))}
+        {layout.cells.map((cell) => (
           <g key={cell.file.path}>
             <rect
               x={cell.x}
@@ -105,43 +133,157 @@ interface TreemapCell {
   h: number;
 }
 
+interface ZoneGroup {
+  zone: Zone;
+  /** Total file count in the zone — included in the header band label. */
+  fileCount: number;
+  /** Total churn (additions + deletions) for the whole zone. */
+  churn: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** True when the zone rect is big enough to fit a readable header band
+   *  without clipping. Determines whether the band is drawn AND whether
+   *  the inner file layout reserves space for it. */
+  headerVisible: boolean;
+}
+
+/** Height of the zone-label band, when present. */
+const HEADER_HEIGHT = 14;
+/** Minimum rect dimensions before we'll render a header band. Below
+ *  this, the band would clip or eat most of the zone's area. */
+const HEADER_MIN_HEIGHT = 36;
+const HEADER_MIN_WIDTH = 60;
+
 /**
- * Squarified treemap (Bruls, Huijsen, Van Wijk 2000). Sorts files
- * by churn desc, then greedily lays out rows that minimize the worst
- * aspect ratio.
+ * Two-level squarified treemap: outer pass packs zones by total
+ * churn, inner pass packs each zone's files into its rect. Returns
+ * both the zone group descriptors (for header bands) and the file
+ * cells (for the actual fill rects).
  */
-function layoutTreemap(
+function layoutTreemapByZone(
   files: BranchChangeEntry[],
   width: number,
   height: number,
-): TreemapCell[] {
-  if (files.length === 0 || width <= 0 || height <= 0) return [];
-  type Item = { file: BranchChangeEntry; value: number };
-  const items: Item[] = files
-    .map((f) => ({
-      file: f,
-      value: Math.max(1, (f.additions ?? 0) + (f.deletions ?? 0)),
-    }))
-    .sort((a, b) => b.value - a.value);
+): { zones: ZoneGroup[]; cells: TreemapCell[] } {
+  if (files.length === 0 || width <= 0 || height <= 0) {
+    return { zones: [], cells: [] };
+  }
 
-  const totalValue = items.reduce((acc, i) => acc + i.value, 0);
+  // Bucket files by zone, accumulating churn. Floor each file at 1
+  // so rename-only / binary files still take a sliver of space.
+  type Bucket = { zone: Zone; files: BranchChangeEntry[]; churn: number };
+  const bucketMap = new Map<Zone, Bucket>();
+  for (const f of files) {
+    const z = classifyZone(f.path);
+    const churn = Math.max(1, (f.additions ?? 0) + (f.deletions ?? 0));
+    const entry = bucketMap.get(z) ?? { zone: z, files: [], churn: 0 };
+    entry.files.push(f);
+    entry.churn += churn;
+    bucketMap.set(z, entry);
+  }
+  const buckets = [...bucketMap.values()].sort((a, b) => b.churn - a.churn);
+
+  // Outer pass: each item is a zone, value = zone churn.
+  const zoneRects = squarify(
+    buckets.map((b) => ({ value: b.churn, payload: b })),
+    0,
+    0,
+    width,
+    height,
+  );
+
+  const zones: ZoneGroup[] = [];
+  const cells: TreemapCell[] = [];
+  for (const zr of zoneRects) {
+    const b = zr.payload;
+    const headerVisible =
+      zr.h >= HEADER_MIN_HEIGHT && zr.w >= HEADER_MIN_WIDTH;
+    const innerY = zr.y + (headerVisible ? HEADER_HEIGHT : 0);
+    const innerH = zr.h - (headerVisible ? HEADER_HEIGHT : 0);
+    zones.push({
+      zone: b.zone,
+      fileCount: b.files.length,
+      churn: b.churn,
+      x: zr.x,
+      y: zr.y,
+      w: zr.w,
+      h: zr.h,
+      headerVisible,
+    });
+
+    if (innerH <= 0 || zr.w <= 0) continue;
+
+    // Inner pass: each item is a file, value = per-file churn.
+    const fileRects = squarify(
+      b.files.map((f) => ({
+        value: Math.max(1, (f.additions ?? 0) + (f.deletions ?? 0)),
+        payload: f,
+      })),
+      zr.x,
+      innerY,
+      zr.w,
+      innerH,
+    );
+    for (const fr of fileRects) {
+      cells.push({
+        file: fr.payload,
+        zone: b.zone,
+        x: fr.x,
+        y: fr.y,
+        w: fr.w,
+        h: fr.h,
+      });
+    }
+  }
+
+  return { zones, cells };
+}
+
+interface SquarifyInput<T> {
+  value: number;
+  payload: T;
+}
+interface SquarifyOutput<T> {
+  payload: T;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Squarified treemap (Bruls, Huijsen, Van Wijk 2000) generalized
+ * to lay out into any rectangle. Sorts items by value desc, then
+ * greedily packs rows whose worst aspect ratio doesn't degrade.
+ */
+function squarify<T>(
+  items: SquarifyInput<T>[],
+  x0: number,
+  y0: number,
+  width: number,
+  height: number,
+): SquarifyOutput<T>[] {
+  if (items.length === 0 || width <= 0 || height <= 0) return [];
+  const sorted = [...items].sort((a, b) => b.value - a.value);
+  const totalValue = sorted.reduce((acc, i) => acc + i.value, 0);
+  if (totalValue <= 0) return [];
   const totalArea = width * height;
-  // Scale every value into pixel-area.
-  const scaled = items.map((i) => ({
-    file: i.file,
+  const scaled = sorted.map((i) => ({
+    payload: i.payload,
     area: (i.value / totalValue) * totalArea,
   }));
 
-  const cells: TreemapCell[] = [];
-  let x = 0;
-  let y = 0;
+  const out: SquarifyOutput<T>[] = [];
+  let x = x0;
+  let y = y0;
   let w = width;
   let h = height;
-  let queue = [...scaled];
+  let queue = scaled;
 
   while (queue.length > 0) {
     const shorter = Math.min(w, h);
-    // Greedily extend the row while aspect ratio improves.
     const row: typeof queue = [queue[0]!];
     queue = queue.slice(1);
     while (queue.length > 0) {
@@ -153,46 +295,29 @@ function layoutTreemap(
         break;
       }
     }
-    // Lay out the row along the shorter side.
     const rowTotal = row.reduce((acc, r) => acc + r.area, 0);
     const rowExtent = rowTotal / shorter;
     if (w >= h) {
-      // shorter is height; row sits along the LEFT edge, stacked vertically.
       let cy = y;
       for (const r of row) {
         const cellH = r.area / rowExtent;
-        cells.push({
-          file: r.file,
-          zone: classifyZone(r.file.path),
-          x,
-          y: cy,
-          w: rowExtent,
-          h: cellH,
-        });
+        out.push({ payload: r.payload, x, y: cy, w: rowExtent, h: cellH });
         cy += cellH;
       }
       x += rowExtent;
       w -= rowExtent;
     } else {
-      // shorter is width; row sits along the TOP edge, laid horizontally.
       let cx = x;
       for (const r of row) {
         const cellW = r.area / rowExtent;
-        cells.push({
-          file: r.file,
-          zone: classifyZone(r.file.path),
-          x: cx,
-          y,
-          w: cellW,
-          h: rowExtent,
-        });
+        out.push({ payload: r.payload, x: cx, y, w: cellW, h: rowExtent });
         cx += cellW;
       }
       y += rowExtent;
       h -= rowExtent;
     }
   }
-  return cells;
+  return out;
 }
 
 /** Worst aspect ratio if `row` is laid along edge of length `shorter`. */
