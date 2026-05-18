@@ -206,7 +206,7 @@ const cardTitle: React.CSSProperties = {
   color: "var(--text-primary)",
 };
 const muted: React.CSSProperties = {
-  color: "var(--text-muted)",
+  color: "var(--text-secondary)",
   fontSize: 11,
 };
 const bar: React.CSSProperties = {
@@ -266,13 +266,15 @@ const crossZoneRow: React.CSSProperties = {
   fontSize: 12,
 };
 const arrow: React.CSSProperties = {
-  color: "var(--text-muted)",
+  color: "var(--text-secondary)",
 };
 const moduleCode: React.CSSProperties = {
   fontFamily: "var(--font-mono, monospace)",
   fontSize: 11,
-  background: "var(--surface-app)",
+  // Lift above the card surface so the chip reads cleanly.
+  background: "var(--surface-elevated)",
   color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
   padding: "1px 4px",
   borderRadius: 3,
 };

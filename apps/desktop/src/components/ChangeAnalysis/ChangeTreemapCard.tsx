@@ -65,7 +65,7 @@ export function ChangeTreemapCard({ files, onOpenFile }: Props) {
               width={cell.w}
               height={cell.h}
               fill={ZONE_COLORS[cell.zone]}
-              stroke="white"
+              stroke="var(--surface-card)"
               strokeWidth={1}
               onClick={(e) =>
                 onOpenFile(cell.file.path, { newTab: e.metaKey || e.ctrlKey })
@@ -270,6 +270,6 @@ const cardTitle: React.CSSProperties = {
   color: "var(--text-primary)",
 };
 const muted: React.CSSProperties = {
-  color: "var(--text-muted)",
+  color: "var(--text-secondary)",
   fontSize: 11,
 };

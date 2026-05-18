@@ -114,7 +114,7 @@ const cardTitle: React.CSSProperties = {
   color: "var(--text-primary)",
 };
 const muted: React.CSSProperties = {
-  color: "var(--text-muted)",
+  color: "var(--text-secondary)",
   fontSize: 11,
 };
 const list: React.CSSProperties = {
