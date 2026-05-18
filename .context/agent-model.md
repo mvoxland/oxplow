@@ -450,10 +450,19 @@ intermediate `ready` step.
   `link_tasks`, `list_recent_file_changes`,
   `dispatch_task`, `file_epic_with_children`, `complete_task`,
   `amend_effort`, `transition_tasks`
-- `complete_task` returns `{ task, file_review }`. When `file_review`
-  is non-null the snapshot bracket diff disagreed with the agent's
-  declared `touched_files`: `claimed_but_not_changed` lists files
-  the agent said it edited but the worktree didn't change;
+- `complete_task` returns `{ task, file_review }`. The diff itself
+  is the set of `file_snapshot` rows landing in the half-open
+  bracket `(start_snapshot_id, end_snapshot_id]` of the effort.
+  `SnapshotCaptureService::request_snapshot` sleeps for
+  `DEFAULT_PREDRAIN_DELAY` (300 ms) before draining the dirty set
+  so the fs-watch debouncer (250 ms in `workspace_watch`) has time
+  to deliver in-flight events; without that wait, an edit followed
+  immediately by `complete_task` collapses the bracket to
+  zero-width and the diff reports every claimed path as
+  unchanged. When `file_review` is non-null the bracket diff
+  disagreed with the agent's declared `touched_files`:
+  `claimed_but_not_changed` lists files the agent said it edited
+  but the worktree didn't change;
   `changed_but_not_claimed` lists files that did change but the
   agent didn't declare. The latter is capped at 10 entries
   (`unclaimed_overflow` carries the original count when truncated)

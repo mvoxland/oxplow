@@ -811,7 +811,10 @@ mod tests {
             )
             // Tests bypass the settle gate; the gate is independently
             // covered in `snapshot_capture::tests::settle_window_*`.
-            .with_settle_duration(std::time::Duration::ZERO),
+            .with_settle_duration(std::time::Duration::ZERO)
+            // Tests drive `mark_dirty` directly, so no fs-watch
+            // debounce window to wait out.
+            .with_predrain_delay(std::time::Duration::ZERO),
         );
         let t = Thread {
             id: ThreadId::from("b-life"),

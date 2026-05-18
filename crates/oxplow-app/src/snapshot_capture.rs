@@ -42,6 +42,20 @@ use oxplow_db::{FileSnapshot, SqliteSnapshotStore};
 /// perception. Tests override this via [`SnapshotCaptureService::with_settle_duration`].
 pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 
+/// How long [`SnapshotCaptureService::request_snapshot`] waits before
+/// draining the dirty set, giving the fs-watch debouncer (250 ms in
+/// `workspace_watch`) time to deliver any in-flight events through
+/// the broadcast channel and into the dirty set. Without this, an
+/// edit followed almost immediately by `complete_task` produces an
+/// empty bracket — the edit hasn't propagated yet, so
+/// `end_snapshot_id == start_snapshot_id` and the file-review diff
+/// reports the claim as unchanged.
+///
+/// 300 ms = 250 ms debouncer + a 50 ms cushion for the broadcast
+/// hop + run_watcher loop. Tests override via
+/// [`SnapshotCaptureService::with_predrain_delay`].
+pub const DEFAULT_PREDRAIN_DELAY: Duration = Duration::from_millis(300);
+
 /// Extract `mtime` from a `Metadata` and convert to unix
 /// milliseconds. Returns `None` when the platform / filesystem
 /// doesn't expose mtime (rare) — callers fall back to hashing.
@@ -129,6 +143,11 @@ struct Inner {
     /// [`DEFAULT_SETTLE_DURATION`]. Tests set this to `Duration::ZERO`
     /// to bypass the gate.
     settle_duration: Duration,
+    /// How long `request_snapshot` waits before draining the dirty
+    /// set. Lets the fs-watch debouncer flush in-flight events. See
+    /// [`DEFAULT_PREDRAIN_DELAY`]. Tests set this to `Duration::ZERO`
+    /// to capture immediately.
+    predrain_delay: Duration,
     /// Single-flight slot for `request_snapshot`. When a capture is
     /// running, this holds a `watch` receiver that publishes the
     /// eventual result. Concurrent callers clone the receiver and
@@ -159,6 +178,7 @@ impl SnapshotCaptureService {
                 events: RwLock::new(None),
                 dirty: Mutex::new(HashMap::new()),
                 settle_duration: DEFAULT_SETTLE_DURATION,
+                predrain_delay: DEFAULT_PREDRAIN_DELAY,
                 in_flight: Mutex::new(None),
             }),
         }
@@ -175,6 +195,19 @@ impl SnapshotCaptureService {
             inner.settle_duration = settle;
         } else {
             warn!("with_settle_duration called after the service was shared; ignoring");
+        }
+        self
+    }
+
+    /// Override the predrain delay (default [`DEFAULT_PREDRAIN_DELAY`]).
+    /// Setting this to `Duration::ZERO` makes `request_snapshot` drain
+    /// the dirty set immediately — used by tests that drive
+    /// `mark_dirty` directly and don't need to wait for fs-watch.
+    pub fn with_predrain_delay(mut self, delay: Duration) -> Self {
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.predrain_delay = delay;
+        } else {
+            warn!("with_predrain_delay called after the service was shared; ignoring");
         }
         self
     }
@@ -771,6 +804,15 @@ impl SnapshotCaptureService {
         &self,
         source: SnapshotSourceKind,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        // Yield long enough for the fs-watch debouncer + broadcast hop
+        // + `run_watcher` to drain any in-flight events into the dirty
+        // set. Without this, an edit that landed on disk less than
+        // 250 ms before this call hasn't propagated yet and we'd
+        // capture an empty bracket — see `DEFAULT_PREDRAIN_DELAY`.
+        let predrain = self.inner.predrain_delay;
+        if !predrain.is_zero() {
+            tokio::time::sleep(predrain).await;
+        }
         let drained: Vec<(PathBuf, DirtyEntry)> = {
             let mut set = self.inner.dirty.lock().unwrap();
             set.drain().collect()
@@ -1131,7 +1173,8 @@ mod tests {
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
-        .with_settle_duration(Duration::ZERO);
+        .with_settle_duration(Duration::ZERO)
+        .with_predrain_delay(Duration::ZERO);
         (svc, store)
     }
 
@@ -1488,7 +1531,8 @@ mod tests {
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
-        .with_settle_duration(Duration::from_millis(100));
+        .with_settle_duration(Duration::from_millis(100))
+        .with_predrain_delay(Duration::ZERO);
 
         svc.mark_dirty(file.clone(), WatchEventKind::Created);
         let snap = svc
@@ -1532,7 +1576,8 @@ mod tests {
             1_000_000,
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
-        .with_settle_duration(Duration::from_secs(60));
+        .with_settle_duration(Duration::from_secs(60))
+        .with_predrain_delay(Duration::ZERO);
 
         svc.mark_dirty(file.clone(), WatchEventKind::Created);
         std::fs::remove_file(&file).unwrap();
@@ -1772,6 +1817,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn predrain_delay_lets_late_dirty_marks_join_the_capture() {
+        // Models the bug fix: a path marked dirty *after*
+        // `request_snapshot` was already called must still land in the
+        // same capture, provided it arrives within the predrain delay.
+        // Without the delay (predrain=ZERO control), the late mark is
+        // missed and the snapshot returns None.
+        let project = tempdir().unwrap();
+        let file = project.path().join("late.txt");
+        std::fs::write(&file, "hello").unwrap();
+        let db = Database::in_memory();
+        seed_stream(&db).await;
+        let store = Arc::new(SqliteSnapshotStore::new(db));
+        let blobs = BlobStore::new(project.path().join(".oxplow/snapshots"));
+        let svc = Arc::new(
+            SnapshotCaptureService::new(
+                store.clone(),
+                blobs,
+                project.path().to_path_buf(),
+                StreamId::from(TEST_STREAM),
+                1_000_000,
+                oxplow_fs_watch::WorkspaceFilter::default(),
+            )
+            .with_settle_duration(Duration::ZERO)
+            // 200 ms gives the spawned task plenty of room to land
+            // its mark_dirty before the drain starts.
+            .with_predrain_delay(Duration::from_millis(200)),
+        );
+        // Kick off the snapshot first — drain is gated by the
+        // predrain delay so this races against the spawned mark.
+        let svc_for_mark = svc.clone();
+        let mark = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            svc_for_mark.mark_dirty(file, WatchEventKind::Other);
+        });
+        let snap = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        mark.await.unwrap();
+        assert!(
+            snap.is_some(),
+            "predrain delay should have let the late mark join the capture",
+        );
+        let rows = store.list_for_path("late.txt").await.unwrap();
+        assert_eq!(rows.len(), 1, "late file should have been captured");
+    }
+
+    #[tokio::test]
     async fn oversize_file_skips_hash_and_blob() {
         let project = tempdir().unwrap();
         let file = project.path().join("big.bin");
@@ -1788,7 +1881,8 @@ mod tests {
             512, // 512 byte cap → 1KB is oversize
             oxplow_fs_watch::WorkspaceFilter::default(),
         )
-        .with_settle_duration(Duration::ZERO);
+        .with_settle_duration(Duration::ZERO)
+        .with_predrain_delay(Duration::ZERO);
         svc.mark_dirty(file, WatchEventKind::Other);
         svc.request_snapshot(SnapshotSourceKind::Startup)
             .await
