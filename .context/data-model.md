@@ -476,6 +476,43 @@ in `oxplow_app::file_ref_version`; callers don't pass any of these
 fields by hand — `task_service::record_effort` and the wiki
 sync watcher fill them automatically.
 
+**Wiki sync preserves unchanged pins.** `sync_from_disk_with_refs_versioned`
+calls `SqlitePageRefStore::merge_source` (NOT `replace_source`).
+Each edge is matched against the existing row by the PK; existing
+edges keep their `local_snapshot_id` / `closest_git_version` /
+`git_version_exact`. Only newly-added edges get the current
+snapshot pin. Edges removed from the body are deleted. So editing
+unrelated prose doesn't re-stamp every file ref's freshness — the
+pin only advances when the body actively re-adds the ref OR when
+the agent explicitly verifies it (next paragraph). The wiki sync
+also strips `@<version>` literals (`@disk`, `@HEAD`, `@<sha>`,
+etc.) from `[[…]]` and `(file:…@…)` / `(dir:…@…)` body forms
+before parsing, and writes the normalised body back to disk —
+version state lives in the row, not the prose.
+
+**Agent-driven `verified_refs` / `removed_refs`.** The
+`record_wiki_page_update` MCP tool takes two required arrays:
+`verified_refs` (paths the agent re-read against the new body
+this turn) and `removed_refs` (paths intentionally removed).
+The tool re-runs the sync synchronously, validates the
+declarations against the new body (every removed path MUST be
+absent, every verified path MUST be present), then re-stamps
+the `page_ref` rows for `verified_refs` via
+`SqlitePageRefStore::restamp_edge_version`. Refs left in the
+body but in NEITHER list keep their existing pin — that's how
+"this content relies on a stale source" stays accurate. Skill
+prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
+
+**User-facing Freshness view.** The
+`list_wiki_freshness(slug)` IPC
+(`crates/oxplow-tauri-ipc/src/commands/wiki_freshness.rs`) joins
+`page_ref` with the latest `file_snapshot` per target path,
+returning a `stale: bool` per ref. `WikiFreshnessPage` renders
+the table with per-ref + per-page "Mark verified" buttons
+backed by `mark_wiki_ref_verified` / `mark_all_wiki_refs_verified`
+IPCs. The wiki page chrome adds a `Freshness (N stale)` action
+chip that routes to the page.
+
 Canonical id shapes match the frontend's `TabRef.id`:
 - `wiki:<slug>` source kind uses just the slug as the id
 - `task:wi-…`

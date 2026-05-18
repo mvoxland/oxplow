@@ -65,6 +65,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Copy;
     case "wiki":
       return BookOpen;
+    case "wiki-freshness":
+      return Gauge;
     case "task":
       return CheckSquare;
     case "finding":

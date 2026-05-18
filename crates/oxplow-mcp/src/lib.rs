@@ -306,6 +306,23 @@ pub struct ResyncNoteParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RecordWikiPageUpdateParams {
+    /// Wiki slug (without `.md`).
+    pub slug: String,
+    /// Repo-relative paths the agent re-read against the new body
+    /// during this edit. Each MUST appear as a `[[…]]` or
+    /// `[label](file:…)` reference in the new body, or the call
+    /// errors. Pass `[]` to declare "I didn't re-check any refs
+    /// this turn" — empty is allowed but the field is required so
+    /// the agent can't sleepwalk past freshness bookkeeping.
+    pub verified_refs: Vec<String>,
+    /// Repo-relative paths the agent intentionally removed from
+    /// the page in this edit. Each MUST NOT appear in the new
+    /// body. Pass `[]` if no refs were removed.
+    pub removed_refs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LspPositionParams {
     pub stream_id: String,
     pub language: String,
@@ -1645,6 +1662,135 @@ impl OxplowMcp {
             .map_err(internal)?;
         json_result(&note)
     }
+
+    #[tool(description = "Record a wiki page edit's freshness bookkeeping. \
+                       Call this AFTER editing a `.oxplow/wiki/<slug>.md` \
+                       file. Both `verified_refs` and `removed_refs` are \
+                       REQUIRED: pass `[]` if nothing applies, but be \
+                       explicit so the freshness signal stays honest. \
+                       `verified_refs` lists repo-relative file paths you \
+                       re-read against the new body during this edit \
+                       (those refs get their snapshot pin advanced to \
+                       current); `removed_refs` lists paths you \
+                       intentionally removed from the page (validated to \
+                       no longer appear in the body). Refs left in place \
+                       without re-checking should appear in NEITHER list \
+                       — they keep their existing pin so 'this content \
+                       relies on stale sources' surfaces accurately.")]
+    async fn record_wiki_page_update(
+        &self,
+        params: Parameters<RecordWikiPageUpdateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_app::file_ref_version;
+        use oxplow_db::page_ref_projections::{KIND_FILE, KIND_WIKI, RT_WIKI_FILE};
+        let p = params.0;
+        let slug = p.slug;
+        // Force a synchronous re-sync of the wiki page so the
+        // page_ref state matches the on-disk body before we
+        // validate / re-stamp. The fs-watcher will run again later
+        // but that's a no-op merge.
+        let resolved_version = {
+            let svc = &self.services.snapshot_capture;
+            let stream_id = oxplow_domain::StreamId::from(svc.stream_id().to_string());
+            match svc.store().latest_snapshot_id_for_stream(stream_id).await {
+                Ok(Some(snapshot_id)) => {
+                    file_ref_version::resolve(svc.store(), svc.project_dir(), snapshot_id)
+                        .await
+                        .ok()
+                }
+                _ => None,
+            }
+        };
+        oxplow_app::wiki_pages::sync_from_disk_with_refs_versioned(
+            &self.services.layout.project_dir,
+            &self.services.wiki_page_store,
+            Some(&self.services.page_ref_store),
+            &slug,
+            resolved_version.clone(),
+        )
+        .await
+        .map_err(internal)?;
+        // Read the body now reflected in the DB to validate against
+        // the agent's declarations.
+        let body_path = self
+            .services
+            .layout
+            .project_dir
+            .join(".oxplow")
+            .join("wiki")
+            .join(format!("{slug}.md"));
+        let body = std::fs::read_to_string(&body_path)
+            .map_err(|e| internal(format!("read {slug}.md: {e}")))?;
+        let parsed = oxplow_app::wiki_pages::parse_refs(&body);
+        let body_files: std::collections::HashSet<&str> =
+            parsed.file_refs.iter().map(|s| s.as_str()).collect();
+        // removed_refs MUST NOT appear in body.
+        let still_present: Vec<&String> = p
+            .removed_refs
+            .iter()
+            .filter(|path| body_files.contains(path.as_str()))
+            .collect();
+        if !still_present.is_empty() {
+            return Err(McpError::invalid_params(
+                format!(
+                    "removed_refs entries still referenced by the body: {}",
+                    still_present
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                None,
+            ));
+        }
+        // verified_refs MUST appear in body.
+        let missing: Vec<&String> = p
+            .verified_refs
+            .iter()
+            .filter(|path| !body_files.contains(path.as_str()))
+            .collect();
+        if !missing.is_empty() {
+            return Err(McpError::invalid_params(
+                format!(
+                    "verified_refs entries not referenced by the body: {}",
+                    missing
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                None,
+            ));
+        }
+        // Re-stamp verified refs to current. We need a snapshot id;
+        // if we couldn't resolve one (no snapshot service in tests),
+        // there's nothing to re-stamp.
+        let mut restamped = Vec::new();
+        if let Some(v) = resolved_version.as_ref() {
+            for path in &p.verified_refs {
+                self.services
+                    .page_ref_store
+                    .restamp_edge_version(
+                        KIND_WIKI,
+                        &slug,
+                        KIND_FILE,
+                        path,
+                        RT_WIKI_FILE,
+                        v.local_snapshot_id,
+                        v.closest_git_version.clone(),
+                        v.git_version_exact,
+                    )
+                    .await
+                    .map_err(|e| internal(e.to_string()))?;
+                restamped.push(path.clone());
+            }
+        }
+        json_result(&serde_json::json!({
+            "slug": slug,
+            "verified": restamped,
+            "removed": p.removed_refs,
+        }))
+    }
 }
 
 fn parse_status(s: &str) -> Result<TaskStatus, McpError> {
@@ -2144,6 +2290,73 @@ mod tests {
                 .into_iter()
                 .collect::<std::collections::BTreeSet<_>>()
         );
+    }
+
+    /// Helper to write a wiki body and call record_wiki_page_update.
+    async fn seed_wiki(project: &std::path::Path, slug: &str, body: &str) {
+        let wiki_dir = project.join(".oxplow").join("wiki");
+        std::fs::create_dir_all(&wiki_dir).unwrap();
+        std::fs::write(wiki_dir.join(format!("{slug}.md")), body).unwrap();
+    }
+
+    #[tokio::test]
+    async fn record_wiki_page_update_validates_removed_refs_absent_from_body() {
+        let (proj, _svc, server) = boot();
+        seed_wiki(
+            proj.path(),
+            "intro",
+            "see [[crates/foo.rs]] and [[crates/bar.rs]]",
+        )
+        .await;
+        let err = server
+            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
+                slug: "intro".into(),
+                verified_refs: vec![],
+                removed_refs: vec!["crates/foo.rs".into()],
+            }))
+            .await
+            .expect_err("foo.rs still in body, should error");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("crates/foo.rs"),
+            "error should mention the offending path: {msg}",
+        );
+    }
+
+    #[tokio::test]
+    async fn record_wiki_page_update_validates_verified_refs_present_in_body() {
+        let (proj, _svc, server) = boot();
+        seed_wiki(proj.path(), "intro", "no refs here").await;
+        let err = server
+            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
+                slug: "intro".into(),
+                verified_refs: vec!["crates/foo.rs".into()],
+                removed_refs: vec![],
+            }))
+            .await
+            .expect_err("foo.rs not in body, should error");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("crates/foo.rs"),
+            "error should mention the missing path: {msg}",
+        );
+    }
+
+    #[tokio::test]
+    async fn record_wiki_page_update_accepts_empty_lists() {
+        // Empty verified + removed is allowed — the agent declared
+        // "I didn't re-check or remove anything in this edit." Body
+        // sync still happens, but no re-stamp.
+        let (proj, _svc, server) = boot();
+        seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
+        server
+            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
+                slug: "intro".into(),
+                verified_refs: vec![],
+                removed_refs: vec![],
+            }))
+            .await
+            .expect("empty lists are allowed");
     }
 
     #[tokio::test]

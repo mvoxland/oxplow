@@ -16,6 +16,7 @@ export type PageKind =
   | "diff"
   | "duplicate-block"
   | "wiki"
+  | "wiki-freshness"
   | "task"
   | "finding"
   | "tasks"

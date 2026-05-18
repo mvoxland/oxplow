@@ -31,4 +31,5 @@ pub mod threads;
 pub mod usage;
 pub mod webview;
 pub mod wiki;
+pub mod wiki_freshness;
 pub mod workspace;

@@ -154,6 +154,241 @@ impl SqlitePageRefStore {
         .unwrap()
     }
 
+    /// Diff-merge: preserve version metadata on edges that already
+    /// exist (matched on the PK), insert new edges with the caller's
+    /// version data, delete edges in storage but not in the new
+    /// set. Atomic. Used by the wiki sync so editing unrelated prose
+    /// doesn't re-stamp every file ref's `local_snapshot_id`.
+    ///
+    /// Semantics:
+    /// - Edge in `existing ∩ new` → row kept with its OLD
+    ///   `local_snapshot_id` / `closest_git_version` /
+    ///   `git_version_exact`. `source_extra` is updated to the new
+    ///   value (line anchors, label overrides may legitimately
+    ///   change without re-verifying the target).
+    /// - Edge in `new \ existing` → INSERT with the new edge's
+    ///   version data (caller stamps it via
+    ///   `page_ref_projections::stamp_file_versions`).
+    /// - Edge in `existing \ new` → DELETE.
+    pub async fn merge_source(
+        &self,
+        source_kind: &str,
+        source_id: &str,
+        edges: Vec<PageRefEdge>,
+    ) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let source_kind = source_kind.to_string();
+        let source_id = source_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let mut conn = db
+                .conn()
+                .map_err(|e| DomainError::Invalid(format!("pool: {e}")))?;
+            let tx = conn
+                .transaction()
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            // Read existing PKs + version data for this source. The
+            // unique key for an edge within a source is
+            // (target_kind, target_id, ref_type).
+            type Key = (String, String, String);
+            type Existing = std::collections::HashMap<Key, (Option<i64>, Option<String>, bool)>;
+            let existing: Existing = {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT target_kind, target_id, ref_type,
+                                local_snapshot_id, closest_git_version,
+                                git_version_exact
+                         FROM page_ref
+                         WHERE source_kind = ?1 AND source_id = ?2",
+                    )
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let rows = stmt
+                    .query_map(params![&source_kind, &source_id], |r| {
+                        let kind: String = r.get(0)?;
+                        let id: String = r.get(1)?;
+                        let rt: String = r.get(2)?;
+                        let local: Option<i64> = r.get(3)?;
+                        let git: Option<String> = r.get(4)?;
+                        let exact: i64 = r.get(5)?;
+                        Ok(((kind, id, rt), (local, git, exact != 0)))
+                    })
+                    .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                let mut map = std::collections::HashMap::new();
+                for row in rows {
+                    let (k, v) = row.map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+                    map.insert(k, v);
+                }
+                map
+            };
+            // Build the new key set for the post-merge delete step.
+            let mut new_keys: std::collections::HashSet<Key> = std::collections::HashSet::new();
+            for edge in &edges {
+                if edge.source_kind != source_kind || edge.source_id != source_id {
+                    continue;
+                }
+                new_keys.insert((
+                    edge.target_kind.clone(),
+                    edge.target_id.clone(),
+                    edge.ref_type.clone(),
+                ));
+            }
+            // Upsert each new edge. Match on PK; if existing,
+            // preserve version data; otherwise stamp with the
+            // caller-supplied version.
+            for edge in edges {
+                if edge.source_kind != source_kind || edge.source_id != source_id {
+                    continue;
+                }
+                let key = (
+                    edge.target_kind.clone(),
+                    edge.target_id.clone(),
+                    edge.ref_type.clone(),
+                );
+                let (local, git, exact) = match existing.get(&key) {
+                    Some(prev) => prev.clone(),
+                    None => (
+                        edge.local_snapshot_id,
+                        edge.closest_git_version.clone(),
+                        edge.git_version_exact,
+                    ),
+                };
+                tx.execute(
+                    "INSERT OR REPLACE INTO page_ref
+                       (source_kind, source_id, target_kind, target_id, ref_type,
+                        source_extra, local_snapshot_id, closest_git_version,
+                        git_version_exact)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        edge.source_kind,
+                        edge.source_id,
+                        edge.target_kind,
+                        edge.target_id,
+                        edge.ref_type,
+                        edge.source_extra,
+                        local,
+                        git,
+                        if exact { 1 } else { 0 },
+                    ],
+                )
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            }
+            // Delete edges that existed but aren't in the new set.
+            for key in existing.keys() {
+                if new_keys.contains(key) {
+                    continue;
+                }
+                tx.execute(
+                    "DELETE FROM page_ref
+                     WHERE source_kind = ?1 AND source_id = ?2
+                       AND target_kind = ?3 AND target_id = ?4
+                       AND ref_type = ?5",
+                    params![&source_kind, &source_id, &key.0, &key.1, &key.2],
+                )
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))?;
+            }
+            tx.commit()
+                .map_err(|e| DomainError::Invalid(format!("sql: {e}")))
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Per-target freshness rows for the wiki page identified by
+    /// `slug`. Each row carries the captured snapshot pin from
+    /// `page_ref` joined to the latest `snapshot.id` whose
+    /// `file_snapshot.path` matches the target. Drives the wiki
+    /// Freshness view.
+    pub async fn list_wiki_file_freshness(
+        &self,
+        slug: &str,
+    ) -> Result<Vec<(String, Option<i64>, Option<String>, bool, Option<i64>)>, DomainError> {
+        let db = self.db.clone();
+        let slug = slug.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT pr.target_id,
+                            pr.local_snapshot_id,
+                            pr.closest_git_version,
+                            pr.git_version_exact,
+                            (SELECT MAX(s.id)
+                               FROM file_snapshot fs
+                               JOIN snapshot s ON s.id = fs.snapshot_id
+                              WHERE fs.path = pr.target_id) AS latest_snapshot_id
+                       FROM page_ref pr
+                      WHERE pr.source_kind = 'wiki'
+                        AND pr.source_id = ?1
+                        AND pr.target_kind = 'file'
+                      ORDER BY pr.target_id ASC",
+                )?;
+                let rows = stmt.query_map(params![slug], |r| {
+                    let path: String = r.get(0)?;
+                    let local: Option<i64> = r.get(1)?;
+                    let git: Option<String> = r.get(2)?;
+                    let exact: i64 = r.get(3)?;
+                    let latest: Option<i64> = r.get(4)?;
+                    Ok((path, local, git, exact != 0, latest))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Re-stamp the version data on a single edge to the supplied
+    /// snapshot pin. Used by the "Mark verified" UI affordances and
+    /// by the wiki-update MCP call's `verified_refs` reconciliation.
+    /// No-op if the matching row doesn't exist.
+    // Each argument is doing distinct semantic work — the PK is 5
+    // strings and the version pin is 3 fields. Bundling them into
+    // a struct would just push the destructuring to every caller
+    // without buying clarity.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn restamp_edge_version(
+        &self,
+        source_kind: &str,
+        source_id: &str,
+        target_kind: &str,
+        target_id: &str,
+        ref_type: &str,
+        local_snapshot_id: i64,
+        closest_git_version: Option<String>,
+        git_version_exact: bool,
+    ) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let source_kind = source_kind.to_string();
+        let source_id = source_id.to_string();
+        let target_kind = target_kind.to_string();
+        let target_id = target_id.to_string();
+        let ref_type = ref_type.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE page_ref
+                        SET local_snapshot_id = ?6,
+                            closest_git_version = ?7,
+                            git_version_exact = ?8
+                      WHERE source_kind = ?1 AND source_id = ?2
+                        AND target_kind = ?3 AND target_id = ?4
+                        AND ref_type = ?5",
+                    params![
+                        source_kind,
+                        source_id,
+                        target_kind,
+                        target_id,
+                        ref_type,
+                        local_snapshot_id,
+                        closest_git_version,
+                        if git_version_exact { 1 } else { 0 },
+                    ],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     /// Like [`replace_source`] but restricted to a named slice
     /// identified by `ref_types`: only rows whose `ref_type` matches
     /// one of the supplied values are deleted, then `edges` is
@@ -396,6 +631,108 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outbound, vec![e]);
+    }
+
+    #[tokio::test]
+    async fn merge_source_preserves_existing_version() {
+        // The first write stamps an edge at snapshot 100. A second
+        // merge with the same edge (but a different version stamp)
+        // must keep the original snapshot id and exact flag.
+        let store = SqlitePageRefStore::new(Database::in_memory());
+        let e1 = edge("wiki", "intro", "file", "a.rs", "wiki_file_ref").with_version(
+            100,
+            Some("aaaa".into()),
+            true,
+        );
+        store.merge_source("wiki", "intro", vec![e1]).await.unwrap();
+        let e2 = edge("wiki", "intro", "file", "a.rs", "wiki_file_ref").with_version(
+            200,
+            Some("bbbb".into()),
+            false,
+        );
+        store.merge_source("wiki", "intro", vec![e2]).await.unwrap();
+        let out = store.list_outbound("wiki", "intro", None).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].local_snapshot_id, Some(100));
+        assert_eq!(out[0].closest_git_version.as_deref(), Some("aaaa"));
+        assert!(out[0].git_version_exact);
+    }
+
+    #[tokio::test]
+    async fn merge_source_stamps_new_edges_and_deletes_missing() {
+        let store = SqlitePageRefStore::new(Database::in_memory());
+        let a =
+            edge("wiki", "intro", "file", "a.rs", "wiki_file_ref").with_version(100, None, false);
+        let b =
+            edge("wiki", "intro", "file", "b.rs", "wiki_file_ref").with_version(100, None, false);
+        store
+            .merge_source("wiki", "intro", vec![a, b])
+            .await
+            .unwrap();
+        // Second merge: drop b.rs, add c.rs. a.rs preserved; b
+        // deleted; c.rs newly stamped at snapshot 200.
+        let a2 =
+            edge("wiki", "intro", "file", "a.rs", "wiki_file_ref").with_version(200, None, false);
+        let c =
+            edge("wiki", "intro", "file", "c.rs", "wiki_file_ref").with_version(200, None, false);
+        store
+            .merge_source("wiki", "intro", vec![a2, c])
+            .await
+            .unwrap();
+        let out = store.list_outbound("wiki", "intro", None).await.unwrap();
+        assert_eq!(out.len(), 2);
+        let by_target: std::collections::HashMap<_, _> = out
+            .iter()
+            .map(|e| (e.target_id.clone(), e.local_snapshot_id))
+            .collect();
+        assert_eq!(by_target.get("a.rs"), Some(&Some(100)));
+        assert_eq!(by_target.get("c.rs"), Some(&Some(200)));
+        assert!(!by_target.contains_key("b.rs"));
+    }
+
+    #[tokio::test]
+    async fn restamp_edge_version_updates_one_row() {
+        let store = SqlitePageRefStore::new(Database::in_memory());
+        let a =
+            edge("wiki", "intro", "file", "a.rs", "wiki_file_ref").with_version(100, None, false);
+        let b =
+            edge("wiki", "intro", "file", "b.rs", "wiki_file_ref").with_version(100, None, false);
+        store
+            .merge_source("wiki", "intro", vec![a, b])
+            .await
+            .unwrap();
+        store
+            .restamp_edge_version(
+                "wiki",
+                "intro",
+                "file",
+                "a.rs",
+                "wiki_file_ref",
+                500,
+                Some("eeee".into()),
+                true,
+            )
+            .await
+            .unwrap();
+        let out = store.list_outbound("wiki", "intro", None).await.unwrap();
+        let by_target: std::collections::HashMap<_, _> = out
+            .iter()
+            .map(|e| {
+                (
+                    e.target_id.clone(),
+                    (
+                        e.local_snapshot_id,
+                        e.closest_git_version.clone(),
+                        e.git_version_exact,
+                    ),
+                )
+            })
+            .collect();
+        assert_eq!(
+            by_target.get("a.rs"),
+            Some(&(Some(500), Some("eeee".into()), true))
+        );
+        assert_eq!(by_target.get("b.rs"), Some(&(Some(100), None, false)));
     }
 
     #[tokio::test]

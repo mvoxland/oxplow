@@ -255,8 +255,23 @@ pub async fn sync_from_disk_with_refs_versioned(
         }
         return store.delete(slug).await;
     }
-    let body = fs::read_to_string(&file_path)
+    let raw_body = fs::read_to_string(&file_path)
         .map_err(|e| DomainError::Invalid(format!("read note {slug}: {e}")))?;
+    // Strip @version literals from any (file|dir):path@version or
+    // [[path@version]] form. The body is prose; versioning lives in
+    // the page_ref row. @disk / @local / @<sha> / @<branch> — all
+    // dropped. If the file changed, write the normalized body back
+    // so future reads see the canonical form.
+    let body = strip_body_version_literals(&raw_body);
+    if body != raw_body {
+        if let Err(err) = fs::write(&file_path, &body) {
+            tracing::warn!(
+                slug,
+                ?err,
+                "failed to write back version-stripped wiki body"
+            );
+        }
+    }
     let title = extract_title(&body, slug);
     let refs = parse_refs(&body);
     let body_size_bytes = body.len() as i64;
@@ -282,9 +297,94 @@ pub async fn sync_from_disk_with_refs_versioned(
         if let Some(v) = file_version.as_ref() {
             stamp_file_versions(&mut edges, v.as_ref());
         }
-        page_refs.replace_source(KIND_WIKI, slug, edges).await?;
+        // merge_source preserves the existing local_snapshot_id /
+        // closest_git_version / git_version_exact on any edge that
+        // matches an existing row by PK. New edges get the freshly
+        // stamped version. Deleted edges (in DB but not body) are
+        // pruned. So editing unrelated prose doesn't re-stamp every
+        // ref's freshness — only refs the body added inherit the
+        // current snapshot pin.
+        page_refs.merge_source(KIND_WIKI, slug, edges).await?;
     }
     Ok(())
+}
+
+/// Strip `@<version>` suffixes from `file:`, `dir:`, and bare
+/// `[[path]]` wikilink forms. Removes `@disk` (tautology), `@local`,
+/// and any author-supplied `@<sha>` / `@<branch>` literal — the
+/// body is prose; version tracking is the page_ref row's job.
+///
+/// Hand-rolled string scanner (no regex dep). Scans for the two
+/// shapes:
+///
+/// 1. `[[...]]` wikilinks — drop `@…` from inside the brackets,
+///    preserving the optional `|label`.
+/// 2. `(file:...)` / `(dir:...)` markdown URL forms — drop `@…`
+///    between the path and the closing `)`.
+///
+/// Other parenthesized URL schemes (`http(s)`, `mailto:`,
+/// `gitcommit:`) are left alone; `@` in those has its own meaning.
+pub fn strip_body_version_literals(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut i = 0;
+    while i < body.len() {
+        let rest = &body[i..];
+        // [[...]] wikilink: handle as a unit
+        if let Some(after_open) = rest.strip_prefix("[[") {
+            if let Some(close) = after_open.find("]]") {
+                let inner_end = 2 + close;
+                let inner = &after_open[..close];
+                let (path_part, label_part) = match inner.find('|') {
+                    Some(p) => (&inner[..p], Some(&inner[p..])),
+                    None => (inner, None),
+                };
+                let stripped_path = match path_part.find('@') {
+                    Some(at) => &path_part[..at],
+                    None => path_part,
+                };
+                out.push_str("[[");
+                out.push_str(stripped_path);
+                if let Some(label) = label_part {
+                    out.push_str(label);
+                }
+                out.push_str("]]");
+                i += inner_end + 2;
+                continue;
+            }
+        }
+        // (file:...) or (dir:...) markdown URL: handle as a unit
+        if let Some(after_paren) = rest.strip_prefix('(') {
+            let scheme_len = if after_paren.starts_with("file:") {
+                Some(5usize)
+            } else if after_paren.starts_with("dir:") {
+                Some(4usize)
+            } else {
+                None
+            };
+            if let Some(scheme_len) = scheme_len {
+                if let Some(close_rel) = after_paren.find(')') {
+                    let url = &after_paren[..close_rel];
+                    let path_after_scheme = &url[scheme_len..];
+                    let stripped = match path_after_scheme.find('@') {
+                        Some(at) => &path_after_scheme[..at],
+                        None => path_after_scheme,
+                    };
+                    out.push('(');
+                    out.push_str(&url[..scheme_len]);
+                    out.push_str(stripped);
+                    out.push(')');
+                    // 1 for '(', `close_rel` chars of URL, 1 for ')'
+                    i += 1 + close_rel + 1;
+                    continue;
+                }
+            }
+        }
+        // Default: copy one UTF-8 char.
+        let ch = rest.chars().next().expect("non-empty");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 /// Sync every `.md` file in the notes dir + prune rows for deleted
@@ -562,6 +662,60 @@ fn find_inline_paths(body: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_version_drops_disk_and_explicit_pins_from_wikilinks() {
+        assert_eq!(
+            strip_body_version_literals("see [[src/foo.ts@disk]]"),
+            "see [[src/foo.ts]]"
+        );
+        assert_eq!(
+            strip_body_version_literals("see [[src/foo.ts@abc1234]]"),
+            "see [[src/foo.ts]]"
+        );
+        assert_eq!(
+            strip_body_version_literals("[[src/foo.ts@disk|the helper]]"),
+            "[[src/foo.ts|the helper]]"
+        );
+        // Bare wikilink untouched.
+        assert_eq!(
+            strip_body_version_literals("[[src/foo.ts]]"),
+            "[[src/foo.ts]]"
+        );
+    }
+
+    #[test]
+    fn strip_version_drops_pins_from_markdown_urls() {
+        assert_eq!(
+            strip_body_version_literals("([foo](file:src/foo.ts@disk))"),
+            "([foo](file:src/foo.ts))"
+        );
+        assert_eq!(
+            strip_body_version_literals("([dir](dir:src/components@abc))"),
+            "([dir](dir:src/components))"
+        );
+        // http URLs with @ are left alone (legitimate userinfo).
+        assert_eq!(
+            strip_body_version_literals("(https://user@host/path)"),
+            "(https://user@host/path)"
+        );
+        // gitcommit shas survive (no @ to strip — but defense in
+        // depth: the scanner only fires on file:/dir: prefixes).
+        assert_eq!(
+            strip_body_version_literals("([abc](gitcommit:abc1234))"),
+            "([abc](gitcommit:abc1234))"
+        );
+    }
+
+    #[test]
+    fn strip_version_preserves_utf8() {
+        // Em dash and accented chars survive the byte-aware scanner.
+        let body = "Look — [[résumé.md@disk]] — okay?";
+        assert_eq!(
+            strip_body_version_literals(body),
+            "Look — [[résumé.md]] — okay?"
+        );
+    }
 
     #[test]
     fn parse_extracts_wikilink_files() {

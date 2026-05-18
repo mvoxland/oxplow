@@ -217,6 +217,9 @@ export const commands = {
 	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
 	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
 	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
+	listWikiFreshness: (slug: string) => typedError<WikiRefFreshness[], IpcError>(__TAURI_INVOKE("list_wiki_freshness", { slug })),
+	markWikiRefVerified: (slug: string, path: string) => typedError<null, IpcError>(__TAURI_INVOKE("mark_wiki_ref_verified", { slug, path })),
+	markAllWikiRefsVerified: (slug: string) => typedError<number, IpcError>(__TAURI_INVOKE("mark_all_wiki_refs_verified", { slug })),
 	recordPageVisit: (pageKind: string, pageId: string, label: string | null, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, durationMs, threadId })),
 	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
 	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
@@ -1708,6 +1711,38 @@ export type WikiPageSearchHit = {
 	title: string,
 	snippet: string,
 	updated_at: Timestamp,
+};
+
+export type WikiRefFreshness = {
+	path: string,
+	/**
+	 *  The snapshot the ref was captured against. 0 when the
+	 *  wiki sync had no snapshot service available.
+	 */
+	local_snapshot_id: number,
+	/**
+	 *  Closest known git commit at capture time; populated only
+	 *  when the worktree had a HEAD.
+	 */
+	closest_git_version: string | null,
+	/**
+	 *  `true` when the local snapshot is byte-equal to the recorded
+	 *  commit (capture was on a clean worktree, or
+	 *  `set_snapshot_git_commit` later attached HEAD to the snapshot).
+	 */
+	git_version_exact: boolean,
+	/**
+	 *  The latest `snapshot.id` whose `file_snapshot.path` matches
+	 *  this target. `None` when the file hasn't been captured (e.g.
+	 *  it's outside the workspace or has never been touched since
+	 *  the snapshot service booted).
+	 */
+	latest_snapshot_id: number | null,
+	/**
+	 *  `true` when `latest_snapshot_id > local_snapshot_id`. The
+	 *  renderer paints a "stale" chip on these rows.
+	 */
+	stale: boolean,
 };
 
 export type WorkspaceContext = {

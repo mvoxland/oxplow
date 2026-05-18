@@ -1,6 +1,6 @@
 ---
 name: oxplow-wiki-capture
-description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_wiki_pages, search_wiki_pages, search_wiki_page_bodies, list_backlinks, get_wiki_page_metadata, resync_wiki_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
+description: Capturing non-trivial exploratory Q&A into wiki pages — codebase walkthroughs AND general synthesis (design rationale, comparisons, tradeoffs, recommendations, advice). The wiki is for any durable understanding worth keeping, not just code questions. Loads on mcp__oxplow__list_wiki_pages, search_wiki_pages, search_wiki_page_bodies, list_backlinks, get_wiki_page_metadata, resync_wiki_page, record_wiki_page_update, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "describe the architecture", "give me an overview", "summarize the codebase", "walk me through X", "why does/did/should X", "what's the difference between X and Y", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "what's the best way to X", "rationale behind X", "advice on X", or says "save this" / "add a note" / "add to the wiki".
 ---
 
 # Wiki pages — exploratory capture
@@ -86,59 +86,39 @@ Files referenced: `src/foo.ts`, `src/bar/baz.ts`
 ```
 
 - Append entries with `## <date> — <focus>` headings.
-- Inline file references as **wikilinks** with workspace-relative
-  paths AND an explicit `@<version>`. The renderer turns these into
-  clickable links that open the file at the pinned version, and the
-  parser strips the version to keep backlinks-by-path working.
+- Inline file references as **bare wikilinks** with workspace-relative
+  paths: `[[src/foo.ts]]`. **No `@<version>` literals in body.**
+  Version tracking lives in the database (`page_ref` row carries
+  `local_snapshot_id` / `closest_git_version` / `git_version_exact`,
+  stamped at write time and preserved on subsequent saves that
+  don't touch the ref). Body stays prose; `@disk`, `@HEAD`,
+  `@<sha>` are all stripped on parse.
 - Backticks stay reserved for code-ish things (identifiers, types,
   shell commands, config keys) — `EditorPane`, `bun test`,
   `NODE_ENV`. If it's a path the reader should be able to click,
   use a wikilink, not backticks.
 
-### Required: every file wikilink declares a version
+### Freshness is tracked in the row, not the body
 
-A file wikilink is a snapshot of understanding. Without a version
-the link is implicitly "whatever's in the working tree right now,"
-which silently rots the moment that file changes. **Always pin a
-version**, picking explicitly between two cases:
-
-1. **Run `git status --porcelain <path>` first.** (Or, if you read
-   the file via Read this turn and saw it was committed cleanly,
-   you can skip the porcelain check — but err toward checking.)
-2. **If the path is clean** (no working-tree edits), use the
-   committed sha: `[[src/foo.ts@<HEAD-7-or-full>]]`. If you don't
-   know the sha, use the literal `@HEAD`: `[[src/foo.ts@HEAD]]`.
-   That pins the link to the commit that's checked out at note-write
-   time (resolves at click time).
-3. **If the path is modified, added, or untracked**, use
-   `[[src/foo.ts@disk]]`. This explicitly says "the working-tree
-   version when this note was written." The reader knows the link
-   is local-state-dependent.
-
-Bare `[[path]]` (no `@`) is forbidden in new wiki pages. Existing
-notes that use bare paths are tolerated (parser back-fills `@disk`
-for legacy compat) but shouldn't be propagated — when you append
-to an existing note, write your *new* lines with explicit versions.
+Each `(wiki page → file)` edge in `page_ref` records the snapshot
+the ref was captured against. The wiki sync preserves that pin
+across saves that don't touch the ref — so editing one paragraph
+doesn't pretend you re-verified every other link. You manage
+freshness explicitly via `record_wiki_page_update` (see Write
+mechanics below) with `verified_refs` and `removed_refs`.
 
 Wikilink target shapes:
 
-- `[[src/foo.ts@HEAD]]` — file at HEAD (use this for clean files)
-- `[[src/foo.ts@<sha>]]` — file at a specific commit
-- `[[src/foo.ts@<branch>]]` — file at the tip of a branch
-- `[[src/foo.ts@disk]]` — file as it sits on disk right now
-  (use this when the working tree differs from HEAD)
-- `[[src/foo.ts@disk:42]]` / `[[src/foo.ts@HEAD:42]]` — version + line
-- `[[src/foo.ts@disk|the foo helper]]` — custom display text
-- `[[dir:src/components]]` — directory (no version; directories are
-  navigation targets, not content snapshots)
+- `[[src/foo.ts]]` — file (bare, no version literal)
+- `[[src/foo.ts:42]]` — file + line anchor
+- `[[src/foo.ts|the foo helper]]` — custom display text
+- `[[dir:src/components]]` — directory
 - `[[abc1234]]` or `[[git:abc1234]]` — git commit reference
 - `[[some-other-note]]` — link to another wiki page by slug
 
-Example: "The drag handler in
-[[src/ui/components/Tabs.tsx@disk:88]] calls `onDrop` after
-validating the target — currently being modified in this thread,
-so we pin to `@disk` until it lands. The committed entry point
-[[src/ui/index.tsx@HEAD]] is unchanged. See
+Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]]
+calls `onDrop` after validating the target. The entry point
+[[src/ui/index.tsx]] wires it up. See
 [[dir:src/ui/components]] for the rest of that surface."
 
 ## Write mechanics
@@ -149,9 +129,14 @@ so we pin to `@disk` until it lands. The committed entry point
    `<projectDir>/.oxplow/wiki/<slug>.md`.
 2. Use the **Write** tool to write/replace the file. (For appends to
    an existing note, Read first, then Write the merged body.)
-3. Call `mcp__oxplow__resync_wiki_page` with the slug so the freshness
-   baseline pins to current HEAD without waiting for the watcher's
-   200ms debounce.
+3. Call `mcp__oxplow__record_wiki_page_update` with the slug,
+   `verified_refs` (every file path you re-read against the new
+   body during this edit), and `removed_refs` (file paths you
+   intentionally removed from the page). Both lists are REQUIRED.
+   Empty `[]` is allowed but deliberate: it means "I didn't
+   re-check anything" / "I didn't remove anything." Refs left in
+   place without re-checking go in NEITHER list and keep their
+   existing freshness pin so the staleness signal stays honest.
 4. When you close the surrounding task via `complete_task`,
    declare the wiki page in `impacts`:
    `{ kind: "wiki", id: "<slug>", action: "created" | "updated" }`.

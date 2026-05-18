@@ -117,6 +117,7 @@ import { SubsystemDocsPage } from "./pages/SubsystemDocsPage.js";
 import { TaskPage } from "./pages/TaskPage.js";
 import { FindingPage } from "./pages/FindingPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
+import { WikiFreshnessPage } from "./pages/WikiFreshnessPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { StreamSettingsPage } from "./pages/StreamSettingsPage.js";
 import { ThreadSettingsPage } from "./pages/ThreadSettingsPage.js";
@@ -2059,6 +2060,7 @@ export function App() {
         return;
       }
       case "wiki":
+      case "wiki-freshness":
       case "directory":
       case "task":
       case "finding":
@@ -2944,6 +2946,15 @@ export function App() {
               onOpenExternalUrl={handleOpenExternalUrl}
             />
           ) : null,
+        });
+      } else if (ref.kind === "wiki-freshness") {
+        const slug = (ref.payload as { slug?: string } | null)?.slug ?? "";
+        const navOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
+        tabs.push({
+          id: ref.id,
+          label: `Freshness — ${slug}`,
+          closable: true,
+          render: () => <WikiFreshnessPage slug={slug} onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "directory") {
         const dirPath = (ref.payload as { path?: string } | null)?.path ?? "";

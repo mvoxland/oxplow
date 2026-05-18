@@ -88,6 +88,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // page refs (unified backlinks/outbound)
         commands::page_refs::list_backlinks,
         commands::page_refs::list_outbound,
+        // wiki freshness (V20 file-ref version tracking)
+        commands::wiki_freshness::list_wiki_freshness,
+        commands::wiki_freshness::mark_wiki_ref_verified,
+        commands::wiki_freshness::mark_all_wiki_refs_verified,
         // page visit
         commands::page_visit::record_page_visit,
         commands::page_visit::list_recent_page_visits,

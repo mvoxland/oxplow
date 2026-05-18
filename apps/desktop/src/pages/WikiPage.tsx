@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Stream, ThreadWorkState } from "../tauri-bridge/index.js";
+import { commands } from "../tauri-bridge/index.js";
 import { Page } from "../tabs/Page.js";
 import { WikiPageTab, FreshnessBadge } from "../components/Wiki/WikiPageTab.js";
 import { useWikiPageController } from "../components/Wiki/useWikiPageController.js";
 import { WikiTableOfContents } from "../components/Wiki/WikiTableOfContents.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { wikiPageRef } from "../tabs/pageRefs.js";
+import { wikiFreshnessRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { usePageTitle, useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -103,6 +104,24 @@ function WikiPageBody({
   const controller = useWikiPageController(stream, slug, onClosed);
   usePageTitle(controller.summary?.title ?? slug);
   const [scrollHost, setScrollHost] = useState<HTMLElement | null>(null);
+  const [staleCount, setStaleCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await commands.listWikiFreshness(slug);
+      if (cancelled) return;
+      if (r.status === "ok") {
+        setStaleCount(r.data.filter((row) => row.stale).length);
+      } else {
+        setStaleCount(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [slug, controller.summary?.updated_at]);
+  const openFreshness = () => {
+    const ref = wikiFreshnessRef(slug);
+    if (nav) nav.navigate(ref);
+  };
 
   const rail = (
     <WikiPageRail
@@ -115,6 +134,29 @@ function WikiPageBody({
     <Page
       testId="page-wiki"
       kind="wiki"
+      chips={staleCount != null && staleCount > 0 ? [{
+        label: `${staleCount} stale ref${staleCount === 1 ? "" : "s"}`,
+        color: "var(--priority-high)",
+        title: "Click to open Freshness view",
+      }] : undefined}
+      actions={
+        <button
+          type="button"
+          onClick={openFreshness}
+          style={{
+            background: "transparent",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 4,
+            color: staleCount && staleCount > 0 ? "var(--priority-high)" : "var(--text-secondary)",
+            padding: "2px 8px",
+            fontSize: "var(--text-xs)",
+            cursor: "pointer",
+          }}
+          title="Open the freshness view for this wiki page"
+        >
+          Freshness{staleCount != null ? ` (${staleCount} stale)` : ""}
+        </button>
+      }
       backlinks={backlinks}
       outbound={outbound}
       layout="details"

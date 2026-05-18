@@ -82,6 +82,10 @@ export function wikiPageRef(slug: string): TabRef {
   return { id: `wiki:${slug}`, kind: "wiki", payload: { slug } };
 }
 
+export function wikiFreshnessRef(slug: string): TabRef {
+  return { id: `wiki-freshness:${slug}`, kind: "wiki-freshness", payload: { slug } };
+}
+
 export function taskRef(itemId: number): TabRef {
   return { id: `task:${itemId}`, kind: "task", payload: { itemId } };
 }
