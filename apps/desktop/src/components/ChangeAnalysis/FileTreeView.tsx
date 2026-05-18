@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { BranchChangeEntry, GitFileStatus } from "../../api.js";
+import { classifyZone, ZONE_LABELS } from "./zones.js";
 import {
   HierarchyView,
   type HierarchyMetrics,
@@ -131,11 +132,17 @@ function materialize(
   for (const f of filesSorted) {
     const id = `${idPrefix}/file:${f.entry.path}`;
     const bucket = statusBucket(f.entry.status);
+    const zone = classifyZone(f.entry.path);
+    // Zone badge rendered as muted detail text. `other` is the
+    // catch-all so suppressing it keeps the column quiet on
+    // unclassified files.
+    const detail = zone === "other" ? undefined : `[${ZONE_LABELS[zone]}]`;
     out.push({
       id,
       label: f.name,
       icon: <FileIcon />,
       statuses: gitStatusToHierarchy(f.entry.status),
+      detail,
       metrics: {
         added: bucket === "added" ? 1 : 0,
         modified: bucket === "modified" ? 1 : 0,

@@ -20,6 +20,7 @@ members = [
     "crates/oxplow-control-plane",
     "crates/oxplow-code-metrics",
     "crates/oxplow-code-dup",
+    "crates/oxplow-code-deps",
     "crates/oxplow-tree-source",
 ]
 
@@ -113,6 +114,7 @@ tree-sitter-clojure-orchard = "0.2"
 oxplow-domain = { path = "crates/oxplow-domain" }
 oxplow-code-metrics = { path = "crates/oxplow-code-metrics" }
 oxplow-code-dup = { path = "crates/oxplow-code-dup" }
+oxplow-code-deps = { path = "crates/oxplow-code-deps" }
 oxplow-tree-source = { path = "crates/oxplow-tree-source" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-config = { path = "crates/oxplow-config" }
