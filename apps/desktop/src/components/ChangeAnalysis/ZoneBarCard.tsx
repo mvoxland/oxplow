@@ -185,10 +185,11 @@ function zoneChip(z: Zone): React.CSSProperties {
 }
 
 const card: React.CSSProperties = {
-  border: "1px solid var(--border, #e5e5e5)",
+  border: "1px solid var(--border-subtle)",
   borderRadius: 6,
   padding: 12,
-  background: "var(--surface, #fff)",
+  background: "var(--surface-card)",
+  color: "var(--text-primary)",
   display: "flex",
   flexDirection: "column",
   gap: 10,
@@ -202,9 +203,10 @@ const cardTitle: React.CSSProperties = {
   margin: 0,
   fontSize: "var(--text-base, 14px)",
   fontWeight: 600,
+  color: "var(--text-primary)",
 };
 const muted: React.CSSProperties = {
-  color: "var(--text-muted, #737373)",
+  color: "var(--text-muted)",
   fontSize: 11,
 };
 const bar: React.CSSProperties = {
@@ -213,7 +215,7 @@ const bar: React.CSSProperties = {
   height: 28,
   borderRadius: 4,
   overflow: "hidden",
-  border: "1px solid var(--border, #e5e5e5)",
+  border: "1px solid var(--border-subtle)",
 };
 const barCell: React.CSSProperties = {
   display: "flex",
@@ -242,7 +244,7 @@ const crossZoneSection: React.CSSProperties = {
   flexDirection: "column",
   gap: 6,
   paddingTop: 6,
-  borderTop: "1px dashed var(--border, #e5e5e5)",
+  borderTop: "1px dashed var(--border-subtle)",
 };
 const crossZoneHeader: React.CSSProperties = {
   display: "flex",
@@ -269,7 +271,8 @@ const arrow: React.CSSProperties = {
 const moduleCode: React.CSSProperties = {
   fontFamily: "var(--font-mono, monospace)",
   fontSize: 11,
-  background: "var(--surface-subtle, #f5f5f5)",
+  background: "var(--surface-app)",
+  color: "var(--text-primary)",
   padding: "1px 4px",
   borderRadius: 3,
 };

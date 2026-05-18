@@ -93,10 +93,11 @@ function SurpriseChip({ reason }: { reason: FileSurprise["reason"] }) {
 }
 
 const card: React.CSSProperties = {
-  border: "1px solid var(--border, #e5e5e5)",
+  border: "1px solid var(--border-subtle)",
   borderRadius: 6,
   padding: 12,
-  background: "var(--surface, #fff)",
+  background: "var(--surface-card)",
+  color: "var(--text-primary)",
   display: "flex",
   flexDirection: "column",
   gap: 8,
@@ -110,9 +111,10 @@ const cardTitle: React.CSSProperties = {
   margin: 0,
   fontSize: "var(--text-base, 14px)",
   fontWeight: 600,
+  color: "var(--text-primary)",
 };
 const muted: React.CSSProperties = {
-  color: "var(--text-muted, #737373)",
+  color: "var(--text-muted)",
   fontSize: 11,
 };
 const list: React.CSSProperties = {
@@ -135,7 +137,7 @@ const pathBtn: React.CSSProperties = {
   padding: 0,
   fontFamily: "var(--font-mono, monospace)",
   fontSize: 12,
-  color: "var(--text-primary, #111)",
+  color: "var(--text-link, #2563eb)",
   cursor: "pointer",
   textAlign: "left",
   flex: 1,
