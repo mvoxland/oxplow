@@ -19,7 +19,9 @@ use specta::Type;
 use thiserror::Error;
 
 use oxplow_db::SqliteTaskStore;
+use oxplow_db::SqliteThreadStore;
 use oxplow_db::{EffortFileChange, SqliteTaskEffortStore, TaskEffortStore};
+use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
 use oxplow_domain::EffortId;
 use oxplow_domain::{
@@ -98,10 +100,15 @@ pub struct TaskService {
     /// that construct a TaskService without the full Services boot
     /// still work — they just skip the lifecycle effort.
     effort_store: Option<Arc<SqliteTaskEffortStore>>,
-    /// Optional. When set alongside `effort_store`, `update()` calls
-    /// `request_snapshot()` on in_progress transitions and stamps
-    /// the returned id onto the effort row.
-    snapshot_capture: Option<Arc<crate::snapshot_capture::SnapshotCaptureService>>,
+    /// Per-stream snapshot capture registry. When set alongside
+    /// `thread_store`, lifecycle snapshots resolve the right service
+    /// via the task's thread → stream — so a task running in a
+    /// non-primary worktree captures snapshots against THAT
+    /// worktree's fs-watch, not the primary's.
+    snapshot_captures: Option<crate::snapshot_capture_registry::SnapshotCaptureRegistry>,
+    /// Looks up a thread to read its `stream_id`. Required to drive
+    /// the registry-based lookup.
+    thread_store: Option<Arc<SqliteThreadStore>>,
 }
 
 /// Returns true iff any item in `items` has this id as its parent_id.
@@ -114,7 +121,8 @@ impl TaskService {
         Self {
             store,
             effort_store: None,
-            snapshot_capture: None,
+            snapshot_captures: None,
+            thread_store: None,
         }
     }
 
@@ -126,16 +134,59 @@ impl TaskService {
         self
     }
 
-    /// Attach the snapshot manager. When present alongside
-    /// `effort_store`, `update()` triggers `request_snapshot()` on
-    /// in_progress entry / exit and stamps the result onto the
-    /// effort row.
-    pub fn with_snapshot_capture(
+    /// Attach the per-stream registry. When present alongside
+    /// `with_thread_store`, lifecycle snapshots route to the service
+    /// matching the task's stream instead of always using the
+    /// singleton attached via `with_snapshot_capture`.
+    pub fn with_snapshot_captures(
         mut self,
-        svc: Arc<crate::snapshot_capture::SnapshotCaptureService>,
+        reg: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
     ) -> Self {
-        self.snapshot_capture = Some(svc);
+        self.snapshot_captures = Some(reg);
         self
+    }
+
+    /// Attach the thread store. Together with `with_snapshot_captures`
+    /// this enables per-stream lifecycle snapshots — `TaskService`
+    /// loads the task's thread to learn which `stream_id` (and thus
+    /// which `SnapshotCaptureService`) to drive.
+    pub fn with_thread_store(mut self, store: Arc<SqliteThreadStore>) -> Self {
+        self.thread_store = Some(store);
+        self
+    }
+
+    /// Resolve the snapshot service that should handle a lifecycle
+    /// event for `thread_id`. Prefers the per-stream registry when
+    /// configured. Returns `None` (and logs) when either the registry
+    /// isn't wired or the thread / stream can't be resolved — callers
+    /// then skip the snapshot step entirely.
+    async fn service_for_thread(
+        &self,
+        thread_id: &ThreadId,
+    ) -> Option<Arc<crate::snapshot_capture::SnapshotCaptureService>> {
+        let reg = self.snapshot_captures.as_ref()?;
+        let threads = self.thread_store.as_ref()?;
+        match threads.get(thread_id).await {
+            Ok(Some(thread)) => {
+                let svc = reg.get(&thread.stream_id);
+                if svc.is_none() {
+                    tracing::debug!(
+                        thread_id = %thread_id,
+                        stream_id = %thread.stream_id,
+                        "lifecycle: stream has no registered capture service",
+                    );
+                }
+                svc
+            }
+            Ok(None) => {
+                tracing::debug!(thread_id = %thread_id, "lifecycle: thread row missing");
+                None
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, thread_id = %thread_id, "lifecycle: thread lookup failed");
+                None
+            }
+        }
     }
 
     /// Create a task attached to `thread` (or to the backlog if
@@ -233,14 +284,15 @@ impl TaskService {
     /// status persistence already succeeded and we don't want a
     /// snapshot failure to roll that back.
     async fn apply_lifecycle_snapshot(&self, item: &Task, entering: bool) {
-        let (Some(snapshot), Some(effort_store)) =
-            (self.snapshot_capture.as_ref(), self.effort_store.as_ref())
-        else {
+        let Some(effort_store) = self.effort_store.as_ref() else {
             return;
         };
         // Lifecycle efforts need a thread to attach to; tasks on
         // the project-wide backlog skip snapshot pinning.
         let Some(thread_id) = item.thread_id.clone() else {
+            return;
+        };
+        let Some(snapshot) = self.service_for_thread(&thread_id).await else {
             return;
         };
         let source = if entering {
@@ -402,7 +454,8 @@ impl TaskService {
             .end_snapshot_id
             .or(effort.start_snapshot_id)
             .unwrap_or(0);
-        match self.snapshot_capture.as_ref() {
+        let svc = self.service_for_thread(&effort.thread_id).await;
+        match svc {
             Some(svc) if snapshot_id != 0 => {
                 crate::file_ref_version::resolve(svc.store(), svc.project_dir(), snapshot_id)
                     .await
@@ -773,6 +826,7 @@ mod tests {
         ThreadId,
         Arc<SqliteTaskEffortStore>,
         tempfile::TempDir,
+        crate::snapshot_capture_registry::SnapshotCaptureRegistry,
     ) {
         let project = tempfile::tempdir().unwrap();
         let db = Database::in_memory();
@@ -800,6 +854,27 @@ mod tests {
             archived_at: None,
         };
         streams.upsert(&s).await.unwrap();
+        // Build a single-entry registry pointing at the test project's
+        // worktree. Per-stream is the registry's whole point — the
+        // primary stream IS the only stream in these tests, but
+        // TaskService routes through `get(&stream_id)` either way.
+        let event_bus = crate::events::EventBus::new();
+        let snapshot_captures = crate::snapshot_capture_registry::SnapshotCaptureRegistry::new(
+            crate::snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                snapshot_store: snapshot_store.clone(),
+                blobs: blobs.clone(),
+                max_file_bytes: 1_000_000,
+                workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                events: event_bus,
+            },
+        );
+        // Drop the default-built service; tests need overridden
+        // settle / predrain durations, so we re-insert a custom one
+        // below. Both gates are independently covered in
+        // `snapshot_capture::tests`.
+        let _ = snapshot_captures
+            .register(&s)
+            .expect("test stream's worktree exists on disk");
         let snapshot_svc = Arc::new(
             crate::snapshot_capture::SnapshotCaptureService::new(
                 snapshot_store,
@@ -809,13 +884,12 @@ mod tests {
                 1_000_000,
                 oxplow_fs_watch::WorkspaceFilter::default(),
             )
-            // Tests bypass the settle gate; the gate is independently
-            // covered in `snapshot_capture::tests::settle_window_*`.
             .with_settle_duration(std::time::Duration::ZERO)
-            // Tests drive `mark_dirty` directly, so no fs-watch
-            // debounce window to wait out.
             .with_predrain_delay(std::time::Duration::ZERO),
         );
+        snapshot_captures.unregister(&s.id);
+        snapshot_captures.insert_for_test(s.id.clone(), snapshot_svc);
+        snapshot_captures.set_primary(s.id.clone());
         let t = Thread {
             id: ThreadId::from("b-life"),
             stream_id: s.id.clone(),
@@ -833,15 +907,17 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
+        let thread_store_for_svc = Arc::new(oxplow_db::SqliteThreadStore::new(db.clone()));
         let svc = TaskService::new(task_store)
             .with_effort_store(effort_store.clone())
-            .with_snapshot_capture(snapshot_svc);
-        (svc, t.id, effort_store, project)
+            .with_snapshot_captures(snapshot_captures.clone())
+            .with_thread_store(thread_store_for_svc);
+        (svc, t.id, effort_store, project, snapshot_captures)
     }
 
     #[tokio::test]
     async fn in_progress_transition_opens_effort_with_start_snapshot() {
-        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid.clone()),
@@ -879,7 +955,9 @@ mod tests {
 
         // Mark a file dirty so the next request_snapshot produces
         // a non-empty result.
-        let svc_for_dirty = svc.snapshot_capture.as_ref().unwrap().clone();
+        let svc_for_dirty = captures
+            .primary()
+            .expect("primary service registered in fixture");
         std::fs::write(_project.path().join("a.txt"), "v").unwrap();
         svc_for_dirty.mark_dirty(
             _project.path().join("a.txt"),
@@ -917,7 +995,7 @@ mod tests {
         // the lifecycle hook — otherwise complete_task's TaskEnd
         // snapshot has no open effort to attach to and the snapshot
         // is orphaned.
-        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid.clone()),
@@ -943,7 +1021,7 @@ mod tests {
         // logging completed work) must NOT open a lifecycle effort —
         // record_effort handles that synthesis itself, with the
         // touched_files payload.
-        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid.clone()),
@@ -964,7 +1042,7 @@ mod tests {
 
     #[tokio::test]
     async fn record_effort_merges_into_lifecycle_effort() {
-        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid.clone()),
@@ -1022,7 +1100,7 @@ mod tests {
 
     #[tokio::test]
     async fn record_effort_creates_fresh_effort_when_no_lifecycle() {
-        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid.clone()),
@@ -1054,7 +1132,7 @@ mod tests {
 
     #[tokio::test]
     async fn non_in_progress_transitions_skip_effort_lifecycle() {
-        let (svc, tid, effort_store, _project) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid.clone()),
@@ -1448,5 +1526,202 @@ mod tests {
             }
             other => panic!("expected Epic, got {other:?}"),
         }
+    }
+
+    /// Regression: a task running on a non-primary stream must capture
+    /// snapshots against THAT stream's worktree. Before the per-stream
+    /// registry, the lifecycle would always hit the primary's
+    /// fs-watcher, leaving the bracket diff empty for any edit landing
+    /// in a worktree-stream.
+    #[tokio::test]
+    async fn non_primary_stream_lifecycle_captures_against_its_own_worktree() {
+        // Two on-disk directories — one for the "primary" stream and a
+        // separate one for the worktree stream. Both write file_snapshot
+        // rows to the same DB but the rows are tagged per-stream.
+        let primary_dir = tempfile::tempdir().unwrap();
+        let worktree_dir = tempfile::tempdir().unwrap();
+        let db = Database::in_memory();
+        let stream_store = SqliteStreamStore::new(db.clone());
+        let thread_store_handle = SqliteThreadStore::new(db.clone());
+        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
+        let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
+        let blobs = crate::blob_store::BlobStore::new(primary_dir.path().join(".oxplow/snapshots"));
+
+        let primary = Stream {
+            id: StreamId::from("s-primary"),
+            kind: StreamKind::Primary,
+            title: "p".into(),
+            branch: "main".into(),
+            branch_ref: "refs/heads/main".into(),
+            branch_source: "main".into(),
+            worktree_path: primary_dir.path().to_string_lossy().into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(1),
+            updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
+        };
+        let worktree = Stream {
+            id: StreamId::from("s-worktree"),
+            kind: StreamKind::Worktree,
+            title: "feature".into(),
+            branch: "feature".into(),
+            branch_ref: "refs/heads/feature".into(),
+            branch_source: "main".into(),
+            worktree_path: worktree_dir.path().to_string_lossy().into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(2),
+            updated_at: Timestamp::from_unix_ms(2),
+            archived_at: None,
+        };
+        stream_store.upsert(&primary).await.unwrap();
+        stream_store.upsert(&worktree).await.unwrap();
+
+        let snapshot_captures = crate::snapshot_capture_registry::SnapshotCaptureRegistry::new(
+            crate::snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                snapshot_store: snapshot_store.clone(),
+                blobs: blobs.clone(),
+                max_file_bytes: 1_000_000,
+                workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                events: crate::events::EventBus::new(),
+            },
+        );
+        // Register both streams the same way Services::boot does, then
+        // swap each entry for a settle/predrain-zero variant so tests
+        // don't burn the debounce windows.
+        for s in [&primary, &worktree] {
+            snapshot_captures.register(s).expect("worktree dir exists");
+            snapshot_captures.unregister(&s.id);
+            let svc = Arc::new(
+                crate::snapshot_capture::SnapshotCaptureService::new(
+                    snapshot_store.clone(),
+                    blobs.clone(),
+                    std::path::PathBuf::from(&s.worktree_path),
+                    s.id.clone(),
+                    1_000_000,
+                    oxplow_fs_watch::WorkspaceFilter::default(),
+                )
+                .with_settle_duration(std::time::Duration::ZERO)
+                .with_predrain_delay(std::time::Duration::ZERO),
+            );
+            snapshot_captures.insert_for_test(s.id.clone(), svc);
+        }
+        snapshot_captures.set_primary(primary.id.clone());
+
+        // Thread is on the WORKTREE stream — this is the case the bug
+        // was about.
+        let thread = Thread {
+            id: ThreadId::from("b-on-worktree"),
+            stream_id: worktree.id.clone(),
+            title: "t".into(),
+            status: ThreadStatus::Active,
+            sort_index: 0,
+            pane_target: "working".into(),
+            resume_session_id: String::new(),
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(3),
+            updated_at: Timestamp::from_unix_ms(3),
+            archived_at: None,
+        };
+        thread_store_handle.upsert(&thread).await.unwrap();
+
+        let svc = TaskService::new(task_store)
+            .with_effort_store(effort_store.clone())
+            .with_snapshot_captures(snapshot_captures.clone())
+            .with_thread_store(Arc::new(SqliteThreadStore::new(db.clone())));
+
+        // Seed a baseline snapshot in the worktree stream so the
+        // EffortStart capture has something to anchor `start_snapshot_id`
+        // against (an empty dirty set returns the latest-existing id,
+        // which would otherwise be NULL on a fresh DB).
+        let seed = worktree_dir.path().join("seed.txt");
+        std::fs::write(&seed, "baseline").unwrap();
+        let worktree_svc_pre = snapshot_captures.get(&worktree.id).unwrap();
+        worktree_svc_pre.mark_dirty(seed, oxplow_fs_watch::WatchEventKind::Other);
+        let _ = worktree_svc_pre
+            .request_snapshot(crate::events::SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+
+        // File the task in_progress — that opens an effort + captures
+        // start_snapshot_id.
+        let item = svc
+            .create(
+                Some(thread.id.clone()),
+                CreateTaskInput {
+                    title: "fix something in the worktree".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        // Edit a file in the WORKTREE stream's directory and mark it
+        // dirty against the worktree stream's service.
+        let edited = worktree_dir.path().join("changed.txt");
+        std::fs::write(&edited, "hello").unwrap();
+        let worktree_svc = snapshot_captures
+            .get(&worktree.id)
+            .expect("worktree service registered");
+        worktree_svc.mark_dirty(edited.clone(), oxplow_fs_watch::WatchEventKind::Other);
+        // Also mark something dirty against the primary's service.
+        // This file would have been captured under the old code too —
+        // we're asserting it does NOT show up in the worktree's effort.
+        let primary_edit = primary_dir.path().join("other.txt");
+        std::fs::write(&primary_edit, "ignored").unwrap();
+        let primary_svc = snapshot_captures
+            .get(&primary.id)
+            .expect("primary service registered");
+        primary_svc.mark_dirty(primary_edit.clone(), oxplow_fs_watch::WatchEventKind::Other);
+
+        // Done: closes the effort and captures the end snapshot —
+        // routes through the worktree stream's service because the
+        // task's thread.stream_id == worktree.id.
+        let _ = svc
+            .update(
+                item.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let closed = effort_store
+            .list_for_item(item.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("one effort recorded");
+        assert!(closed.ended_at.is_some());
+        assert!(closed.start_snapshot_id.is_some());
+        assert!(closed.end_snapshot_id.is_some());
+
+        let changed =
+            oxplow_db::TaskEffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
+                .await
+                .unwrap();
+        assert!(
+            changed.iter().any(|p| p == "changed.txt"),
+            "worktree edit must be visible in the bracket diff; got {changed:?}",
+        );
+        assert!(
+            !changed.iter().any(|p| p == "other.txt"),
+            "primary-stream edit must NOT bleed into the worktree's effort; got {changed:?}",
+        );
     }
 }

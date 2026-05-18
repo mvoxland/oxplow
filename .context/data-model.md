@@ -275,9 +275,24 @@ mtime_ms, size, state`.
 **`stream_id` is NOT NULL** (V16). Every captured row belongs to a
 specific stream's worktree — different streams have independent
 histories, and `listSnapshotsForStream` queries `WHERE stream_id =
-?`. `SnapshotCaptureService` is built per-boot with the primary
-stream id; the Services constructor calls `ensure_primary` before
-wiring the service so the id is always available.
+?`.
+
+**One `SnapshotCaptureService` per stream.** Snapshot capture is
+*per-worktree*: `SnapshotCaptureRegistry`
+(`crates/oxplow-app/src/snapshot_capture_registry.rs`) owns one
+service per active stream, each watching its own
+`worktree_path`. `Services::boot` enumerates every active stream
+and registers a service for each; the IPC stream lifecycle
+commands (`create_worktree`, `adopt_worktree`,
+`delete_stream`, `archive_stream`) register/unregister at
+runtime. Callers resolve the right service via
+`snapshot_captures.get(&stream_id)` (when the stream is known)
+or `snapshot_captures.primary()` (for project-shared surfaces
+like the wiki page watcher and freshness checks). `TaskService`
+resolves via task → thread → stream, so lifecycle snapshots
+capture against the task's actual worktree — a task on a
+worktree stream never bleeds into the primary's snapshot
+history.
 
 `effort_id` (nullable, FK → `task_effort.id` ON DELETE SET NULL)
 ties `task-start` / `task-end` rows back to the effort that produced

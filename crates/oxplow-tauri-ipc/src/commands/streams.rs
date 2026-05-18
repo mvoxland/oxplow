@@ -42,6 +42,13 @@ pub async fn create_worktree(
         .git
         .register(&stream.id, std::path::PathBuf::from(&stream.worktree_path))
         .await;
+    // Spin up the per-stream snapshot capture service + its fs-watch
+    // and git-refs listeners so edits in the new worktree start
+    // landing in `file_snapshot` immediately.
+    if let Some(svc) = state.snapshot_captures.register(&stream) {
+        svc.spawn_watcher();
+        svc.spawn_git_refs_listener();
+    }
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(stream)
 }
@@ -70,6 +77,10 @@ pub async fn adopt_worktree(
         .git
         .register(&stream.id, std::path::PathBuf::from(&stream.worktree_path))
         .await;
+    if let Some(svc) = state.snapshot_captures.register(&stream) {
+        svc.spawn_watcher();
+        svc.spawn_git_refs_listener();
+    }
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(stream)
 }
@@ -82,6 +93,11 @@ pub async fn delete_stream(
 ) -> Result<(), IpcError> {
     state.streams.delete_stream(&id).await?;
     state.git.deregister(&id).await;
+    // Drop the per-stream snapshot service from the registry. The
+    // spawned watcher task continues until process exit (it holds an
+    // internal Arc to keep the service alive); follow-up to add
+    // graceful shutdown is filed separately.
+    state.snapshot_captures.unregister(&id);
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(())
 }
@@ -115,6 +131,7 @@ pub async fn archive_stream(
     }
     state.streams.archive_stream(&id, delete_worktree).await?;
     state.git.deregister(&id).await;
+    state.snapshot_captures.unregister(&id);
     state.events.emit(OxplowEvent::StreamsChanged);
     Ok(())
 }

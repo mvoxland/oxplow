@@ -1690,7 +1690,12 @@ impl OxplowMcp {
         // validate / re-stamp. The fs-watcher will run again later
         // but that's a no-op merge.
         let resolved_version = {
-            let svc = &self.services.snapshot_capture;
+            // Wiki pages are project-wide; freshness is tagged against
+            // the primary stream's snapshot service. Pseudo-stream
+            // migration tracked in epic #28's follow-up.
+            let Some(svc) = self.services.snapshot_captures.primary() else {
+                return Err(internal("primary snapshot service not registered"));
+            };
             let stream_id = oxplow_domain::StreamId::from(svc.stream_id().to_string());
             match svc.store().latest_snapshot_id_for_stream(stream_id).await {
                 Ok(Some(snapshot_id)) => {

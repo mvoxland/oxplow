@@ -65,17 +65,27 @@ fn main() {
         }
     });
 
-    // Start the file-snapshot manager's watcher loop. The service
-    // itself is constructed inside Services::boot so TaskService can
-    // request snapshots on `in_progress` transitions; here we only
-    // wire the fs-watch listener + the boot-time sweep + cleanup.
-    let snapshot_svc = (*state.snapshot_capture).clone();
+    // Start the file-snapshot manager's watcher loop for every
+    // registered stream. The services themselves are constructed
+    // inside Services::boot so TaskService can request snapshots on
+    // `in_progress` transitions; here we wire the fs-watch listeners
+    // + the boot-time sweep + cleanup on the primary stream.
+    state.snapshot_captures.spawn_all_watchers();
+    // GitRefsChanged listeners need an event-bus subscriber per
+    // service so a commit in any worktree re-stamps that stream's
+    // latest snapshot. The primary's listener also covers the legacy
+    // wiki-watcher wiring below.
+    for svc in state.snapshot_captures.list() {
+        svc.spawn_git_refs_listener();
+    }
+    // The startup sweep + cleanup loop below operate on the primary
+    // stream's service. Each per-stream worktree has its own service
+    // via the registry; only the primary needs the sweep at boot.
+    let snapshot_svc = state
+        .snapshot_captures
+        .primary()
+        .expect("primary snapshot capture registered at boot");
     let project_dir = state.layout.project_dir.clone();
-    snapshot_svc.spawn_watcher();
-    // Subscribe to GitRefsChanged so a fresh commit (or any HEAD
-    // move) shows up in Local History as a snapshot row tagged with
-    // the new commit, even when the worktree itself didn't change.
-    snapshot_svc.spawn_git_refs_listener();
     // Startup sweep: any file whose current content doesn't match
     // the latest snapshot row (or was never snapshotted) gets
     // queued + captured now. Backfills changes that landed while
@@ -193,7 +203,10 @@ fn main() {
         let wiki_page_refs = state.page_ref_store.clone();
         let wiki_dir = state.layout.project_dir.clone();
         let wiki_events = event_bus.clone();
-        let wiki_snapshot_capture = state.snapshot_capture.clone();
+        // Wiki is project-wide; pin to the primary stream's service.
+        // Tracked for migration to a dedicated wiki pseudo-stream
+        // under epic #28's follow-up.
+        let wiki_snapshot_capture = state.snapshot_captures.primary();
         let bts = state.background_tasks.clone();
         let task = bts.start(StartInput {
             kind: BackgroundTaskKind::NotesResync,
@@ -207,7 +220,7 @@ fn main() {
                 wiki_store,
                 wiki_page_refs,
                 wiki_events,
-                Some(wiki_snapshot_capture),
+                wiki_snapshot_capture,
             )
             .await
             {

@@ -136,7 +136,12 @@ pub async fn mark_all_wiki_refs_verified(
 }
 
 async fn resolve_current(state: &AppState) -> Option<file_ref_version::ResolvedFileVersion> {
-    let svc = &state.snapshot_capture;
+    // Wiki pages live under `<project>/.oxplow/wiki/` and are
+    // project-wide (shared across streams), so we deliberately tag
+    // their freshness against the primary stream's snapshot service.
+    // A proper fix would be a dedicated wiki pseudo-stream — see
+    // follow-up filed under epic #28.
+    let svc = state.snapshot_captures.primary()?;
     let stream_id = oxplow_domain::StreamId::from(svc.stream_id().to_string());
     let snapshot_id = svc
         .store()

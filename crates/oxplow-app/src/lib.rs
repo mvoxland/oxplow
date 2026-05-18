@@ -28,6 +28,7 @@ pub mod lsp_sessions;
 pub mod page_ref_backfill;
 pub mod recovery;
 pub mod snapshot_capture;
+pub mod snapshot_capture_registry;
 pub mod task_service;
 pub mod terminal_sessions;
 pub mod thread_runtime;
@@ -132,10 +133,13 @@ pub struct Services {
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
     pub snapshot_store: Arc<SqliteSnapshotStore>,
-    /// Capture manager used by both the boot-time fs-watcher loop
-    /// and by TaskService's effort lifecycle (start/end snapshots on
-    /// in_progress transitions). See `snapshot_capture.rs`.
-    pub snapshot_capture: Arc<snapshot_capture::SnapshotCaptureService>,
+    /// Per-stream snapshot capture registry. Holds one service per
+    /// active stream (each watching its own worktree) and is the
+    /// stream-aware replacement for the singleton above. Callers that
+    /// know which stream they're acting on should `get(&stream_id)`
+    /// here; legacy callers that need "the primary" use
+    /// `snapshot_captures.primary()` (or the `snapshot_capture` alias).
+    pub snapshot_captures: snapshot_capture_registry::SnapshotCaptureRegistry,
     pub hook_event_store: Arc<dyn HookEventStore>,
     pub agent_status_store: Arc<dyn AgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
@@ -271,24 +275,32 @@ impl Services {
                 .unwrap_or_default();
             (max_bytes, filter)
         };
-        // Snapshot capture is stream-scoped (a worktree belongs to a
-        // single stream), so ensure the project's primary stream
-        // exists before wiring the service.
+        // Snapshot capture is per-stream: each worktree gets its own
+        // service so fs-watch sees edits in the right tree. The
+        // registry holds them all and is the lookup point for any
+        // code that knows the stream it's acting on.
         let primary_stream = futures::executor::block_on(streams.ensure_primary())?;
-        let snapshot_capture = Arc::new(
-            snapshot_capture::SnapshotCaptureService::new(
-                snapshot_store.clone(),
-                blobs.clone(),
-                layout.project_dir.clone(),
-                primary_stream.id.clone(),
-                max_bytes,
+        let snapshot_captures = snapshot_capture_registry::SnapshotCaptureRegistry::new(
+            snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                snapshot_store: snapshot_store.clone(),
+                blobs: blobs.clone(),
+                max_file_bytes: max_bytes,
                 workspace_filter,
-            )
-            .with_events(event_bus.clone()),
+                events: event_bus.clone(),
+            },
         );
+        // Register every active stream. Streams whose worktree no
+        // longer exists on disk (orphaned) are silently skipped — the
+        // registry's `register` returns None for those.
+        let active_streams = futures::executor::block_on(streams.list_streams())?;
+        for s in &active_streams {
+            snapshot_captures.register(s);
+        }
+        snapshot_captures.set_primary(primary_stream.id.clone());
         let tasks = tasks
             .with_effort_store(effort_store.clone())
-            .with_snapshot_capture(snapshot_capture.clone());
+            .with_snapshot_captures(snapshot_captures.clone())
+            .with_thread_store(thread_store.clone());
 
         let background_tasks = BackgroundTaskStore::new();
         bridge_background_task_events(&background_tasks, &event_bus);
@@ -300,7 +312,7 @@ impl Services {
             streams,
             threads,
             tasks,
-            snapshot_capture,
+            snapshot_captures,
             stream_store,
             thread_store,
             task_store,
@@ -419,20 +431,24 @@ impl Services {
                 .map(|c| oxplow_fs_watch::WorkspaceFilter::with_user_entries(&c.generated))
                 .unwrap_or_default()
         };
-        let snapshot_capture = Arc::new(
-            snapshot_capture::SnapshotCaptureService::new(
-                snapshot_store.clone(),
-                blobs.clone(),
-                layout.project_dir.clone(),
-                primary_stream.id.clone(),
-                5 * 1024 * 1024,
+        let snapshot_captures = snapshot_capture_registry::SnapshotCaptureRegistry::new(
+            snapshot_capture_registry::SnapshotCaptureRegistryConfig {
+                snapshot_store: snapshot_store.clone(),
+                blobs: blobs.clone(),
+                max_file_bytes: 5 * 1024 * 1024,
                 workspace_filter,
-            )
-            .with_events(event_bus.clone()),
+                events: event_bus.clone(),
+            },
         );
+        let active_streams = futures::executor::block_on(streams.list_streams())?;
+        for s in &active_streams {
+            snapshot_captures.register(s);
+        }
+        snapshot_captures.set_primary(primary_stream.id.clone());
         let tasks = tasks
             .with_effort_store(effort_store.clone())
-            .with_snapshot_capture(snapshot_capture.clone());
+            .with_snapshot_captures(snapshot_captures.clone())
+            .with_thread_store(thread_store.clone());
         Ok(Self {
             config: config_arc,
             db,
@@ -451,7 +467,7 @@ impl Services {
             usage_store,
             code_quality_store,
             snapshot_store,
-            snapshot_capture,
+            snapshot_captures,
             hook_event_store,
             agent_status_store,
             agent_turn_store,

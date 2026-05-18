@@ -453,13 +453,21 @@ intermediate `ready` step.
 - `complete_task` returns `{ task, file_review }`. The diff itself
   is the set of `file_snapshot` rows landing in the half-open
   bracket `(start_snapshot_id, end_snapshot_id]` of the effort.
-  `SnapshotCaptureService::request_snapshot` sleeps for
-  `DEFAULT_PREDRAIN_DELAY` (300 ms) before draining the dirty set
-  so the fs-watch debouncer (250 ms in `workspace_watch`) has time
-  to deliver in-flight events; without that wait, an edit followed
-  immediately by `complete_task` collapses the bracket to
-  zero-width and the diff reports every claimed path as
-  unchanged. When `file_review` is non-null the bracket diff
+  Two pieces make this work end-to-end:
+  1. `SnapshotCaptureService::request_snapshot` sleeps for
+     `DEFAULT_PREDRAIN_DELAY` (300 ms) before draining the dirty
+     set so the fs-watch debouncer (250 ms in `workspace_watch`)
+     has time to deliver in-flight events; without that wait, an
+     edit followed immediately by `complete_task` collapses the
+     bracket to zero-width.
+  2. There is **one `SnapshotCaptureService` per stream**
+     (`SnapshotCaptureRegistry`), each watching its own worktree.
+     `TaskService` resolves the right service via the task's
+     thread → stream, so an effort on a worktree stream captures
+     against THAT worktree's fs-watch — not the primary's.
+     Without per-stream capture, edits in any non-primary
+     worktree are invisible to `file_snapshot` and the bracket
+     diff is always empty there. When `file_review` is non-null the bracket diff
   disagreed with the agent's declared `touched_files`:
   `claimed_but_not_changed` lists files the agent said it edited
   but the worktree didn't change;
