@@ -2876,6 +2876,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-code-deps"
+version = "0.3.0"
+dependencies = [
+ "oxplow-code-metrics",
+ "serde",
+ "specta",
+ "tree-sitter",
+]
+
+[[package]]
 name = "oxplow-code-dup"
 version = "0.3.0"
 dependencies = [
@@ -3150,6 +3160,7 @@ version = "0.3.0"
 dependencies = [
  "git2",
  "oxplow-app",
+ "oxplow-code-deps",
  "oxplow-code-metrics",
  "oxplow-config",
  "oxplow-db",

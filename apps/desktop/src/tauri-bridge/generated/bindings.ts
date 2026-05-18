@@ -309,6 +309,18 @@ export const commands = {
 	 *  (path, content) pair through tree-sitter.
 	 */
 	analyzeFunctionsAtRefs: (files: AnalyzeFileSpec[]) => typedError<AnalyzeFunctionsResult, IpcError>(__TAURI_INVOKE("analyze_functions_at_refs", { files })),
+	/**
+	 *  Classify each path against the project's commit-history co-change
+	 *  patterns. Returns one [`FileSurprise`] per input path explaining
+	 *  whether the touch is `Normal`, has missing-usual-co-changers, or
+	 *  the file is `Dormant`.
+	 * 
+	 *  History is rebuilt on every call — fast enough for diff-time
+	 *  invocations (≤ 5000 commits, sub-second on oxplow-scale repos).
+	 *  Caching the [`CoChangeHistory`] per project is a runtime concern
+	 *  the caller can layer on top later.
+	 */
+	analyzeCoChangeSurprise: (filePaths: string[]) => typedError<FileSurprise[], IpcError>(__TAURI_INVOKE("analyze_co_change_surprise", { filePaths })),
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
 	listFileSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_file_snapshots_for_stream", { streamId, limit })),
 	/**
@@ -671,6 +683,11 @@ export type AnalyzeFunctionsResult = {
 	 *  cases via `BranchChangeEntry.additions` / `deletions`).
 	 */
 	churn?: AnalyzedFileChurn[],
+	/**
+	 *  One entry per file with imports that changed (added or
+	 *  removed). Files with stable imports are omitted.
+	 */
+	import_deltas?: ImportDelta[],
 };
 
 export type AnalyzedFileChurn = {
@@ -1017,6 +1034,12 @@ export type FileSnapshot = {
 	mtime_ms: number | null,
 };
 
+// One row of [`analyze_surprise`] output.
+export type FileSurprise = {
+	path: string,
+	reason: SurpriseReason,
+};
+
 /**
  *  Recently completed tasks merged with recently updated wiki
  *  notes, sorted by timestamp DESC. Drives the rail's "Finished"
@@ -1153,6 +1176,73 @@ export type HookKind =
  *  observes traffic for it.
  */
 "agent_boot";
+
+/**
+ *  Delta between the before- and after-revision import edges for a
+ *  single file. `cross_zone_added` is the highlight signal — a new
+ *  import that crosses an architectural zone boundary (e.g. `ui`
+ *  suddenly reaches into `store`) is the "wrong layer" callout.
+ */
+export type ImportDelta = {
+	path: string,
+	added: ZonedImportEdge[],
+	removed: ZonedImportEdge[],
+	/**
+	 *  Subset of `added` whose `from_zone != to_zone` AND `to_zone`
+	 *  is known (we never flag external/unresolved targets).
+	 */
+	cross_zone_added: ZonedImportEdge[],
+};
+
+/**
+ *  One discovered dependency edge: "this file references this module
+ *  in this way at this span."
+ */
+export type ImportEdge = {
+	// Repo-relative path of the importing file (pass-through).
+	from_path: string,
+	// The exact text of the import declaration as written.
+	raw: string,
+	/**
+	 *  Parsed module identifier — what the author imported. Format
+	 *  is language-native: `"std::fs"` for Rust, `"@scope/pkg"` or
+	 *  `"./relative"` for JS/TS, `"foo.bar"` for Python/Java,
+	 *  `"github.com/foo/bar"` for Go, `"<stdio.h>"` or `"foo.h"` for
+	 *  C/C++, `"foo.bar"` for Clojure.
+	 */
+	module: string,
+	// Declaration kind.
+	kind: ImportKind,
+	// 1-based start line of the import declaration.
+	start_line: number,
+	// 1-based end line of the import declaration.
+	end_line: number,
+};
+
+// What kind of dependency declaration produced this edge.
+export type ImportKind = 
+// Rust `use foo::bar;` / `pub use ...;` / `extern crate foo;`.
+"use" | 
+/**
+ *  JS/TS `import { x } from "foo"` / `import * as x from "foo"`
+ *  / `import "foo"`, plus `require("foo")` calls.
+ */
+"import" | 
+// Python `import foo` / `from foo import bar`.
+"py_import" | 
+// Go `import "foo"` (within a single-or-grouped import decl).
+"go_import" | 
+// Java `import foo.bar.Baz;` / `import static foo.Bar.baz;`.
+"java_import" | 
+// C / C++ preprocessor `#include <stdio.h>` / `#include "foo.h"`.
+"include" | 
+// C++ `using foo::bar;` / `using namespace foo;`.
+"using" | 
+/**
+ *  Clojure `(ns my.ns (:require [foo.bar :as fb]))` or top-level
+ *  `(require '[foo.bar :as fb])`.
+ */
+"clj_require";
 
 export type InstalledLspPackage = {
 	name: string,
@@ -1470,6 +1560,25 @@ export type StreamId = string;
 // Whether a stream is the project's primary stream or a worktree.
 export type StreamKind = "primary" | "worktree";
 
+// Why a file was flagged as surprising.
+export type SurpriseReason = 
+/**
+ *  Nothing surprising — file has no strong co-changers, OR its
+ *  usual co-changers are also in this commit.
+ */
+{ kind: "normal" } | 
+/**
+ *  The file has well-established co-changers (≥ N co-occurrences
+ *  historically), but none of them are in this commit. Carries
+ *  the top-3 expected co-changers for the tooltip.
+ */
+{ kind: "usual_co_changers_absent"; expected: string[] } | 
+/**
+ *  File hasn't been touched in `last_touched_days`. Threshold
+ *  is `DEFAULT_DORMANT_DAYS` unless the caller overrode it.
+ */
+{ kind: "dormant"; last_touched_days: number };
+
 // A task row.
 export type Task = {
 	id: TaskId,
@@ -1743,6 +1852,85 @@ export type WorkspaceStatusSummary = {
 	renamed: number,
 	untracked: number,
 	total: number,
+};
+
+/**
+ *  Architectural zone. Coarse on purpose — one chip in the UI per
+ *  distinct concept. Add new variants here when a new top-level
+ *  concern appears in the repo.
+ */
+export type Zone = 
+/**
+ *  Desktop frontend React code (`apps/desktop/src/**` outside
+ *  `src-tauri`).
+ */
+"ui" | 
+// Tauri shell crate (`apps/desktop/src-tauri/`).
+"shell" | 
+// `#[tauri::command]` adapters that bridge UI ↔ services.
+"ipc" | 
+// Pure-types + store traits (`oxplow-domain`).
+"domain" | 
+// rusqlite stores + migrations (`oxplow-db`).
+"store" | 
+// Git integration (`oxplow-git`).
+"git" | 
+// LSP bridge crates (`oxplow-lsp`, `oxplow-lsp-installer`).
+"lsp" | 
+// Runtime / write-guard / filing enforcement (`oxplow-runtime`).
+"runtime" | 
+// Filesystem watchers (`oxplow-fs-watch`).
+"fs_watch" | 
+// PTY + tmux subsystems.
+"terminal" | 
+// MCP server (`oxplow-mcp`).
+"mcp" | 
+// Top-level Services orchestration (`oxplow-app`).
+"app_orchestration" | 
+// Config crate.
+"config" | 
+// Session crate.
+"session" | 
+// Plugin / control-plane.
+"plugin" | 
+/**
+ *  Static analysis crates (`oxplow-code-metrics`,
+ *  `oxplow-code-dup`, `oxplow-code-deps`, `oxplow-tree-source`).
+ */
+"analysis" | 
+// Database migrations specifically (across crates).
+"migration" | 
+// Test files (`*_test.rs`, `*.test.ts`, `tests/` directories).
+"test" | 
+// Documentation, README, `.context/`, ADRs.
+"docs" | 
+/**
+ *  Project metadata (Cargo.toml, package.json, tauri.conf.json,
+ *  .toml/.json config at the repo root).
+ */
+"project_meta" | 
+/**
+ *  Anything outside the repo (external crate / npm package /
+ *  system header) — only used for import targets, never for
+ *  files in the worktree.
+ */
+"external" | 
+// Anything else.
+"other";
+
+/**
+ *  A directed edge between two zones, with the originating
+ *  [`ImportEdge`] for hover/drill-down.
+ */
+export type ZonedImportEdge = {
+	edge: ImportEdge,
+	from_zone: Zone,
+	/**
+	 *  The target zone if we could classify it, else None. None
+	 *  indicates a target we couldn't resolve (external package,
+	 *  path the resolver doesn't know how to walk).
+	 */
+	to_zone: Zone | null,
 };
 
 /* Tauri Specta runtime */

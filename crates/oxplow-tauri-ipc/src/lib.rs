@@ -109,6 +109,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::code_quality::run_duplication_scan_at,
         commands::code_quality::find_latest_code_quality_scan,
         commands::code_quality::analyze_functions_at_refs,
+        commands::code_quality::analyze_co_change_surprise,
         // snapshots
         commands::snapshot::list_snapshots,
         commands::snapshot::list_file_snapshots_for_stream,

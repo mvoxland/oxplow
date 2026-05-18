@@ -15,6 +15,7 @@ import type {
   CodeQualityFindingRow,
   CodeQualityScanRow,
 } from "../../api-types.js";
+import type { FileSurprise, ImportDelta } from "../../tauri-bridge/index.js";
 import { commands } from "../../tauri-bridge/index.js";
 import { DISK, refVersion, type FileVersion } from "../../file-version.js";
 import {
@@ -99,6 +100,13 @@ export interface ChangeAnalysisState {
   /** Per-function churn rows (added/deleted/modified lines). One
    *  row per function with non-zero churn. */
   functionChurn: FunctionChurnRow[];
+  /** Per-file import edge deltas (added / removed / cross-zone-added).
+   *  Drives the ZoneBarCard's cross-zone-edge callout. Empty for
+   *  files with stable imports. */
+  importDeltas: ImportDelta[];
+  /** Per-file co-change surprise classification. Files with reason
+   *  `Normal` are still included so the UI can render counts. */
+  coChangeSurprise: FileSurprise[];
   /** Per-file interestingness score (path → score + reasons). */
   fileScores: Map<string, InterestingnessResult>;
   refresh: () => Promise<void>;
@@ -222,6 +230,8 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   const [files, setFiles] = useState<BranchChangeEntry[]>(EMPTY_FILES);
   const [functions, setFunctions] = useState<FunctionsBuckets>(EMPTY_BUCKETS);
   const [functionChurn, setFunctionChurn] = useState<FunctionChurnRow[]>([]);
+  const [importDeltas, setImportDeltas] = useState<ImportDelta[]>([]);
+  const [coChangeSurprise, setCoChangeSurprise] = useState<FileSurprise[]>([]);
   const [duplication, setDuplication] = useState<{
     findings: CodeQualityFindingRow[];
     scanAgeMs: number | null;
@@ -246,6 +256,8 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     if (!streamId) {
       setFiles(EMPTY_FILES);
       setFunctions(EMPTY_BUCKETS);
+      setImportDeltas([]);
+      setCoChangeSurprise([]);
       setDuplication({ findings: [], scanAgeMs: null, hasScan: false });
       setLoading(false);
       return;
@@ -270,6 +282,24 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
       const fileList = await fetchFiles(streamId, refs.baseRef, target);
       if (reqId !== reqIdRef.current) return;
       setFiles(fileList);
+
+      // Co-change surprise classification. Independent of the
+      // function/import analysis; runs in parallel via spawn_blocking
+      // on the Rust side. Snapshot-mode skips it — co-change is a
+      // git-history concept and snapshots aren't commits.
+      if (parseSnapshotTarget(target) === null && fileList.length > 0) {
+        const paths = fileList.map((f) => f.path);
+        const surprise = await commands.analyzeCoChangeSurprise(paths);
+        if (reqId !== reqIdRef.current) return;
+        if (surprise.status === "ok") {
+          setCoChangeSurprise(surprise.data);
+        } else {
+          // Non-fatal — co-change is a nice-to-have signal.
+          setCoChangeSurprise([]);
+        }
+      } else {
+        setCoChangeSurprise([]);
+      }
 
       // Function diff: read base + head content for each non-binary,
       // non-deleted, non-added-only file. (Added files have no base
@@ -344,6 +374,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
         attachChurn(buckets, churnRows);
         setFunctions(buckets);
         setFunctionChurn(churnRows);
+        setImportDeltas(result.import_deltas ?? []);
       }
 
       // Duplication: snapshot-mode skips this entirely. The scan
@@ -567,6 +598,12 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     },
     tests,
     functionChurn: filteredChurn,
+    importDeltas: scope
+      ? importDeltas.filter((d) => filteredPathSet.has(d.path))
+      : importDeltas,
+    coChangeSurprise: scope
+      ? coChangeSurprise.filter((s) => filteredPathSet.has(s.path))
+      : coChangeSurprise,
     fileScores,
     refresh,
     refs: resolvedRefs,

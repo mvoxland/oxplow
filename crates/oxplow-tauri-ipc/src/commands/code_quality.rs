@@ -4,8 +4,15 @@ use oxplow_app::code_quality_runner::{
     run_duplication_scan, run_duplication_scan_scoped, run_metrics_scan, RunOptions,
 };
 use oxplow_app::{BackgroundTaskKind, CodeQualityScanPhase, OxplowEvent, StartInput};
+use oxplow_code_deps::{
+    diff_edges, extract_imports, zone_for_resolved_edge, zone_for_unresolved_edge, ImportEdge,
+    Zone, ZonedImportEdge,
+};
 use oxplow_code_metrics::{analyze_file, FunctionMetrics, Visibility};
 use oxplow_db::{CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus};
+use oxplow_git::co_change::{
+    analyze_surprise, build_history, CoChangeOptions, FileSurprise, DEFAULT_DORMANT_DAYS,
+};
 use oxplow_tree_source::{
     AllFiles, DiskTreeSource, ExplicitPaths, FileFilter, GitTreeSource, TreeSource, TreeVersion,
 };
@@ -389,6 +396,20 @@ pub struct AnalyzedFileChurn {
     pub functions: Vec<AnalyzedFunctionChurn>,
 }
 
+/// Delta between the before- and after-revision import edges for a
+/// single file. `cross_zone_added` is the highlight signal — a new
+/// import that crosses an architectural zone boundary (e.g. `ui`
+/// suddenly reaches into `store`) is the "wrong layer" callout.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct ImportDelta {
+    pub path: String,
+    pub added: Vec<ZonedImportEdge>,
+    pub removed: Vec<ZonedImportEdge>,
+    /// Subset of `added` whose `from_zone != to_zone` AND `to_zone`
+    /// is known (we never flag external/unresolved targets).
+    pub cross_zone_added: Vec<ZonedImportEdge>,
+}
+
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct AnalyzeFunctionsResult {
     pub sides: Vec<AnalyzedFileSide>,
@@ -398,6 +419,38 @@ pub struct AnalyzeFunctionsResult {
     /// cases via `BranchChangeEntry.additions` / `deletions`).
     #[serde(default)]
     pub churn: Vec<AnalyzedFileChurn>,
+    /// One entry per file with imports that changed (added or
+    /// removed). Files with stable imports are omitted.
+    #[serde(default)]
+    pub import_deltas: Vec<ImportDelta>,
+}
+
+/// Classify each path against the project's commit-history co-change
+/// patterns. Returns one [`FileSurprise`] per input path explaining
+/// whether the touch is `Normal`, has missing-usual-co-changers, or
+/// the file is `Dormant`.
+///
+/// History is rebuilt on every call — fast enough for diff-time
+/// invocations (≤ 5000 commits, sub-second on oxplow-scale repos).
+/// Caching the [`CoChangeHistory`] per project is a runtime concern
+/// the caller can layer on top later.
+#[tauri::command]
+#[specta::specta]
+pub async fn analyze_co_change_surprise(
+    state: tauri::State<'_, AppState>,
+    file_paths: Vec<String>,
+) -> Result<Vec<FileSurprise>, IpcError> {
+    if file_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let project = state.layout.project_dir.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let history = build_history(&project, CoChangeOptions::default());
+        analyze_surprise(&history, &file_paths, DEFAULT_DORMANT_DAYS)
+    })
+    .await
+    .map_err(|e| IpcError::internal(format!("co-change task: {e}")))?;
+    Ok(result)
 }
 
 /// Compute per-function metadata for the Change Analysis dashboard,
@@ -412,6 +465,7 @@ pub async fn analyze_functions_at_refs(
         return Ok(AnalyzeFunctionsResult {
             sides: Vec::new(),
             churn: Vec::new(),
+            import_deltas: Vec::new(),
         });
     }
     let result = tokio::task::spawn_blocking(move || analyze_files(files))
@@ -423,6 +477,7 @@ pub async fn analyze_functions_at_refs(
 fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
     let mut sides: Vec<AnalyzedFileSide> = Vec::new();
     let mut churn: Vec<AnalyzedFileChurn> = Vec::new();
+    let mut import_deltas: Vec<ImportDelta> = Vec::new();
     for spec in files {
         // Run analyze_file once per side (working metrics for churn
         // attribution — we don't want to re-parse).
@@ -479,11 +534,152 @@ fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
                     })
                     .collect(),
             });
+
+            // Import delta on this file. We extract both sides and
+            // diff by (kind, module). Each edge gets zoned via the
+            // path-based resolver — for now a tiny built-in
+            // (Rust crate-name lookup + obvious external/relative
+            // shortcuts), with unresolved edges marked to_zone=None
+            // so they never contribute to `cross_zone_added`.
+            let base_edges = extract_imports(&spec.path, base);
+            let head_edges = extract_imports(&spec.path, head);
+            let (added_raw, removed_raw) = diff_edges(&base_edges, &head_edges);
+            if !added_raw.is_empty() || !removed_raw.is_empty() {
+                let added: Vec<ZonedImportEdge> = added_raw.into_iter().map(zone_edge).collect();
+                let removed: Vec<ZonedImportEdge> =
+                    removed_raw.into_iter().map(zone_edge).collect();
+                let cross_zone_added: Vec<ZonedImportEdge> = added
+                    .iter()
+                    .filter(|z| z.is_cross_zone())
+                    .cloned()
+                    .collect();
+                import_deltas.push(ImportDelta {
+                    path: spec.path.clone(),
+                    added,
+                    removed,
+                    cross_zone_added,
+                });
+            }
         }
     }
     sides.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.side.cmp(&b.side)));
     churn.sort_by(|a, b| a.path.cmp(&b.path));
-    AnalyzeFunctionsResult { sides, churn }
+    import_deltas.sort_by(|a, b| a.path.cmp(&b.path));
+    AnalyzeFunctionsResult {
+        sides,
+        churn,
+        import_deltas,
+    }
+}
+
+/// Resolve an [`ImportEdge`] to a [`ZonedImportEdge`]. The resolver
+/// is intentionally minimal for v1:
+///
+/// - Rust `use foo::bar`: take the first path segment as a crate
+///   name. `crate` / `self` / `super` map back to the importer's
+///   own zone (same-zone). Other names go through
+///   `zone_for_crate_name`; if it returns `None` we mark the target
+///   as `External` (a real crate name we don't host).
+/// - TS/JS `import "./foo"` / `"../bar"`: relative paths join with
+///   the importer's directory. The joined path goes through the
+///   path zone classifier. Non-relative ("react", "@scope/pkg")
+///   marks as `External`.
+/// - Everything else: unresolved (to_zone = None), so cross-zone
+///   logic ignores it. Better to underflag than overflag.
+fn zone_edge(edge: ImportEdge) -> ZonedImportEdge {
+    if let Some(target) = resolve_target(&edge) {
+        match target {
+            ResolveResult::RepoPath(path) => zone_for_resolved_edge(edge, &path),
+            ResolveResult::External => {
+                // Build a synthetic edge whose to_zone is External.
+                let from_zone = oxplow_code_deps::classify_zone(&edge.from_path);
+                ZonedImportEdge {
+                    edge,
+                    from_zone,
+                    to_zone: Some(Zone::External),
+                }
+            }
+        }
+    } else {
+        zone_for_unresolved_edge(edge)
+    }
+}
+
+enum ResolveResult {
+    /// In-repo file path (or the synthetic `crates/<name>/src/lib.rs`
+    /// stand-in for workspace crate references).
+    RepoPath(String),
+    /// Definitely not in this repo (system lib, npm package, etc.).
+    External,
+}
+
+fn resolve_target(edge: &ImportEdge) -> Option<ResolveResult> {
+    use oxplow_code_deps::ImportKind;
+    match edge.kind {
+        ImportKind::Use => resolve_rust(edge),
+        ImportKind::Import => resolve_ts_like(edge),
+        ImportKind::PyImport
+        | ImportKind::GoImport
+        | ImportKind::JavaImport
+        | ImportKind::Include
+        | ImportKind::Using
+        | ImportKind::CljRequire => None,
+    }
+}
+
+fn resolve_rust(edge: &ImportEdge) -> Option<ResolveResult> {
+    let first = edge.module.split("::").next().unwrap_or("");
+    if first.is_empty() {
+        return None;
+    }
+    if matches!(first, "crate" | "self" | "super") {
+        // Resolves back inside the importer's own crate — same zone
+        // by construction.
+        return Some(ResolveResult::RepoPath(edge.from_path.clone()));
+    }
+    if let Some(zone) = oxplow_code_deps::zone_for_crate_name(first) {
+        // Synthesize a path that classifies to that zone — we don't
+        // need the exact file, just the zone.
+        let _ = zone;
+        return Some(ResolveResult::RepoPath(format!(
+            "crates/{}/src/lib.rs",
+            first.replace('_', "-")
+        )));
+    }
+    Some(ResolveResult::External)
+}
+
+fn resolve_ts_like(edge: &ImportEdge) -> Option<ResolveResult> {
+    let module = edge.module.trim();
+    if module.starts_with("./") || module.starts_with("../") {
+        let from_dir = std::path::Path::new(&edge.from_path).parent()?;
+        let joined = from_dir.join(module);
+        // Lexical normalization — collapse `..` and `.`. We can't
+        // touch the filesystem from here (callers may be analyzing
+        // a git-ref content). Filesystem-aware resolution can come
+        // later if the heuristic is wrong too often.
+        let normalized = normalize_relative_path(&joined);
+        Some(ResolveResult::RepoPath(normalized))
+    } else {
+        // Bare specifier ("react", "@scope/x", "node:fs") → external.
+        Some(ResolveResult::External)
+    }
+}
+
+fn normalize_relative_path(path: &std::path::Path) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => {
+                out.push(other.as_os_str().to_string_lossy().into_owned());
+            }
+        }
+    }
+    out.join("/")
 }
 
 fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
@@ -537,6 +733,49 @@ mod tests {
         let result = analyze_functions_at_refs(files).await.unwrap();
         assert_eq!(result.sides.len(), 1);
         assert_eq!(result.sides[0].side, "head");
+    }
+
+    #[tokio::test]
+    async fn cross_zone_import_added_surfaces() {
+        // UI file gains a Rust-style import of `oxplow_db` — but
+        // this is a Rust source path, so use a Rust importer. Use
+        // an analysis-zone file that adds an import of oxplow_db.
+        let files = vec![AnalyzeFileSpec {
+            path: "crates/oxplow-code-deps/src/lib.rs".into(),
+            base_content: Some("use std::fs;\nfn a() {}\n".into()),
+            head_content: Some("use std::fs;\nuse oxplow_db::Database;\nfn a() {}\n".into()),
+        }];
+        let result = analyze_functions_at_refs(files).await.unwrap();
+        assert_eq!(result.import_deltas.len(), 1);
+        let delta = &result.import_deltas[0];
+        assert!(
+            !delta.cross_zone_added.is_empty(),
+            "expected cross-zone added; got delta={delta:?}"
+        );
+        let cz = &delta.cross_zone_added[0];
+        assert_eq!(cz.from_zone, Zone::Analysis);
+        assert_eq!(cz.to_zone, Some(Zone::Store));
+    }
+
+    #[tokio::test]
+    async fn external_import_not_flagged_as_cross_zone() {
+        let files = vec![AnalyzeFileSpec {
+            path: "crates/oxplow-db/src/lib.rs".into(),
+            base_content: Some("fn a() {}\n".into()),
+            head_content: Some("use serde::Serialize;\nfn a() {}\n".into()),
+        }];
+        let result = analyze_functions_at_refs(files).await.unwrap();
+        assert_eq!(result.import_deltas.len(), 1);
+        let delta = &result.import_deltas[0];
+        assert_eq!(delta.added.len(), 1);
+        assert_eq!(delta.added[0].to_zone, Some(Zone::External));
+        // External targets are deliberately NOT cross-zone — a
+        // store crate pulling in serde is not a layer violation.
+        assert!(
+            delta.cross_zone_added.is_empty(),
+            "External targets must not surface as cross-zone; got {:?}",
+            delta.cross_zone_added
+        );
     }
 
     #[tokio::test]

@@ -184,6 +184,113 @@ Per-function variant `functionInterestingness` uses the same
 shape but with churn lines + length on a single function. Used
 by `FunctionChurnCard` for tiebreak ordering.
 
+## Architectural-change overlay: zones, import deltas, co-change surprise
+
+A second axis of analysis sits on top of the function-level metrics:
+"what does this change *mean* architecturally?" Three pieces compose
+it.
+
+### `oxplow-code-deps`
+
+Tree-sitter-based import extractor + zone classifier. Same nine
+languages as `oxplow-code-metrics` (it depends on that crate's
+grammar table). Public API:
+
+- `extract_imports(path, source) -> Vec<ImportEdge>` — one
+  `ImportEdge { from_path, raw, module, kind, start_line, end_line }`
+  per import declaration. Module strings are language-native and
+  unresolved (`std::fs`, `./Foo`, `<stdio.h>`, `foo.bar`).
+- `diff_edges(before, after) -> (added, removed)` — set diff keyed on
+  `(kind, module)`.
+- `classify_zone(path) -> Zone` — path-prefix table mapping every
+  repo file to one of ~22 architectural zones (`ui`, `shell`, `ipc`,
+  `store`, `git`, `lsp`, `runtime`, `analysis`, `test`, `docs`, …).
+  Project-meta basenames (Cargo.toml, package.json) and test paths
+  override crate-zone classification.
+- `zone_for_crate_name(name) -> Option<Zone>` — workspace-crate
+  lookup for resolving Rust `use foo::*` to a zone via the synthetic
+  path `crates/foo/src/lib.rs`.
+- `ZonedImportEdge { edge, from_zone, to_zone }` with
+  `is_cross_zone()` — true only when target is in-repo, known, and
+  different from the source. `Zone::External` targets never trip
+  cross-zone (importing serde isn't a layer violation).
+
+Mirror TS table at
+`apps/desktop/src/components/ChangeAnalysis/zones.ts` (kept in sync
+by hand) so the UI can badge files without a backend roundtrip. The
+Rust table is the source of truth for `ZonedImportEdge` records
+crossing the IPC.
+
+### `oxplow-git/co_change`
+
+Walks `git log` (libgit2, time-sorted) within a configurable window
+(default 180 days, 5k commit cap), drops mega-commits (>50 files —
+mass renames / formatter sweeps drown the signal), builds two maps:
+
+- `co_changers: file → Vec<(co_changer, count)>` filtered to pairs
+  with ≥ 3 co-occurrences, sorted descending.
+- `last_touched: file → seconds-since-epoch`.
+
+`analyze_surprise(history, commit_files, dormant_days) -> Vec<FileSurprise>`
+classifies each file as `Normal | UsualCoChangersAbsent { expected }
+| Dormant { last_touched_days }`. Dormancy fires before the
+co-changer check (cheaper, clearer signal); files never seen in the
+window are treated as dormant. `SurpriseReason` is specta-derived.
+
+The caller is expected to cache `CoChangeHistory` per `(repo,
+window)` — the public API is pure once the history is built.
+
+### IPC: `import_deltas` + `analyze_co_change_surprise`
+
+`analyze_functions_at_refs` (the existing per-function metrics
+command) now also returns `import_deltas: Vec<ImportDelta>`:
+
+```ts
+interface ImportDelta {
+  path: string;
+  added: ZonedImportEdge[];
+  removed: ZonedImportEdge[];
+  cross_zone_added: ZonedImportEdge[]; // subset of `added`
+}
+```
+
+The resolver inside the IPC is intentionally minimal:
+
+- Rust `use crate::*` / `self` / `super` → importer's own zone.
+- Rust `use foo::*` → workspace crate lookup; missing → External.
+- TS `./foo` / `../foo` → lexical relative-path normalization
+  through `classify_zone`.
+- Bare specifiers (`react`, `@scope/x`, `node:fs`) → External.
+- Everything else → unresolved (`to_zone: null`); cross-zone logic
+  ignores it.
+
+Better to underflag than overflag — a missed cross-zone touch is a
+quieter UI; a false-positive is a wrong "wrong layer" callout.
+
+New command `analyze_co_change_surprise(file_paths) -> Vec<FileSurprise>`
+runs the git-history pipeline above on a `spawn_blocking` worker.
+History is rebuilt on every call (sub-second on oxplow-scale repos)
+— runtime-level caching is a future optimization.
+
+### UI cards (Change Analysis drilldown)
+
+Three new cards in
+`apps/desktop/src/components/ChangeAnalysis/`, inserted at the top
+of `ChangeAnalysisDrilldown` above `FilesPanel`:
+
+- **`ZoneBarCard`** — horizontal bar of touched zones sized by churn,
+  with cross-zone-added-imports listed below. The headline "wrong
+  layer" signal.
+- **`ChangeTreemapCard`** — squarified treemap (inline algorithm, no
+  d3 dep) sized by churn, coloured by zone. Visual gestalt for "where
+  is this commit's mass."
+- **`CoChangeSurpriseCard`** — only renders when the backend flags
+  something. Lists files with `Dormant` (amber chip + day count) or
+  `UsualCoChangersAbsent` (blue chip + top-3 expected co-changers).
+
+Zone badges also render inline in `FileTreeView` rows via the muted
+`detail` slot.
+
 ## Adding a third analysis kind
 
 1. New crate (or new module) producing `CodeQualityFinding`

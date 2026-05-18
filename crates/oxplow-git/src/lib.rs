@@ -9,6 +9,7 @@ pub mod blame;
 mod branch;
 mod branch_changes;
 mod branch_ops;
+pub mod co_change;
 mod conflict;
 pub mod log;
 pub mod refs;
