@@ -7,13 +7,13 @@ name: Release
 # re-runs.
 #
 # To create a release:
-# 1. Bump versions to match the tag you're about to push:
+# 1. Tag: git tag vX.Y.Z
+# 2. Push tag: git push origin vX.Y.Z
+# 3. Bump versions to match the tag you're about to push:
 #    - package.json: version = "X.Y.Z"
 #    - Cargo.toml: [workspace.package].version = "X.Y.Z"
 #    - bun install (to refresh bun.lock) + cargo check (to refresh Cargo.lock)
-# 2. Commit the bumps.
-# 3. Tag: git tag vX.Y.Z
-# 4. Push tag: git push origin vX.Y.Z
+#    - commit
 
 
 on:
