@@ -16,21 +16,58 @@ CI produces installers for every push to `main`, and tagged
 releases (`v<version>`) attach the same bundles to a GitHub
 Release.
 
-1. Open the
-   [latest successful run](https://github.com/nvoxland/oxplow/actions)
-   on the `main` branch (or pick a [release](https://github.com/nvoxland/oxplow/releases)).
-2. Scroll to **Artifacts** (CI) or the asset list (releases).
-3. Download the bundle for your platform:
-    - macOS → `.dmg` (or `.app.tar.gz`)
-    - Windows → `.msi` or `.exe` installer
-    - Linux → `.deb` or `.AppImage`
-4. Install / open it like any other app.
+### macOS: Homebrew (recommended)
 
-On macOS the first launch is blocked because the build is
-unsigned. Right-click the `.app`, choose **Open**, then confirm in
-the dialog. After the first launch macOS remembers your choice.
-Windows shows a SmartScreen warning — click **More info → Run
-anyway**.
+The builds are unsigned, so macOS's Gatekeeper refuses to launch
+them when downloaded directly from a browser — the dreaded
+**"Oxplow.app is damaged and can't be opened"** dialog. Homebrew
+sidesteps the whole mess by stripping the quarantine attribute
+on install. One command:
+
+```sh
+brew install --cask nvoxland/oxplow/oxplow
+```
+
+That clones the [`nvoxland/homebrew-oxplow`](https://github.com/nvoxland/homebrew-oxplow)
+tap, downloads the latest signed-ad-hoc DMG, drops quarantine,
+and copies the app into `/Applications/`. Subsequent releases
+land via `brew upgrade --cask oxplow`.
+
+### macOS: direct DMG download (manual)
+
+If you don't want Homebrew, grab the DMG from a
+[release](https://github.com/nvoxland/oxplow/releases). After
+copying `Oxplow.app` into `/Applications/`, **you must strip
+the quarantine attribute manually** or macOS will refuse to
+launch it:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Oxplow.app
+```
+
+Then double-click normally. macOS only re-applies the
+quarantine attribute on fresh downloads, so the strip is a
+one-time step per install.
+
+!!! warning "Why this is necessary"
+    The DMG is fine — the OS attaches a `com.apple.quarantine`
+    extended attribute to anything downloaded from a browser,
+    and Gatekeeper refuses to launch an unsigned binary while
+    that attribute is set. Older macOS let you right-click →
+    **Open** to bypass it; recent macOS removed that escape
+    hatch for unsigned apps. Until oxplow is notarized, every
+    direct-DMG install needs the `xattr` step.
+
+### Windows: direct download
+
+Grab the `.msi` or `.exe` from a release and run it. SmartScreen
+warns on first launch because the build is unsigned — click
+**More info → Run anyway**.
+
+### Linux: direct download
+
+Grab the `.deb` or `.AppImage` from a release. No quarantine
+mechanism to work around.
 
 ## Option 2: build from source
 

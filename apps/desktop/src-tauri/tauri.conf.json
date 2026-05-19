@@ -41,6 +41,9 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Oxplow",
-    "longDescription": "Stream-aware IDE shell for AI agent workflows."
+    "longDescription": "Stream-aware IDE shell for AI agent workflows.",
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

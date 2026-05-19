@@ -165,13 +165,86 @@ jobs:
           releaseDraft: true
           prerelease: false
 
-  # tauri-action leaves the release as a draft without notes. After
-  # every platform has attached its assets, generate release notes
-  # from commits/PRs since the previous tag and flip the draft to
-  # published. Only runs on real tag pushes — workflow_dispatch dry
-  # runs from a branch skip this step (there's no release to finalize).
-  finalize:
+  # Rewrite the Homebrew Cask in the nvoxland/homebrew-oxplow tap
+  # with the just-released version + the SHA256 of the arm64 DMG
+  # asset attached to this release's still-draft tag, then commit +
+  # push back to the tap repo. Users then get the new version on
+  # `brew upgrade --cask oxplow`.
+  #
+  # Bootstrapping requirements:
+  # - A repo at https://github.com/nvoxland/homebrew-oxplow with a
+  #   `Casks/oxplow.rb` file (see packaging/homebrew/README.md).
+  # - A repo secret `HOMEBREW_TAP_TOKEN` carrying a personal access
+  #   token with `repo` scope (covers both this repo's draft-release
+  #   asset download and the tap repo push).
+  #
+  # Sequenced BEFORE finalize on purpose: a cask publish failure
+  # here aborts the run, finalize doesn't fire, and the release
+  # stays as an invisible draft. Better than a public release whose
+  # advertised Homebrew install path is broken.
+  publish-cask:
     needs: release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Bump cask in tap repo
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+          dmg_name="Oxplow_${version}_aarch64.dmg"
+
+          # The release is still a draft at this point (finalize
+          # runs after us). `gh release download` resolves the
+          # asset via the API and works against drafts as long as
+          # the token has Contents:read on this repo — which a
+          # personal-account `repo`-scope PAT does.
+          echo "Downloading ${dmg_name} from draft release ${tag}…"
+          mkdir -p /tmp/cask
+          gh release download "$tag" \
+            --repo "${{ github.repository }}" \
+            --pattern "$dmg_name" \
+            --dir /tmp/cask
+          sha=$(shasum -a 256 "/tmp/cask/${dmg_name}" | awk '{print $1}')
+          echo "sha256: $sha"
+
+          # Render the cask template with concrete version + sha.
+          mkdir -p /tmp/tap/Casks
+          cp packaging/homebrew/oxplow.rb /tmp/tap-template.rb
+          sed -i \
+            -e "s/^  version \".*\"/  version \"${version}\"/" \
+            -e "s/^  sha256 \".*\"/  sha256 \"${sha}\"/" \
+            /tmp/tap-template.rb
+
+          # Clone the tap, replace the cask, commit, push.
+          git clone --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/nvoxland/homebrew-oxplow.git" \
+            /tmp/tap
+          mkdir -p /tmp/tap/Casks
+          mv /tmp/tap-template.rb /tmp/tap/Casks/oxplow.rb
+          cd /tmp/tap
+          git config user.email "actions@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add Casks/oxplow.rb
+          if git diff --cached --quiet; then
+            echo "Cask already at ${version}; nothing to commit."
+            exit 0
+          fi
+          git commit -m "oxplow ${version}"
+          git push origin HEAD
+
+  # tauri-action leaves the release as a draft without notes. Once
+  # everything that *must* succeed before users see the release has
+  # succeeded (matrix builds attached, Homebrew tap bumped),
+  # generate release notes from commits/PRs since the previous tag
+  # and flip the draft to published. Only runs on real tag pushes —
+  # workflow_dispatch dry runs from a branch skip this step (there's
+  # no release to finalize).
+  finalize:
+    needs: publish-cask
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
