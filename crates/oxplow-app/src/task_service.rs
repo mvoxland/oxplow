@@ -527,7 +527,11 @@ pub async fn compute_effort_file_review(
         .list_changed_paths_for_effort(&effort.id)
         .await
         .ok()?;
-    review_from_lists(&effort.id, task_id, claimed, &changed)
+    let acknowledged = effort_store
+        .list_acknowledged_paths(&effort.id)
+        .await
+        .ok()?;
+    review_from_lists(&effort.id, task_id, claimed, &changed, &acknowledged)
 }
 
 /// Recompute a review for a specific effort id. The Stop hook
@@ -548,7 +552,8 @@ pub async fn recompute_effort_file_review(
         .list_changed_paths_for_effort(effort_id)
         .await
         .ok()?;
-    review_from_lists(effort_id, effort.task_id, &claimed, &changed)
+    let acknowledged = effort_store.list_acknowledged_paths(effort_id).await.ok()?;
+    review_from_lists(effort_id, effort.task_id, &claimed, &changed, &acknowledged)
 }
 
 fn review_from_lists(
@@ -556,15 +561,19 @@ fn review_from_lists(
     task_id: TaskId,
     claimed: &[String],
     changed: &[String],
+    acknowledged: &[String],
 ) -> Option<EffortFileReview> {
     let claimed_set: std::collections::HashSet<&str> = claimed.iter().map(|s| s.as_str()).collect();
     let changed_set: std::collections::HashSet<&str> = changed.iter().map(|s| s.as_str()).collect();
+    let acknowledged_set: std::collections::HashSet<&str> =
+        acknowledged.iter().map(|s| s.as_str()).collect();
     let mut claimed_but_not_changed: Vec<String> = claimed_set
         .difference(&changed_set)
         .map(|s| (*s).to_string())
         .collect();
     let mut changed_but_not_claimed: Vec<String> = changed_set
         .difference(&claimed_set)
+        .filter(|s| !acknowledged_set.contains(*s))
         .map(|s| (*s).to_string())
         .collect();
     claimed_but_not_changed.sort();
@@ -755,6 +764,27 @@ mod tests {
         assert_eq!(
             classify_change(Some(tmp.path()), "real.rs"),
             EffortFileChange::Updated
+        );
+    }
+
+    #[test]
+    fn review_subtracts_acknowledged_paths_from_unclaimed() {
+        // Diff sees `extra.rs` plus `claimed.rs`; agent only claimed
+        // `claimed.rs`. Without ack: `extra.rs` shows in
+        // `changed_but_not_claimed`. With ack: it's filtered out
+        // and the review collapses to `None`.
+        let effort = EffortId::from("ef-test");
+        let task = TaskId::new(1);
+        let claimed = vec!["claimed.rs".to_string()];
+        let changed = vec!["claimed.rs".to_string(), "extra.rs".to_string()];
+        let no_ack = review_from_lists(&effort, task, &claimed, &changed, &[]);
+        let r = no_ack.expect("unclaimed extra.rs should produce a review");
+        assert_eq!(r.changed_but_not_claimed, vec!["extra.rs".to_string()]);
+        let with_ack =
+            review_from_lists(&effort, task, &claimed, &changed, &["extra.rs".to_string()]);
+        assert!(
+            with_ack.is_none(),
+            "acknowledged path should clear the discrepancy: {with_ack:?}",
         );
     }
 

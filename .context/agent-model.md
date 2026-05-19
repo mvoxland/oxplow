@@ -477,17 +477,23 @@ intermediate `ready` step.
   so the agent isn't asked to triage a wall of paths from parallel
   efforts or formatters. `amend_effort(effort_id, add_files,
   remove_files)` is the corrective tool — adds/removes
-  `task_effort_file` rows. Persisted authorship is always the
-  agent's declared list (after any amend), never the raw diff.
+  `task_effort_file` rows AND, for every path in `remove_files`,
+  records an acknowledgement row in `effort_acknowledged_path` so
+  the Stop hook's recompute treats the discrepancy as resolved.
+  Re-adding a previously-disclaimed path via `add_files` clears
+  its acknowledgement. Persisted authorship is always the agent's
+  declared list (after any amend), never the raw diff.
 - The Stop hook also surfaces unresolved file reviews as a
   one-shot directive (priority: between stale-epic-children and
   in-progress audit). MCP `complete_task` stashes the effort id in
   `ThreadRuntimeRegistry::pending_effort_reviews`; the Stop hook
   drains it via `take_pending_effort_reviews`, recomputes the diff
-  fresh against the current `task_effort_file` rows (so an agent
-  that already called `amend_effort` doesn't get a stale prompt),
-  and fires the directive. Drained = one-shot — silent agreement
-  is fine; the prompt won't repeat.
+  fresh against the current `task_effort_file` rows, subtracts the
+  paths the agent has acknowledged via `effort_acknowledged_path`,
+  and fires the directive only if a discrepancy still remains. So
+  a successful `amend_effort` reconciles in a single round-trip —
+  the Stop hook won't re-flag the same disclaimed path on the next
+  recompute. Drained = one-shot regardless.
 - `dispatch_task({ threadId, itemId, extraContext?, autoStart? })` composes
   a subagent brief server-side (preamble + item fields + children + last notes
   + optional extra context) so the orchestrator doesn't have to Read the item

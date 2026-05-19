@@ -210,6 +210,22 @@ pub trait TaskEffortStore: Send + Sync {
     /// `record_file`. Used by the `amend_effort` MCP tool when the
     /// agent disclaims a path that the auto-diff thought was theirs.
     async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError>;
+    /// Record that the agent explicitly disclaimed `path` for this
+    /// effort. Survives Stop-hook recomputes so the same
+    /// `changed_but_not_claimed` discrepancy doesn't re-fire the
+    /// directive after a successful `amend_effort`. Idempotent.
+    async fn acknowledge_unclaimed_path(
+        &self,
+        id: &EffortId,
+        path: &str,
+    ) -> Result<(), DomainError>;
+    /// Drop a prior acknowledgement. Called when the agent re-claims
+    /// a path via `amend_effort(add_files=…)` after having previously
+    /// disclaimed it.
+    async fn forget_acknowledged_path(&self, id: &EffortId, path: &str) -> Result<(), DomainError>;
+    /// All paths the agent has explicitly acknowledged as
+    /// not-mine-but-in-the-diff for this effort.
+    async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError>;
 }
 
 #[derive(Clone)]
@@ -674,6 +690,64 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             }
         }
         Ok(())
+    }
+
+    async fn acknowledge_unclaimed_path(
+        &self,
+        id: &EffortId,
+        path: &str,
+    ) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id_clone = id.clone();
+        let path_clone = path.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT OR IGNORE INTO effort_acknowledged_path (effort_id, path) \
+                     VALUES (?1, ?2)",
+                    params![id_clone.as_str(), path_clone],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn forget_acknowledged_path(&self, id: &EffortId, path: &str) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let id_clone = id.clone();
+        let path_clone = path.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "DELETE FROM effort_acknowledged_path \
+                     WHERE effort_id = ?1 AND path = ?2",
+                    params![id_clone.as_str(), path_clone],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError> {
+        let db = self.db.clone();
+        let id_clone = id.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT path FROM effort_acknowledged_path \
+                     WHERE effort_id = ?1 ORDER BY path",
+                )?;
+                let rows =
+                    stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
     }
 
     async fn list_efforts_at_snapshots(

@@ -1120,6 +1120,16 @@ impl OxplowMcp {
                 .remove_file(&effort_id, path)
                 .await
                 .map_err(|e| internal(e.to_string()))?;
+            // Record the disclaim as an explicit acknowledgement so
+            // the Stop hook's recompute doesn't re-flag the same
+            // `changed_but_not_claimed` discrepancy. Survives across
+            // turns; cleared if the agent later re-claims the path
+            // via `add_files`.
+            self.services
+                .effort_store
+                .acknowledge_unclaimed_path(&effort_id, path)
+                .await
+                .map_err(|e| internal(e.to_string()))?;
         }
         // Compute the snapshot-version pin once for this effort —
         // every added path inherits the same triple. Falls back to a
@@ -1159,6 +1169,14 @@ impl OxplowMcp {
                     oxplow_db::EffortFileChange::Updated,
                     version.as_ref(),
                 )
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+            // If this path was previously acknowledged-as-not-mine
+            // (i.e. disclaimed), clear that acknowledgement now that
+            // the agent has changed their mind and is claiming it.
+            self.services
+                .effort_store
+                .forget_acknowledged_path(&effort_id, path)
                 .await
                 .map_err(|e| internal(e.to_string()))?;
         }
@@ -2294,6 +2312,33 @@ mod tests {
             ["src/added.rs", "src/keep.rs"]
                 .into_iter()
                 .collect::<std::collections::BTreeSet<_>>()
+        );
+        // Disclaimed paths land in the acknowledgement table so
+        // the Stop hook's recompute treats them as resolved
+        // discrepancies and stops re-firing the directive.
+        let acks = services
+            .effort_store
+            .list_acknowledged_paths(&effort.id)
+            .await
+            .unwrap();
+        assert_eq!(acks, vec!["src/disclaim.rs".to_string()]);
+        // Re-claiming an acknowledged path should clear its ack.
+        server
+            .amend_effort(Parameters(AmendEffortParams {
+                effort_id: effort.id.as_str().to_string(),
+                add_files: Some(vec!["src/disclaim.rs".into()]),
+                remove_files: None,
+            }))
+            .await
+            .unwrap();
+        let acks_after = services
+            .effort_store
+            .list_acknowledged_paths(&effort.id)
+            .await
+            .unwrap();
+        assert!(
+            acks_after.is_empty(),
+            "re-claiming the path should clear its acknowledgement, got {acks_after:?}",
         );
     }
 

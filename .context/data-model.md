@@ -265,6 +265,18 @@ than it'd be useful. If a future feature wants "show me commits for
 this item," the answer is to scope `git log` by the files
 in `task_effort_file`.
 
+`effort_acknowledged_path` (V21) records the agent's explicit
+disclaim of a path that the auto-diff thought belonged to the
+effort. Columns: `effort_id`, `path`, `acknowledged_at`. Written by
+`amend_effort(remove_files=…)` (one row per path, idempotent via
+`INSERT OR IGNORE`); cleared by `amend_effort(add_files=…)` when
+the agent re-claims a previously-disclaimed path. Consumed by
+`recompute_effort_file_review` in `oxplow_app::task_service`: paths
+present here are subtracted from `changed_but_not_claimed` before
+the Stop hook decides whether to fire the file-review directive,
+so a successful amend reconciles in one round-trip instead of
+relying on the hook's one-fire silent-agreement grace.
+
 ### `file_snapshot` + `snapshot_entry` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Time-ordered, self-contained snapshots. `file_snapshot` columns:
