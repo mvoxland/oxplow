@@ -258,6 +258,28 @@ test("postprocessWikilinks: skips fenced code blocks", () => {
     .toBe("before\n```\n[label](file:foo.ts)\n```\nafter [[foo.ts|label]]");
 });
 
+// markdown-it's default validateLink rejects file:/data: URLs, so when
+// the editor receives `[label](file:path)` it ends up storing them as
+// escaped literal text and serializing them back as `\[[path|path\]]`
+// (escaped outer brackets, redundant duplicated label). postprocess
+// must defensively normalize that mangled shape back to a bare
+// wikilink, or the on-disk file rots a little more on every save.
+test("postprocessWikilinks: cleans up the editor's escaped-bracket round-trip", () => {
+  // Real-world shape observed after a wiki save round-trip:
+  expect(postprocessWikilinks("see \\[[src/foo.ts|src/foo.ts\\]] here"))
+    .toBe("see [[src/foo.ts]] here");
+});
+
+test("postprocessWikilinks: escaped-bracket round-trip preserves a real label", () => {
+  expect(postprocessWikilinks("\\[[src/foo.ts|the helper\\]]"))
+    .toBe("[[src/foo.ts|the helper]]");
+});
+
+test("postprocessWikilinks: escaped-bracket cleanup handles multiple occurrences", () => {
+  expect(postprocessWikilinks("\\[[a.ts|a.ts\\]] and \\[[b.ts|b.ts\\]]"))
+    .toBe("[[a.ts]] and [[b.ts]]");
+});
+
 test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported forms", () => {
   const samples = [
     "see [[src/foo.ts]] in the codebase",

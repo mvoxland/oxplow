@@ -321,8 +321,20 @@ function collapseLinksOutsideInlineCode(text: string): string {
   const parts = text.split(/(`[^`\n]*`)/g);
   return parts.map((part, idx) => {
     if (idx % 2 === 1) return part;
-    // Match `[label](url)` but NOT `![alt](url)`.
-    return part.replace(
+    // First clean up the editor's escaped-bracket round-trip of bare
+    // wikilinks: markdown-it rejects `file:` URLs in its default
+    // `validateLink`, so `[label](file:path)` ends up stored as
+    // literal text in Tiptap; on serialize the outer brackets get
+    // escaped, leaving `\[[target|label\]]` on disk. Strip that
+    // escaping back to a real wikilink before everything else runs.
+    const unmangled = part.replace(
+      /\\\[\[([^\]\n|]+)\|([^\]\n]+)\\\]\]/g,
+      (_m, target: string, label: string) =>
+        target === label ? `[[${target}]]` : `[[${target}|${label}]]`,
+    );
+    // Then collapse `[label](url)` for our internal schemes — but
+    // NOT `![alt](url)` (images).
+    return unmangled.replace(
       /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|gitcommit):[^)\s]+)\)/g,
       (_match, lead: string, label: string, url: string) => {
         const collapsed = collapseInternalLink(label, url);
