@@ -64,9 +64,46 @@ thread into tmux mode.
 
 ### Snapshot retention
 
-Snapshots from closed tasks are pruned on a configurable
-schedule. Tune from the project's settings page if defaults
-don't fit (most users never touch this).
+Snapshots from closed tasks are pruned on a 24-hour schedule
+(orphaned blobs in `.oxplow/snapshots/` are GC'd at the same
+time). Tune the retention window from the project's settings
+page if the default doesn't fit (most users never touch this).
+
+### Generated paths
+
+`oxplow.yaml` carries a `generated` list of paths the project
+should treat as build output / generated content. Anything on
+the list is invisible to fs-watch, snapshot capture, the
+startup sweep, code-quality scans, and every snapshot list view
+in the UI. Entries can be:
+
+- A **single-segment name** (no `/`) — matches anywhere in the
+  path. `target` filters every `target/` directory in the tree.
+- A **repo-relative path** — matches the exact path or
+  everything under it. `apps/desktop/dist` filters that one
+  directory, not unrelated `dist/` elsewhere. `docs/generated/output.txt`
+  filters just that file.
+
+```yaml
+# oxplow.yaml
+generated:
+  - target
+  - node_modules
+  - .idea
+  - apps/desktop/dist
+```
+
+Two paths are *always* ignored regardless of config: `.git/`,
+and everything under `.oxplow/` except `.oxplow/wiki/`. Build
+dirs that used to be hardcoded (`node_modules`, `target`,
+`.next`, …) are now the user's call — projects without a
+`generated` list will see them captured.
+
+You can edit `oxplow.yaml` directly, or right-click any
+directory in the file tree → **Mark as generated** to append
+its name to the list. Read-side filtering applies on every
+read, so paths added after they were already captured drop
+out of the UI immediately — no rescan, no purge.
 
 ### LSP servers
 

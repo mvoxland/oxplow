@@ -67,8 +67,9 @@ ready → in_progress → done
 tasks are durable: they survive turns, sessions, and
 crashes. The agent files them before changing project files
 (enforced — see [Work queue](../guide/work-queue.md)) and
-closes them when acceptance criteria are met. You can reopen
-anything by flipping it back to `in_progress`.
+closes them when the change has shipped. You can reopen anything
+by flipping it back to `in_progress`. A task description is just
+markdown — if a checklist of "what does done look like".
 
 ## Wiki page
 

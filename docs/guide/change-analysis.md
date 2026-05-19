@@ -27,6 +27,18 @@ of the whole change:
   three are genuinely the three you should open first.
 - **Summary cards.** Files added / modified / deleted, total +/-,
   net complexity delta, duplication added, tests touched.
+- **Change treemap.** Cells are scaled by churn and grouped by
+  architectural zone (backend / frontend / config / docs / tests
+  / build) — a 40-file branch reads as "mostly frontend, one
+  config edit" instead of a wall of paths.
+- **Import deltas.** Per-file added / removed import edges,
+  classified as resolved (target exists in the tree) or
+  unresolved (dangling).
+- **Co-change surprise.** Files that historically changed
+  together but didn't here, and files that changed here but
+  historically don't co-change with the rest of the diff. Both
+  rank in a "surprise" view so you can spot a missed peer
+  before review catches it.
 - **Pivots.** Click a row in the file-extension, directory, or
   status pivot tables to drill down into just that slice.
 

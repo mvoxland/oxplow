@@ -55,6 +55,13 @@ The blame margin shows the commit and author that last touched
 each line; hover for the message and click the per-row kebab to
 open that commit's page.
 
+The chrome carries a per-snapshot history dropdown that lists
+every local snapshot of the open file, in descending order,
+labeled with the pinned commit (or `uncommitted`) and any
+in-flight / just-completed effort. Pick an entry to jump to
+the snapshot detail page scoped to that file — see
+[Local History](local-history.md#file-page-integration).
+
 ## Diff and commit pages
 
 Diff tabs (`diff:<path>|from|to`) open the Monaco diff editor

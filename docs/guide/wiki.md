@@ -20,8 +20,24 @@ commit message.
 
 They are *not* the right place for:
 
-- Acceptance criteria — those go on the task.
 - Personal todos — that's the work queue.
+- Per-task acceptance criteria — those belong inline in the
+  task description as a `## Acceptance criteria` subsection.
+
+## Editing
+
+Wiki pages render and edit in the same surface — there's no
+view/edit toggle. The editor is Tiptap, configured to preserve
+everything the read view supports: a `MermaidBlock` node that
+shows the rendered SVG when the caret is outside the block and
+the raw source when the caret enters; custom link handling that
+keeps `file:` / `dir:` / `gitcommit:` schemes through Tiptap's
+URL sanitizer; and a wikilink round-trip pass so `[[ ]]` syntax
+on disk parses to clickable markdown links in the editor and
+re-serializes back to `[[ ]]` on save (with bare vs labeled
+forms preserved).
+
+Saves are debounced while you type and flushed on blur.
 
 ## Wikilinks
 

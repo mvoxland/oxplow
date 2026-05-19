@@ -16,9 +16,9 @@ ready → in_progress → done
 - **ready** — filed but not yet picked up. Backlog.
 - **in_progress** — the agent (or you) is actively working it.
 - **blocked** — paused; needs your input or an external answer.
-- **done** — acceptance criteria met. The agent closes its own
-  items when it's finished; you can reopen anything by flipping
-  it back to `in_progress`.
+- **done** — finished. The agent closes its own items when the
+  change has shipped; you can reopen anything by flipping it
+  back to `in_progress`.
 - **canceled** — abandoned without shipping.
 - **archived** — drops out of the default views.
 
