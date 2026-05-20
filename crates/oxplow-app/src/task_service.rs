@@ -20,7 +20,7 @@ use thiserror::Error;
 
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::SqliteThreadStore;
-use oxplow_db::{EffortFileChange, SqliteTaskEffortStore, TaskEffortStore};
+use oxplow_db::{EffortFileChange, SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore};
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
 use oxplow_domain::EffortId;
@@ -512,6 +512,7 @@ pub const MAX_UNCLAIMED_FOR_REVIEW: usize = 10;
 /// snapshot bracket exists yet.
 pub async fn compute_effort_file_review(
     effort_store: &SqliteTaskEffortStore,
+    snapshot_store: &SqliteSnapshotStore,
     task_id: TaskId,
     claimed: &[String],
 ) -> Option<EffortFileReview> {
@@ -520,18 +521,36 @@ pub async fn compute_effort_file_review(
         .await
         .ok()
         .flatten()?;
-    if effort.start_snapshot_id.is_none() || effort.end_snapshot_id.is_none() {
-        return None;
-    }
-    let changed = effort_store
-        .list_changed_paths_for_effort(&effort.id)
-        .await
-        .ok()?;
+    let changed = effort_changed_paths(snapshot_store, &effort).await?;
     let acknowledged = effort_store
         .list_acknowledged_paths(&effort.id)
         .await
         .ok()?;
-    review_from_lists(&effort.id, task_id, claimed, &changed, &acknowledged)
+    let other_claimed = effort_store
+        .paths_claimed_by_intervening_efforts(&effort.id)
+        .await
+        .ok()?;
+    review_from_lists(
+        &effort.id,
+        task_id,
+        claimed,
+        &changed,
+        &acknowledged,
+        &other_claimed,
+    )
+}
+
+/// The set of paths whose content changed between the effort's start
+/// and end snapshots, via the shared snapshot diff (content/hash-based,
+/// not snapshot-row membership). `None` if the effort has no snapshot
+/// bracket yet.
+async fn effort_changed_paths(
+    snapshot_store: &SqliteSnapshotStore,
+    effort: &oxplow_db::TaskEffort,
+) -> Option<Vec<String>> {
+    let (start, end) = (effort.start_snapshot_id?, effort.end_snapshot_id?);
+    let changes = snapshot_store.diff_snapshots(Some(start), end).await.ok()?;
+    Some(changes.into_iter().map(|c| c.path).collect())
 }
 
 /// Recompute a review for a specific effort id. The Stop hook
@@ -540,20 +559,26 @@ pub async fn compute_effort_file_review(
 /// has a discrepancy (or doesn't exist / has no snapshot bracket).
 pub async fn recompute_effort_file_review(
     effort_store: &SqliteTaskEffortStore,
+    snapshot_store: &SqliteSnapshotStore,
     effort_id: &EffortId,
 ) -> Option<EffortFileReview> {
     let effort = effort_store.get_effort(effort_id).await.ok().flatten()?;
-    if effort.start_snapshot_id.is_none() || effort.end_snapshot_id.is_none() {
-        return None;
-    }
     let files = effort_store.list_files(effort_id).await.ok()?;
     let claimed: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
-    let changed = effort_store
-        .list_changed_paths_for_effort(effort_id)
+    let changed = effort_changed_paths(snapshot_store, &effort).await?;
+    let acknowledged = effort_store.list_acknowledged_paths(effort_id).await.ok()?;
+    let other_claimed = effort_store
+        .paths_claimed_by_intervening_efforts(effort_id)
         .await
         .ok()?;
-    let acknowledged = effort_store.list_acknowledged_paths(effort_id).await.ok()?;
-    review_from_lists(effort_id, effort.task_id, &claimed, &changed, &acknowledged)
+    review_from_lists(
+        effort_id,
+        effort.task_id,
+        &claimed,
+        &changed,
+        &acknowledged,
+        &other_claimed,
+    )
 }
 
 fn review_from_lists(
@@ -562,18 +587,23 @@ fn review_from_lists(
     claimed: &[String],
     changed: &[String],
     acknowledged: &[String],
+    other_claimed: &[String],
 ) -> Option<EffortFileReview> {
     let claimed_set: std::collections::HashSet<&str> = claimed.iter().map(|s| s.as_str()).collect();
     let changed_set: std::collections::HashSet<&str> = changed.iter().map(|s| s.as_str()).collect();
     let acknowledged_set: std::collections::HashSet<&str> =
         acknowledged.iter().map(|s| s.as_str()).collect();
+    let other_claimed_set: std::collections::HashSet<&str> =
+        other_claimed.iter().map(|s| s.as_str()).collect();
     let mut claimed_but_not_changed: Vec<String> = claimed_set
         .difference(&changed_set)
         .map(|s| (*s).to_string())
         .collect();
+    // A changed path another effort already claimed (it finished inside
+    // this effort's window) isn't this agent's to claim — drop it.
     let mut changed_but_not_claimed: Vec<String> = changed_set
         .difference(&claimed_set)
-        .filter(|s| !acknowledged_set.contains(*s))
+        .filter(|s| !acknowledged_set.contains(*s) && !other_claimed_set.contains(*s))
         .map(|s| (*s).to_string())
         .collect();
     claimed_but_not_changed.sort();
@@ -777,14 +807,33 @@ mod tests {
         let task = TaskId::new(1);
         let claimed = vec!["claimed.rs".to_string()];
         let changed = vec!["claimed.rs".to_string(), "extra.rs".to_string()];
-        let no_ack = review_from_lists(&effort, task, &claimed, &changed, &[]);
+        let no_ack = review_from_lists(&effort, task, &claimed, &changed, &[], &[]);
         let r = no_ack.expect("unclaimed extra.rs should produce a review");
         assert_eq!(r.changed_but_not_claimed, vec!["extra.rs".to_string()]);
-        let with_ack =
-            review_from_lists(&effort, task, &claimed, &changed, &["extra.rs".to_string()]);
+        let with_ack = review_from_lists(
+            &effort,
+            task,
+            &claimed,
+            &changed,
+            &["extra.rs".to_string()],
+            &[],
+        );
         assert!(
             with_ack.is_none(),
             "acknowledged path should clear the discrepancy: {with_ack:?}",
+        );
+        // Same effect when another effort already claimed the path.
+        let with_other = review_from_lists(
+            &effort,
+            task,
+            &claimed,
+            &changed,
+            &[],
+            &["extra.rs".to_string()],
+        );
+        assert!(
+            with_other.is_none(),
+            "path claimed by an intervening effort should clear the discrepancy: {with_other:?}",
         );
     }
 

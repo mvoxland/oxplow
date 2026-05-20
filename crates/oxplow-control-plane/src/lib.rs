@@ -740,6 +740,7 @@ async fn stop_directive(
         for eid in pending_ids {
             let Some(review) = oxplow_app::task_service::recompute_effort_file_review(
                 &ctx.services.effort_store,
+                &ctx.services.snapshot_store,
                 &eid,
             )
             .await

@@ -226,6 +226,15 @@ pub trait TaskEffortStore: Send + Sync {
     /// All paths the agent has explicitly acknowledged as
     /// not-mine-but-in-the-diff for this effort.
     async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError>;
+    /// Paths claimed (via `task_effort_file`) by OTHER efforts that
+    /// finished within this effort's snapshot window
+    /// (`other.end_snapshot_id ∈ (self.start, self.end]`). Such a path
+    /// changed during this effort's bracket but another effort already
+    /// owns it, so we shouldn't ask this one to claim it too.
+    async fn paths_claimed_by_intervening_efforts(
+        &self,
+        id: &EffortId,
+    ) -> Result<Vec<String>, DomainError>;
 }
 
 #[derive(Clone)]
@@ -750,6 +759,36 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         .unwrap()
     }
 
+    async fn paths_claimed_by_intervening_efforts(
+        &self,
+        id: &EffortId,
+    ) -> Result<Vec<String>, DomainError> {
+        let db = self.db.clone();
+        let id_clone = id.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT tef.path
+                     FROM task_effort self
+                     JOIN task_effort other
+                       ON other.id != self.id
+                      AND other.end_snapshot_id > self.start_snapshot_id
+                      AND other.end_snapshot_id <= self.end_snapshot_id
+                     JOIN task_effort_file tef ON tef.effort_id = other.id
+                     WHERE self.id = ?1
+                       AND self.start_snapshot_id IS NOT NULL
+                       AND self.end_snapshot_id IS NOT NULL
+                     ORDER BY tef.path",
+                )?;
+                let rows =
+                    stmt.query_map(params![id_clone.as_str()], |row| row.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     async fn list_efforts_at_snapshots(
         &self,
         snapshot_ids: Vec<i64>,
@@ -817,6 +856,53 @@ mod tests {
     async fn fixture() -> (SqliteTaskEffortStore, TaskId, ThreadId) {
         let (store, _db, tid, thread) = fixture_with_db().await;
         (store, tid, thread)
+    }
+
+    #[tokio::test]
+    async fn intervening_efforts_claims_within_window() {
+        // self effort B spans snapshots (10, 30]. Effort A finishes at
+        // 20 (inside) and claims shared.rs; effort C finishes at 40
+        // (outside) and claims outside.rs. Only shared.rs should be
+        // reported as already-claimed-by-an-intervening-effort.
+        let db = Database::in_memory();
+        let store = SqliteTaskEffortStore::new(db.clone());
+        let db2 = db.clone();
+        tokio::task::spawn_blocking(move || {
+            db2.with_conn(|conn| {
+                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+                for (id, start, end) in
+                    [("ef-self", 10, 30), ("ef-a", 15, 20), ("ef-c", 25, 40)]
+                {
+                    conn.execute(
+                        "INSERT INTO task_effort
+                           (id, task_id, thread_id, started_at, ended_at,
+                            start_snapshot_id, end_snapshot_id)
+                         VALUES (?1, 1, 'b-1', '2026-01-01T00:00:00Z',
+                                 '2026-01-01T00:01:00Z', ?2, ?3)",
+                        params![id, start, end],
+                    )?;
+                }
+                for (eid, path) in [("ef-a", "shared.rs"), ("ef-c", "outside.rs")] {
+                    conn.execute(
+                        "INSERT INTO task_effort_file
+                           (effort_id, path, change_kind, local_snapshot_id,
+                            closest_git_version, git_version_exact)
+                         VALUES (?1, ?2, 'updated', 1, NULL, 0)",
+                        params![eid, path],
+                    )?;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+        let got = store
+            .paths_claimed_by_intervening_efforts(&EffortId::from("ef-self"))
+            .await
+            .unwrap();
+        assert_eq!(got, vec!["shared.rs".to_string()]);
     }
 
     async fn fixture_with_db() -> (SqliteTaskEffortStore, Database, TaskId, ThreadId) {

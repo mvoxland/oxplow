@@ -1068,6 +1068,7 @@ impl OxplowMcp {
             } else {
                 review = oxplow_app::task_service::compute_effort_file_review(
                     &self.services.effort_store,
+                    &self.services.snapshot_store,
                     item.id,
                     &touched,
                 )

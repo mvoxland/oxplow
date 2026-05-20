@@ -246,6 +246,15 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
 - `getCommitsAheadOf(projectDir, base, head, limit=50)` — wraps
   `git log base..head` with the same parser used by `getGitLog`, for
   pairwise commit-diff displays.
+- `tree_at_commit(repo, rev)` / `diff_commits(repo, a, b)`
+  (`src/tree.rs`) — a libgit2 tree walk that yields `path -> blob oid`
+  and runs it through the **shared** `oxplow_domain::diff_trees`
+  comparison (the same primitive `SqliteSnapshotStore::diff_snapshots`
+  uses for snapshots). This is the source-agnostic content diff:
+  before/after can come from two git commits or two snapshots and go
+  through one comparison instead of `git diff`. It's a content-identity
+  diff (added/modified/deleted); **rename detection is intentionally
+  not done** here — views that need renames still use git's own diff.
 - `listRecentRemoteBranches(projectDir, limit=20)` — wraps
   `git for-each-ref --sort=-committerdate refs/remotes` and returns
   `RemoteBranchEntry[]` (filters out `<remote>/HEAD`). Drives the

@@ -8,7 +8,9 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, StreamId, Timestamp};
+use std::collections::BTreeMap;
+
+use oxplow_domain::{diff_trees, DomainError, FileChange, StreamId, Timestamp};
 
 use crate::database::Database;
 use crate::page_ref_projections::finding_edges;
@@ -1254,6 +1256,85 @@ impl SqliteSnapshotStore {
         .unwrap()
     }
 
+    /// Reconstruct the content tree as-of `snapshot_id`: `path ->
+    /// content identity`, using the most-recent `file_snapshot` row per
+    /// path with `snapshot_id <= snapshot_id` (snapshots are
+    /// incremental, so this is the file's content at that boundary).
+    /// Deletion rows (`blob_hash` NULL, not oversize) drop the path;
+    /// oversize rows (no blob hash) get a `size:mtime` identity so a
+    /// change to a too-big file is still detected.
+    pub async fn tree_at(&self, snapshot_id: i64) -> Result<BTreeMap<String, String>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let stream_id: Option<String> = conn
+                    .query_row(
+                        "SELECT stream_id FROM snapshot WHERE id = ?1",
+                        params![snapshot_id],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                let Some(stream_id) = stream_id else {
+                    return Ok(BTreeMap::new());
+                };
+                let mut stmt = conn.prepare(
+                    "SELECT path, blob_hash, oversize, size_bytes, mtime_ms FROM (
+                        SELECT path, blob_hash, oversize, size_bytes, mtime_ms,
+                               ROW_NUMBER() OVER (
+                                 PARTITION BY path ORDER BY snapshot_id DESC, id DESC
+                               ) AS rn
+                        FROM file_snapshot
+                        WHERE stream_id = ?1
+                          AND snapshot_id IS NOT NULL
+                          AND snapshot_id <= ?2
+                     ) WHERE rn = 1",
+                )?;
+                let rows = stmt.query_map(params![stream_id, snapshot_id], |row| {
+                    let path: String = row.get(0)?;
+                    let blob_hash: Option<String> = row.get(1)?;
+                    let oversize: i32 = row.get(2)?;
+                    let size_bytes: i64 = row.get(3)?;
+                    let mtime_ms: Option<i64> = row.get(4)?;
+                    Ok((path, blob_hash, oversize != 0, size_bytes, mtime_ms))
+                })?;
+                let mut tree = BTreeMap::new();
+                for r in rows {
+                    let (path, blob_hash, oversize, size_bytes, mtime_ms) = r?;
+                    let id = match blob_hash {
+                        Some(h) => h,
+                        // Oversize: content exists but isn't hashed —
+                        // use size+mtime as a best-effort identity.
+                        None if oversize => {
+                            format!("oversize:{}:{}", size_bytes, mtime_ms.unwrap_or(0))
+                        }
+                        // Deletion row: the path is absent at this point.
+                        None => continue,
+                    };
+                    tree.insert(path, id);
+                }
+                Ok(tree)
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Content diff between two snapshots, via the shared
+    /// [`oxplow_domain::diff_trees`]. `from = None` ⇒ everything in `to`
+    /// is added. Reconstructs each side with [`Self::tree_at`].
+    pub async fn diff_snapshots(
+        &self,
+        from: Option<i64>,
+        to: i64,
+    ) -> Result<Vec<FileChange>, DomainError> {
+        let before = match from {
+            Some(f) => self.tree_at(f).await?,
+            None => BTreeMap::new(),
+        };
+        let after = self.tree_at(to).await?;
+        Ok(diff_trees(&before, &after))
+    }
+
     /// For each input snapshot id, return the set of wiki slugs whose
     /// `.md` body changed in that snapshot's file_snapshot rows.
     /// Cheap targeted query for the Local History dashboard's wiki
@@ -1487,6 +1568,126 @@ impl SqliteSnapshotStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::ChangeStatus;
+
+    /// Seed a stream + snapshots + file_snapshot rows for diff tests.
+    /// `rows`: (snapshot_id, path, blob_hash, oversize).
+    async fn seed_snapshots(db: &Database, rows: &[(i64, &str, Option<&str>, bool)]) {
+        let snaps: std::collections::BTreeSet<i64> = rows.iter().map(|(s, ..)| *s).collect();
+        let rows: Vec<(i64, String, Option<String>, bool)> = rows
+            .iter()
+            .map(|(s, p, h, o)| (*s, p.to_string(), h.map(|s| s.to_string()), *o))
+            .collect();
+        let db = db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+                conn.execute(
+                    "INSERT INTO streams
+                       (id, kind, title, branch, branch_ref, branch_source,
+                        worktree_path, created_at, updated_at)
+                     VALUES ('s-1','primary','s','main','refs/heads/main','origin',
+                             '/tmp','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
+                    [],
+                )?;
+                for sid in &snaps {
+                    conn.execute(
+                        "INSERT INTO snapshot (id, stream_id, created_at)
+                         VALUES (?1, 's-1', '2026-01-01T00:00:00Z')",
+                        params![sid],
+                    )?;
+                }
+                for (sid, path, hash, oversize) in &rows {
+                    conn.execute(
+                        "INSERT INTO file_snapshot
+                           (stream_id, path, blob_hash, size_bytes, captured_at,
+                            oversize, snapshot_id, mtime_ms)
+                         VALUES ('s-1', ?1, ?2, 10, '2026-01-01T00:00:00Z', ?3, ?4, 1)",
+                        params![path, hash, *oversize as i32, sid],
+                    )?;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn tree_at_reconstructs_latest_row_per_path() {
+        let db = Database::in_memory();
+        let store = SqliteSnapshotStore::new(db.clone());
+        seed_snapshots(
+            &db,
+            &[
+                (1, "a.txt", Some("hA"), false),
+                (1, "b.txt", Some("hB"), false),
+                (2, "a.txt", Some("hA2"), false), // a modified at snap 2
+                (2, "c.txt", Some("hC"), false),  // c added at snap 2
+            ],
+        )
+        .await;
+
+        let t1 = store.tree_at(1).await.unwrap();
+        assert_eq!(t1.get("a.txt").map(String::as_str), Some("hA"));
+        assert_eq!(t1.get("b.txt").map(String::as_str), Some("hB"));
+        assert!(!t1.contains_key("c.txt"));
+
+        let t2 = store.tree_at(2).await.unwrap();
+        // b carries forward (no row at snap 2); a is the newer hash.
+        assert_eq!(t2.get("a.txt").map(String::as_str), Some("hA2"));
+        assert_eq!(t2.get("b.txt").map(String::as_str), Some("hB"));
+        assert_eq!(t2.get("c.txt").map(String::as_str), Some("hC"));
+    }
+
+    #[tokio::test]
+    async fn diff_snapshots_classifies_and_omits_noops() {
+        let db = Database::in_memory();
+        let store = SqliteSnapshotStore::new(db.clone());
+        seed_snapshots(
+            &db,
+            &[
+                (1, "a.txt", Some("hA"), false),
+                (1, "b.txt", Some("hB"), false),
+                (2, "a.txt", Some("hA2"), false), // modified
+                (2, "c.txt", Some("hC"), false),  // added
+                (3, "a.txt", Some("hA2"), false), // no-op rewrite (same hash)
+                (4, "b.txt", None, false),        // deletion row
+            ],
+        )
+        .await;
+
+        let d12 = store.diff_snapshots(Some(1), 2).await.unwrap();
+        assert_eq!(
+            d12,
+            vec![
+                FileChange {
+                    path: "a.txt".into(),
+                    status: ChangeStatus::Modified
+                },
+                FileChange {
+                    path: "c.txt".into(),
+                    status: ChangeStatus::Added
+                },
+            ]
+        );
+
+        // snap 2 -> 3 is a byte-identical rewrite of a.txt: no change.
+        assert!(store.diff_snapshots(Some(2), 3).await.unwrap().is_empty());
+
+        // b.txt deleted by snap 4.
+        let d14 = store.diff_snapshots(Some(1), 4).await.unwrap();
+        assert!(d14.contains(&FileChange {
+            path: "b.txt".into(),
+            status: ChangeStatus::Deleted
+        }));
+
+        // from = None ⇒ everything in `to` is added.
+        let d_none = store.diff_snapshots(None, 1).await.unwrap();
+        assert_eq!(d_none.len(), 2);
+        assert!(d_none.iter().all(|c| c.status == ChangeStatus::Added));
+    }
 
     #[tokio::test]
     async fn set_snapshot_git_commit_cascades_to_file_refs() {

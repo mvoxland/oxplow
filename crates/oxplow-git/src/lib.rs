@@ -17,6 +17,7 @@ mod refs_watch;
 mod repo;
 pub mod status;
 pub mod sync;
+pub mod tree;
 pub mod workspace;
 mod worktree;
 
@@ -49,6 +50,7 @@ pub use sync::{
     add_path, commit_all, fetch, merge, pull, pull_remote_into_current, push, push_current_to,
     rebase, search_workspace_text, GitOpResult, TextSearchHit,
 };
+pub use tree::{diff_commits, tree_at_commit};
 pub use workspace::{
     create_workspace_directory, create_workspace_file, delete_workspace_path,
     list_workspace_entries, list_workspace_files, read_workspace_file, rename_workspace_path,

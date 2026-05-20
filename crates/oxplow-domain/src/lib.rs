@@ -14,6 +14,7 @@ pub mod stream;
 pub mod task;
 pub mod thread;
 pub mod time;
+pub mod tree_diff;
 
 pub use error::DomainError;
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
@@ -25,3 +26,4 @@ pub use task::{
 };
 pub use thread::{Thread, ThreadStatus};
 pub use time::Timestamp;
+pub use tree_diff::{diff_trees, ChangeStatus, FileChange};

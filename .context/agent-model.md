@@ -450,10 +450,19 @@ intermediate `ready` step.
   `link_tasks`, `list_recent_file_changes`,
   `dispatch_task`, `file_epic_with_children`, `complete_task`,
   `amend_effort`, `transition_tasks`
-- `complete_task` returns `{ task, file_review }`. The diff itself
-  is the set of `file_snapshot` rows landing in the half-open
-  bracket `(start_snapshot_id, end_snapshot_id]` of the effort.
-  Two pieces make this work end-to-end:
+- `complete_task` returns `{ task, file_review }`. The "changed"
+  set is a **content diff between the effort's start and end
+  snapshots** — `SqliteSnapshotStore::diff_snapshots(start, end)`,
+  which reconstructs each path's content as-of each boundary
+  (latest `file_snapshot` row ≤ that snapshot) and reports a path
+  only when its `blob_hash` differs. This is the shared
+  `oxplow_domain::diff_trees` comparison (the same one
+  `oxplow_git::diff_commits` uses), **not** raw membership of rows
+  in `(start, end]` — so a no-op rewrite / edit-then-revert (equal
+  hash) doesn't count as changed, and the comparison is the source
+  of truth, not snapshot row timing. (`list_changed_paths_for_effort`
+  still exists for an IPC view but no longer drives the review.)
+  Two pieces make the underlying capture work end-to-end:
   1. `SnapshotCaptureService::request_snapshot` sleeps for
      `DEFAULT_PREDRAIN_DELAY` (300 ms) before draining the dirty
      set so the fs-watch debouncer (250 ms in `workspace_watch`)
@@ -472,10 +481,13 @@ intermediate `ready` step.
   `claimed_but_not_changed` lists files the agent said it edited
   but the worktree didn't change;
   `changed_but_not_claimed` lists files that did change but the
-  agent didn't declare. The latter is capped at 10 entries
-  (`unclaimed_overflow` carries the original count when truncated)
-  so the agent isn't asked to triage a wall of paths from parallel
-  efforts or formatters. `amend_effort(effort_id, add_files,
+  agent didn't declare — minus any path another effort already
+  claimed whose `end_snapshot_id` falls inside this effort's window
+  (`paths_claimed_by_intervening_efforts`), since a concurrent/
+  intervening effort already owns it. The latter is capped at 10
+  entries (`unclaimed_overflow` carries the original count when
+  truncated) so the agent isn't asked to triage a wall of paths
+  from parallel efforts or formatters. `amend_effort(effort_id, add_files,
   remove_files)` is the corrective tool — adds/removes
   `task_effort_file` rows AND, for every path in `remove_files`,
   records an acknowledgement row in `effort_acknowledged_path` so
