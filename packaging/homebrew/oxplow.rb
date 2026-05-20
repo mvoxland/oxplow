@@ -15,6 +15,7 @@ cask "oxplow" do
   depends_on arch: :arm64
 
   app "Oxplow.app"
+  binary "#{appdir}/Oxplow.app/Contents/MacOS/oxplow"
 
   # Homebrew strips the com.apple.quarantine attribute on every
   # cask install by default (`brew install --cask` without
