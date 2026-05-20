@@ -196,6 +196,19 @@ export const commands = {
 	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	deleteWorkNote: (id: NoteId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_work_note", { id })),
 	listTaskEvents: (itemId: number | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
+	createComment: (streamId: StreamId, threadId: string | null, targetKind: string, targetId: string, quote: string, anchorJson: string, intent: CommentIntent, author: string, body: string) => typedError<CommentThread, IpcError>(__TAURI_INVOKE("create_comment", { streamId, threadId, targetKind, targetId, quote, anchorJson, intent, author, body })),
+	addCommentMessage: (commentId: CommentId, author: string, body: string) => typedError<CommentMessage, IpcError>(__TAURI_INVOKE("add_comment_message", { commentId, author, body })),
+	listCommentsForTarget: (targetKind: string, targetId: string) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_target", { targetKind, targetId })),
+	listCommentsForStream: (streamId: StreamId) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_stream", { streamId })),
+	setCommentIntent: (commentId: CommentId, intent: CommentIntent) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_intent", { commentId, intent })),
+	setCommentStatus: (commentId: CommentId, status: CommentStatus) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_status", { commentId, status })),
+	/**
+	 *  Persist a re-resolved anchor hint (and orphan flag) after the
+	 *  renderer re-locates — or fails to re-locate — the quote in current
+	 *  content. No event: this is a passive sync, not a user mutation.
+	 */
+	setCommentAnchor: (commentId: CommentId, anchorJson: string, orphaned: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_anchor", { commentId, anchorJson, orphaned })),
+	deleteComment: (commentId: CommentId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_comment", { commentId })),
 	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
 	getWikiPage: (slug: string) => typedError<{
 	slug: string,
@@ -929,6 +942,70 @@ export type CodeQualityScan = {
 };
 
 export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
+
+/**
+ *  The thread anchor + metadata. The conversation lives in
+ *  [`CommentMessage`] rows keyed by `id`.
+ */
+export type Comment = {
+	id: CommentId,
+	/**
+	 *  Hard scope — comments are queryable per stream regardless of
+	 *  which thread authored them.
+	 */
+	stream_id: StreamId,
+	/**
+	 *  The agent thread the comment was first added in. Nullable so a
+	 *  content comment survives the thread being archived.
+	 */
+	thread_id: ThreadId | null,
+	target_kind: string,
+	target_id: string,
+	quote: string,
+	anchor_json: string,
+	intent: CommentIntent,
+	status: CommentStatus,
+	orphaned: boolean,
+	author: string,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+	last_activity_at: Timestamp,
+};
+
+/**
+ *  Comment identifier — plain SQLite autoincrement integer (no UUIDs).
+ *  Private field, same reasoning as [`TaskId`].
+ */
+export type CommentId = number;
+
+// Why the comment exists — drives what the agent acts on.
+export type CommentIntent = 
+// A private thinking note; the agent leaves it alone unless asked.
+"note" | 
+// The user wants the agent to do something about this.
+"followup";
+
+// One message in a comment thread (the first message included).
+export type CommentMessage = {
+	id: CommentMessageId,
+	comment_id: CommentId,
+	// Free-form, e.g. `"user"` or `"agent"`.
+	author: string,
+	body: string,
+	created_at: Timestamp,
+};
+
+// Comment-message identifier — plain SQLite autoincrement integer.
+export type CommentMessageId = number;
+
+// Lifecycle of a comment thread.
+export type CommentStatus = "open" | "resolved";
+
+// A comment plus its full message thread, oldest-first.
+export type CommentThread = {
+	comment: Comment,
+	messages: CommentMessage[],
+};
 
 export type CommitDetail = {
 	sha: string,

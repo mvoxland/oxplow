@@ -133,6 +133,49 @@ impl fmt::Display for TaskLinkId {
     }
 }
 
+/// Comment identifier — plain SQLite autoincrement integer (no UUIDs).
+/// Private field, same reasoning as [`TaskId`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+pub struct CommentId(i64);
+
+impl CommentId {
+    pub const fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for CommentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Comment-message identifier — plain SQLite autoincrement integer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[serde(transparent)]
+pub struct CommentMessageId(i64);
+
+impl CommentMessageId {
+    pub const fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for CommentMessageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

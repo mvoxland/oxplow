@@ -128,6 +128,48 @@ In `apps/desktop/index.html`:
   page-summary loading, refresh-on-event, and notFound/loadError
   state — it just no longer owns the editor's draft.
 
+## Comments
+
+`RichTextField` becomes comment-enabled when given a `comments`
+config (`{ streamId, threadId, targetKind, targetId, author? }`).
+WikiPageTab passes `{ targetKind: "wiki", targetId: slug, threadId:
+null }` (wiki pages aren't thread-bound); TaskPage passes
+`{ targetKind: "task", targetId: String(item.id), threadId:
+item.thread_id }`.
+
+- **`CommentDecorations.ts`** is a ProseMirror **plugin extension**,
+  NOT a stored mark. This is the load-bearing rule: a stored mark
+  would serialize into the markdown that round-trips to disk and
+  pollute the file. Highlights are inline **decorations** computed
+  from the comment list and pushed in via a transaction meta
+  (`commentDecorationsKey`); between pushes the set maps through doc
+  edits so highlights track typing. (`InternalLink` is a stored mark
+  — use it as a structural reference only, not the comment mechanism.)
+- **Re-anchoring.** `findCommentRange(doc, quote, hintFrom?, hintTo?)`
+  re-resolves each comment's `quote` to a `{ from, to }`: it tries the
+  stored hint range first (fast path), then flattens the doc's text
+  nodes and runs the shared `resolveQuoteOffset`
+  (`components/Comments/anchor.ts`), mapping the text offset back to a
+  doc position. Cross-block selections don't match (no block separator
+  in the flattened text) and orphan — acceptable for v1. A corrected
+  or orphaned anchor is persisted via `setCommentAnchor`, which emits
+  no event, so the recompute effect doesn't loop.
+- **Authoring is right-click-driven** (not an auto-popping button or
+  click-to-open — those fight normal selection/cursor editing). The
+  wrapper's `onContextMenu` **always** fires and `preventDefault`s, so
+  the native webview menu never appears in the editor. It builds a
+  shared `ContextMenu` with Cut / Copy / Paste (via `navigator.clipboard`
+  + ProseMirror commands, using positions captured at menu-open so they
+  survive the click moving focus) plus, when comment-enabled, "Add
+  Comment" (selection non-empty) and "Open Comment" (right-click target's
+  `closest("[data-comment-id]")` hits a decoration). "Add Comment" opens
+  `NewCommentPopover` (composer anchored to the selection-end caret via
+  `coordsAtPos`); "Open Comment" opens `CommentPopover`. Both live in
+  `components/Comments/` and `stopPropagation` their pointer events so
+  the wrapper's editor-focus `onClick` doesn't steal focus. The
+  highlight CSS class is `.oxplow-comment-highlight`
+  (`--comment-highlight*` tokens).
+
 ## Related
 
 - [theming.md](./theming.md) — semantic CSS variable tokens.

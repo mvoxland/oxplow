@@ -88,6 +88,10 @@
         --freshness-stale: #f59e0b;
         --freshness-very-stale: #fb7185;
 
+        /* Comment-anchored text highlight (amber, like a margin note). */
+        --comment-highlight: #d9a441;
+        --comment-highlight-bg: rgba(217, 164, 65, 0.18);
+
         --diff-add-bg: #1f3326;
         --diff-add-fg: #a7f3d0;
         --diff-remove-bg: #3a1f25;
@@ -343,6 +347,14 @@
       .oxplow-rt-field:hover .oxplow-rt-pencil,
       .oxplow-rt-field:focus-within .oxplow-rt-pencil { opacity: 0.85 !important; }
       .oxplow-rt-editor.ProseMirror { outline: none; min-height: 1.4em; }
+      /* Comment-anchored text — an overlay decoration (NOT a stored
+         mark), so it never touches the markdown that round-trips to
+         disk. Reused class name across prose + (future) other surfaces. */
+      .oxplow-comment-highlight {
+        background: var(--comment-highlight-bg);
+        border-bottom: 2px solid var(--comment-highlight);
+        cursor: pointer;
+      }
       /* Wikilink / file: / dir: / gitcommit: anchors inside the editor
          are click-to-navigate (handled by RichTextField's wrapper),
          so they should advertise themselves as links rather than

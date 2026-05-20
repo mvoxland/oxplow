@@ -84,6 +84,13 @@ text, lifts to a 4%-white wash on hover).
 `--freshness-fresh` (emerald), `--freshness-stale` (amber),
 `--freshness-very-stale` (rose).
 
+### Comments
+
+`--comment-highlight` (amber) — the inline highlight + quote rule for
+text a comment is anchored to (margin-note feel).
+`--comment-highlight-bg` is the translucent fill painted under the
+anchored range in the editor / prose surfaces.
+
 ### Diff
 
 `--diff-add-bg` / `--diff-add-fg`, `--diff-remove-bg` / `--diff-remove-fg`.

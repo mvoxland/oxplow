@@ -111,6 +111,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Library;
     case "files":
       return FolderTree;
+    case "comments":
+      return Inbox;
     case "code-quality":
       return Gauge;
     case "local-history":
@@ -234,6 +236,7 @@ const INDEX_KINDS = new Set<string>([
   "archived",
   "wiki-index",
   "files",
+  "comments",
   "code-quality",
   "local-history",
   "local-history-full",

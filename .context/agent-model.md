@@ -539,6 +539,21 @@ intermediate `ready` step.
   "fork_thread" above. Creates a new queued thread on the same stream,
   seeds a note item, optionally moves ready / blocked items across in
   one transaction.
+- `list_comments({ scope, id, status? })` / `respond_to_comment({
+  comment_id, body })` / `resolve_comment({ comment_id })` — the user's
+  threaded annotations anchored to text in pages (wiki / file / task).
+  `scope` is `"thread"` (id = `b-…`) or `"stream"` (id = `s-…`, the
+  whole workspace); `status` filters `"all"` / `"open"` /
+  `"needs_response"`. `respond_to_comment` appends a message authored
+  `"agent"` (which clears `needs_response` until the user replies
+  again); `resolve_comment` marks the thread resolved. **The runtime
+  never force-triggers any of this — there is no Stop-hook branch and
+  no synthesized work item for comments.** The agent only touches
+  comments when the user prompts it (typically via the
+  `/review-comments` plugin command, which just wraps these tools).
+  `comment_id` is an integer (comments use autoincrement ids). Store:
+  `crates/oxplow-db/src/comment_store.rs`; mutations emit
+  `CommentsChanged` on the bus.
 
 `buildLspMcpTools` (`crates/oxplow-mcp/src/lib.rs`) adds language-server
 queries (definition, references, hover) the agent can use without

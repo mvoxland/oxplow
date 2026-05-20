@@ -66,11 +66,16 @@ caught via `editor.onContextMenu`, which:
 3. Opens the shared `ContextMenu` component
    (`apps/desktop/src/components/ContextMenu.tsx`) at the cursor.
 
-Menu items live in a per-render `MenuItem[]` array — `Save`, `Find`,
-`Go to Definition`, `Format Document`, `Copy Path`,
-`Annotate with Git Blame`, `Compare with Clipboard`. Items are gated on
-`enabled` based on file path, language LSP support, and selection
-presence.
+Menu items live in a per-render `MenuItem[]` array — `Cut`, `Copy`,
+`Paste` (via `navigator.clipboard` + `editor.executeEdits`), `Save`,
+`Find`, `Go to Definition`, `Format Document`, `Copy Path`,
+`Annotate with Git Blame`, `Compare with Clipboard`, `Add Comment`,
+`Open Comment`. Items are gated on `enabled` based on file path, language
+LSP support, selection presence, and (for `Open Comment`) whether the
+right-click landed on a commented range. The right-click handler
+`preventDefault`s the native event (and the editor container has a
+belt-and-suspenders `onContextMenu={e => e.preventDefault()}`) so the
+webview's native menu never shows.
 
 The `ContextMenu` component handles its own viewport-clamping and
 submenu flip-up logic; never re-implement that per-call site.
@@ -163,6 +168,37 @@ jumping to source opens the working copy of the right-side path in the
 regular editor pane and closes the diff tab. For literal-content diffs
 (e.g. Compare with Clipboard) this still opens the workspace file,
 which is the useful action.
+
+## Comment overlay
+
+`MonacoCommentLayer` (`apps/desktop/src/components/Comments/MonacoCommentLayer.tsx`)
+is mounted inside `EditorPane`'s relative container once `monacoReady`
+and `filePath` are set (target `file:<repo-relative path>`, stream-scoped
+— files aren't thread-bound, so `threadId` is null). It mirrors the
+rich-text integration:
+
+- **Highlights** are inline `deltaDecorations`
+  (`inlineClassName: "oxplow-comment-highlight"`, its own id ref —
+  separate from `diffDecoIdsRef`), recomputed when the thread list
+  changes. A parallel `decoId → commentId` map drives hit-testing.
+- **Re-anchoring** tries the stored `{ startLine, startColumn, endLine,
+  endColumn }` first (quote still matches → reuse), else runs the shared
+  `resolveQuoteOffset` over `model.getValue()` and maps the offset back
+  via `model.getPositionAt`. Corrected/orphaned anchors persist through
+  `setCommentAnchor` (no event → no loop).
+- **Right-click-driven**, not click/selection (those fight cursor
+  placement). `MonacoCommentLayer` exposes a `MonacoCommentHandle`
+  (`forwardRef` + `useImperativeHandle`): `commentIdAt(position)`,
+  `addCommentForSelection()`, `openComment(id)`. `EditorPane`'s existing
+  `onContextMenu` captures the comment-at-position into a ref and adds
+  "Add Comment" (enabled when there's a selection) + "Open Comment"
+  (enabled when over a commented range) to its `contextMenuItems`,
+  delegating to the handle. The layer renders `NewCommentPopover` /
+  `CommentPopover` from its own state.
+- **Popover/composer coords:** Monaco renders its own selection (not the
+  native DOM one), so the rect comes from
+  `editor.getScrolledVisiblePosition` + the editor DOM node's bounding
+  rect — NOT `window.getSelection()`.
 
 ## LSP bridge
 

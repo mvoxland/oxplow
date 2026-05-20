@@ -434,6 +434,23 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
         snapshot_svc.spawn_cleanup_loop(retention_days, Some(state.background_tasks.clone()));
     }
 
+    // Comment cleanup loop — prunes resolved/orphaned comment threads
+    // whose last activity is older than the retention window. Runs at
+    // boot and every 24h.
+    {
+        use oxplow_domain::stores::CommentStore;
+        const COMMENT_RETENTION_DAYS: i64 = 14;
+        let comment_store = state.comment_store.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(e) = comment_store.cleanup(COMMENT_RETENTION_DAYS).await {
+                    tracing::warn!("comment cleanup failed: {e}");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+            }
+        });
+    }
+
     // Per-stream fs + .git/refs watchers — bridges file changes onto
     // the EventBus so the renderer's QuickOpen, project panel, history,
     // git dashboard, etc. refresh without polling. Held in a registry

@@ -111,6 +111,7 @@ import { WikiIndexPage } from "./pages/WikiIndexPage.js";
 import { TasksPage } from "./pages/TasksPage.js";
 import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
+import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
@@ -2123,6 +2124,7 @@ export function App() {
       case "terminal":
       case "files":
       case "wiki-index":
+      case "comments":
       case "tasks":
       case "done-work":
       case "backlog":
@@ -2901,6 +2903,13 @@ export function App() {
               onOpenWikiPage={handleOpenWiki}
             />
           ),
+        });
+      } else if (ref.kind === "comments") {
+        tabs.push({
+          id: ref.id,
+          label: "Comments",
+          closable: true,
+          render: () => <CommentsInboxPage stream={stream} onOpenPage={navOpen} />,
         });
       } else if (
         ref.kind === "tasks"

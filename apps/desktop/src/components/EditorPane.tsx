@@ -11,6 +11,7 @@ import { logUi } from "../logger.js";
 import { usePageSnapshot } from "../tabs/usePageSnapshot.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
+import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
 
 interface Props {
   stream: Stream;
@@ -78,6 +79,10 @@ export function EditorPane({
   onRevealtasksRef.current = onRevealTask;
   const headByPathRef = useRef<Map<string, string | null>>(new Map());
   const diffDecoIdsRef = useRef<string[]>([]);
+  const commentLayerRef = useRef<MonacoCommentHandle | null>(null);
+  // Comment id under the last right-click (drives the "Open Comment"
+  // menu item); set in onContextMenu before the menu opens.
+  const ctxCommentIdRef = useRef<number | null>(null);
   // Monaco loads asynchronously, so the model-binding effect below needs a
   // signal to retry once it lands — otherwise the first file opened arrives
   // before the editor instance exists and the effect's early return makes
@@ -167,7 +172,15 @@ export function EditorPane({
           editor.setPosition(position);
         }
         editor.focus();
+        // Is the right-click on commented text? Drives "Open Comment".
+        ctxCommentIdRef.current = position
+          ? (commentLayerRef.current?.commentIdAt(position) ?? null)
+          : null;
         const browserEvent = event.event?.browserEvent as MouseEvent | undefined;
+        // Suppress the webview's native context menu (Reload / Inspect /
+        // AutoFill) so only our custom menu shows — Monaco with
+        // `contextmenu: false` doesn't preventDefault the DOM event.
+        browserEvent?.preventDefault();
         setContextMenu({
           x: browserEvent?.clientX ?? 8,
           y: browserEvent?.clientY ?? 8,
@@ -564,6 +577,47 @@ export function EditorPane({
 
   const contextMenuItems: MenuItem[] = [
     {
+      id: "editor.cut",
+      label: "Cut",
+      enabled: !!filePath && hasEditorSelection(editorRef.current),
+      run: () => {
+        const ed = editorRef.current;
+        const model = ed?.getModel();
+        const sel = ed?.getSelection?.();
+        if (!ed || !model || !sel || sel.isEmpty()) return;
+        void navigator.clipboard.writeText(model.getValueInRange(sel));
+        ed.executeEdits("cut", [{ range: sel, text: "" }]);
+        ed.focus();
+      },
+    },
+    {
+      id: "editor.copy",
+      label: "Copy",
+      enabled: !!filePath && hasEditorSelection(editorRef.current),
+      run: () => {
+        const ed = editorRef.current;
+        const model = ed?.getModel();
+        const sel = ed?.getSelection?.();
+        if (!ed || !model || !sel || sel.isEmpty()) return;
+        void navigator.clipboard.writeText(model.getValueInRange(sel));
+      },
+    },
+    {
+      id: "editor.paste",
+      label: "Paste",
+      enabled: !!filePath,
+      run: async () => {
+        const ed = editorRef.current;
+        const sel = ed?.getSelection?.();
+        if (!ed || !sel) return;
+        const t = await navigator.clipboard.readText();
+        if (t) {
+          ed.executeEdits("paste", [{ range: sel, text: t }]);
+          ed.focus();
+        }
+      },
+    },
+    {
       id: "editor.save",
       label: "Save",
       shortcut: "Ctrl/Cmd+S",
@@ -615,6 +669,21 @@ export function EditorPane({
         onCompareWithClipboard?.(text, filePath);
       },
     },
+    {
+      id: "editor.add-comment",
+      label: "Add Comment",
+      enabled: !!filePath && hasEditorSelection(editorRef.current),
+      run: () => commentLayerRef.current?.addCommentForSelection(),
+    },
+    {
+      id: "editor.open-comment",
+      label: "Open Comment",
+      enabled: ctxCommentIdRef.current != null,
+      run: () => {
+        const id = ctxCommentIdRef.current;
+        if (id != null) commentLayerRef.current?.openComment(id);
+      },
+    },
   ];
 
   const showBlame = blame && blame.path === filePath;
@@ -623,8 +692,25 @@ export function EditorPane({
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* File tabs live in the parent CenterTabs bar now; this component
           just hosts the single Monaco editor that swaps models on filePath. */}
-      <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
+      <div
+        style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}
+        // Belt-and-suspenders: kill the webview's native context menu in
+        // the editor area so only our custom menu shows (Monaco's own
+        // onContextMenu preventDefault can miss depending on timing).
+        onContextMenu={(e) => e.preventDefault()}
+      >
         <div ref={hostRef} data-testid="monaco-host" data-file-path={filePath ?? ""} style={{ width: "100%", height: "100%", minHeight: 0 }} />
+        {monacoReady && filePath ? (
+          <MonacoCommentLayer
+            ref={commentLayerRef}
+            editor={editorRef.current}
+            monaco={monacoRef.current}
+            ready={monacoReady}
+            streamId={stream.id}
+            threadId={null}
+            filePath={filePath}
+          />
+        ) : null}
         {showBlame ? (
           <BlameOverlay
             entries={blame!.entries}

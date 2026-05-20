@@ -49,6 +49,7 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 | `apps/desktop/src/pages/TaskPage.tsx` | Single-record page for a task — wraps `TaskDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
 | `apps/desktop/src/pages/NotePage.tsx` | Single-record page for a wiki page — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get the unified chrome (title from `usePageTitle`, browser-style back/forward + star, Backlinks panel). `NoteTab` no longer renders its own header — freshness badge + Edit/Save/Revert/Delete/Create live in a thin secondary toolbar inside the body. In-tab wikilink-to-note clicks route through `PageNavigationContext.navigate(wikiPageRef)` so they participate in tab-level history. |
 | `apps/desktop/src/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
+| `apps/desktop/src/pages/CommentsInboxPage.tsx` | Global Comments inbox (`comments` index kind, `commentsRef()`). Lists every comment in the current stream (`listCommentsForStream`), grouped by target. A **row click opens that comment's full `CommentPopover` inline** (read/reply/intent/resolve/delete — triage the whole backlog from one place); a **group-header click jumps to the target page** (file/wiki/task). The holistic "review them all" surface; the agent reaches the same data via the `list_comments` MCP tool. |
 | `apps/desktop/src/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards. Variant chosen via `dashboardRef("planning"\|"review"\|"quality")`. |
 | `apps/desktop/src/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
 | `apps/desktop/src/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt). Replaces the in-rail ThreadRail settings modal. Routed via `threadSettingsRef(threadId)`. |
@@ -61,7 +62,7 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 ```
 "agent" | "file" | "diff" | "duplicate-block" | "note" | "task" | "finding"
 | "tasks" | "done-work" | "backlog" | "archived"
-| "wiki-index" | "files" | "code-quality" | "terminal"
+| "wiki-index" | "files" | "comments" | "code-quality" | "terminal"
 | "local-history" | "git-history" | "git-dashboard" | "git-commit"
 | "uncommitted-changes" | "change-analysis" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
@@ -85,7 +86,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | note | `note:<slug>` | `note:how-stop-hook-fires` |
 | task | `wi:<id>` | `wi:wi-142` |
 | finding | `finding:<id>` | `finding:f-7` |
-| `*-index` | the kind name | `code-quality`, `start`, `settings` |
+| `*-index` | the kind name | `code-quality`, `comments`, `start`, `settings` |
 | git-dashboard | `git-dashboard` | `git-dashboard` |
 | git-commit | `git-commit:<sha>` | `git-commit:abc1234567890` |
 | uncommitted-changes | `uncommitted-changes` | `uncommitted-changes` |
@@ -144,7 +145,7 @@ have content:
    should include agent-touched files).
 5. **Pages** — directory entries (computed in `computePagesDirectory`,
    exposed for unit testing): Start, Plan work, Done work, Backlog,
-   Archived, Notes, Files, Terminal, Code quality, Local history, Git dashboard,
+   Archived, Notes, Files, Comments, Terminal, Code quality, Local history, Git dashboard,
    Uncommitted, Git history, Hook events, Subsystem docs, Settings,
    plus Dashboards (Planning, Review, Quality). The backlog ready
    count surfaces as a badge on the **Backlog** entry.

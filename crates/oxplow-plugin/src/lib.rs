@@ -80,6 +80,7 @@ pub struct PluginPaths {
     pub wiki_capture_skill: PathBuf,
     pub mermaid_skill: PathBuf,
     pub work_next_command: PathBuf,
+    pub review_comments_command: PathBuf,
 }
 
 /// Materialize the plugin directory. `hook_base_url` and
@@ -155,6 +156,12 @@ pub fn write_plugin(
     let work_next_command = commands_dir.join("work-next.md");
     fs::write(&work_next_command, include_str!("../assets/work-next.md"))?;
 
+    let review_comments_command = commands_dir.join("review-comments.md");
+    fs::write(
+        &review_comments_command,
+        include_str!("../assets/review-comments.md"),
+    )?;
+
     Ok(PluginPaths {
         plugin_dir,
         manifest,
@@ -166,6 +173,7 @@ pub fn write_plugin(
         wiki_capture_skill,
         mermaid_skill,
         work_next_command,
+        review_comments_command,
     })
 }
 
@@ -247,6 +255,7 @@ mod tests {
         assert!(paths.wiki_capture_skill.exists());
         assert!(paths.mermaid_skill.exists());
         assert!(paths.work_next_command.exists());
+        assert!(paths.review_comments_command.exists());
         assert!(paths.agent_guide.exists());
     }
 

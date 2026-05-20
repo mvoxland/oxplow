@@ -65,7 +65,7 @@ use std::sync::RwLock;
 
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
-    Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqlitePageRefStore,
+    Database, SqliteAgentTurnStore, SqliteCodeQualityStore, SqliteCommentStore, SqlitePageRefStore,
     SqlitePageVisitStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
     SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
     SqliteThreadStore, SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
@@ -351,6 +351,7 @@ pub struct Services {
     /// at write time; the reader IPC (`list_backlinks` /
     /// `list_outbound`) exposes the inverse view.
     pub page_ref_store: Arc<SqlitePageRefStore>,
+    pub comment_store: Arc<SqliteCommentStore>,
     pub hook_ingest: HookIngestService,
     pub background_tasks: BackgroundTaskStore,
     pub followups: FollowupStore,
@@ -391,6 +392,7 @@ impl Services {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
+        let comment_store = Arc::new(SqliteCommentStore::new(db.clone()));
         let task_store =
             Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_ref_store).clone()));
         let work_note_store = Arc::new(
@@ -527,6 +529,7 @@ impl Services {
             effort_store,
             wiki_page_thread_updates,
             page_ref_store,
+            comment_store,
             hook_ingest,
             background_tasks,
             followups: FollowupStore::new(),
@@ -562,6 +565,7 @@ impl Services {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
+        let comment_store = Arc::new(SqliteCommentStore::new(db.clone()));
         let task_store =
             Arc::new(SqliteTaskStore::new(db.clone()).with_page_refs((*page_ref_store).clone()));
         let work_note_store = Arc::new(
@@ -671,6 +675,7 @@ impl Services {
             effort_store,
             wiki_page_thread_updates,
             page_ref_store,
+            comment_store,
             hook_ingest,
             background_tasks: {
                 let store = BackgroundTaskStore::new();

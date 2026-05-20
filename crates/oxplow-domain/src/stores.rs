@@ -9,8 +9,9 @@
 
 use async_trait::async_trait;
 
+use crate::comment::{CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread};
 use crate::hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
-use crate::ids::{AgentTurnId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
+use crate::ids::{AgentTurnId, CommentId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
 use crate::task::{Task, TaskEvent, TaskLink, TaskLinkType, TaskNote};
 use crate::thread::Thread;
@@ -158,4 +159,54 @@ pub trait AgentTurnStore: Send + Sync {
         thread: &ThreadId,
         limit: usize,
     ) -> Result<Vec<AgentTurn>, DomainError>;
+}
+
+/// Threaded comments anchored to a text selection on any page.
+/// Reads return whole [`CommentThread`]s (anchor + messages).
+#[async_trait]
+pub trait CommentStore: Send + Sync {
+    /// Create a comment anchored to `target` with its first message.
+    #[allow(clippy::too_many_arguments)]
+    async fn create(
+        &self,
+        stream: &StreamId,
+        thread: Option<&ThreadId>,
+        target: &CommentTarget,
+        quote: &str,
+        anchor_json: &str,
+        intent: CommentIntent,
+        author: &str,
+        body: &str,
+    ) -> Result<CommentThread, DomainError>;
+
+    /// Append a reply to an existing thread; bumps `last_activity_at`.
+    async fn add_message(
+        &self,
+        comment: CommentId,
+        author: &str,
+        body: &str,
+    ) -> Result<CommentMessage, DomainError>;
+
+    async fn get(&self, id: CommentId) -> Result<Option<CommentThread>, DomainError>;
+    async fn list_for_target(
+        &self,
+        target: &CommentTarget,
+    ) -> Result<Vec<CommentThread>, DomainError>;
+    async fn list_for_stream(&self, stream: &StreamId) -> Result<Vec<CommentThread>, DomainError>;
+    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<CommentThread>, DomainError>;
+
+    async fn set_intent(&self, id: CommentId, intent: CommentIntent) -> Result<(), DomainError>;
+    async fn set_status(&self, id: CommentId, status: CommentStatus) -> Result<(), DomainError>;
+    /// Persist a re-resolved anchor hint (and whether it's orphaned).
+    async fn set_anchor(
+        &self,
+        id: CommentId,
+        anchor_json: &str,
+        orphaned: bool,
+    ) -> Result<(), DomainError>;
+    async fn delete(&self, id: CommentId) -> Result<(), DomainError>;
+
+    /// Delete `resolved` and `orphaned` threads whose last activity is
+    /// older than `retention_days`. Returns the number deleted.
+    async fn cleanup(&self, retention_days: i64) -> Result<u64, DomainError>;
 }

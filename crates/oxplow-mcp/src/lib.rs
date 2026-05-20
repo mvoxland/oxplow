@@ -18,8 +18,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use oxplow_app::{CreateTaskInput, OxplowEvent, Services, UpdateTaskChanges};
-use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore};
-use oxplow_domain::{NoteId, Task, TaskId, TaskLinkType, TaskStatus, ThreadId};
+use oxplow_domain::stores::{
+    CommentStore, TaskEventStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore,
+};
+use oxplow_domain::{
+    CommentId, CommentStatus, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskStatus, ThreadId,
+};
 
 #[derive(Clone)]
 pub struct OxplowMcp {
@@ -84,6 +88,29 @@ pub struct AddThreadNoteParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeleteNoteParams {
     pub id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListCommentsParams {
+    /// `"thread"` (id = `b-…`) or `"stream"` (id = `s-…`).
+    pub scope: String,
+    /// The thread or stream id matching `scope`.
+    pub id: String,
+    /// Filter: `"all"` (default), `"open"`, or `"needs_response"`.
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RespondToCommentParams {
+    /// Integer comment id (from `list_comments`).
+    pub comment_id: i64,
+    pub body: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CommentIdParams {
+    /// Integer comment id (from `list_comments`).
+    pub comment_id: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -358,6 +385,16 @@ impl OxplowMcp {
             .emit(OxplowEvent::TasksChanged { thread_id });
     }
 
+    /// Renderer is a separate process; emit so it refetches the page's
+    /// comments + the Comments inbox after an agent-driven change.
+    fn emit_comments_changed(&self, comment: &oxplow_domain::Comment) {
+        self.services.events.emit(OxplowEvent::CommentsChanged {
+            stream_id: comment.stream_id.clone(),
+            target_kind: comment.target_kind.clone(),
+            target_id: comment.target_id.clone(),
+        });
+    }
+
     // ---------- liveness / version ----------
 
     #[tool(description = "Liveness check: returns \"pong\".")]
@@ -597,6 +634,115 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&notes)
+    }
+
+    // ---------- comments ----------
+
+    #[tool(
+        description = "List comments — threaded annotations the user anchored to a text selection \
+                       in a page (wiki body, code file line, task detail). `scope` is \"thread\" \
+                       (id = b-…) or \"stream\" (id = s-…, every page in the workspace). `status` \
+                       filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups \
+                       whose latest message isn't yours — i.e. what the user wants you to act on). \
+                       Each result carries the anchored `quote`, the message thread, and `intent` \
+                       (note vs followup). Respond with respond_to_comment; close with resolve_comment."
+    )]
+    async fn list_comments(
+        &self,
+        params: Parameters<ListCommentsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let threads = match params.0.scope.as_str() {
+            "thread" => {
+                expect_id_kind("list_comments", "id", &params.0.id, ID_THREAD)?;
+                let id = ThreadId::from(params.0.id);
+                self.services
+                    .comment_store
+                    .list_for_thread(&id)
+                    .await
+                    .map_err(internal)?
+            }
+            "stream" => {
+                expect_id_kind("list_comments", "id", &params.0.id, ID_STREAM)?;
+                let id = StreamId::from(params.0.id);
+                self.services
+                    .comment_store
+                    .list_for_stream(&id)
+                    .await
+                    .map_err(internal)?
+            }
+            other => {
+                return Err(McpError::invalid_params(
+                    format!(
+                        "list_comments: `scope` must be \"thread\" or \"stream\", got `{other}`"
+                    ),
+                    None,
+                ));
+            }
+        };
+        let status = params.0.status.as_deref().unwrap_or("all");
+        let filtered: Vec<_> = threads
+            .into_iter()
+            .filter(|t| match status {
+                "needs_response" => t.needs_response(),
+                "open" => t.comment.status == CommentStatus::Open,
+                _ => true,
+            })
+            .collect();
+        json_result(&filtered)
+    }
+
+    #[tool(
+        description = "Respond to a comment: append your reply to its thread (recorded as author \
+                       \"agent\"). This marks an open follow-up answered until the user replies \
+                       again. `comment_id` is the integer id from list_comments. Returns the \
+                       updated thread."
+    )]
+    async fn respond_to_comment(
+        &self,
+        params: Parameters<RespondToCommentParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let id = CommentId::new(params.0.comment_id);
+        self.services
+            .comment_store
+            .add_message(id, "agent", &params.0.body)
+            .await
+            .map_err(internal)?;
+        let thread = self
+            .services
+            .comment_store
+            .get(id)
+            .await
+            .map_err(internal)?;
+        if let Some(t) = &thread {
+            self.emit_comments_changed(&t.comment);
+        }
+        json_result(&thread)
+    }
+
+    #[tool(
+        description = "Resolve a comment thread (status = resolved). Use when the user's note is \
+                       fully addressed. `comment_id` is the integer id from list_comments."
+    )]
+    async fn resolve_comment(
+        &self,
+        params: Parameters<CommentIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let id = CommentId::new(params.0.comment_id);
+        self.services
+            .comment_store
+            .set_status(id, CommentStatus::Resolved)
+            .await
+            .map_err(internal)?;
+        let thread = self
+            .services
+            .comment_store
+            .get(id)
+            .await
+            .map_err(internal)?;
+        if let Some(t) = &thread {
+            self.emit_comments_changed(&t.comment);
+        }
+        json_result(&thread)
     }
 
     #[tool(

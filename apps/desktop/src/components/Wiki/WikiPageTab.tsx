@@ -108,6 +108,12 @@ export function WikiPageTab({
             key={`wiki-${slug}`}
             value={editorValue}
             placeholder={`Start writing your wiki page (${slug})…`}
+            comments={{
+              streamId: stream.id,
+              threadId: null,
+              targetKind: "wiki",
+              targetId: slug,
+            }}
             onCommit={(markdown) => {
               const next = postprocessWikilinks(markdown);
               if (next === body) return;

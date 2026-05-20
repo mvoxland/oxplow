@@ -189,7 +189,20 @@ export function TaskPage({
       rightRail={rail}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        <TaskDetail item={item} onUpdateTask={handleUpdate} />
+        <TaskDetail
+          item={item}
+          onUpdateTask={handleUpdate}
+          comments={
+            stream
+              ? {
+                  streamId: stream.id,
+                  threadId: item.thread_id ?? null,
+                  targetKind: "task",
+                  targetId: String(item.id),
+                }
+              : undefined
+          }
+        />
         <section>
           <h2 className="task-activity-heading">Activity</h2>
           <ActivityTimeline

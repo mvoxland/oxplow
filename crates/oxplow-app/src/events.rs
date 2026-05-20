@@ -90,6 +90,14 @@ pub enum OxplowEvent {
         item_id: Option<TaskId>,
         thread_id: Option<ThreadId>,
     },
+    /// A comment (or one of its messages) changed on `target_kind` /
+    /// `target_id` within `stream_id`. Renderer refetches the affected
+    /// page's comments + the Comments inbox.
+    CommentsChanged {
+        stream_id: StreamId,
+        target_kind: String,
+        target_id: String,
+    },
     /// A wiki page's backing file changed on disk (creation, body
     /// update, deletion). `slug` is the file stem — subscribers
     /// (e.g. `WikiPageTab`) filter by their own slug so an unrelated

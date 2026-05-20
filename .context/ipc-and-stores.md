@@ -484,6 +484,28 @@ modes. `open_project` spawns a new process rather than mutating any
 store. When you add a command the launcher window needs, keep it on
 this no-`Services` footing; everything else uses the flow above.
 
+## Comments
+
+Threaded annotations anchored to a text selection on any page — a
+straightforward 7-layer instance (`SqliteCommentStore`,
+`crates/oxplow-db/src/comment_store.rs`; schema in
+[data-model.md](./data-model.md)). The Tauri commands live in
+`crates/oxplow-tauri-ipc/src/commands/comments.rs`: `create_comment`,
+`add_comment_message`, `list_comments_for_target`,
+`list_comments_for_stream`, `set_comment_intent`, `set_comment_status`,
+`set_comment_anchor`, `delete_comment`. The same store is exposed to the
+agent via three MCP tools (`list_comments`, `respond_to_comment`,
+`resolve_comment`) — see [agent-model.md](./agent-model.md).
+
+Every mutating command (and the MCP `respond_to_comment` /
+`resolve_comment`) emits `OxplowEvent::CommentsChanged { streamId,
+targetKind, targetId }`; the wire kind is `commentsChanged`, mirrored in
+`OxplowEventKind` in `apps/desktop/src/tauri-bridge/index.ts`. The
+renderer subscribes to refetch the affected page's comments + the
+Comments inbox. `set_comment_anchor` is the one mutation that does **not**
+emit — it's a passive re-anchor sync the renderer runs on load, not a
+user action.
+
 ## Related
 
 - [data-model.md](./data-model.md) — the actual schemas, including

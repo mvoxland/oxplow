@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -7,10 +7,44 @@ import { Markdown } from "tiptap-markdown";
 import { Pencil } from "lucide-react";
 import { InternalLink } from "./InternalLink.js";
 import { MermaidBlock } from "./MermaidBlock.js";
+import {
+  CommentDecorations,
+  commentDecorationsKey,
+  findCommentRange,
+  type CommentRange,
+} from "./CommentDecorations.js";
+import { createComment, setCommentAnchor } from "../../api.js";
+import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
+import { useCommentsForTarget } from "../Comments/useCommentsForTarget.js";
+import { CommentPopover } from "../Comments/CommentPopover.js";
+import { NewCommentPopover } from "../Comments/NewCommentPopover.js";
+import { ContextMenu } from "../ContextMenu.js";
+import type { MenuItem } from "../../menu.js";
 import { parseMarkdownLink } from "../Wiki/MarkdownView.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
 import { DISK } from "../../file-version.js";
+
+/// Comment integration bundle. When provided, the field highlights
+/// anchored ranges and exposes "Add comment" / "Open comment" via the
+/// right-click menu (no auto-popping button or click-to-open, so
+/// comments don't fight selection/cursor). `targetId` identifies the
+/// page (wiki slug / task id); `streamId` is the hard scope and
+/// `threadId` the origin thread (null for non-thread-bound surfaces).
+export interface RichTextCommentConfig {
+  streamId: string;
+  threadId: string | null;
+  targetKind: string;
+  targetId: string;
+  author?: string;
+}
+
+interface PendingSelection {
+  quote: string;
+  from: number;
+  to: number;
+  rect: DOMRect;
+}
 
 /**
  * Shared rich-text editor surface. One instance per editable region
@@ -43,6 +77,9 @@ export interface RichTextFieldProps {
   /** When true, no pencil affordance (e.g. effort summaries — but
    *  those should use MarkdownView, not this field). Default false. */
   hidePencil?: boolean;
+  /** When set, the field becomes comment-enabled (highlights, the
+   *  selection affordance, and the thread popover). */
+  comments?: RichTextCommentConfig;
 }
 
 export function RichTextField({
@@ -53,9 +90,18 @@ export function RichTextField({
   className,
   style,
   hidePencil,
+  comments,
 }: RichTextFieldProps) {
   const lastCommittedRef = useRef(value);
   const debounceRef = useRef<number | null>(null);
+
+  // Comment state. The hook is always called (empty target → no fetch).
+  const { threads } = useCommentsForTarget(comments?.targetKind ?? "", comments?.targetId ?? "");
+  const [activeComment, setActiveComment] = useState<{ id: number; rect: DOMRect } | null>(null);
+  const [pendingSel, setPendingSel] = useState<PendingSelection | null>(null);
+  const [commentMenu, setCommentMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(
+    null,
+  );
 
   const editor = useEditor({
     extensions: [
@@ -72,6 +118,8 @@ export function RichTextField({
       }),
       MermaidBlock,
       InternalLink,
+      // Decorations only — opening is via the right-click menu, not click.
+      CommentDecorations.configure({ onClickComment: null }),
       Placeholder.configure({ placeholder: placeholder ?? "" }),
       Markdown.configure({
         html: false,
@@ -130,6 +178,149 @@ export function RichTextField({
       }
     };
   }, []);
+
+  // Re-anchor each comment's quote against the current doc and push the
+  // resolved ranges into the decoration plugin. Recomputes when the
+  // thread list changes or the document content is re-synced; live
+  // typing in between is handled by the plugin mapping its set forward.
+  // A corrected/orphaned anchor is persisted via `setCommentAnchor`,
+  // which deliberately emits no event so this doesn't loop.
+  useEffect(() => {
+    if (!editor || !comments) return;
+    const doc = editor.state.doc;
+    const ranges: CommentRange[] = [];
+    for (const thread of threads) {
+      const c = thread.comment;
+      let hintFrom: number | undefined;
+      let hintTo: number | undefined;
+      try {
+        const parsed = JSON.parse(c.anchor_json) as { from?: number; to?: number };
+        hintFrom = typeof parsed.from === "number" ? parsed.from : undefined;
+        hintTo = typeof parsed.to === "number" ? parsed.to : undefined;
+      } catch {
+        // Malformed hint — fall back to a pure quote search.
+      }
+      const range = findCommentRange(doc, c.quote, hintFrom, hintTo);
+      if (range) {
+        ranges.push({ id: c.id, from: range.from, to: range.to });
+        if (c.orphaned || hintFrom !== range.from || hintTo !== range.to) {
+          void setCommentAnchor(c.id, JSON.stringify({ from: range.from, to: range.to }), false);
+        }
+      } else if (!c.orphaned) {
+        void setCommentAnchor(c.id, c.anchor_json, true);
+      }
+    }
+    editor.view.dispatch(editor.state.tr.setMeta(commentDecorationsKey, ranges));
+  }, [editor, threads, comments, value]);
+
+  // Open the new-comment composer anchored to the current selection.
+  // Anchors to the caret at the END of the selection (coordsAtPos), not
+  // the selection's bounding box — a multi-line / mid-paragraph box-left
+  // lands the composer far from where the user is looking.
+  const startCommentForSelection = () => {
+    if (!editor || !comments) return;
+    const { from, to, empty } = editor.state.selection;
+    if (empty) return;
+    const quote = editor.state.doc.textBetween(from, to).trim();
+    if (!quote) return;
+    let rect: DOMRect;
+    try {
+      const c = editor.view.coordsAtPos(to);
+      rect = new DOMRect(c.left, c.top, 0, c.bottom - c.top);
+    } catch {
+      const domSel = window.getSelection();
+      if (!domSel || domSel.rangeCount === 0) return;
+      rect = domSel.getRangeAt(0).getBoundingClientRect();
+    }
+    setActiveComment(null);
+    setPendingSel({ quote, from, to, rect });
+  };
+
+  // Right-click menu. Always shown (the native webview menu is never
+  // allowed in our editor); carries Cut/Copy/Paste plus, when
+  // comment-enabled, "Add Comment" (on a selection) / "Open Comment" (on
+  // a commented range). Clipboard ops use positions captured here at
+  // menu-open so they survive the menu click moving focus.
+  const handleContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!editor) return;
+    event.preventDefault();
+    const { from, to, empty } = editor.state.selection;
+    const text = empty ? "" : editor.state.doc.textBetween(from, to);
+    const targetEl = event.target as HTMLElement | null;
+    const commentEl = comments
+      ? (targetEl?.closest?.("[data-comment-id]") as HTMLElement | null)
+      : null;
+    const commentId = commentEl ? Number(commentEl.getAttribute("data-comment-id")) : null;
+
+    const items: MenuItem[] = [
+      {
+        id: "cut",
+        label: "Cut",
+        enabled: !empty,
+        run: async () => {
+          if (text) await navigator.clipboard.writeText(text);
+          editor.chain().focus().deleteRange({ from, to }).run();
+        },
+      },
+      {
+        id: "copy",
+        label: "Copy",
+        enabled: !empty,
+        run: () => {
+          if (text) void navigator.clipboard.writeText(text);
+        },
+      },
+      {
+        id: "paste",
+        label: "Paste",
+        enabled: true,
+        run: async () => {
+          const t = await navigator.clipboard.readText();
+          if (t) editor.chain().focus().insertContentAt(empty ? from : { from, to }, t).run();
+        },
+      },
+    ];
+    if (comments && !empty) {
+      items.push({
+        id: "comment.add",
+        label: "Add Comment",
+        enabled: true,
+        run: () => startCommentForSelection(),
+      });
+    }
+    if (comments && commentId != null) {
+      const rect = commentEl!.getBoundingClientRect();
+      items.push({
+        id: "comment.open",
+        label: "Open Comment",
+        enabled: true,
+        run: () => {
+          setPendingSel(null);
+          setActiveComment({ id: commentId, rect });
+        },
+      });
+    }
+    setCommentMenu({ x: event.clientX, y: event.clientY, items });
+  };
+
+  const handleCreateComment = async (input: { body: string; intent: CommentIntent }) => {
+    if (!comments || !pendingSel) return;
+    await createComment({
+      streamId: comments.streamId,
+      threadId: comments.threadId,
+      targetKind: comments.targetKind,
+      targetId: comments.targetId,
+      quote: pendingSel.quote,
+      anchorJson: JSON.stringify({ from: pendingSel.from, to: pendingSel.to }),
+      intent: input.intent,
+      author: comments.author ?? "user",
+      body: input.body,
+    });
+    setPendingSel(null);
+  };
+
+  const activeThread =
+    activeComment != null ? threads.find((t) => t.comment.id === activeComment.id) : undefined;
 
   const wrapperStyle: CSSProperties = {
     position: "relative",
@@ -196,6 +387,7 @@ export function RichTextField({
         // Middle-click on a link → new-tab navigate.
         if (event.button === 1) handleAnchorIntent(event, true);
       }}
+      onContextMenu={handleContextMenu}
     >
       {!hidePencil ? (
         <Pencil
@@ -214,6 +406,28 @@ export function RichTextField({
         />
       ) : null}
       <EditorContent editor={editor} />
+      {comments && pendingSel && (
+        <NewCommentPopover
+          rect={pendingSel.rect}
+          onCreate={handleCreateComment}
+          onDismiss={() => setPendingSel(null)}
+        />
+      )}
+      {comments && activeComment && activeThread && (
+        <CommentPopover
+          thread={activeThread}
+          author={comments.author ?? "user"}
+          anchorRect={activeComment.rect}
+          onClose={() => setActiveComment(null)}
+        />
+      )}
+      {commentMenu && (
+        <ContextMenu
+          items={commentMenu.items}
+          position={{ x: commentMenu.x, y: commentMenu.y }}
+          onClose={() => setCommentMenu(null)}
+        />
+      )}
     </div>
   );
 }

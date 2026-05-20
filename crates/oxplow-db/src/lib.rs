@@ -6,6 +6,7 @@
 
 pub mod agent_stores;
 pub mod analytics_stores;
+pub mod comment_store;
 mod database;
 pub mod effort_store;
 pub mod page_ref_projections;
@@ -23,6 +24,7 @@ pub use analytics_stores::{
     PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotStats, SqliteCodeQualityStore,
     SqlitePageVisitStore, SqliteSnapshotStore, SqliteUsageStore, UsageEvent, UsageRollup,
 };
+pub use comment_store::SqliteCommentStore;
 pub use database::{Database, DbInitError};
 pub use effort_store::{
     EffortAtSnapshot, EffortFile, EffortFileChange, FileRefVersion, SqliteTaskEffortStore,

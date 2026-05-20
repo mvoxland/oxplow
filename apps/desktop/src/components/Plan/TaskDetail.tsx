@@ -4,6 +4,7 @@ import { Pencil } from "lucide-react";
 import type { EffortDetail, Task, TaskPriority, TaskStatus } from "../../api.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { RichTextField } from "../RichText/RichTextField.js";
+import type { RichTextCommentConfig } from "../RichText/RichTextField.js";
 import { inputStyle, miniButtonStyle } from "./plan-utils.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
@@ -76,9 +77,11 @@ function statusOptionsFor(current: TaskStatus): TaskStatus[] {
 export function TaskDetail({
   item,
   onUpdateTask,
+  comments,
 }: {
   item: Task;
   onUpdateTask: (itemId: number, changes: TaskDetailChanges) => Promise<void>;
+  comments?: RichTextCommentConfig;
 }) {
   return (
     <div
@@ -100,6 +103,7 @@ export function TaskDetail({
         value={item.description}
         placeholder="Add a description… include a ## Acceptance criteria section if helpful."
         style={{ paddingLeft: 0, paddingRight: 22 }}
+        comments={comments}
         onCommit={(value) => {
           if (value === item.description) return;
           void onUpdateTask(item.id, { description: value });

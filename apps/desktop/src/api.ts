@@ -1,7 +1,14 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import { listen } from "@tauri-apps/api/event";
 import type { OxplowEvent } from "./api-types.js";
-import type { LaunchInfo, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import type {
+  CommentIntent,
+  CommentMessage,
+  CommentStatus,
+  CommentThread,
+  LaunchInfo,
+  RecentProjectView,
+} from "./tauri-bridge/generated/bindings.js";
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors arrive as IpcError objects with
@@ -1109,6 +1116,89 @@ export function subscribeWikiPageEvents(onEvent: (slug: string) => void): () => 
       const slug = typeof event.slug === "string" ? event.slug : "";
       onEvent(slug);
     }
+  });
+}
+
+// ---- Comments ----
+
+export async function createComment(input: {
+  streamId: string;
+  threadId: string | null;
+  targetKind: string;
+  targetId: string;
+  quote: string;
+  anchorJson: string;
+  intent: CommentIntent;
+  author: string;
+  body: string;
+}): Promise<CommentThread> {
+  return unwrap(
+    await commands.createComment(
+      input.streamId,
+      input.threadId,
+      input.targetKind,
+      input.targetId,
+      input.quote,
+      input.anchorJson,
+      input.intent,
+      input.author,
+      input.body,
+    ),
+  );
+}
+
+export async function addCommentMessage(
+  commentId: number,
+  author: string,
+  body: string,
+): Promise<CommentMessage> {
+  return unwrap(await commands.addCommentMessage(commentId, author, body));
+}
+
+export async function listCommentsForTarget(
+  targetKind: string,
+  targetId: string,
+): Promise<CommentThread[]> {
+  return unwrap(await commands.listCommentsForTarget(targetKind, targetId));
+}
+
+export async function listCommentsForStream(streamId: string): Promise<CommentThread[]> {
+  return unwrap(await commands.listCommentsForStream(streamId));
+}
+
+export async function setCommentIntent(commentId: number, intent: CommentIntent): Promise<void> {
+  unwrap(await commands.setCommentIntent(commentId, intent));
+}
+
+export async function setCommentStatus(commentId: number, status: CommentStatus): Promise<void> {
+  unwrap(await commands.setCommentStatus(commentId, status));
+}
+
+export async function setCommentAnchor(
+  commentId: number,
+  anchorJson: string,
+  orphaned: boolean,
+): Promise<void> {
+  unwrap(await commands.setCommentAnchor(commentId, anchorJson, orphaned));
+}
+
+export async function deleteComment(commentId: number): Promise<void> {
+  unwrap(await commands.deleteComment(commentId));
+}
+
+/// Subscribe to comment changes. The callback receives the affected
+/// `{ targetKind, targetId }`; pass a filter to scope to one target.
+export function subscribeCommentEvents(
+  onChange: (target: { targetKind: string; targetId: string }) => void,
+  filter?: { targetKind?: string; targetId?: string },
+): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.kind !== "commentsChanged") return;
+    const targetKind = typeof event.targetKind === "string" ? event.targetKind : "";
+    const targetId = typeof event.targetId === "string" ? event.targetId : "";
+    if (filter?.targetKind !== undefined && filter.targetKind !== targetKind) return;
+    if (filter?.targetId !== undefined && filter.targetId !== targetId) return;
+    onChange({ targetKind, targetId });
   });
 }
 

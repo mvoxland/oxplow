@@ -870,9 +870,7 @@ mod tests {
         tokio::task::spawn_blocking(move || {
             db2.with_conn(|conn| {
                 conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-                for (id, start, end) in
-                    [("ef-self", 10, 30), ("ef-a", 15, 20), ("ef-c", 25, 40)]
-                {
+                for (id, start, end) in [("ef-self", 10, 30), ("ef-a", 15, 20), ("ef-c", 25, 40)] {
                     conn.execute(
                         "INSERT INTO task_effort
                            (id, task_id, thread_id, started_at, ended_at,

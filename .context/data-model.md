@@ -783,6 +783,62 @@ globally). `listRecentlyFinished` filters out rows whose timestamp is
 ≤ the matching watermark; `clearRecentlyFinished` upserts both scopes
 to `now()`.
 
+### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migration `V22__comments.sql`)
+
+Threaded annotations the user anchors to a text selection on any page
+(wiki body, code file lines, task detail). The user collects notes
+across many points; the agent reviews/responds **only when asked**
+(never force-triggered — no Stop-hook branch, no synthesized work
+items).
+
+`comment` is the thread anchor + metadata; `comment_message` holds
+every message in the thread including the first. **Integer PK ids
+(`INTEGER PRIMARY KEY AUTOINCREMENT`) — no UUIDs.**
+
+`comment` columns: `id, stream_id (NOT NULL, FK streams ON DELETE
+CASCADE), thread_id (nullable, FK threads ON DELETE SET NULL),
+target_kind, target_id, quote, anchor_json, intent ('note' |
+'followup'), status ('open' | 'resolved'), orphaned (0/1), author,
+created_at, updated_at, last_activity_at`. Indexes on `(stream_id,
+status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
+`(target_kind, target_id)`.
+
+- **Scope.** `stream_id` is the hard scope so the agent can list every
+  comment in a stream regardless of which thread authored it;
+  `thread_id` is the origin agent thread and is nullable (SET NULL) so
+  content comments survive the thread being archived/deleted. Reads
+  support per-target, per-stream, and per-thread queries; the agent's
+  MCP `list_comments` queries by thread or stream (never cross-stream).
+- **Anchoring is resilient, not positional.** `quote` (the selected
+  text) is the durable anchor + the context handed to the agent;
+  `anchor_json` is an opaque per-surface position *hint* the renderer
+  re-validates on load via exact-quote search and may rewrite through
+  `set_anchor`. When the quote can't be located the comment is marked
+  `orphaned` — still listed in the inbox, just without an inline
+  highlight.
+- **"Answered" is derived, not stored.** `CommentThread::needs_response`
+  (in `oxplow-domain`) returns true for an `open` `followup` whose
+  latest message author isn't `"agent"`. Messages are stored
+  oldest-first, so a user reply after an agent response re-opens the
+  follow-up. The MCP `list_comments(status:"needs_response")` filters on
+  this.
+
+`comment_message` columns: `id, comment_id (FK comment ON DELETE
+CASCADE), author (free-form, e.g. 'user' / 'agent'), body, created_at`.
+Index on `(comment_id, created_at)`. `add_message` bumps the parent's
+`last_activity_at`.
+
+**Garbage collection.** `SqliteCommentStore::cleanup(retention_days)`
+deletes `resolved` and `orphaned` threads whose `last_activity_at` is
+older than the cutoff (`retention_days <= 0` disables pruning). The host
+binary (`apps/desktop/src-tauri/src/main.rs`) runs it at boot and every
+24h with a 14-day window, mirroring the snapshot cleanup loop. Open
+comments are never swept.
+
+Change fan-out: the IPC/MCP layers emit `OxplowEvent::CommentsChanged
+{ stream_id, target_kind, target_id }` after every mutation; the
+renderer refetches the affected page's comments + the Comments inbox.
+
 ## The `sort_index` queue
 
 `tasks.sort_index` orders work in a single numeric space scoped

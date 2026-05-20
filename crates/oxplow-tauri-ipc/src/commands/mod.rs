@@ -12,6 +12,7 @@ pub mod backlog;
 pub mod branch;
 pub mod churn;
 pub mod code_quality;
+pub mod comments;
 pub mod config;
 pub mod effort;
 pub mod followup;
