@@ -1,19 +1,22 @@
 name: Release
 
 # Tag-triggered release flow. Push a `v<version>` tag (matching
-# package.json's version field) and this workflow builds Tauri
-# installers on all three platforms and publishes them to a GitHub
-# Release. Also runnable manually from the Actions tab for dry runs /
-# re-runs.
+# Cargo.toml's [workspace.package].version) and this workflow builds
+# Tauri installers on all three platforms and publishes them to a
+# GitHub Release. Also runnable manually from the Actions tab for dry
+# runs / re-runs.
+#
+# Version source of truth: Cargo.toml [workspace.package].version.
+# The desktop crate inherits it via `version.workspace = true`, and
+# tauri.conf.json omits its own `version` field so Tauri falls back
+# to that crate's Cargo.toml. The root package.json and
+# apps/desktop/package.json are private workspace shells with no
+# version field — nothing to keep in sync.
 #
 # To create a release:
-# 1. Tag: git tag vX.Y.Z
-# 2. Push tag: git push origin vX.Y.Z
-# 3. Bump versions to match the tag you're about to push:
-#    - package.json: version = "X.Y.Z"
-#    - Cargo.toml: [workspace.package].version = "X.Y.Z"
-#    - bun install (to refresh bun.lock) + cargo check (to refresh Cargo.lock)
-#    - commit
+# 1. Bump Cargo.toml [workspace.package].version = "X.Y.Z"
+# 2. cargo check (to refresh Cargo.lock) + commit
+# 3. git tag vX.Y.Z && git push origin vX.Y.Z
 
 
 on:
@@ -26,24 +29,23 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
-  # Tag-vs-package.json-vs-Cargo.toml sanity check. Fails fast if
-  # someone pushed a v0.0.2 tag while package.json still says 0.0.1,
-  # or while the workspace Cargo.toml's [workspace.package].version
-  # is out of sync — avoids cutting a release with a version mismatch
-  # baked into installer filenames or Rust artifact metadata. The
-  # verify step no-ops on workflow_dispatch runs that weren't fired
-  # against a tag ref (manual dry runs from a branch), so the job
-  # always reports success and doesn't block downstream jobs.
+  # Tag-vs-Cargo.toml sanity check. Cargo.toml [workspace.package]
+  # .version is the single source of truth (tauri.conf.json and both
+  # package.json files no longer carry a version). Fails fast if
+  # someone pushed a v0.0.2 tag while the workspace version still
+  # says 0.0.1. The verify step no-ops on workflow_dispatch runs
+  # that weren't fired against a tag ref (manual dry runs from a
+  # branch), so the job always reports success and doesn't block
+  # downstream jobs.
   check-tag:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Verify tag matches package.json + Cargo.toml versions
+      - name: Verify tag matches Cargo.toml workspace version
         if: github.ref_type == 'tag'
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           tag_version="${tag#v}"
-          pkg_version=$(node -p "require('./package.json').version")
           # Pull `version = "..."` from [workspace.package]. awk
           # tracks the current TOML section so a `version` line
           # under some other table (e.g. a dependency) can't
@@ -57,18 +59,9 @@ jobs:
             }
           ' Cargo.toml)
           echo "tag: $tag (version=$tag_version)"
-          echo "package.json version: $pkg_version"
           echo "Cargo.toml [workspace.package].version: $cargo_version"
-          fail=0
-          if [ "$tag_version" != "$pkg_version" ]; then
-            echo "::error::Tag $tag does not match package.json version $pkg_version"
-            fail=1
-          fi
           if [ "$tag_version" != "$cargo_version" ]; then
             echo "::error::Tag $tag does not match Cargo.toml [workspace.package].version $cargo_version"
-            fail=1
-          fi
-          if [ "$fail" -ne 0 ]; then
             exit 1
           fi
 
