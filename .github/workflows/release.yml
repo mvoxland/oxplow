@@ -14,9 +14,9 @@ name: Release
 # version field — nothing to keep in sync.
 #
 # To create a release:
-# 1. Bump Cargo.toml [workspace.package].version = "X.Y.Z"
-# 2. cargo check (to refresh Cargo.lock) + commit
-# 3. git tag vX.Y.Z && git push origin vX.Y.Z
+# 1. VERSION=vX.Y.Z && git tag ${VERSION} && git push origin ${VERSION}
+# 2. Bump Cargo.toml [workspace.package].version = "X.Y.Z"
+# 3. cargo check (to refresh Cargo.lock) + commit
 
 
 on:

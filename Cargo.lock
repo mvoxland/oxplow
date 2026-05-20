@@ -2847,7 +2847,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-app"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2888,7 +2888,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-code-deps"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "oxplow-code-metrics",
  "serde",
@@ -2898,7 +2898,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-code-dup"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "oxplow-code-metrics",
  "tree-sitter",
@@ -2906,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-code-metrics"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "tree-sitter",
  "tree-sitter-c",
@@ -2922,7 +2922,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-config"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "dirs",
  "fs2",
@@ -2938,7 +2938,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-control-plane"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2967,7 +2967,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-db"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "oxplow-domain",
@@ -2988,7 +2988,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-desktop"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "oxplow-app",
  "oxplow-config",
@@ -3012,7 +3012,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-domain"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -3025,7 +3025,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-fs-watch"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "notify",
  "notify-debouncer-full",
@@ -3038,7 +3038,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-git"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "git2",
  "oxplow-db",
@@ -3056,7 +3056,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-lsp"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "bytes",
  "lsp-types",
@@ -3071,7 +3071,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-lsp-installer"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "flate2",
  "reqwest",
@@ -3087,7 +3087,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-mcp"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "git2",
@@ -3106,7 +3106,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-plugin"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3117,7 +3117,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-pty"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "bytes",
  "libc",
@@ -3135,7 +3135,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-runtime"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "oxplow-db",
@@ -3153,7 +3153,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-session"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "git2",
@@ -3170,7 +3170,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-tauri-ipc"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "git2",
  "oxplow-app",
@@ -3201,7 +3201,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-tmux"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "oxplow-domain",
@@ -3215,7 +3215,7 @@ dependencies = [
 
 [[package]]
 name = "oxplow-tree-source"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "git2",
  "serde",
