@@ -103,6 +103,7 @@ import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { AgentPage } from "./pages/AgentPage.js";
+import { TerminalPage } from "./pages/TerminalPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { DirectoryPage } from "./pages/DirectoryPage.js";
@@ -2119,6 +2120,7 @@ export function App() {
       case "snapshot":
       case "uncommitted-changes":
       case "hook-events":
+      case "terminal":
       case "files":
       case "wiki-index":
       case "tasks":
@@ -2830,6 +2832,32 @@ export function App() {
           label: "Hook Events",
           closable: true,
           render: () => <HookEventsPage streamId={stream?.id ?? null} />,
+        });
+      } else if (ref.kind === "terminal") {
+        tabs.push({
+          id: ref.id,
+          label: "Terminal",
+          closable: true,
+          render: () => (
+            <TerminalPage
+              stream={stream}
+              visible={effectiveCenterActive === ref.id}
+              onOpenFile={(absPath, line, column) => {
+                if (!stream) return;
+                const wt = stream.worktree_path.endsWith("/")
+                  ? stream.worktree_path.slice(0, -1)
+                  : stream.worktree_path;
+                const rel = absPath.startsWith(wt + "/")
+                  ? absPath.slice(wt.length + 1)
+                  : absPath;
+                if (typeof line === "number" && line > 0) {
+                  void handleNavigateToLocation({ path: rel, line, column: column ?? 1 });
+                } else {
+                  void handleOpenFile(rel);
+                }
+              }}
+            />
+          ),
         });
       } else if (ref.kind === "op-error") {
         const errorId = (ref.payload as { errorId?: string } | null)?.errorId ?? "";

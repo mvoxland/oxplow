@@ -36,6 +36,7 @@ export type PageKind =
   | "uncommitted-changes"
   | "hook-events"
   | "subsystem-docs"
+  | "terminal"
   | "settings"
   | "dashboard"
   | "new-stream"

@@ -61,7 +61,7 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 ```
 "agent" | "file" | "diff" | "duplicate-block" | "note" | "task" | "finding"
 | "tasks" | "done-work" | "backlog" | "archived"
-| "wiki-index" | "files" | "code-quality"
+| "wiki-index" | "files" | "code-quality" | "terminal"
 | "local-history" | "git-history" | "git-dashboard" | "git-commit"
 | "uncommitted-changes" | "change-analysis" | "hook-events" | "subsystem-docs"
 | "settings" | "start" | "dashboard"
@@ -144,7 +144,7 @@ have content:
    should include agent-touched files).
 5. **Pages** — directory entries (computed in `computePagesDirectory`,
    exposed for unit testing): Start, Plan work, Done work, Backlog,
-   Archived, Notes, Files, Code quality, Local history, Git dashboard,
+   Archived, Notes, Files, Terminal, Code quality, Local history, Git dashboard,
    Uncommitted, Git history, Hook events, Subsystem docs, Settings,
    plus Dashboards (Planning, Review, Quality). The backlog ready
    count surfaces as a badge on the **Backlog** entry.
@@ -690,11 +690,17 @@ Snapshots are the only path for cross-restart fidelity.
 3. Build a `*Page` component in `apps/desktop/src/pages/` that
    wraps the body in `<Page>` and (typically) registers a title
    via `usePageTitle`.
-4. Add a `ref.kind === "..."` branch in the `centerTabs` page-tab
+4. Add the kind to **`handleOpenPage`'s `switch (ref.kind)` allowlist**
+   in `App.tsx` (the per-thread-page-tab `case` group). This is easy to
+   miss: it has a `default: return`, so a kind that isn't listed is
+   silently dropped — the rail/search entry appears but clicking does
+   nothing. An index kind also needs to be in `INDEX_KINDS`
+   (`pageKinds.tsx`) and the `indexRef(...)` param union (`pageRefs.ts`).
+5. Add a `ref.kind === "..."` branch in the `centerTabs` page-tab
    loop in `App.tsx` to render the page.
-5. Plumb any list rows that target the new kind through
+6. Plumb any list rows that target the new kind through
    `useRouteDispatch` / `RouteLink` so plain-click navigates in-tab.
-6. If the page exposes data that other pages should backlink to,
+7. If the page exposes data that other pages should backlink to,
    register a provider in `appPageBacklinks.ts`.
 
 Do **not** introduce a parallel state slot for the new kind's tab

@@ -39,6 +39,39 @@ pub async fn open_terminal_session(
     rows: u16,
     transport_mode: String,
 ) -> Result<AttachResult, IpcError> {
+    // The "shell" pane is a plain interactive terminal (the Terminal
+    // page), not the agent: spawn the user's $SHELL rooted at the
+    // worktree dir with no agent command, plugin, or system prompt.
+    if pane_target == "shell" {
+        let stream = match state.streams.current().await? {
+            Some(s) => s,
+            None => state.streams.ensure_primary().await?,
+        };
+        let cols = cols.max(20);
+        let rows = rows.max(5);
+        // One persistent shell per stream; re-attach resumes it.
+        let session_key = format!("{}|shell|{}", stream.id.0, transport_mode);
+        let cwd = std::path::PathBuf::from(&stream.worktree_path);
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let result = state
+            .terminal_sessions
+            .attach_or_create(session_key, "shell".to_string(), cols, rows, |c, r| {
+                SpawnRequest {
+                    command: shell,
+                    args: vec!["-l".into()],
+                    cwd,
+                    env: vec![
+                        ("TERM".into(), "xterm-256color".into()),
+                        ("COLORTERM".into(), "truecolor".into()),
+                    ],
+                    cols: c,
+                    rows: r,
+                }
+            })
+            .await?;
+        return Ok(result);
+    }
+
     let pane_kind = match pane_target.as_str() {
         "working" => PaneKind::Working,
         "talking" => PaneKind::Talking,

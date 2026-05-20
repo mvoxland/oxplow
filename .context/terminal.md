@@ -8,9 +8,20 @@ editor.
 ## Single component
 
 `apps/desktop/src/components/TerminalPane.tsx` is the **only** xterm.js
-consumer. It's mounted inside `apps/desktop/src/pages/AgentPage.tsx`,
-which is the agent tab's renderer. There is no other Terminal instance
-anywhere in the app.
+consumer. It's mounted by two page renderers:
+
+- `apps/desktop/src/pages/AgentPage.tsx` — the agent tab, `paneTarget`
+  `"working"` / `"talking"`. The backend spawns the agent CLI.
+- `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (rail
+  entry + `indexRef("terminal")`), `paneTarget` `"shell"`. The backend
+  (`commands/terminal.rs`) early-branches on `"shell"` to spawn the
+  user's `$SHELL -l` (fallback `/bin/sh`) rooted at
+  `stream.worktree_path` — no agent command, plugin, or system prompt.
+  One persistent shell per stream (session key `<stream>|shell|<mode>`).
+  No `onUserInterrupt`: Escape is an ordinary shell keystroke here.
+
+Both go through the same component; only the `paneTarget` (and thus the
+server-side spawn) differs.
 
 The component owns:
 
@@ -87,5 +98,7 @@ each scans the same line. Examples for the future:
 - Added a new xterm addon (WebLinks, search, image, …) → list it.
 - Changed how the link provider resolves paths (e.g. picked up the
   pty's live cwd) → update the resolution section.
-- Added a new TerminalPane mount site (today: only AgentPage) →
-  call out the new host so future work doesn't assume one consumer.
+- Added a new TerminalPane mount site (today: AgentPage + TerminalPage)
+  → call out the new host so future work doesn't assume one consumer.
+- Added a new `pane_target` (today: working / talking / shell) → note
+  what the backend spawns for it.

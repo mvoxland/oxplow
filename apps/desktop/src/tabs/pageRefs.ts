@@ -94,8 +94,13 @@ export function findingRef(findingId: string): TabRef {
   return { id: `finding:${findingId}`, kind: "finding", payload: { findingId } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "code-quality" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "subsystem-docs" | "settings"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "code-quality" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "subsystem-docs" | "terminal" | "settings"): TabRef {
   return { id: kind, kind, payload: null };
+}
+
+/** The Terminal page: a plain interactive shell rooted at the worktree dir. */
+export function terminalRef(): TabRef {
+  return indexRef("terminal");
 }
 
 /** Convenience helper for the new HookEventsPage. */

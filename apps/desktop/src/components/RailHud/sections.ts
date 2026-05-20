@@ -53,6 +53,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "archived", label: "Archived", ref: archivedRef() },
     { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index") },
     { id: "files", label: "Files", ref: indexRef("files") },
+    { id: "terminal", label: "Terminal", ref: indexRef("terminal") },
     { id: "code-quality", label: "Code Quality", ref: indexRef("code-quality") },
     { id: "local-history", label: "Local History", ref: indexRef("local-history") },
     { id: "git-dashboard", label: "Git", ref: gitDashboardRef() },

@@ -39,6 +39,7 @@ import {
   type LucideIcon,
   Plus,
   Settings,
+  Terminal,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
 
@@ -124,6 +125,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Activity;
     case "subsystem-docs":
       return FileCode;
+    case "terminal":
+      return Terminal;
     case "new-stream":
     case "new-task":
       return Plus;
@@ -239,6 +242,7 @@ const INDEX_KINDS = new Set<string>([
   "git-dashboard",
   "hook-events",
   "subsystem-docs",
+  "terminal",
   "settings",
   "new-stream",
   "new-task",
