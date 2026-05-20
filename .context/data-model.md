@@ -28,14 +28,18 @@ because they're either global or must survive without a booted
   dedups by canonical path, bumps recency, caps at 20. The IPC layer
   resolves the path via the Tauri path resolver and manages it as
   `RecentProjectsState` in both launch modes.
-- **`session.json`** — the set of project dirs with an open window, in
-  the same app-config dir. Managed by `oxplow_config::SessionProjects`
+- **`session.json`** — the set of project dirs open last, in the same
+  app-config dir. Managed by `oxplow_config::SessionProjects`
   (`crates/oxplow-config/src/session.rs`); drives session restore on a
-  bare launch. Each project process `add`s its dir on boot and
-  `remove`s it on deliberate window close; read-modify-writes take a
-  cross-process `fs2` lock since many processes touch it. The path is
-  resolved by `oxplow_config::global_config_dir()` so `main.rs` can read
-  it before any Tauri handle exists.
+  bare launch. A fresh (non-`OXPLOW_RESTORING`) boot **`replace`s** the
+  set with the live window set (self + recents whose instance lock is
+  held); restore boots just `add` themselves. Closing one window while
+  others are live **`remove`s** that project; closing the last window /
+  a full quit (`QUITTING` flag from `RunEvent::ExitRequested`) keeps the
+  set. Read-modify-writes take a cross-process `fs2` lock since many
+  processes touch it. The path is resolved by
+  `oxplow_config::global_config_dir()` so `main.rs` can read it before
+  any Tauri handle exists.
 - **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held
   for the life of a project process, so a second process can't boot on
   the same `state.sqlite`. Helpers: `AppLayout::instance_lock_path` /

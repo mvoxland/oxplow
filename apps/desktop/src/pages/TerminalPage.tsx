@@ -21,13 +21,13 @@ export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps)
   usePageTitle("Terminal");
   if (!stream) {
     return (
-      <Page testId="page-terminal" title="Terminal" kind="terminal" showNavBar={false}>
+      <Page testId="page-terminal" title="Terminal" kind="terminal">
         <div style={{ padding: 12, color: "var(--muted)" }}>No project open.</div>
       </Page>
     );
   }
   return (
-    <Page testId="page-terminal" title="Terminal" kind="terminal" showNavBar={false}>
+    <Page testId="page-terminal" title="Terminal" kind="terminal">
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         <div style={{ flex: 1, minHeight: 0 }}>
           <TerminalPane

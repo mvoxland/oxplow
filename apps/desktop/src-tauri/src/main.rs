@@ -9,6 +9,12 @@ use oxplow_tauri_ipc::{
 };
 use tauri::Emitter;
 
+/// Set once the app is quitting as a whole (Cmd-Q / app exit). A
+/// single window closing while this is false is a deliberate
+/// per-window close (drop it from the restore set); during a full
+/// quit we preserve the set so every open window comes back.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn main() {
     init_tracing();
 
@@ -46,7 +52,7 @@ fn restore_session() -> bool {
         if !dir.join(".oxplow").is_dir() {
             continue; // gone or never initialized — don't restore
         }
-        match oxplow_app::spawn_project_window(dir) {
+        match oxplow_app::spawn_project_window(dir, true) {
             Ok(()) => {
                 spawned += 1;
                 tracing::info!(project = %path, "restored session window");
@@ -64,6 +70,52 @@ fn restore_session() -> bool {
 fn session_store() -> Option<oxplow_config::SessionProjects> {
     oxplow_config::global_config_dir()
         .map(|d| oxplow_config::SessionProjects::new(d.join("session.json")))
+}
+
+/// The set of project dirs with a currently-live window: `self_dir`
+/// (which holds its own instance lock during boot) plus every recent
+/// project whose `.oxplow/instance.lock` is held by a live process.
+/// Used to re-snapshot the session on a fresh boot so closed/stale
+/// projects drop off and don't accumulate across runs.
+fn live_project_dirs(self_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    let self_canon = std::fs::canonicalize(self_dir).unwrap_or_else(|_| self_dir.to_path_buf());
+    seen.insert(self_canon.clone());
+    out.push(self_canon);
+    if let Some(cfg) = oxplow_config::global_config_dir() {
+        let recents = oxplow_config::RecentProjects::new(cfg.join("recent-projects.json"));
+        for r in recents.list() {
+            let p = std::path::PathBuf::from(&r.path);
+            let canon = std::fs::canonicalize(&p).unwrap_or(p);
+            if !seen.insert(canon.clone()) {
+                continue;
+            }
+            if oxplow_app::is_project_locked(&canon) {
+                out.push(canon);
+            }
+        }
+    }
+    out
+}
+
+/// Whether any oxplow project OTHER than `self_dir` currently has a
+/// live window (its instance lock is held). Used to decide whether a
+/// closing window is "one of several" (drop it from the restore set)
+/// vs. the last/only window (keep it to restore next launch).
+fn other_window_alive(self_dir: &std::path::Path) -> bool {
+    let self_canon = std::fs::canonicalize(self_dir).ok();
+    let Some(cfg) = oxplow_config::global_config_dir() else {
+        return false;
+    };
+    let recents = oxplow_config::RecentProjects::new(cfg.join("recent-projects.json"));
+    recents.list().into_iter().any(|r| {
+        let canon = std::fs::canonicalize(&r.path).ok();
+        if canon.is_some() && canon == self_canon {
+            return false; // skip self
+        }
+        oxplow_app::is_project_locked(std::path::Path::new(&r.path))
+    })
 }
 
 /// Publish a loopback focus channel for this project and serve it on a
@@ -232,11 +284,20 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
     }
 
     // Record this window in the global session so a later bare launch
-    // reopens it. Removed again on a deliberate window close (the
-    // `on_window_event` handler below); a Cmd-Q / crash / shutdown
-    // leaves it in place, which is what makes restore-on-relaunch work.
+    // reopens it. A window closing does NOT remove its entry — closing
+    // the (last) window is how the user "exits", and they expect it
+    // restored. Instead we re-snapshot the live set on each fresh boot:
+    //   - restore spawns carry OXPLOW_RESTORING → just add self, so
+    //     concurrent restores don't clobber the set being restored;
+    //   - a user-initiated open re-snapshots the live window set
+    //     (self + any project whose instance lock is still held), which
+    //     drops projects closed in a prior run so they don't accumulate.
     if let Some(session) = session_store() {
-        session.add(&project_dir);
+        if std::env::var_os("OXPLOW_RESTORING").is_some() {
+            session.add(&project_dir);
+        } else {
+            session.replace(&live_project_dirs(&project_dir));
+        }
     }
 
     // Services::boot synchronously calls `tokio::spawn` (PtyManager owner
@@ -541,16 +602,20 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(specta.invoke_handler())
         .on_window_event(move |_window, event| {
-            // A deliberate window close drops this project from the
-            // session set so it isn't reopened next launch, and clears
-            // the focus channel. App quit (Cmd-Q) / crash / shutdown
-            // don't fire CloseRequested, so those leave the session
-            // entry in place to be restored (and release the instance
-            // lock on death, so the stale focus port is never used).
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                if let Some(session) = session_store() {
-                    session.remove(&project_dir_for_close);
+                // Closing one window while OTHER windows are still open
+                // means "I'm done with this project" → drop it from the
+                // restore set. Closing the last/only window, or quitting
+                // the whole app (Cmd-Q → ExitRequested sets QUITTING),
+                // preserves the set so it's restored next launch.
+                let quitting = QUITTING.load(std::sync::atomic::Ordering::SeqCst);
+                if !quitting && other_window_alive(&project_dir_for_close) {
+                    if let Some(session) = session_store() {
+                        session.remove(&project_dir_for_close);
+                    }
                 }
+                // The instance lock releases on process death, so a
+                // stale focus port is never used; clear it anyway.
                 oxplow_app::clear_instance_info(&project_dir_for_close);
             }
         })
@@ -572,8 +637,16 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
         .manage(state)
         .manage(plugin_runtime)
         .manage(launch_info)
-        .run(ctx)
-        .expect("error while running tauri application");
+        .build(ctx)
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // A full app quit (Cmd-Q, OS shutdown) flips QUITTING so the
+            // per-window CloseRequested handlers preserve the session set
+            // instead of dropping each window as it tears down.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
 }
 
 /// Forwards every `OxplowEvent` from the in-process bus onto the

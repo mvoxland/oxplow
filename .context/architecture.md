@@ -104,15 +104,30 @@ can't be reached (stale state), `open_project` falls back to a clear
 crashed instance's stale focus port is never used (the lock probe sees
 the project as not-open and the second launch just opens it).
 
-**Session restore.** The set of project dirs with an open window lives
-in a global `session.json` (`oxplow_config::SessionProjects`).
-`run_project` `add`s its dir on boot and `remove`s it on the window's
-`CloseRequested` (a deliberate close). A Cmd-Q / crash / OS-shutdown
-does **not** fire per-window `CloseRequested` on macOS, so those entries
-survive and a subsequent bare launch reopens them. (If a future Tauri
-version starts routing Cmd-Q through `CloseRequested`, restore-on-quit
-would break — verify in-app.) Stale entries (dir gone / no `.oxplow/`)
-are skipped at restore.
+**Session restore.** A global `session.json`
+(`oxplow_config::SessionProjects`) holds the set of project dirs that
+were open last. A bare launch reopens them (skipping dirs that are gone
+/ no longer have `.oxplow/`); each restore spawn carries
+`OXPLOW_RESTORING`.
+
+How the set is maintained:
+
+- **Fresh (non-restore) boot** re-snapshots it: `run_project` writes
+  `session.json` = self + every recent project whose
+  `.oxplow/instance.lock` is still held (`live_project_dirs`). So the
+  first window of a session resets the set to what's actually live and
+  stale entries don't accumulate.
+- **Restore boot** (`OXPLOW_RESTORING` set) skips the re-snapshot and
+  just `add`s itself, so concurrent restores can't clobber the set
+  being restored.
+- **Closing one window while others are open** drops that project from
+  the set (`other_window_alive` is true → `session.remove`) — you're
+  done with it, don't reopen it.
+- **Closing the last/only window, or quitting the whole app** preserves
+  the set so it's restored. A full quit flips a `QUITTING` flag (set
+  from `RunEvent::ExitRequested`) that suppresses the per-window
+  removal, so Cmd-Q with several windows brings them all back; closing
+  the last lone window has no other live window so it's kept too.
 
 **Global app state** lives under the app-config dir
 (`net.voxland.oxplow`, resolved by `oxplow_config::global_config_dir()`

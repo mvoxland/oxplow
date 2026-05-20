@@ -63,6 +63,16 @@ impl SessionProjects {
         });
     }
 
+    /// Replace the entire open set with `dirs` (canonicalized). Used to
+    /// re-snapshot the live window set on a fresh (non-restore) boot, so
+    /// stale entries from previous sessions don't accumulate.
+    pub fn replace(&self, dirs: &[std::path::PathBuf]) {
+        let canon: Vec<String> = dirs.iter().map(|d| canonicalize(d.as_path())).collect();
+        let _ = self.with_locked(move |doc| {
+            doc.open = canon;
+        });
+    }
+
     /// Open (creating) the session file, take an exclusive cross-process
     /// lock, read+parse the doc, run `f` (which may mutate it), and —
     /// if mutated — write it back. Returns `f`'s result. Any IO/parse
@@ -144,6 +154,28 @@ mod tests {
         let remaining = s.list();
         assert_eq!(remaining.len(), 1);
         assert!(!remaining.contains(&canon_a));
+    }
+
+    #[test]
+    fn replace_overwrites_whole_set() {
+        let dir = tempdir().unwrap();
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        let c = tempdir().unwrap();
+        let s = store(&dir);
+        s.add(a.path());
+        s.add(b.path());
+        assert_eq!(s.list().len(), 2);
+
+        // Re-snapshot to a different live set: A and B drop, C remains.
+        s.replace(&[c.path().to_path_buf()]);
+        let list = s.list();
+        assert_eq!(list.len(), 1);
+        let canon_c = std::fs::canonicalize(c.path())
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(list[0], canon_c);
     }
 
     #[test]

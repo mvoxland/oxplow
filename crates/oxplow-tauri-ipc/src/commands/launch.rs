@@ -148,6 +148,6 @@ pub async fn abort_setup(app: tauri::AppHandle) -> Result<(), IpcError> {
 /// Spawn a fresh oxplow process pinned to `dir` (process-per-window),
 /// mapping IO failures into the frontend error envelope.
 fn spawn_project_process(dir: &Path) -> Result<(), IpcError> {
-    oxplow_app::spawn_project_window(dir)
+    oxplow_app::spawn_project_window(dir, false)
         .map_err(|e| IpcError::internal(format!("spawn project window: {e}")))
 }

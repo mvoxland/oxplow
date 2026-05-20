@@ -137,12 +137,19 @@ pub fn try_acquire_instance_lock(layout: &AppLayout) -> std::io::Result<Option<s
 /// startup; the positional arg is for `ps` visibility. The child
 /// detaches and survives the caller's exit. Used by the IPC
 /// open/setup commands and by session restore at startup.
-pub fn spawn_project_window(dir: &std::path::Path) -> std::io::Result<()> {
+///
+/// `restoring` marks the child as part of session restore via
+/// `OXPLOW_RESTORING`: such a child keeps the existing session set
+/// (adds itself) instead of re-snapshotting the live set, so
+/// concurrent restore spawns can't clobber each other.
+pub fn spawn_project_window(dir: &std::path::Path, restoring: bool) -> std::io::Result<()> {
     let exe = std::env::current_exe()?;
-    std::process::Command::new(exe)
-        .env("OXPLOW_PROJECT_DIR", dir)
-        .arg(dir)
-        .spawn()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.env("OXPLOW_PROJECT_DIR", dir).arg(dir);
+    if restoring {
+        cmd.env("OXPLOW_RESTORING", "1");
+    }
+    cmd.spawn()?;
     Ok(())
 }
 
