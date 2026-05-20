@@ -3353,6 +3353,7 @@ export function App() {
         <div style={{ flex: 1, display: "flex", flexDirection: "row", minHeight: 0, minWidth: 0 }}>
         <RailHud
           threadId={selectedThread?.id ?? null}
+          streamId={stream?.id ?? null}
           threadWork={selectedThreadWork}
           backlog={backlogState}
           recentFiles={recentFileEntries}

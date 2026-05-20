@@ -3,15 +3,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BacklogState, FinishedEntry, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, taskRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef } from "../../tabs/pageRefs.js";
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
 import type { OpError } from "../opErrorsStore.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
 import {
+  listCommentsForStream,
   listRecentPageVisits,
   listWikiPages,
+  subscribeCommentEvents,
   subscribePageVisitEvents,
   subscribeWikiPageEvents,
   topVisitedPages,
@@ -40,6 +42,8 @@ export interface BookmarkRailEntry {
 
 export interface RailHudProps {
   threadId: string | null;
+  /** Current stream — scopes the open-comments section. */
+  streamId?: string | null;
   threadWork: ThreadWorkState | null;
   backlog: BacklogState | null;
   recentFiles: RecentFileEntry[];
@@ -76,6 +80,7 @@ export interface RailHudProps {
  */
 export function RailHud({
   threadId,
+  streamId,
   threadWork,
   backlog,
   recentFiles,
@@ -130,6 +135,8 @@ export function RailHud({
       ) ? (
         <UncommittedSection summary={uncommitted} onOpenPage={onOpenPage} />
       ) : null}
+
+      <CommentsSection streamId={streamId ?? null} onOpenPage={onOpenPage} />
 
       {opErrors && opErrors.length > 0 ? (
         <OpErrorsSection
@@ -577,6 +584,88 @@ function UncommittedSection({
               </span>
             </>
           ) : null}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+/// Open-comments summary: counts of unresolved comments in the current
+/// stream, split by intent — "for me" (notes-to-self) and "for the
+/// agent" (follow-ups). Self-fetching + live like HistorySection;
+/// hidden when there are none. Each row opens the Comments inbox.
+function CommentsSection({
+  streamId,
+  onOpenPage,
+}: {
+  streamId: string | null;
+  onOpenPage(ref: TabRef): void;
+}) {
+  const [notes, setNotes] = useState(0);
+  const [followups, setFollowups] = useState(0);
+
+  useEffect(() => {
+    if (!streamId) {
+      setNotes(0);
+      setFollowups(0);
+      return;
+    }
+    let cancelled = false;
+    const refresh = () => {
+      void listCommentsForStream(streamId).then((threads) => {
+        if (cancelled) return;
+        let n = 0;
+        let f = 0;
+        for (const t of threads) {
+          if (t.comment.status !== "open") continue;
+          if (t.comment.intent === "followup") f += 1;
+          else n += 1;
+        }
+        setNotes(n);
+        setFollowups(f);
+      });
+    };
+    refresh();
+    const off = subscribeCommentEvents(refresh);
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [streamId]);
+
+  if (notes === 0 && followups === 0) return null;
+
+  return (
+    <>
+      <SectionHeading>Comments</SectionHeading>
+      {notes > 0 ? (
+        <button
+          type="button"
+          data-testid="rail-comments-notes"
+          onClick={() => onOpenPage(commentsRef())}
+          title="Open the Comments inbox"
+          style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
+        >
+          <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>
+            For me
+          </span>
+          <span style={{ flex: 1 }} />
+          <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{notes}</span>
+        </button>
+      ) : null}
+      {followups > 0 ? (
+        <button
+          type="button"
+          data-testid="rail-comments-followups"
+          onClick={() => onOpenPage(commentsRef())}
+          title="Open the Comments inbox"
+          style={{ ...rowStyle, padding: "4px 14px 12px", gap: 8 }}
+        >
+          <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>
+            For the agent
+          </span>
+          <span style={{ flex: 1 }} />
+          <span style={{ color: "var(--accent)", fontSize: 11 }}>{followups}</span>
         </button>
       ) : null}
     </>

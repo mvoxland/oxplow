@@ -150,6 +150,15 @@ have content:
    plus Dashboards (Planning, Review, Quality). The backlog ready
    count surfaces as a badge on the **Backlog** entry.
 
+In addition to the numbered sections, `CommentsSection` renders (when
+non-empty) between Uncommitted and the rest: it self-fetches
+`listCommentsForStream(streamId)` (kept live via
+`subscribeCommentEvents`) and shows two count rows for **open**
+comments split by intent — "For me" (`note`) and "For the agent"
+(`followup`) — each opening the Comments inbox (`commentsRef()`).
+Modeled on `UncommittedSection`; needs the `streamId` prop on
+`RailHud` (passed from `App.tsx`).
+
 ## Migration status
 
 The full IA redesign ships in phases (see plan
