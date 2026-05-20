@@ -205,7 +205,6 @@ jobs:
           echo "sha256: $sha"
 
           # Render the cask template with concrete version + sha.
-          mkdir -p /tmp/tap/Casks
           cp packaging/homebrew/oxplow.rb /tmp/tap-template.rb
           sed -i \
             -e "s/^  version \".*\"/  version \"${version}\"/" \
