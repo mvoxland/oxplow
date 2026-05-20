@@ -45,8 +45,8 @@ Things I keep forgetting. Read this before adding any UI.
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
   `apps/desktop/src/pages/SettingsPage.tsx` — full Page tab, no backdrop.
-- **Never call `window.prompt()`.** The Tauri webview blocks it the
-  same way Electron did — it returns `null` synchronously without
+- **Never call `window.prompt()`.** The Tauri webview blocks it —
+  it returns `null` synchronously without
   showing anything, so any code path gated on its return value
   silently no-ops. Use `InlineEdit` (for
   click-to-edit) or `InlinePromptStrip` (for new-X flows that need a
@@ -134,6 +134,16 @@ Things I keep forgetting. Read this before adding any UI.
 - **Shortcuts go through the menu.** Add new shortcuts to
   `commands.ts` and `keybindings.ts` so they appear in the native
   menu and help discoverability.
+- **The native menu is renderer-driven.** `App.tsx` pushes the menu
+  snapshot to `set_native_menu` (built in
+  `crates/oxplow-tauri-ipc/src/commands/menu.rs`); macOS shows the
+  native bar, off-Mac falls back to the in-window `Menubar`. (There is
+  no `isElectron` gate any more — that was dead post-Tauri code.) The
+  builder supports **nested submenus** via `MenuItemSnapshot.submenu`;
+  dynamic entries (e.g. File ▸ Open Recent ▸ `<project>`, built by
+  `buildNativeMenuSnapshots`) use free-form ids like
+  `project.openRecent:<path>` that the `menu:command` handler matches by
+  prefix rather than going through the static `CommandId` map.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
   Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.

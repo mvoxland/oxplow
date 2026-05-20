@@ -17,6 +17,7 @@ pub mod effort;
 pub mod followup;
 pub mod git;
 pub mod hooks;
+pub mod launch;
 pub mod log;
 pub mod lsp;
 pub mod menu;

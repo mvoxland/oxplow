@@ -11,7 +11,28 @@ use specta::Type;
 use thiserror::Error;
 use tracing::info;
 
+pub mod recent;
+pub use recent::{RecentProject, RecentProjects};
+
+pub mod session;
+pub use session::SessionProjects;
+
 pub const OXPLOW_CONFIG_FILE: &str = "oxplow.yaml";
+
+/// Reverse-DNS app identifier. Mirrors `identifier` in
+/// `tauri.conf.json`; used to derive the global app-config dir so code
+/// without a Tauri handle (e.g. `main.rs` before the app is built) can
+/// resolve the same location Tauri's path resolver would.
+pub const APP_IDENTIFIER: &str = "net.voxland.oxplow";
+
+/// Global app-config dir (`<platform config dir>/net.voxland.oxplow`),
+/// where launcher-level state like `recent-projects.json` and
+/// `session.json` live. Matches Tauri's `app_config_dir()` on macOS /
+/// Linux / Windows. `None` only if the platform config dir is
+/// undiscoverable.
+pub fn global_config_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join(APP_IDENTIFIER))
+}
 
 const DEFAULT_SNAPSHOT_RETENTION_DAYS: u32 = 7;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;

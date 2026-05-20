@@ -28,6 +28,10 @@ pub struct MenuItemSnapshot {
     pub shortcut: Option<String>,
     pub enabled: bool,
     pub checked: Option<bool>,
+    /// When present, this item is a nested submenu of these children
+    /// (e.g. File ▸ Open Recent ▸ …) rather than a leaf command.
+    #[serde(default)]
+    pub submenu: Option<Vec<MenuItemSnapshot>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -56,45 +60,63 @@ pub async fn set_native_menu(
 fn build_menu(app: &AppHandle, groups: &[MenuGroupSnapshot]) -> tauri::Result<Menu<Wry>> {
     let mut menu = MenuBuilder::new(app);
     for group in groups {
-        let mut submenu = SubmenuBuilder::new(app, &group.label);
-        for item in &group.items {
-            // Items with id "native.<role>" map to the OS predefined
-            // menu items (Cut/Copy/Paste/SelectAll/Undo/Redo). These
-            // dispatch through the macOS responder chain so the
-            // standard keyboard shortcuts (Cmd+V, Cmd+C, …) reach
-            // the focused webview — without them, WKWebView swallows
-            // Cmd+V and JS keydown handlers never see it.
-            if let Some(role) = item.id.strip_prefix("native.") {
-                let predefined = match role {
-                    "undo" => PredefinedMenuItem::undo(app, Some(&item.label))?,
-                    "redo" => PredefinedMenuItem::redo(app, Some(&item.label))?,
-                    "cut" => PredefinedMenuItem::cut(app, Some(&item.label))?,
-                    "copy" => PredefinedMenuItem::copy(app, Some(&item.label))?,
-                    "paste" => PredefinedMenuItem::paste(app, Some(&item.label))?,
-                    "selectAll" => PredefinedMenuItem::select_all(app, Some(&item.label))?,
-                    "separator" => PredefinedMenuItem::separator(app)?,
-                    _ => {
-                        tracing::warn!(role, "unknown native menu role; skipping");
-                        continue;
-                    }
-                };
-                submenu = submenu.item(&predefined);
-                continue;
-            }
-
-            let mut builder =
-                MenuItemBuilder::with_id(item.id.clone(), &item.label).enabled(item.enabled);
-            if let Some(shortcut) = item.shortcut.as_deref().filter(|s| !s.is_empty()) {
-                let normalized = normalize_accelerator(shortcut);
-                builder = builder.accelerator(normalized);
-            }
-            let menu_item = builder.build(app)?;
-            submenu = submenu.item(&menu_item);
-        }
-        let built = submenu.build()?;
-        menu = menu.item(&built);
+        let submenu = build_submenu(app, &group.label, &group.items)?;
+        menu = menu.item(&submenu);
     }
     menu.build()
+}
+
+/// Build one submenu (a menu group, or a nested `submenu` item like
+/// File ▸ Open Recent). Recurses for items that carry their own
+/// `submenu` children.
+fn build_submenu(
+    app: &AppHandle,
+    label: &str,
+    items: &[MenuItemSnapshot],
+) -> tauri::Result<tauri::menu::Submenu<Wry>> {
+    let mut submenu = SubmenuBuilder::new(app, label);
+    for item in items {
+        // Items with id "native.<role>" map to the OS predefined
+        // menu items (Cut/Copy/Paste/SelectAll/Undo/Redo). These
+        // dispatch through the macOS responder chain so the
+        // standard keyboard shortcuts (Cmd+V, Cmd+C, …) reach
+        // the focused webview — without them, WKWebView swallows
+        // Cmd+V and JS keydown handlers never see it.
+        if let Some(role) = item.id.strip_prefix("native.") {
+            let predefined = match role {
+                "undo" => PredefinedMenuItem::undo(app, Some(&item.label))?,
+                "redo" => PredefinedMenuItem::redo(app, Some(&item.label))?,
+                "cut" => PredefinedMenuItem::cut(app, Some(&item.label))?,
+                "copy" => PredefinedMenuItem::copy(app, Some(&item.label))?,
+                "paste" => PredefinedMenuItem::paste(app, Some(&item.label))?,
+                "selectAll" => PredefinedMenuItem::select_all(app, Some(&item.label))?,
+                "separator" => PredefinedMenuItem::separator(app)?,
+                _ => {
+                    tracing::warn!(role, "unknown native menu role; skipping");
+                    continue;
+                }
+            };
+            submenu = submenu.item(&predefined);
+            continue;
+        }
+
+        // Nested submenu (e.g. Open Recent ▸ <project>).
+        if let Some(children) = &item.submenu {
+            let child = build_submenu(app, &item.label, children)?;
+            submenu = submenu.item(&child);
+            continue;
+        }
+
+        let mut builder =
+            MenuItemBuilder::with_id(item.id.clone(), &item.label).enabled(item.enabled);
+        if let Some(shortcut) = item.shortcut.as_deref().filter(|s| !s.is_empty()) {
+            let normalized = normalize_accelerator(shortcut);
+            builder = builder.accelerator(normalized);
+        }
+        let menu_item = builder.build(app)?;
+        submenu = submenu.item(&menu_item);
+    }
+    submenu.build()
 }
 
 /// The renderer ships accelerators in human-readable form

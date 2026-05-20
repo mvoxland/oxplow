@@ -120,7 +120,7 @@ End-to-end smoke for the test harness itself:
 
 1. **Launch against a scratch project**: `mkdtemp` a dir, `git init` it, point
    oxplow at it. This mirrors what `runtime.test.ts` does.
-2. **Confirm Playwright can attach to the Electron main window** and query
+2. **Confirm Playwright can attach to the Tauri webview window** and query
    stable selectors (add `data-testid` attributes if missing — that's itself a
    likely outcome of task 1 or 2).
 3. **Run 2–3 tasks end-to-end** before handing the full list to the agent, to

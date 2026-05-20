@@ -1,13 +1,17 @@
 # Oxplow
 
-A desktop IDE for running Claude Code (and other coding agents) across many
-parallel branches of the same project — built around a **stream** model
-where each stream is its own branch, worktree, and agent instance.
+A desktop app for guiding and tracking coding agents (Claude Code and
+others) across many parallel branches of one project. Each **stream** is
+its own branch, worktree, and agent instance.
 
-Oxplow is a stream-aware React + Electron shell with Monaco at its core.
-It layers a queue, commit/wait points, file snapshots, and a Local
-History view on top of the agent so you can steer multiple agents
-through real work without them clobbering each other.
+Oxplow is built around steering an agent like a pair-programming
+partner. The agent does the typing; your job is to plan, review, and
+understand the big picture. It's a comprehension and steering surface --
+a work queue, commit/wait points, file snapshots, and a Local History
+view sit on top of the agent so you can keep several agents moving
+through real work without them clobbering each other. Monaco + LSP are
+there for reading code and the occasional manual change, but oxplow is
+not an IDE: the focus is the system, not the editor.
 
 ## What it gives you
 
@@ -41,12 +45,12 @@ through real work without them clobbering each other.
 
 ## Architecture in one paragraph
 
-Custom Electron main process owns a SQLite database
-(`.oxplow/state.sqlite`), a set of stores (streams, threads, work
-items, commit/wait points, snapshots, efforts), and an MCP server +
-HTTP hook endpoint that Claude Code connects to per thread. The React
-renderer subscribes to store events and renders the dock-shell UI
-(Plan pane, file browser, editor tabs, terminal pane, Local History).
+A Rust backend (Tauri 2 shell + a set of `oxplow-*` crates) owns the
+SQLite database, the stores (streams, threads, work items, commit/wait
+points, snapshots, efforts), and an MCP server + hook endpoint that
+Claude Code connects to per thread. The React/Monaco/xterm frontend
+subscribes to store events and renders the rail HUD + pages UI (work
+queue, file browser, editor/diff pages, terminal, Local History).
 Detailed subsystem docs live under [.context/](./.context/).
 
 ## Running

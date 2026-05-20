@@ -26,11 +26,11 @@ cask "oxplow" do
   # No extra directive needed here — just don't pass `--quarantine`.
 
   zap trash: [
-    "~/Library/Application Support/com.voxland.oxplow",
+    "~/Library/Application Support/net.voxland.oxplow",
     "~/Library/Application Support/oxplow",
-    "~/Library/Preferences/com.voxland.oxplow.plist",
-    "~/Library/Saved Application State/com.voxland.oxplow.savedState",
-    "~/Library/Caches/com.voxland.oxplow",
-    "~/Library/WebKit/com.voxland.oxplow",
+    "~/Library/Preferences/net.voxland.oxplow.plist",
+    "~/Library/Saved Application State/net.voxland.oxplow.savedState",
+    "~/Library/Caches/net.voxland.oxplow",
+    "~/Library/WebKit/net.voxland.oxplow",
   ]
 end

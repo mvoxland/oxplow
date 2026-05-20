@@ -104,6 +104,195 @@ impl AppLayout {
             state_db_path,
         }
     }
+
+    /// Path of the per-project single-instance lock file.
+    pub fn instance_lock_path(&self) -> PathBuf {
+        self.state_dir.join("instance.lock")
+    }
+}
+
+/// Try to take the per-project single-instance lock. On success the
+/// held [`std::fs::File`] is returned — keep it alive for the whole
+/// process (the OS releases the advisory lock when it drops). `None`
+/// means another live oxplow process already holds it, so this process
+/// must not boot a second `Services` on the same `state.sqlite`
+/// (double fs/git watchers + a serialized SQLite writer lock).
+pub fn try_acquire_instance_lock(layout: &AppLayout) -> std::io::Result<Option<std::fs::File>> {
+    use fs2::FileExt;
+    std::fs::create_dir_all(&layout.state_dir)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(layout.instance_lock_path())?;
+    match file.try_lock_exclusive() {
+        Ok(()) => Ok(Some(file)),
+        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Spawn a fresh oxplow process pinned to `dir` — the process-per-
+/// window primitive. `OXPLOW_PROJECT_DIR` is what the shell honours at
+/// startup; the positional arg is for `ps` visibility. The child
+/// detaches and survives the caller's exit. Used by the IPC
+/// open/setup commands and by session restore at startup.
+pub fn spawn_project_window(dir: &std::path::Path) -> std::io::Result<()> {
+    let exe = std::env::current_exe()?;
+    std::process::Command::new(exe)
+        .env("OXPLOW_PROJECT_DIR", dir)
+        .arg(dir)
+        .spawn()?;
+    Ok(())
+}
+
+/// Non-destructive probe: is `project_dir` currently held by a live
+/// oxplow process? Used by `open_project` to warn before spawning a
+/// duplicate window. Acquiring the lock here would itself succeed when
+/// nobody holds it, so we immediately drop it (releasing) and report
+/// the prior state.
+pub fn is_project_locked(project_dir: &std::path::Path) -> bool {
+    use fs2::FileExt;
+    let lock_path = project_dir.join(".oxplow").join("instance.lock");
+    let Ok(file) = std::fs::OpenOptions::new().write(true).open(&lock_path) else {
+        return false; // no lock file → never opened (or not yet)
+    };
+    match file.try_lock_exclusive() {
+        // We took it → nobody else held it. Drop releases immediately.
+        Ok(()) => false,
+        Err(_) => true,
+    }
+}
+
+/// Focus-channel coordinates a running project process publishes so a
+/// second launch of the same project can raise its window instead of
+/// failing on the instance lock. Written to `.oxplow/instance.json`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InstanceInfo {
+    /// Loopback TCP port the running instance listens on for focus pings.
+    pub focus_port: u16,
+    /// Shared secret echoed back on the focus ping so an unrelated
+    /// process that happens to hold the port can't be made to act.
+    pub nonce: String,
+}
+
+fn instance_info_path(project_dir: &std::path::Path) -> PathBuf {
+    project_dir.join(".oxplow").join("instance.json")
+}
+
+/// A fresh random focus nonce.
+pub fn new_focus_nonce() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// Publish this process's focus coordinates for `layout`'s project.
+pub fn write_instance_info(layout: &AppLayout, info: &InstanceInfo) -> std::io::Result<()> {
+    std::fs::create_dir_all(&layout.state_dir)?;
+    let json = serde_json::to_vec_pretty(info)?;
+    std::fs::write(instance_info_path(&layout.project_dir), json)
+}
+
+/// Best-effort: remove the focus coordinates (called as a project
+/// process shuts down so a stale port isn't left behind).
+pub fn clear_instance_info(project_dir: &std::path::Path) {
+    let _ = std::fs::remove_file(instance_info_path(project_dir));
+}
+
+fn read_instance_info(project_dir: &std::path::Path) -> Option<InstanceInfo> {
+    let bytes = std::fs::read(instance_info_path(project_dir)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Ask the running instance of `project_dir` to focus its window.
+/// Returns `true` if the ping was delivered. Only meaningful when the
+/// project is actually open (the caller checks [`is_project_locked`]
+/// first); a stale/unreachable file just returns `false` so the caller
+/// can fall back.
+pub fn request_focus(project_dir: &std::path::Path) -> bool {
+    use std::io::Write;
+    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+    use std::time::Duration;
+
+    let Some(info) = read_instance_info(project_dir) else {
+        return false;
+    };
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, info.focus_port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
+        return false;
+    };
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+    let mut line = info.nonce;
+    line.push('\n');
+    stream.write_all(line.as_bytes()).is_ok()
+}
+
+#[cfg(test)]
+mod instance_lock_tests {
+    use super::*;
+
+    #[test]
+    fn lock_is_exclusive_and_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = AppLayout::for_project(dir.path());
+
+        let held = try_acquire_instance_lock(&layout).unwrap();
+        assert!(held.is_some(), "first acquire succeeds");
+        assert!(
+            is_project_locked(dir.path()),
+            "probe sees the lock while held"
+        );
+
+        drop(held);
+        assert!(
+            !is_project_locked(dir.path()),
+            "probe is clear once the lock is released"
+        );
+    }
+
+    #[test]
+    fn unopened_project_is_not_locked() {
+        let dir = tempfile::tempdir().unwrap();
+        // No .oxplow/instance.lock yet.
+        assert!(!is_project_locked(dir.path()));
+    }
+
+    #[test]
+    fn request_focus_delivers_nonce_to_listener() {
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpListener;
+
+        let dir = tempfile::tempdir().unwrap();
+        let layout = AppLayout::for_project(dir.path());
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let nonce = new_focus_nonce();
+        write_instance_info(
+            &layout,
+            &InstanceInfo {
+                focus_port: port,
+                nonce: nonce.clone(),
+            },
+        )
+        .unwrap();
+
+        let want = nonce.clone();
+        let handle = std::thread::spawn(move || {
+            let (conn, _) = listener.accept().unwrap();
+            let mut got = String::new();
+            BufReader::new(conn).read_line(&mut got).unwrap();
+            assert_eq!(got.trim(), want);
+        });
+
+        assert!(request_focus(dir.path()), "ping should be delivered");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn request_focus_false_without_instance_info() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!request_focus(dir.path()));
+    }
 }
 
 /// All the long-lived services oxplow needs to serve a UI.

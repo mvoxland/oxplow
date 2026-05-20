@@ -12,17 +12,233 @@ use tauri::Emitter;
 fn main() {
     init_tracing();
 
-    // Project root resolution. `tauri dev` runs the binary with cwd
-    // set to `apps/desktop` (the package being built), which isn't a
-    // git toplevel — `ensure_primary` would refuse it and the
-    // renderer would see "no primary stream available". Honour
-    // `OXPLOW_PROJECT_DIR` so the dev launcher can pin cwd to the
-    // repo root; production launches via `./bin/oxplow` from the
-    // repo root and just use cwd as before.
-    let project_dir = std::env::var_os("OXPLOW_PROJECT_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().expect("current dir"));
+    // `generate_context!` embeds the Info.plist and may expand only
+    // once per binary — build it here and hand it to whichever mode
+    // we boot into.
+    let ctx = tauri::generate_context!();
+
+    // Process-per-window model: this process serves exactly one
+    // project, chosen at launch. A bare launch (Finder/Spotlight/dock,
+    // no arg + no env) has no project and boots the launcher instead.
+    // A dir that isn't an Oxplow project yet (no `.oxplow/`) boots the
+    // setup-confirmation screen rather than silently initializing.
+    match resolve_project_dir() {
+        Some(dir) if dir.join(".oxplow").is_dir() => run_project(dir, ctx),
+        Some(dir) => run_setup(dir, ctx),
+        // Bare launch: reopen the windows that were open at last exit;
+        // if there were none, show the launcher.
+        None if restore_session() => {}
+        None => run_launcher(ctx),
+    }
+}
+
+/// Reopen the project windows recorded in the global session (the set
+/// open at last exit). Spawns one process per still-valid project dir
+/// and returns whether at least one was reopened. Entries whose dir is
+/// gone or no longer an Oxplow project are skipped.
+fn restore_session() -> bool {
+    let Some(session) = session_store() else {
+        return false;
+    };
+    let mut spawned = 0;
+    for path in session.list() {
+        let dir = std::path::Path::new(&path);
+        if !dir.join(".oxplow").is_dir() {
+            continue; // gone or never initialized — don't restore
+        }
+        match oxplow_app::spawn_project_window(dir) {
+            Ok(()) => {
+                spawned += 1;
+                tracing::info!(project = %path, "restored session window");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, project = %path, "failed to restore session window")
+            }
+        }
+    }
+    spawned > 0
+}
+
+/// The global session store (`session.json` in the app-config dir),
+/// or `None` if the config dir is undiscoverable.
+fn session_store() -> Option<oxplow_config::SessionProjects> {
+    oxplow_config::global_config_dir()
+        .map(|d| oxplow_config::SessionProjects::new(d.join("session.json")))
+}
+
+/// Publish a loopback focus channel for this project and serve it on a
+/// background thread: a nonce-matching ping raises/focuses the main
+/// window. Lets a second `open_project` of the same dir focus the
+/// existing window (see `oxplow_app::request_focus`) instead of being
+/// turned away by the instance lock. Best-effort — any failure just
+/// means the second open falls back to the "already open" error.
+fn start_focus_listener(app: &tauri::AppHandle, project_dir: std::path::PathBuf) {
+    use std::io::{BufRead, BufReader};
+    use tauri::Manager;
+
+    let listener = match std::net::TcpListener::bind(("127.0.0.1", 0)) {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(error = %e, "focus listener bind failed");
+            return;
+        }
+    };
+    let Ok(port) = listener.local_addr().map(|a| a.port()) else {
+        return;
+    };
+    let nonce = oxplow_app::new_focus_nonce();
     let layout = AppLayout::for_project(&project_dir);
+    if let Err(e) = oxplow_app::write_instance_info(
+        &layout,
+        &oxplow_app::InstanceInfo {
+            focus_port: port,
+            nonce: nonce.clone(),
+        },
+    ) {
+        tracing::warn!(error = %e, "failed to publish focus channel");
+        return;
+    }
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(conn) = conn else { continue };
+            let mut line = String::new();
+            if BufReader::new(conn).read_line(&mut line).is_ok() && line.trim() == nonce {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.unminimize();
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+            }
+        }
+    });
+}
+
+/// Resolve the project dir for this process:
+///   1. first positional CLI arg (`oxplow <dir>`),
+///   2. `OXPLOW_PROJECT_DIR` (set by the dev script and by the
+///      `open_project` spawn),
+///   3. otherwise `None` → launcher mode.
+///
+/// The cwd fallback was intentionally dropped: a bare launch shows the
+/// launcher rather than silently adopting whatever directory it was
+/// started from.
+fn resolve_project_dir() -> Option<std::path::PathBuf> {
+    if let Some(arg) = std::env::args().nth(1) {
+        // Skip flag-like args (e.g. macOS may pass `-psn_…`).
+        if !arg.starts_with('-') {
+            return Some(std::path::PathBuf::from(arg));
+        }
+    }
+    std::env::var_os("OXPLOW_PROJECT_DIR").map(std::path::PathBuf::from)
+}
+
+/// Resolve the global recent-projects store, optionally record the
+/// just-opened project, and manage it on the app. Shared by both
+/// launch modes so the launcher screen and a project window can each
+/// list / open / forget recent projects.
+fn install_recent_projects(app: &tauri::AppHandle, record: Option<std::path::PathBuf>) {
+    use tauri::Manager;
+    let cfg_dir = app
+        .path()
+        .app_config_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let store: oxplow_tauri_ipc::RecentProjectsState = Arc::new(
+        oxplow_config::RecentProjects::new(cfg_dir.join("recent-projects.json")),
+    );
+    if let Some(dir) = record {
+        store.record(&dir);
+    }
+    app.manage(store);
+}
+
+/// Launcher mode — no project, no `Services`. Hosts only the
+/// recent-projects surface (`commands::launch`) and the launcher
+/// window; the renderer's `<Root>` sees `mode: "launcher"` and renders
+/// the start screen.
+fn run_launcher(ctx: tauri::Context) {
+    tracing::info!("booting in launcher mode (no project dir)");
+    let specta = specta_builder();
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(specta.invoke_handler())
+        .manage(oxplow_tauri_ipc::LaunchInfo::launcher())
+        .setup(move |app| {
+            specta.mount_events(app);
+            install_recent_projects(app.handle(), None);
+            oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
+            Ok(())
+        })
+        .run(ctx)
+        .expect("error while running tauri application");
+}
+
+/// Setup mode — a directory was opened that isn't an Oxplow project
+/// yet (no `.oxplow/`). Like the launcher (no `Services`), but the
+/// renderer shows the "Create an Oxplow project here?" screen for this
+/// dir. Confirming calls `setup_project` (creates `.oxplow/` and
+/// relaunches into `run_project`); declining calls `abort_setup`
+/// (exits). Nothing is recorded into recents until setup is confirmed.
+fn run_setup(project_dir: std::path::PathBuf, ctx: tauri::Context) {
+    tracing::info!(project = %project_dir.display(), "booting in setup mode (no .oxplow yet)");
+    let specta = specta_builder();
+    let launch_info = oxplow_tauri_ipc::LaunchInfo::setup(project_dir.to_string_lossy());
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(specta.invoke_handler())
+        .manage(launch_info)
+        .setup(move |app| {
+            specta.mount_events(app);
+            install_recent_projects(app.handle(), None);
+            oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
+            Ok(())
+        })
+        .run(ctx)
+        .expect("error while running tauri application");
+}
+
+/// Project mode — boot `Services` for `project_dir` and run the full
+/// app shell, exactly as before the launcher existed.
+fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
+    let layout = AppLayout::for_project(&project_dir);
+
+    // Per-project single-instance guard. Two processes on the same
+    // `.oxplow/state.sqlite` would double the fs/git watchers and
+    // contend on SQLite's writer lock, so refuse the second boot. Held
+    // for the life of the process (leaked); the OS frees it on exit.
+    match oxplow_app::try_acquire_instance_lock(&layout) {
+        Ok(Some(lock)) => {
+            Box::leak(Box::new(lock));
+        }
+        Ok(None) => {
+            tracing::error!(
+                project = %layout.project_dir.display(),
+                "project already open in another oxplow window; exiting"
+            );
+            eprintln!(
+                "oxplow: this project is already open in another window: {}",
+                layout.project_dir.display()
+            );
+            std::process::exit(0);
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to acquire instance lock; continuing without guard");
+        }
+    }
+
+    // Record this window in the global session so a later bare launch
+    // reopens it. Removed again on a deliberate window close (the
+    // `on_window_event` handler below); a Cmd-Q / crash / shutdown
+    // leaves it in place, which is what makes restore-on-relaunch work.
+    if let Some(session) = session_store() {
+        session.add(&project_dir);
+    }
+
     // Services::boot synchronously calls `tokio::spawn` (PtyManager owner
     // task), which requires an entered Tokio runtime. Tauri builds its
     // own runtime later, so we stand up a dedicated multi-thread runtime
@@ -314,14 +530,39 @@ fn main() {
     });
 
     let specta = specta_builder();
+    let launch_info = oxplow_tauri_ipc::LaunchInfo::project(project_dir.to_string_lossy());
+    let project_dir_for_setup = project_dir.clone();
+    let project_dir_for_close = project_dir.clone();
+    let project_dir_for_focus = project_dir.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(specta.invoke_handler())
+        .on_window_event(move |_window, event| {
+            // A deliberate window close drops this project from the
+            // session set so it isn't reopened next launch, and clears
+            // the focus channel. App quit (Cmd-Q) / crash / shutdown
+            // don't fire CloseRequested, so those leave the session
+            // entry in place to be restored (and release the instance
+            // lock on death, so the stale focus port is never used).
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                if let Some(session) = session_store() {
+                    session.remove(&project_dir_for_close);
+                }
+                oxplow_app::clear_instance_info(&project_dir_for_close);
+            }
+        })
         .setup(move |app| {
             specta.mount_events(app);
+            // Record this project into the global recents so the
+            // launcher offers it next time, and expose the store to
+            // the in-window "Open Recent" surface.
+            install_recent_projects(app.handle(), Some(project_dir_for_setup));
+            // Publish a focus channel so a second open of this project
+            // raises this window instead of failing on the lock.
+            start_focus_listener(app.handle(), project_dir_for_focus.clone());
             spawn_event_bridge(app.handle().clone(), event_bus.clone());
             spawn_lsp_event_bridge(app.handle().clone(), lsp_clients.clone());
             spawn_terminal_event_bridge(app.handle().clone(), terminal_sessions.clone());
@@ -330,7 +571,8 @@ fn main() {
         })
         .manage(state)
         .manage(plugin_runtime)
-        .run(tauri::generate_context!())
+        .manage(launch_info)
+        .run(ctx)
         .expect("error while running tauri application");
 }
 

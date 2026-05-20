@@ -6,7 +6,7 @@ import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
 import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import { createRoot } from "react-dom/client";
-import { App } from "./App.js";
+import { Root } from "./Root.js";
 import { installUiLogging, logUi } from "./logger.js";
 
 self.MonacoEnvironment = {
@@ -35,4 +35,4 @@ installUiLogging();
 logUi("info", "ui bootstrapping");
 
 const el = document.getElementById("root")!;
-createRoot(el).render(<App />);
+createRoot(el).render(<Root />);

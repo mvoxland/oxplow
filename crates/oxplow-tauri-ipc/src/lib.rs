@@ -10,7 +10,7 @@ pub mod error;
 pub mod state;
 
 pub use error::IpcError;
-pub use state::{AppState, PluginRuntime, PluginRuntimeState};
+pub use state::{AppState, LaunchInfo, PluginRuntime, PluginRuntimeState, RecentProjectsState};
 
 use tauri_specta::{collect_commands, Builder};
 
@@ -225,6 +225,14 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::terminal::terminate_terminal_session,
         // menu
         commands::menu::set_native_menu,
+        // launcher / multi-window
+        commands::launch::get_launch_mode,
+        commands::launch::list_recent_projects,
+        commands::launch::remove_recent_project,
+        commands::launch::open_project,
+        commands::launch::project_needs_setup,
+        commands::launch::setup_project,
+        commands::launch::abort_setup,
     ])
 }
 

@@ -74,7 +74,7 @@ import {
   updateFileDraft,
   type FileSessionState,
 } from "./editor-session.js";
-import { buildMenuGroupSnapshots, buildMenuGroups } from "./commands.js";
+import { buildMenuGroupSnapshots, buildMenuGroups, buildNativeMenuSnapshots, OPEN_RECENT_PREFIX } from "./commands.js";
 import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
@@ -126,7 +126,7 @@ import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
 import { closedThreadsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newTaskRef, snapshotRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
-import { getOpErrorsStore } from "./components/opErrorsStore.js";
+import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { FilePage } from "./pages/FilePage.js";
@@ -135,6 +135,9 @@ import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { resolveActiveTabRef } from "./tabs/resolveActiveTabRef.js";
 import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
+import { openProjectGuarded, listRecentProjects } from "./api.js";
+import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { DISK } from "./file-version.js";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
@@ -393,6 +396,27 @@ function writePersistedCenterActive(value: string): void {
   } catch {}
 }
 
+/// Prompt for a folder and open it as a project. `newWindow=false`
+/// replaces the current window (this process exits once the new one
+/// spawns); `true` opens an additional independent window. Shared by
+/// the File ▸ Open Project commands and Cmd+K palette.
+async function pickAndOpenProject(newWindow: boolean) {
+  const selected = await openFolderDialog({
+    directory: true,
+    multiple: false,
+    title: newWindow ? "Open Project in New Window" : "Open Project",
+  });
+  if (typeof selected !== "string") return;
+  try {
+    await openProjectGuarded(selected, newWindow);
+  } catch (e) {
+    recordOpError({
+      label: "Open project",
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
@@ -444,10 +468,10 @@ export function App() {
   const opErrorsAll = useSyncExternalStore(opErrorsStore.subscribe, opErrorsStore.getSnapshot);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
-  const isElectron = !!window.oxplowDesktop?.isElectron;
-  // macOS uses the native top-of-screen menu bar (wired up by Tauri's
-  // menu plugin in src-tauri/src/main.rs); the in-window Menubar would
-  // duplicate it.
+  // macOS uses the native top-of-screen menu bar (driven by the
+  // renderer through `setNativeMenu`, built in
+  // src-tauri/.../commands/menu.rs); the in-window Menubar would
+  // duplicate it, so it only renders off-Mac.
   const isMac = typeof navigator !== "undefined"
     && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
 
@@ -1623,8 +1647,24 @@ export function App() {
       handleOpenPageRef.current?.(indexRef("files"));
       setCommitFilesRequest((n) => n + 1);
     },
+    openProject() {
+      void pickAndOpenProject(false);
+    },
+    openProjectNewWindow() {
+      void pickAndOpenProject(true);
+    },
   }), [stream, selectedFilePath, workspaceContext.gitEnabled]);
+  const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
+  useEffect(() => {
+    listRecentProjects()
+      .then(setRecentProjects)
+      .catch((e) => logUi("warn", "failed to load recent projects for menu", { error: String(e) }));
+  }, []);
   const menuGroupSnapshots = useMemo(() => buildMenuGroupSnapshots(commandState), [commandState]);
+  const nativeMenuSnapshots = useMemo(
+    () => buildNativeMenuSnapshots(commandState, recentProjects),
+    [commandState, recentProjects],
+  );
   const menuGroups = useMemo(
     () => buildMenuGroups(commandState, commandHandlers),
     [commandState, commandHandlers],
@@ -1683,15 +1723,20 @@ export function App() {
   }, [commandMap]);
 
   useEffect(() => {
-    if (!isElectron) return;
-    void desktopBridge().setNativeMenu(menuGroupSnapshots).catch((error) => {
+    void desktopBridge().setNativeMenu(nativeMenuSnapshots).catch((error) => {
       logUi("error", "failed to update native menu", { error: String(error) });
     });
-  }, [isElectron, menuGroupSnapshots]);
+  }, [nativeMenuSnapshots]);
 
   useEffect(() => {
-    if (!isElectron) return;
     return desktopBridge().onMenuCommand((commandId: string) => {
+      // Dynamic "Open Recent ▸ <project>" entries aren't in commandMap;
+      // open the trailing path in a new window.
+      if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
+        const path = commandId.slice(OPEN_RECENT_PREFIX.length);
+        void openProjectGuarded(path, true);
+        return;
+      }
       const command = commandMap.get(commandId as never);
       if (!command || !command.run) return;
       // React 18 only auto-flushes effects synchronously for discrete
@@ -1706,7 +1751,7 @@ export function App() {
       const run = command.run;
       flushSync(() => { run(); });
     });
-  }, [commandMap, isElectron]);
+  }, [commandMap]);
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => {
@@ -3240,7 +3285,7 @@ export function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-        {!isElectron && !isMac ? <Menubar groups={menuGroups} /> : null}
+        {!isMac ? <Menubar groups={menuGroups} /> : null}
         {error ? (
           <div style={{ padding: "2px 12px", background: "var(--bg-2)", color: "#ff6b6b", fontSize: 11, minHeight: 22, borderBottom: "1px solid var(--border)" }}>{error}</div>
         ) : null}

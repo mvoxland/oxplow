@@ -3,8 +3,9 @@
 
 What this doc covers: the per-thread tab store, the shared `Page` chrome,
 the page-ref id format, and the rail HUD that drives navigation. This is
-the substrate the IA redesign is being built on; it lives alongside the
-existing IDE-style chrome until later phases migrate the panels into pages.
+the substrate the IA redesign was built on; the old dock chrome is gone
+(see "Left dock removed" / "Bottom dock removed" below) and the rail HUD
++ pages are now THE shell.
 
 ## Mental model
 

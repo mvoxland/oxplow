@@ -1,6 +1,7 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import { listen } from "@tauri-apps/api/event";
 import type { OxplowEvent } from "./api-types.js";
+import type { LaunchInfo, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors arrive as IpcError objects with
@@ -595,6 +596,57 @@ export async function gitRebaseOnto(streamId: string, onto: string): Promise<Git
 export async function getWorkspaceContext(): Promise<WorkspaceContext> {
   const ctx = unwrap(await commands.getWorkspaceContext());
   return { gitEnabled: ctx.is_git_repo };
+}
+
+// ---- Launcher / multi-window (process-per-window) ----
+
+/// Whether this process booted into the launcher or a project. The
+/// `<Root>` gate calls this first to pick the top-level screen.
+export async function getLaunchMode(): Promise<LaunchInfo> {
+  return unwrap(await commands.getLaunchMode());
+}
+
+/// Recent projects for the launcher, most-recent first, each tagged
+/// with whether its directory still exists on disk.
+export async function listRecentProjects(): Promise<RecentProjectView[]> {
+  return unwrap(await commands.listRecentProjects());
+}
+
+/// Forget a project from the recent list.
+export async function removeRecentProject(path: string): Promise<void> {
+  unwrap(await commands.removeRecentProject(path));
+}
+
+/// Open `path` as a project. `newWindow=false` replaces the current
+/// window (this process exits once the new one is spawned);
+/// `newWindow=true` opens an additional independent window.
+export async function openProject(path: string, newWindow: boolean): Promise<void> {
+  unwrap(await commands.openProject(path, newWindow));
+}
+
+/// Whether `path` still needs first-run setup (has no `.oxplow/` yet).
+export async function projectNeedsSetup(path: string): Promise<boolean> {
+  return unwrap(await commands.projectNeedsSetup(path));
+}
+
+/// Create the `.oxplow/` project structure in `path` and relaunch into
+/// it. Called from the setup-confirmation screen.
+export async function setupProject(path: string): Promise<void> {
+  unwrap(await commands.setupProject(path));
+}
+
+/// Decline first-run setup — closes the setup window (exits the process).
+export async function abortSetup(): Promise<void> {
+  unwrap(await commands.abortSetup());
+}
+
+/// Open `path`, but route uninitialized dirs (no `.oxplow/`) to a NEW
+/// window regardless of `newWindow` — that window shows the setup
+/// confirmation, so declining it can never destroy the launcher or the
+/// caller's current project window.
+export async function openProjectGuarded(path: string, newWindow: boolean): Promise<void> {
+  const needsSetup = await projectNeedsSetup(path);
+  await openProject(path, needsSetup ? true : newWindow);
 }
 
 export async function createStream(input:

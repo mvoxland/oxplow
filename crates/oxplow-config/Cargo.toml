@@ -14,6 +14,8 @@ serde_yaml = { workspace = true }
 specta = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+dirs = "6"
+fs2 = "0.4"
 
 [dev-dependencies]
 tempfile = { workspace = true }

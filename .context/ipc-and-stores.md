@@ -470,10 +470,25 @@ the wiki + tasks use, route through
 `oxplow_domain::refs::extract` rather than re-implementing the
 parser.
 
+## Exception: commands with no `Services` (launcher)
+
+Not every command follows the 7-layer flow. The launcher / multi-window
+commands in `crates/oxplow-tauri-ipc/src/commands/launch.rs`
+(`get_launch_mode`, `list_recent_projects`, `remove_recent_project`,
+`open_project`) deliberately depend on **neither** a SQLite store
+**nor** `AppState` (`Services`) — they must work in launcher mode where
+no project is booted. Instead they read managed state
+`RecentProjectsState` (`Arc<oxplow_config::RecentProjects>`, a global
+JSON file) and `LaunchInfo`, both managed by `main.rs` in *both* launch
+modes. `open_project` spawns a new process rather than mutating any
+store. When you add a command the launcher window needs, keep it on
+this no-`Services` footing; everything else uses the flow above.
+
 ## Related
 
 - [data-model.md](./data-model.md) — the actual schemas, including
-  the `page_ref` graph and its column conventions.
+  the `page_ref` graph and its column conventions; plus the global
+  `recent-projects.json` / `instance.lock` state.
 - [agent-model.md](./agent-model.md) — how the agent calls into MCP
   tools that wrap these stores, including `list_backlinks` /
   `list_outbound`.

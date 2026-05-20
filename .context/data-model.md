@@ -13,6 +13,40 @@ a thin class wrapping that connection. Schema changes go through versioned
 migrations (`crates/oxplow-db/migrations/V1__initial_schema.sql`) gated by `PRAGMA user_version`
 — migrations are append-only; never edit a prior version.
 
+## Global state (outside `.oxplow/`)
+
+Two pieces of state live **outside** any project's `.oxplow/` dir,
+because they're either global or must survive without a booted
+`Services` (see the process-per-window model in
+[architecture.md](./architecture.md)):
+
+- **`recent-projects.json`** — the launcher's recent-projects list, in
+  the app-config dir (`~/Library/Application Support/net.voxland.oxplow/`
+  on macOS). Managed by `oxplow_config::RecentProjects`
+  (`crates/oxplow-config/src/recent.rs`) — a JSON file, not a SQLite
+  table, modeled on the LSP-installer manifest pattern. `record()`
+  dedups by canonical path, bumps recency, caps at 20. The IPC layer
+  resolves the path via the Tauri path resolver and manages it as
+  `RecentProjectsState` in both launch modes.
+- **`session.json`** — the set of project dirs with an open window, in
+  the same app-config dir. Managed by `oxplow_config::SessionProjects`
+  (`crates/oxplow-config/src/session.rs`); drives session restore on a
+  bare launch. Each project process `add`s its dir on boot and
+  `remove`s it on deliberate window close; read-modify-writes take a
+  cross-process `fs2` lock since many processes touch it. The path is
+  resolved by `oxplow_config::global_config_dir()` so `main.rs` can read
+  it before any Tauri handle exists.
+- **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held
+  for the life of a project process, so a second process can't boot on
+  the same `state.sqlite`. Helpers: `AppLayout::instance_lock_path` /
+  `oxplow_app::{try_acquire_instance_lock, is_project_locked}`. It lives
+  inside `.oxplow/` but is not part of the SQLite schema.
+- **`.oxplow/instance.json`** — `{ focus_port, nonce }` published by a
+  running project process so a second `open_project` of the same dir can
+  focus the existing window (a loopback ping) instead of failing on the
+  lock. Written by `oxplow_app::write_instance_info`, read/pinged by
+  `request_focus`, cleared on deliberate window close.
+
 ## Tables and stores
 
 ### `streams` — `StreamStore` (`crates/oxplow-db/src/stream_store.rs`)

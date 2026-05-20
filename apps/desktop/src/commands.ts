@@ -12,6 +12,8 @@ export type CommandId =
   | "stream.new"
   | "thread.new"
   | "files.commit"
+  | "project.open"
+  | "project.openNewWindow"
   // Native (responder-chain) items. Activations are dispatched by the
   // OS, never by the renderer's `menu:command` listener — the ids
   // exist only so the snapshot can carry them through to the Rust
@@ -72,6 +74,8 @@ export interface CommandHandlers {
   openHistory(): void;
   openSnapshots(): void;
   commitFiles(): void;
+  openProject(): void;
+  openProjectNewWindow(): void;
 }
 
 export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[] {
@@ -80,6 +84,8 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       id: "file",
       label: "File",
       items: [
+        { id: "project.open", label: "Open Project…", enabled: true },
+        { id: "project.openNewWindow", label: "Open Project in New Window…", enabled: true },
         { id: "file.save", label: "Save", shortcut: "Ctrl/Cmd+S", enabled: state.canSave },
         { id: "file.quickOpen", label: "Quick Open…", shortcut: "Ctrl/Cmd+P", enabled: state.hasStream },
         { id: "files.commit", label: "Commit Changes…", enabled: !!state.canCommit },
@@ -142,6 +148,8 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "history.open": handlers.openHistory,
     "snapshots.open": handlers.openSnapshots,
     "files.commit": handlers.commitFiles,
+    "project.open": handlers.openProject,
+    "project.openNewWindow": handlers.openProjectNewWindow,
     // Native items dispatch through the OS responder chain.
     "native.undo": noop,
     "native.redo": noop,
@@ -155,6 +163,57 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     ...group,
     items: group.items.map((item) => ({ ...item, run: handlersById[item.id] })),
   }));
+}
+
+/// Native-menu snapshot item that may carry a nested submenu and a
+/// free-form id (the Open Recent children use `project.openRecent:<path>`
+/// ids that aren't part of the static `CommandId` union). Mirrors the
+/// Rust `MenuItemSnapshot` shape (with `submenu`).
+export interface NativeMenuItemSnapshot {
+  id: string;
+  label: string;
+  shortcut?: string;
+  enabled: boolean;
+  checked?: boolean;
+  submenu?: NativeMenuItemSnapshot[];
+}
+
+export interface NativeMenuGroupSnapshot {
+  id: string;
+  label: string;
+  items: NativeMenuItemSnapshot[];
+}
+
+/// Menu-command id prefix for a dynamic "Open Recent ▸ <project>" entry.
+/// The native `menu:command` dispatch matches this prefix and opens the
+/// trailing path in a new window.
+export const OPEN_RECENT_PREFIX = "project.openRecent:";
+
+/// The native-menu snapshot: the static groups plus a dynamic
+/// File ▸ Open Recent ▸ <project> submenu built from the recents list.
+/// Only the native menu carries this — the in-window Menubar uses the
+/// plain `buildMenuGroups`.
+export function buildNativeMenuSnapshots(
+  state: CommandState,
+  recents: { path: string; title: string; exists: boolean }[],
+): NativeMenuGroupSnapshot[] {
+  return buildMenuGroupSnapshots(state).map((group) => {
+    if (group.id !== "file") return group;
+    const openRecent: NativeMenuItemSnapshot = {
+      id: "project.openRecent",
+      label: "Open Recent",
+      enabled: recents.length > 0,
+      submenu: recents.map((r) => ({
+        id: `${OPEN_RECENT_PREFIX}${r.path}`,
+        label: r.title,
+        enabled: r.exists,
+      })),
+    };
+    const items: NativeMenuItemSnapshot[] = [...group.items];
+    const afterIdx = items.findIndex((i) => i.id === "project.openNewWindow");
+    items.splice(afterIdx >= 0 ? afterIdx + 1 : items.length, 0, openRecent);
+    return { ...group, items };
+  });
 }
 
 export function findCommandById(groups: MenuGroup[], id: CommandId): MenuCommand | undefined {

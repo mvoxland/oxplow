@@ -16,6 +16,7 @@ tauri-build = { workspace = true }
 
 [dependencies]
 oxplow-app = { workspace = true }
+oxplow-config = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-tauri-ipc = { workspace = true }
 oxplow-mcp = { workspace = true }

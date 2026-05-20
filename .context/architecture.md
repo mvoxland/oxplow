@@ -1,10 +1,27 @@
-# Architecture guidance: VS Code-inspired workflow without full workbench adoption
+# Architecture guidance: a comprehension + steering surface, not an IDE
 
 ## Goal
 
-Use a lot of the **workflow concepts** and selected building blocks from VS Code without turning this app into the full VS Code IDE shell.
+Oxplow is **explicitly not an IDE.** The agent does the typing, so the
+app's center of gravity is **understanding the big picture and steering
+the agent** — planning, reviewing, navigating, and comprehending the
+system — not being an editing surface. The UI is a **web / Linear-style
+shape** (rail HUD + pages; see `.context/pages-and-tabs.md`), optimized
+for navigation and comprehension rather than keystroke-level code entry.
 
-This note is the default guidance for future implementation decisions unless a later design explicitly replaces it.
+Code editing and viewing still exist and matter: **in the end the code
+is the reality.** We keep Monaco + LSP (intellisense, go-to-def,
+diagnostics) for drilling down and making manual changes when you need
+to. But that editor is a **drill-down detail view, not the primary
+surface** — it is reached *from* the comprehension/steering surface, it
+does not define the app the way it defines an IDE.
+
+We still borrow **workflow concepts** and small building blocks from VS
+Code (Monaco, codicons, decorations, the URI/model patterns) — we just
+don't organize the product around an editor.
+
+This note is the default guidance for future implementation decisions
+unless a later design explicitly replaces it.
 
 ## Current app shape
 
@@ -27,6 +44,85 @@ Every other stream is a **worktree** stream (`kind: "worktree"`). At creation it
 
 Both kinds can switch branches — either via the StreamRail "Switch branch…" context menu (routed through `Services.checkoutStreamBranch()`), or by an external `git checkout` in the worktree dir (picked up by the `GitRefsWatcherRegistry` → `maybeSyncStreamBranch()`). Git's own errors (dirty tree, missing branch, already checked out elsewhere) propagate verbatim to the UI; oxplow does no pre-flight validation.
 
+## Process-per-window & launcher
+
+Oxplow is **one OS process per project window**. Each window boots its
+own `Services` (its own `.oxplow/state.sqlite`, event bus, control
+plane on an ephemeral `127.0.0.1` port, watchers, etc.). There is no
+shared in-process state across windows — windows are as isolated as two
+separate app launches. This was a deliberate choice over an in-process
+`HashMap<window, Services>` registry, which would have required
+threading window context through every IPC command and rewriting all
+event-emission paths.
+
+Boot flow (`apps/desktop/src-tauri/src/main.rs`):
+
+- `resolve_project_dir()` → first positional CLI arg, else
+  `OXPLOW_PROJECT_DIR`, else `None`. (No cwd fallback — a bare launch
+  must not silently adopt its start directory.)
+- `Some(dir)` with a `.oxplow/` dir → `run_project(dir, ctx)`: today's
+  full boot.
+- `Some(dir)` **without** `.oxplow/` → `run_setup(dir, ctx)`: **no
+  `Services`** — the renderer shows a "Create an Oxplow project here?"
+  confirmation (`<ProjectSetup>`). Confirm → `setup_project` creates
+  `.oxplow/` and relaunches the process (which now takes the
+  `run_project` branch); decline → `abort_setup` exits. Nothing is
+  recorded into recents until setup is confirmed.
+- `None` → **session restore**: if the global session has open
+  windows from last exit, `restore_session()` spawns one process per
+  still-valid project dir and we show no launcher. Otherwise →
+  `run_launcher(ctx)`: **no `Services`** — just the recent-projects
+  surface and a launcher window.
+
+The renderer's `<Root>` calls `get_launch_mode` and renders
+`<Launcher>` / `<ProjectSetup>` / `<App>` accordingly.
+- `generate_context!()` is expanded once in `main()` and handed to
+  whichever mode runs (it embeds the Info.plist and may expand only
+  once per binary).
+
+Opening / reopening a project (IntelliJ-style) goes through the
+`open_project` IPC command, which **spawns a fresh process** of the
+current executable with `OXPLOW_PROJECT_DIR` set. "New window" = spawn;
+"replace this window" = spawn then `app.exit(0)`. The launcher and the
+in-window File ▸ Open Project commands both route here — but through
+`openProjectGuarded`, which first calls `project_needs_setup` and forces
+an **uninitialized** dir to a *new* window. That way a declined setup
+(`<ProjectSetup>` → Cancel) only closes the setup window and never
+destroys the launcher or the caller's current project window.
+
+A **per-project instance lock** (`.oxplow/instance.lock`, fs2 advisory
+lock acquired in `run_project`) prevents two processes from booting on
+the same project — that would double the watchers and contend on the
+single SQLite writer. `open_project` probes the lock first; if the
+project is already open it **focuses the existing window** instead of
+spawning a duplicate. Focus uses a small loopback channel: each
+`run_project` publishes `.oxplow/instance.json` (`{ focus_port, nonce }`)
+and serves a background thread that raises the window on a nonce-matching
+ping; `oxplow_app::request_focus` does the ping. If the running instance
+can't be reached (stale state), `open_project` falls back to a clear
+"already open" error. The instance lock releases on process death, so a
+crashed instance's stale focus port is never used (the lock probe sees
+the project as not-open and the second launch just opens it).
+
+**Session restore.** The set of project dirs with an open window lives
+in a global `session.json` (`oxplow_config::SessionProjects`).
+`run_project` `add`s its dir on boot and `remove`s it on the window's
+`CloseRequested` (a deliberate close). A Cmd-Q / crash / OS-shutdown
+does **not** fire per-window `CloseRequested` on macOS, so those entries
+survive and a subsequent bare launch reopens them. (If a future Tauri
+version starts routing Cmd-Q through `CloseRequested`, restore-on-quit
+would break — verify in-app.) Stale entries (dir gone / no `.oxplow/`)
+are skipped at restore.
+
+**Global app state** lives under the app-config dir
+(`net.voxland.oxplow`, resolved by `oxplow_config::global_config_dir()`
+so non-Tauri code can find it): `recent-projects.json`
+(`oxplow_config::RecentProjects`) and `session.json` — see
+[data-model.md](./data-model.md).
+
+The workspace isolation rule below still holds, now **per process**:
+each process treats its own project dir as the workspace root.
+
 ## Workspace isolation rule
 
 Oxplow may write only inside (a) the daemon's start directory and its descendants, or (b) a worktree directory that an oxplow stream owns. Anywhere else is off-limits.
@@ -46,9 +142,11 @@ This rule takes priority over convenience heuristics like "find the nearest encl
 
 Prefer a **hybrid architecture**:
 
-1. **Keep the custom React shell**
-2. **Keep Monaco as the editor core**
-3. **Reuse VS Code concepts heavily**
+1. **Keep the custom React shell** — organized around comprehension and
+   steering (rail HUD + pages), not around an editor.
+2. **Keep Monaco + LSP as the drill-down editor/viewer**, reached from
+   the surface — not as the app's center of gravity.
+3. **Reuse VS Code concepts heavily** (as workflow concepts, not as a workbench)
 4. **Reuse small, standalone pieces where practical**
 5. **Do not try to embed the full VS Code workbench or explorer implementation directly**
 
@@ -116,7 +214,7 @@ These pieces are deeply tied to the larger workbench/runtime architecture and ar
 
 ### Tradeoff
 
-- More IDE behavior must be assembled intentionally rather than inherited from a full workbench
+- More behavior must be assembled intentionally rather than inherited from a full workbench
 - Some features that VS Code gets “for free” from its internal architecture will need custom glue here
 
 ## Recommended architectural direction
@@ -155,7 +253,7 @@ Future file work should follow these principles:
 - support decorations for diagnostics, Git, and selection state
 - make explorer selection drive editor opening
 
-### 4. Add IDE primitives explicitly
+### 4. Add app primitives explicitly
 
 Prefer adding small, composable primitives rather than importing a giant workbench dependency.
 
@@ -185,7 +283,9 @@ When implementing the file explorer:
   - filtering/search
   - future context actions
 
-The goal is not “just a file list”; it is to create the beginning of a broader IDE-style file/workspace layer.
+The goal is a navigation/comprehension layer — a way to see and reach
+code well — not the foundation of an IDE. It serves understanding and
+drill-down, not an editor-centric workflow.
 
 ## Recommendation for future LSP work
 
@@ -225,4 +325,9 @@ If those are not true, prefer:
 
 Until explicitly changed, the default architecture stance is:
 
-> **Build a custom, stream-aware IDE shell with Monaco at the core, heavily inspired by VS Code workflows and concepts, but without importing the full VS Code workbench.**
+> **Build a custom, stream-aware comprehension + steering surface
+> (web/Linear-style), where the human plans, reviews, navigates, and
+> understands agent-driven work. Keep Monaco + LSP as a drill-down
+> editor/viewer for reading code and making manual changes — because in
+> the end the code is the reality — but do not organize the product
+> around an editor, and do not import the full VS Code workbench.**

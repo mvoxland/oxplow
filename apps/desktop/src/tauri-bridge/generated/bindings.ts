@@ -625,6 +625,38 @@ export const commands = {
 	 *  the renderer.
 	 */
 	setNativeMenu: (groups: MenuGroupSnapshot[]) => typedError<null, IpcError>(__TAURI_INVOKE("set_native_menu", { groups })),
+	/**
+	 *  Whether this process booted into the launcher or a project, so the
+	 *  renderer can pick the right top-level screen.
+	 */
+	getLaunchMode: () => typedError<LaunchInfo, IpcError>(__TAURI_INVOKE("get_launch_mode")),
+	/**
+	 *  Recent projects, most-recently-opened first, each tagged with
+	 *  whether its directory still exists.
+	 */
+	listRecentProjects: () => typedError<RecentProjectView[], IpcError>(__TAURI_INVOKE("list_recent_projects")),
+	// Forget a recent project (exact match on the stored path).
+	removeRecentProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_recent_project", { path })),
+	/**
+	 *  Open `path` as a project. Spawns a new oxplow process pinned to
+	 *  that directory. When `new_window` is false the current window is
+	 *  replaced — we spawn the new process and then exit this one.
+	 */
+	openProject: (path: string, newWindow: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("open_project", { path, newWindow })),
+	/**
+	 *  Whether `path` still needs first-run setup — i.e. it has no
+	 *  `.oxplow/` dir yet. The launcher/app calls this before opening so a
+	 *  declined setup never replaces an existing window.
+	 */
+	projectNeedsSetup: (path: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("project_needs_setup", { path })),
+	/**
+	 *  Create the `.oxplow/` project structure in `path`, then relaunch
+	 *  into it. The fresh process sees `.oxplow/` present and boots the
+	 *  full app shell (via `run_project`); this setup window then exits.
+	 */
+	setupProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("setup_project", { path })),
+	// Decline first-run setup: close this window by exiting the process.
+	abortSetup: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_setup")),
 };
 
 /* Types */
@@ -1268,6 +1300,18 @@ export type IpcError = {
 };
 
 /**
+ *  Which mode the current process booted in. Managed (and returned by
+ *  `get_launch_mode`) so the renderer's `<Root>` can decide between the
+ *  launcher screen and the full app shell without guessing.
+ */
+export type LaunchInfo = {
+	// `"launcher"` or `"project"`.
+	mode: string,
+	// The project dir when `mode == "project"`, else `None`.
+	projectDir: string | null,
+};
+
+/**
  *  Per-line attribution combining git blame with a local "this line was
  *  last touched in oxplow effort X" overlay. The full TS implementation
  *  could match against snapshot file contents to attribute lines to
@@ -1306,6 +1350,11 @@ export type MenuItemSnapshot = {
 	shortcut: string | null,
 	enabled: boolean,
 	checked: boolean | null,
+	/**
+	 *  When present, this item is a nested submenu of these children
+	 *  (e.g. File ▸ Open Recent ▸ …) rather than a leaf command.
+	 */
+	submenu?: MenuItemSnapshot[] | null,
 };
 
 export type MoveTaskRequest = {
@@ -1372,6 +1421,18 @@ export type PageVisitDay = {
 };
 
 export type PaneKindArg = "working" | "talking";
+
+// A recent-projects row plus a freshness flag for the UI.
+export type RecentProjectView = {
+	path: string,
+	title: string,
+	lastOpenedAt: number,
+	/**
+	 *  Whether the directory still exists on disk (drives the
+	 *  launcher's "missing" badge).
+	 */
+	exists: boolean,
+};
 
 export type RefKind = "local" | "remote" | "tag" | "head";
 
