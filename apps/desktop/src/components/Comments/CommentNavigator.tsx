@@ -24,9 +24,14 @@ export function CommentNavigator({
   const { threads } = useCommentsForTarget(targetKind, targetId);
   const [open, setOpen] = useState(false);
   const [idx, setIdx] = useState(0);
+  // Default to unresolved only (mirrors the Comments Dashboard); the
+  // dropdown carries a toggle to include resolved threads.
+  const [showResolved, setShowResolved] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  const { jumpable, orphaned, total } = partitionPageComments(threads);
+  const hasResolved = threads.some((t) => t.comment.status === "resolved");
+  const shown = showResolved ? threads : threads.filter((t) => t.comment.status !== "resolved");
+  const { jumpable, orphaned, total } = partitionPageComments(shown);
 
   useEffect(() => {
     if (!open) return;
@@ -44,7 +49,7 @@ export function CommentNavigator({
     };
   }, [open]);
 
-  if (total === 0) return null;
+  if (threads.length === 0) return null;
 
   const jumpTo = (i: number) => {
     if (jumpable.length === 0) return;
@@ -114,6 +119,39 @@ export function CommentNavigator({
             fontSize: "var(--text-xs)",
           }}
         >
+          {hasResolved ? (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                padding: "2px 4px 4px",
+                borderBottom: "1px solid var(--border-subtle)",
+                marginBottom: 4,
+              }}
+            >
+              <button
+                type="button"
+                data-testid="page-nav-comments-show-resolved"
+                onClick={() => setShowResolved((v) => !v)}
+                style={{
+                  border: "1px solid var(--border-subtle)",
+                  background: "transparent",
+                  color: "var(--text-secondary)",
+                  borderRadius: 4,
+                  padding: "1px 8px",
+                  fontSize: 10,
+                  cursor: "pointer",
+                }}
+              >
+                {showResolved ? "Unresolved only" : "Show resolved"}
+              </button>
+            </div>
+          ) : null}
+          {total === 0 ? (
+            <div style={{ padding: "6px 8px", color: "var(--text-muted)" }}>
+              No unresolved comments.
+            </div>
+          ) : null}
           {jumpable.map((t) => (
             <button
               key={t.comment.id}
