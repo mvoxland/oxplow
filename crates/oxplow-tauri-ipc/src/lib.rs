@@ -84,6 +84,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::comments::set_comment_intent,
         commands::comments::set_comment_status,
         commands::comments::set_comment_anchor,
+        commands::comments::relink_comment,
         commands::comments::delete_comment,
         // wiki
         commands::wiki::list_wiki_pages,

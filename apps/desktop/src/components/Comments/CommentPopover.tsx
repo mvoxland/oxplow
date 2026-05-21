@@ -12,6 +12,15 @@ import { CommentComposer } from "./CommentComposer.js";
 
 const CARD_WIDTH = 420;
 
+/// Whether the stored anchor was a fuzzy (approximate) re-attachment.
+export function anchorIsApprox(anchorJson: string): boolean {
+  try {
+    return (JSON.parse(anchorJson) as { approx?: boolean }).approx === true;
+  } catch {
+    return false;
+  }
+}
+
 /// Relative timestamp ("3m ago"). `Timestamp` serializes to an RFC3339
 /// string, so `new Date(...)` parses it directly.
 function relTime(ts: unknown): string {
@@ -46,6 +55,7 @@ export function CommentPopover({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const { comment, messages } = thread;
   const resolved = comment.status === "resolved";
+  const approx = !comment.orphaned && anchorIsApprox(comment.anchor_json);
 
   // Close on outside click.
   useEffect(() => {
@@ -108,7 +118,20 @@ export function CommentPopover({
             (orphaned){" "}
           </span>
         )}
+        {approx && (
+          <span
+            title="Re-attached approximately — the quoted text drifted, so this anchor may not be exact."
+            style={{ color: "var(--freshness-stale)", fontStyle: "normal" }}
+          >
+            (approx){" "}
+          </span>
+        )}
         “{comment.quote}”
+        {comment.orphaned && (
+          <div style={{ marginTop: 4, fontStyle: "normal", color: "var(--text-muted)" }}>
+            Select the intended text in the editor and right-click → “Relink orphaned…”.
+          </div>
+        )}
       </div>
 
       {/* Message thread */}

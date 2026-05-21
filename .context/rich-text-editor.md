@@ -145,15 +145,26 @@ item.thread_id }`.
   (`commentDecorationsKey`); between pushes the set maps through doc
   edits so highlights track typing. (`InternalLink` is a stored mark
   — use it as a structural reference only, not the comment mechanism.)
-- **Re-anchoring.** `findCommentRange(doc, quote, hintFrom?, hintTo?)`
-  re-resolves each comment's `quote` to a `{ from, to }`: it tries the
-  stored hint range first (fast path), then flattens the doc's text
-  nodes and runs the shared `resolveQuoteOffset`
-  (`components/Comments/anchor.ts`), mapping the text offset back to a
-  doc position. Cross-block selections don't match (no block separator
-  in the flattened text) and orphan — acceptable for v1. A corrected
-  or orphaned anchor is persisted via `setCommentAnchor`, which emits
-  no event, so the recompute effect doesn't loop.
+- **Re-anchoring.** `findCommentRange(doc, quote, { hintFrom, hintTo,
+  prefix, suffix })` re-resolves each comment's `quote` to a
+  `{ from, to, approx }`: stored-hint fast path, then `flatten(doc)` +
+  the shared `resolveAnchor` (`components/Comments/anchor.ts`) — exact
+  (disambiguated by context + proximity) then bounded fuzzy — mapped back
+  to doc positions. `flatten` now inserts a `BLOCK_SEP` between blocks
+  (with a synthetic map entry so `map` stays 1:1 with text), so
+  **cross-block selections match** (capture uses the same flatten, so
+  stored quote/context agree). `buildAnchorJson` re-persists the enriched
+  anchor (from/to + textOffset + prefix/suffix + `approx`) via
+  `setCommentAnchor` (no event → no loop); fuzzy matches get the dashed
+  `--approx` highlight.
+- **Live un-orphan.** The re-anchor effect also keys on a debounced
+  `docVersion` bumped from `editor.on("update")`, so retyping a deleted
+  quote re-attaches promptly instead of waiting for the blur/commit that
+  updates `value`.
+- **Relinking.** When a selection is active, the editor context menu
+  lists "Relink orphaned: …" entries that re-attach an orphaned comment
+  to the current selection via `relink_comment` (rewrites quote +
+  anchor, clears orphaned).
 - **Authoring is right-click-driven** (not an auto-popping button or
   click-to-open — those fight normal selection/cursor editing). The
   wrapper's `onContextMenu` **always** fires and `preventDefault`s, so

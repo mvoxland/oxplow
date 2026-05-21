@@ -1182,6 +1182,16 @@ export async function setCommentAnchor(
   unwrap(await commands.setCommentAnchor(commentId, anchorJson, orphaned));
 }
 
+/// Re-attach an orphaned comment to a freshly-selected span: rewrites
+/// both quote + anchor and clears the orphan flag.
+export async function relinkComment(
+  commentId: number,
+  quote: string,
+  anchorJson: string,
+): Promise<void> {
+  unwrap(await commands.relinkComment(commentId, quote, anchorJson));
+}
+
 export async function deleteComment(commentId: number): Promise<void> {
   unwrap(await commands.deleteComment(commentId));
 }

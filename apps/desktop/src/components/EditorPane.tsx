@@ -684,6 +684,14 @@ export function EditorPane({
         if (id != null) commentLayerRef.current?.openComment(id);
       },
     },
+    // Re-attach orphaned comments to the current selection — the escape
+    // hatch when a quote drifted past fuzzy tolerance.
+    ...(commentLayerRef.current?.relinkTargets() ?? []).map((t) => ({
+      id: `editor.relink-${t.id}`,
+      label: `Relink orphaned: “${t.quote.length > 24 ? `${t.quote.slice(0, 24)}…` : t.quote}”`,
+      enabled: !!filePath && hasEditorSelection(editorRef.current),
+      run: () => commentLayerRef.current?.relinkToSelection(t.id),
+    })),
   ];
 
   const showBlame = blame && blame.path === filePath;

@@ -208,6 +208,12 @@ export const commands = {
 	 *  content. No event: this is a passive sync, not a user mutation.
 	 */
 	setCommentAnchor: (commentId: CommentId, anchorJson: string, orphaned: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_anchor", { commentId, anchorJson, orphaned })),
+	/**
+	 *  Re-attach an orphaned comment to a freshly-selected span: rewrite
+	 *  both quote + anchor and clear the orphan flag. A user mutation, so it
+	 *  emits a changed event (unlike the passive `set_comment_anchor`).
+	 */
+	relinkComment: (commentId: CommentId, quote: string, anchorJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("relink_comment", { commentId, quote, anchorJson })),
 	deleteComment: (commentId: CommentId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_comment", { commentId })),
 	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
 	getWikiPage: (slug: string) => typedError<{

@@ -183,9 +183,19 @@ rich-text integration:
   changes. A parallel `decoId → commentId` map drives hit-testing.
 - **Re-anchoring** tries the stored `{ startLine, startColumn, endLine,
   endColumn }` first (quote still matches → reuse), else runs the shared
-  `resolveQuoteOffset` over `model.getValue()` and maps the offset back
-  via `model.getPositionAt`. Corrected/orphaned anchors persist through
-  `setCommentAnchor` (no event → no loop).
+  `resolveAnchor` (`components/Comments/anchor.ts`) over
+  `model.getValue()` — exact (disambiguated by stored `prefix`/`suffix`
+  context + `textOffset` proximity) then bounded fuzzy — and maps the
+  offset back via `model.getPositionAt`. `buildAnchorJson` re-persists the
+  enriched anchor (line/col + textOffset + prefix/suffix + `approx`) from
+  the resolved location so hints/context self-heal and old comments
+  upgrade in place; fuzzy matches paint the dashed
+  `.oxplow-comment-highlight--approx` variant. Corrected/orphaned anchors
+  persist through `setCommentAnchor` (no event → no loop).
+- **Relinking.** The `MonacoCommentHandle` exposes `relinkTargets()` +
+  `relinkToSelection(id)`; EditorPane's context menu lists "Relink
+  orphaned: …" entries that re-attach an orphaned comment to the current
+  selection via `relink_comment`.
 - **Right-click-driven**, not click/selection (those fight cursor
   placement). `MonacoCommentLayer` exposes a `MonacoCommentHandle`
   (`forwardRef` + `useImperativeHandle`): `commentIdAt(position)`,

@@ -819,11 +819,23 @@ last_activity_at DESC)`, `(target_kind, target_id)`.
   MCP `list_comments` queries by thread or stream (never cross-stream).
 - **Anchoring is resilient, not positional.** `quote` (the selected
   text) is the durable anchor + the context handed to the agent;
-  `anchor_json` is an opaque per-surface position *hint* the renderer
-  re-validates on load via exact-quote search and may rewrite through
-  `set_anchor`. When the quote can't be located the comment is marked
-  `orphaned` — still listed in the inbox, just without an inline
-  highlight.
+  `anchor_json` is an opaque, schemaless per-surface hint the renderer
+  re-validates on load and may rewrite through `set_anchor`. The
+  renderer enriches it with a W3C/Hypothesis-style selector — surrounding
+  `prefix`/`suffix` context, a `textOffset`, and an `approx` flag —
+  alongside the surface position (Monaco line/col, ProseMirror from/to).
+  The shared resolver (`apps/desktop/src/components/Comments/anchor.ts`,
+  `resolveAnchor`) tiers exact-quote (disambiguated by context +
+  proximity) then a bounded fuzzy fallback; a fuzzy re-attach sets
+  `approx` (shown as a dashed highlight + "approx" badge). Only when even
+  fuzzy fails is the comment `orphaned` — still listed, no highlight.
+  Rust never parses `anchor_json`, so enriching it needs no migration.
+- **Relinking.** `relink(id, quote, anchor_json)` (store) /
+  `relink_comment` (IPC) is the escape hatch for a comment whose quote
+  drifted past fuzzy tolerance: it rewrites BOTH the quote and the anchor
+  and clears `orphaned`. Triggered from the editor's selection
+  context-menu ("Relink orphaned: …"). Unlike `set_anchor` (a passive
+  re-validation sync, no event) it emits a changed event.
 - **"Answered" is derived, not stored.** `CommentThread::needs_response`
   (in `oxplow-domain`) returns true for an `open` `followup` whose
   latest message author isn't `"agent"`. Messages are stored

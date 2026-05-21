@@ -355,6 +355,12 @@
         border-bottom: 2px solid var(--comment-highlight);
         cursor: pointer;
       }
+      /* Approximate (fuzzy-reattached) anchor — the quoted text drifted
+         and was re-matched within tolerance, so the highlight may not be
+         exact. Dashed underline signals the uncertainty. */
+      .oxplow-comment-highlight--approx {
+        border-bottom-style: dashed;
+      }
       /* Wikilink / file: / dir: / gitcommit: anchors inside the editor
          are click-to-navigate (handled by RichTextField's wrapper),
          so they should advertise themselves as links rather than

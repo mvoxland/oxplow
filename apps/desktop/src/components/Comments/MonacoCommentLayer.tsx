@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-import { createComment, setCommentAnchor } from "../../api.js";
+import { createComment, relinkComment, setCommentAnchor } from "../../api.js";
 import {
   clearCommentReveal,
   peekPendingCommentReveal,
   subscribeCommentReveal,
 } from "../../comment-reveal-bus.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
-import { resolveQuoteOffset } from "./anchor.js";
+import { extractContext, resolveAnchor } from "./anchor.js";
 import { CommentPopover } from "./CommentPopover.js";
 import { NewCommentPopover } from "./NewCommentPopover.js";
 import { useCommentsForTarget } from "./useCommentsForTarget.js";
@@ -27,6 +27,32 @@ export interface MonacoCommentHandle {
   addCommentForSelection(): void;
   /// Open the thread popover for `commentId`.
   openComment(commentId: number): void;
+  /// Orphaned comments for this file — drives "Relink orphaned" menu
+  /// entries (the escape hatch when a quote drifted past fuzzy tolerance).
+  relinkTargets(): { id: number; quote: string }[];
+  /// Re-attach `commentId` to the editor's current selection.
+  relinkToSelection(commentId: number): void;
+}
+
+/// Build the enriched `anchor_json` for a resolved Monaco range: the
+/// line/col fast-path hint plus the text offset and prefix/suffix
+/// context the resolver uses, and whether this was a fuzzy (approximate)
+/// match. Recomputed from the resolved location on every re-anchor so
+/// the stored hint + context self-heal.
+function buildAnchorJson(model: any, text: string, range: any, approx: boolean): string {
+  const startOffset: number = model.getOffsetAt(range.getStartPosition());
+  const endOffset: number = model.getOffsetAt(range.getEndPosition());
+  const { prefix, suffix } = extractContext(text, startOffset, endOffset);
+  return JSON.stringify({
+    startLine: range.startLineNumber,
+    startColumn: range.startColumn,
+    endLine: range.endLineNumber,
+    endColumn: range.endColumn,
+    prefix,
+    suffix,
+    textOffset: startOffset,
+    approx,
+  });
 }
 
 /// Comment overlay for the Monaco editor. Renders inline highlights and
@@ -65,34 +91,53 @@ export const MonacoCommentLayer = forwardRef<
     for (const thread of threads) {
       const c = thread.comment;
       let range: any = null;
+      let approx = false;
+      let parsed: Record<string, unknown> = {};
       try {
-        const a = JSON.parse(c.anchor_json) as Record<string, number>;
-        if (typeof a.startLine === "number") {
-          const r = new monaco.Range(a.startLine, a.startColumn, a.endLine, a.endColumn);
+        parsed = JSON.parse(c.anchor_json) as Record<string, unknown>;
+        // Tier A: the stored range still spells the quote exactly.
+        if (typeof parsed.startLine === "number") {
+          const r = new monaco.Range(
+            parsed.startLine as number,
+            parsed.startColumn as number,
+            parsed.endLine as number,
+            parsed.endColumn as number,
+          );
           if (model.getValueInRange(r) === c.quote) range = r;
         }
       } catch {
-        // fall through to quote search
+        // fall through to the resolver
       }
       if (!range) {
-        const offset = resolveQuoteOffset(text, c.quote);
-        if (offset !== null) {
-          const start = model.getPositionAt(offset);
-          const end = model.getPositionAt(offset + c.quote.length);
+        // Tiers B/C: exact (disambiguated by context + proximity) then
+        // bounded fuzzy near the stored offset.
+        const res = resolveAnchor(text, {
+          quote: c.quote,
+          prefix: typeof parsed.prefix === "string" ? parsed.prefix : undefined,
+          suffix: typeof parsed.suffix === "string" ? parsed.suffix : undefined,
+          hintOffset: typeof parsed.textOffset === "number" ? parsed.textOffset : undefined,
+        });
+        if (res.offset !== null) {
+          const start = model.getPositionAt(res.offset);
+          const end = model.getPositionAt(res.offset + res.length);
           range = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+          approx = res.confidence === "fuzzy";
         }
       }
       if (range) {
         decos.push({
           range,
-          options: { inlineClassName: "oxplow-comment-highlight", stickiness: 1 },
+          options: {
+            inlineClassName: approx
+              ? "oxplow-comment-highlight oxplow-comment-highlight--approx"
+              : "oxplow-comment-highlight",
+            stickiness: 1,
+          },
         });
-        const aj = JSON.stringify({
-          startLine: range.startLineNumber,
-          startColumn: range.startColumn,
-          endLine: range.endLineNumber,
-          endColumn: range.endColumn,
-        });
+        // Persist the enriched anchor recomputed from the resolved
+        // location so the position hint + context self-heal (and old
+        // comments upgrade in place). The equality guard keeps churn down.
+        const aj = buildAnchorJson(model, text, range, approx);
         if (c.orphaned || c.anchor_json !== aj) void setCommentAnchor(c.id, aj, false);
         map.push({ decoId: "", commentId: c.id });
       } else if (!c.orphaned) {
@@ -112,6 +157,38 @@ export const MonacoCommentLayer = forwardRef<
     if (!vis || !dom) return null;
     const host = dom.getBoundingClientRect();
     return new DOMRect(host.left + vis.left, host.top + vis.top, 0, vis.height);
+  };
+
+  // Capture the current selection as a quote + enriched anchor_json.
+  // Shared by "Add comment" and "Relink orphaned".
+  const captureSelection = (): { quote: string; anchorJson: string } | null => {
+    const sel = editor?.getSelection?.();
+    const model = editor?.getModel?.();
+    if (!sel || !model || sel.isEmpty()) return null;
+    const raw: string = model.getValueInRange(sel);
+    const quote = raw.trim();
+    if (!quote) return null;
+    // Locate the trimmed quote inside the raw selection so context/offset
+    // line up with the text the resolver searches.
+    const text: string = model.getValue();
+    const lead = raw.length - raw.trimStart().length;
+    const quoteStart = model.getOffsetAt(sel.getStartPosition()) + lead;
+    const startPos = model.getPositionAt(quoteStart);
+    const endPos = model.getPositionAt(quoteStart + quote.length);
+    const { prefix, suffix } = extractContext(text, quoteStart, quoteStart + quote.length);
+    return {
+      quote,
+      anchorJson: JSON.stringify({
+        startLine: startPos.lineNumber,
+        startColumn: startPos.column,
+        endLine: endPos.lineNumber,
+        endColumn: endPos.column,
+        prefix,
+        suffix,
+        textOffset: quoteStart,
+        approx: false,
+      }),
+    };
   };
 
   // Honor cross-page "go to location" requests from the Comments
@@ -149,20 +226,13 @@ export const MonacoCommentLayer = forwardRef<
       },
       addCommentForSelection() {
         const sel = editor?.getSelection?.();
-        const model = editor?.getModel?.();
-        if (!sel || !model || sel.isEmpty()) return;
-        const quote: string = model.getValueInRange(sel).trim();
-        if (!quote) return;
+        if (!sel) return;
+        const captured = captureSelection();
+        if (!captured) return;
         const rect = rectAtPosition(sel.getEndPosition());
         if (!rect) return;
-        const anchorJson = JSON.stringify({
-          startLine: sel.startLineNumber,
-          startColumn: sel.startColumn,
-          endLine: sel.endLineNumber,
-          endColumn: sel.endColumn,
-        });
         setActive(null);
-        setPending({ quote, anchorJson, rect });
+        setPending({ quote: captured.quote, anchorJson: captured.anchorJson, rect });
       },
       openComment(commentId) {
         const model = editor?.getModel?.();
@@ -171,6 +241,15 @@ export const MonacoCommentLayer = forwardRef<
         const rect = r ? rectAtPosition(r.getStartPosition()) : null;
         setPending(null);
         setActive({ id: commentId, rect: rect ?? new DOMRect(120, 120, 0, 0) });
+      },
+      relinkTargets() {
+        return threadsRef.current
+          .filter((t) => t.comment.orphaned)
+          .map((t) => ({ id: t.comment.id, quote: t.comment.quote }));
+      },
+      relinkToSelection(commentId) {
+        const captured = captureSelection();
+        if (captured) void relinkComment(commentId, captured.quote, captured.anchorJson);
       },
     }),
     [editor],

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Markdown } from "tiptap-markdown";
@@ -11,10 +12,12 @@ import {
   CommentDecorations,
   commentDecorationsKey,
   findCommentRange,
+  flatten,
   type CommentRange,
 } from "./CommentDecorations.js";
-import { createComment, setCommentAnchor } from "../../api.js";
+import { createComment, relinkComment, setCommentAnchor } from "../../api.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
+import { extractContext } from "../Comments/anchor.js";
 import { useCommentsForTarget } from "../Comments/useCommentsForTarget.js";
 import {
   clearCommentReveal,
@@ -44,11 +47,28 @@ export interface RichTextCommentConfig {
   author?: string;
 }
 
+/// Build the enriched `anchor_json` for a resolved `[from, to)` doc
+/// range: the from/to fast-path hint plus prefix/suffix/textOffset
+/// (recomputed from the same flattened text the resolver searches) and
+/// whether this was a fuzzy (approximate) match.
+function buildAnchorJson(doc: PMNode, from: number, to: number, approx: boolean): string {
+  const { text, map } = flatten(doc);
+  let startOff = map.findIndex((p) => p >= from);
+  if (startOff === -1) startOff = map.length;
+  let endOff = map.findIndex((p) => p >= to);
+  if (endOff === -1) endOff = map.length;
+  const { prefix, suffix } = extractContext(text, startOff, endOff);
+  return JSON.stringify({ from, to, prefix, suffix, textOffset: startOff, approx });
+}
+
 interface PendingSelection {
   quote: string;
   from: number;
   to: number;
   rect: DOMRect;
+  /// Enriched anchor_json (from/to + prefix/suffix/textOffset) captured
+  /// from the same flattened text the resolver searches.
+  anchorJson: string;
 }
 
 /**
@@ -190,6 +210,25 @@ export function RichTextField({
   // typing in between is handled by the plugin mapping its set forward.
   // A corrected/orphaned anchor is persisted via `setCommentAnchor`,
   // which deliberately emits no event so this doesn't loop.
+  // Bumped (debounced) on every doc-changing transaction so the
+  // re-anchor effect re-runs on live edits — not just on the debounced
+  // `value` commit. Without this, deleting then retyping the quoted text
+  // while focused would leave the comment stuck orphaned until blur.
+  const [docVersion, setDocVersion] = useState(0);
+  useEffect(() => {
+    if (!editor) return;
+    let timer: number | null = null;
+    const onTx = () => {
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setDocVersion((v) => v + 1), 150);
+    };
+    editor.on("update", onTx);
+    return () => {
+      if (timer != null) window.clearTimeout(timer);
+      editor.off("update", onTx);
+    };
+  }, [editor]);
+
   useEffect(() => {
     if (!editor || !comments) return;
     const doc = editor.state.doc;
@@ -198,25 +237,36 @@ export function RichTextField({
       const c = thread.comment;
       let hintFrom: number | undefined;
       let hintTo: number | undefined;
+      let prefix: string | undefined;
+      let suffix: string | undefined;
       try {
-        const parsed = JSON.parse(c.anchor_json) as { from?: number; to?: number };
+        const parsed = JSON.parse(c.anchor_json) as {
+          from?: number;
+          to?: number;
+          prefix?: string;
+          suffix?: string;
+        };
         hintFrom = typeof parsed.from === "number" ? parsed.from : undefined;
         hintTo = typeof parsed.to === "number" ? parsed.to : undefined;
+        prefix = typeof parsed.prefix === "string" ? parsed.prefix : undefined;
+        suffix = typeof parsed.suffix === "string" ? parsed.suffix : undefined;
       } catch {
         // Malformed hint — fall back to a pure quote search.
       }
-      const range = findCommentRange(doc, c.quote, hintFrom, hintTo);
+      const range = findCommentRange(doc, c.quote, { hintFrom, hintTo, prefix, suffix });
       if (range) {
-        ranges.push({ id: c.id, from: range.from, to: range.to });
-        if (c.orphaned || hintFrom !== range.from || hintTo !== range.to) {
-          void setCommentAnchor(c.id, JSON.stringify({ from: range.from, to: range.to }), false);
-        }
+        ranges.push({ id: c.id, from: range.from, to: range.to, approx: range.approx });
+        // Re-persist the enriched anchor recomputed from the resolved
+        // location so the hint + context self-heal (and old comments
+        // upgrade in place); guard keeps DB churn down.
+        const aj = buildAnchorJson(doc, range.from, range.to, range.approx);
+        if (c.orphaned || c.anchor_json !== aj) void setCommentAnchor(c.id, aj, false);
       } else if (!c.orphaned) {
         void setCommentAnchor(c.id, c.anchor_json, true);
       }
     }
     editor.view.dispatch(editor.state.tr.setMeta(commentDecorationsKey, ranges));
-  }, [editor, threads, comments, value]);
+  }, [editor, threads, comments, value, docVersion]);
 
   // Honor cross-page "go to location" requests from the Comments
   // dashboard. The decoration plugin renders each anchored range as a
@@ -244,12 +294,35 @@ export function RichTextField({
   // Anchors to the caret at the END of the selection (coordsAtPos), not
   // the selection's bounding box — a multi-line / mid-paragraph box-left
   // lands the composer far from where the user is looking.
+  // Capture the quote + enriched anchor (prefix/suffix/textOffset) from
+  // the SAME flattened text the resolver searches, so stored context
+  // lines up with re-anchor. Block separators let cross-block selections
+  // round-trip.
+  const captureAnchor = (from: number, to: number): { quote: string; anchorJson: string } | null => {
+    if (!editor) return null;
+    const { text, map } = flatten(editor.state.doc);
+    let startOff = map.findIndex((p) => p >= from);
+    if (startOff === -1) startOff = map.length;
+    let endOff = map.findIndex((p) => p >= to);
+    if (endOff === -1) endOff = map.length;
+    const raw = text.slice(startOff, endOff);
+    const quote = raw.trim();
+    if (!quote) return null;
+    const lead = raw.length - raw.trimStart().length;
+    const qStart = startOff + lead;
+    const { prefix, suffix } = extractContext(text, qStart, qStart + quote.length);
+    return {
+      quote,
+      anchorJson: JSON.stringify({ from, to, prefix, suffix, textOffset: qStart, approx: false }),
+    };
+  };
+
   const startCommentForSelection = () => {
     if (!editor || !comments) return;
     const { from, to, empty } = editor.state.selection;
     if (empty) return;
-    const quote = editor.state.doc.textBetween(from, to).trim();
-    if (!quote) return;
+    const captured = captureAnchor(from, to);
+    if (!captured) return;
     let rect: DOMRect;
     try {
       const c = editor.view.coordsAtPos(to);
@@ -260,7 +333,7 @@ export function RichTextField({
       rect = domSel.getRangeAt(0).getBoundingClientRect();
     }
     setActiveComment(null);
-    setPendingSel({ quote, from, to, rect });
+    setPendingSel({ quote: captured.quote, from, to, rect, anchorJson: captured.anchorJson });
   };
 
   // Right-click menu. Always shown (the native webview menu is never
@@ -314,6 +387,21 @@ export function RichTextField({
         enabled: true,
         run: () => startCommentForSelection(),
       });
+      // Re-attach any orphaned comment to this fresh selection — the
+      // escape hatch for a quote that drifted past fuzzy tolerance.
+      for (const t of threads) {
+        if (!t.comment.orphaned) continue;
+        const snip = t.comment.quote.length > 24 ? `${t.comment.quote.slice(0, 24)}…` : t.comment.quote;
+        items.push({
+          id: `comment.relink.${t.comment.id}`,
+          label: `Relink orphaned: “${snip}”`,
+          enabled: true,
+          run: () => {
+            const captured = captureAnchor(from, to);
+            if (captured) void relinkComment(t.comment.id, captured.quote, captured.anchorJson);
+          },
+        });
+      }
     }
     if (comments && commentId != null) {
       const rect = commentEl!.getBoundingClientRect();
@@ -338,7 +426,7 @@ export function RichTextField({
       targetKind: comments.targetKind,
       targetId: comments.targetId,
       quote: pendingSel.quote,
-      anchorJson: JSON.stringify({ from: pendingSel.from, to: pendingSel.to }),
+      anchorJson: pendingSel.anchorJson,
       intent: input.intent,
       author: comments.author ?? "user",
       body: input.body,

@@ -142,6 +142,27 @@ pub async fn set_comment_anchor(
         .await?)
 }
 
+/// Re-attach an orphaned comment to a freshly-selected span: rewrite
+/// both quote + anchor and clear the orphan flag. A user mutation, so it
+/// emits a changed event (unlike the passive `set_comment_anchor`).
+#[tauri::command]
+#[specta::specta]
+pub async fn relink_comment(
+    state: tauri::State<'_, AppState>,
+    comment_id: CommentId,
+    quote: String,
+    anchor_json: String,
+) -> Result<(), IpcError> {
+    state
+        .comment_store
+        .relink(comment_id, &quote, &anchor_json)
+        .await?;
+    if let Some(thread) = state.comment_store.get(comment_id).await? {
+        emit_changed(&state, &thread.comment);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_comment(

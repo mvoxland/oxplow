@@ -5,7 +5,7 @@ import { requestCommentReveal } from "../comment-reveal-bus.js";
 import { resolvedWindowOptions, visibleThreads } from "../comments-filter.js";
 import type { Stream } from "../api.js";
 import type { CommentThread } from "../tauri-bridge/generated/bindings.js";
-import { CommentPopover } from "../components/Comments/CommentPopover.js";
+import { anchorIsApprox, CommentPopover } from "../components/Comments/CommentPopover.js";
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -215,6 +215,14 @@ export function CommentsInboxPage({
                       )}
                       {t.comment.orphaned && (
                         <span style={{ fontSize: "var(--text-xs)", color: "var(--freshness-stale)" }}>orphaned</span>
+                      )}
+                      {!t.comment.orphaned && anchorIsApprox(t.comment.anchor_json) && (
+                        <span
+                          title="Re-attached approximately — the quoted text drifted, so this anchor may not be exact."
+                          style={{ fontSize: "var(--text-xs)", color: "var(--freshness-stale)" }}
+                        >
+                          approx
+                        </span>
                       )}
                       <span style={{ flex: 1 }} />
                       <button

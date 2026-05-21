@@ -378,6 +378,35 @@ impl CommentStore for SqliteCommentStore {
         .unwrap()
     }
 
+    async fn relink(
+        &self,
+        id: CommentId,
+        quote: &str,
+        anchor_json: &str,
+    ) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        let quote = quote.to_string();
+        let anchor_json = anchor_json.to_string();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "UPDATE comment
+                     SET quote = ?2, anchor_json = ?3, orphaned = 0, updated_at = ?4
+                     WHERE id = ?1",
+                    params![
+                        id.value(),
+                        quote,
+                        anchor_json,
+                        ts_to_string(Timestamp::now())
+                    ],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     async fn delete(&self, id: CommentId) -> Result<(), DomainError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
@@ -548,6 +577,48 @@ mod tests {
             reopened.comment.resolved_at.is_none(),
             "reopening should clear resolved_at",
         );
+    }
+
+    #[tokio::test]
+    async fn relink_rewrites_quote_and_clears_orphan() {
+        let (db, stream, thread) = fixture().await;
+        let store = SqliteCommentStore::new(db);
+        let c = store
+            .create(
+                &stream,
+                Some(&thread),
+                &target(),
+                "old words",
+                "{\"from\":1,\"to\":9}",
+                CommentIntent::Note,
+                "user",
+                "note",
+            )
+            .await
+            .unwrap();
+        // Mark it orphaned (quote vanished).
+        store
+            .set_anchor(c.comment.id, c.comment.anchor_json.as_str(), true)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .get(c.comment.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .comment
+                .orphaned
+        );
+
+        store
+            .relink(c.comment.id, "new words", "{\"from\":20,\"to\":29}")
+            .await
+            .unwrap();
+        let after = store.get(c.comment.id).await.unwrap().unwrap().comment;
+        assert_eq!(after.quote, "new words");
+        assert_eq!(after.anchor_json, "{\"from\":20,\"to\":29}");
+        assert!(!after.orphaned);
     }
 
     #[tokio::test]

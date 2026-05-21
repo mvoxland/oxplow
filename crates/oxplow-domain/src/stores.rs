@@ -204,6 +204,16 @@ pub trait CommentStore: Send + Sync {
         anchor_json: &str,
         orphaned: bool,
     ) -> Result<(), DomainError>;
+    /// Re-attach an orphaned comment to a freshly-selected span: replace
+    /// both the `quote` and the `anchor_json` and clear `orphaned`. (The
+    /// old quote no longer matches, so unlike `set_anchor` this rewrites
+    /// the durable anchor text too.)
+    async fn relink(
+        &self,
+        id: CommentId,
+        quote: &str,
+        anchor_json: &str,
+    ) -> Result<(), DomainError>;
     async fn delete(&self, id: CommentId) -> Result<(), DomainError>;
 
     /// Delete `resolved` and `orphaned` threads whose last activity is
