@@ -2,11 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { EffortAtSnapshot, Snapshot, Stream } from "../api.js";
 import {
   getTaskSummaries,
-  listChangedPathsForEffort,
   listEffortFiles,
   listEffortsAtSnapshots,
   listSnapshots,
 } from "../api.js";
+import { groupChangesByEffort, type GroupedChanges } from "../snapshot-effort-grouping.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page } from "../tabs/Page.js";
@@ -48,12 +48,6 @@ interface EffortRow {
   effort: EffortAtSnapshot;
   taskTitle: string;
   files: Array<{ path: string; change: "created" | "updated" | "deleted" }>;
-  /** Auto-diff between start_snapshot_id and end_snapshot_id —
-   *  every path that changed during the effort window regardless of
-   *  whether the agent claimed it. Reference list shown alongside
-   *  the canonical `files` so the user can spot omissions. Empty
-   *  for in-flight efforts (end snapshot id isn't pinned yet). */
-  autoDiff: string[];
 }
 
 export function SnapshotDetailPage({
@@ -171,27 +165,11 @@ export function SnapshotDetailPage({
           }),
         );
         const filesById = new Map<string, EffortFileRow[]>(filesByEffort);
-        const diffsByEffort: Array<[string, string[]]> = await Promise.all(
-          completed.map(async (e) => {
-            try {
-              const paths = await listChangedPathsForEffort(e.effortId);
-              return [e.effortId, paths] as [string, string[]];
-            } catch (err) {
-              logUi("warn", "effort auto-diff fetch failed", {
-                error: String(err),
-                effortId: e.effortId,
-              });
-              return [e.effortId, [] as string[]] as [string, string[]];
-            }
-          }),
-        );
-        const diffById = new Map<string, string[]>(diffsByEffort);
         if (cancelled) return;
         const toRow = (effort: EffortAtSnapshot): EffortRow => ({
           effort,
           taskTitle: titleByTask.get(effort.tasksId) ?? `task ${effort.tasksId}`,
           files: filesById.get(effort.effortId) ?? [],
-          autoDiff: diffById.get(effort.effortId) ?? [],
         });
         setCompletedEfforts(completed.map(toRow));
         setInFlightEfforts(inFlight.map(toRow));
@@ -212,6 +190,31 @@ export function SnapshotDetailPage({
     if (!snapshot) return `Snapshot ${snapshotId}`;
     return `Snapshot ${snapshotId} · ${formatFullDateTime(snapshot.createdAt)}`;
   }, [snapshot, snapshotId]);
+
+  // The page's core: this snapshot's actual changed files, grouped by
+  // the effort(s) that claim them. All efforts active here (completed +
+  // in-flight) are candidate claimers; the helper buckets the rest into
+  // "unclaimed" and reports efforts that claimed nothing changed here.
+  const allEffortRows = useMemo(
+    () => [...completedEfforts, ...inFlightEfforts],
+    [completedEfforts, inFlightEfforts],
+  );
+  const effortById = useMemo(
+    () => new Map(allEffortRows.map((r) => [r.effort.effortId, r])),
+    [allEffortRows],
+  );
+  const grouped = useMemo<GroupedChanges>(
+    () =>
+      groupChangesByEffort(
+        analysis.files.map((f) => ({ path: f.path, status: f.status })),
+        allEffortRows.map((r) => ({
+          effortId: r.effort.effortId,
+          title: r.taskTitle,
+          files: r.files,
+        })),
+      ),
+    [analysis.files, allEffortRows],
+  );
 
   return (
     <Page testId="page-snapshot-detail" title={headerTitle} kind="snapshot" backlinks={backlinks} outbound={outbound}>
@@ -252,22 +255,10 @@ export function SnapshotDetailPage({
           </div>
         </div>
 
-        {completedEfforts.length > 0 ? (
-          <EffortsSection
-            title="Efforts completed at this snapshot"
-            rows={completedEfforts}
-            showAutoDiff
-            onOpenTask={(taskId) => onOpenPage(taskRef(taskId))}
-            onOpenSnapshot={(id) => onOpenPage(snapshotRef(id))}
-            onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
-          />
-        ) : null}
-
-        {inFlightEfforts.length > 0 ? (
-          <EffortsSection
-            title="Efforts in progress at this snapshot"
-            rows={inFlightEfforts}
-            showAutoDiff={false}
+        {snapshot && stream ? (
+          <ChangesByEffortSection
+            grouped={grouped}
+            effortById={effortById}
             onOpenTask={(taskId) => onOpenPage(taskRef(taskId))}
             onOpenSnapshot={(id) => onOpenPage(snapshotRef(id))}
             onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
@@ -290,49 +281,89 @@ export function SnapshotDetailPage({
   );
 }
 
-function EffortsSection({
-  title,
-  rows,
-  showAutoDiff,
+/// The page's core: this snapshot's changed files, grouped by the
+/// effort(s) that claim them, then an "Unclaimed" bucket, then a roster
+/// of efforts active here that claimed none of the changes.
+function ChangesByEffortSection({
+  grouped,
+  effortById,
   onOpenTask,
   onOpenSnapshot,
   onOpenFile,
 }: {
-  title: string;
-  rows: EffortRow[];
-  /** Show the "Also changed in window" reference list per row.
-   *  Only meaningful for completed efforts (in-flight ones have no
-   *  end snapshot pinned yet). */
-  showAutoDiff: boolean;
+  grouped: GroupedChanges;
+  effortById: Map<string, EffortRow>;
   onOpenTask(taskId: number): void;
   onOpenSnapshot(snapshotId: number): void;
   onOpenFile?: (path: string) => void;
 }) {
+  const changedCount =
+    grouped.byEffort.reduce((n, g) => n + g.files.length, 0) + grouped.unclaimed.length;
+  const idleRows = grouped.idleEffortIds
+    .map((id) => effortById.get(id))
+    .filter((r): r is EffortRow => !!r);
+
+  const fileRow = (
+    f: GroupedChanges["unclaimed"][number],
+    key: string,
+  ) => (
+    <li key={key} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+      <StatusBadge status={f.entry.status} />
+      {onOpenFile ? (
+        <button
+          type="button"
+          onClick={() => onOpenFile(f.entry.path)}
+          style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
+          title={f.entry.path}
+        >
+          {f.entry.path}
+        </button>
+      ) : (
+        <span style={{ fontFamily: "var(--mono, monospace)" }}>{f.entry.path}</span>
+      )}
+      {f.declaredChange ? (
+        <span style={{ color: "var(--text-muted)", fontSize: 10 }}>claimed: {f.declaredChange}</span>
+      ) : null}
+      {f.alsoClaimedBy.length > 0 ? (
+        <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
+          · also claimed by {f.alsoClaimedBy.join(", ")}
+        </span>
+      ) : null}
+    </li>
+  );
+
   return (
     <section style={card}>
       <div style={{ fontWeight: 600, marginBottom: 8, fontSize: "var(--text-sm)" }}>
-        {title}
+        {changedCount === 0
+          ? "Changes in this snapshot"
+          : `${changedCount} file${changedCount === 1 ? "" : "s"} changed in this snapshot`}
       </div>
+      {changedCount === 0 ? (
+        <div style={{ color: "var(--text-muted)", fontSize: 11 }}>
+          No file changes were captured in this snapshot.
+        </div>
+      ) : null}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {rows.map(({ effort, taskTitle, files, autoDiff }) => {
-          const claimedSet = new Set(files.map((f) => f.path));
-          const referenceOnly = showAutoDiff
-            ? autoDiff.filter((p) => !claimedSet.has(p))
-            : [];
+        {grouped.byEffort.map((group) => {
+          const row = effortById.get(group.effortId);
+          const effort = row?.effort;
           return (
-            <div
-              key={effort.effortId}
-              style={{ display: "flex", flexDirection: "column", gap: 4 }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div key={group.effortId} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
                   type="button"
-                  onClick={() => onOpenTask(effort.tasksId)}
+                  onClick={() => effort && onOpenTask(effort.tasksId)}
                   style={{ ...linkButton, fontFamily: "inherit", fontWeight: 600 }}
                 >
-                  {taskTitle}
+                  {group.title}
                 </button>
-                {effort.startSnapshotId !== null ? (
+                {effort ? (
+                  <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>
+                    {effort.completedHere ? "completed here" : "in progress"}
+                  </span>
+                ) : null}
+                {effort?.startSnapshotId != null && !effort.completedHere ? (
                   <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
                     · started at{" "}
                     <button
@@ -345,116 +376,82 @@ function EffortsSection({
                   </span>
                 ) : null}
               </div>
-              {files.length === 0 && referenceOnly.length === 0 ? (
-                <div style={{ color: "var(--text-muted)", fontSize: 11, paddingLeft: 4 }}>
-                  {showAutoDiff
-                    ? "No files declared and no diff in the effort window."
-                    : "No files declared yet for this effort."}
-                </div>
-              ) : null}
-              {files.length > 0 ? (
-                <div>
-                  <div
-                    style={{
-                      color: "var(--text-muted)",
-                      fontSize: 10,
-                      paddingLeft: 4,
-                      marginBottom: 2,
-                    }}
-                  >
-                    Claimed (canonical authorship)
-                  </div>
-                  <ul style={listStyle}>
-                    {files.map((f) => (
-                      <li key={f.path}>
-                        {onOpenFile ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenFile(f.path)}
-                            style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
-                            title={`${f.change}: ${f.path}`}
-                          >
-                            {f.path}
-                          </button>
-                        ) : (
-                          <span style={{ fontFamily: "var(--mono, monospace)" }}>{f.path}</span>
-                        )}
-                        <span style={{ marginLeft: 6, color: "var(--text-muted)" }}>
-                          {f.change}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-              {referenceOnly.length > 0 ? (
-                <div>
-                  <div
-                    style={{
-                      color: "var(--text-muted)",
-                      fontSize: 10,
-                      paddingLeft: 4,
-                      marginBottom: 2,
-                    }}
-                    title="All paths whose file_snapshot rows fall in (start_snapshot, end_snapshot] but the agent didn't claim. Could be parallel efforts, formatters, or omissions."
-                  >
-                    Also changed in window (reference, not claimed)
-                  </div>
-                  <ul style={referenceListStyle}>
-                    {referenceOnly.map((path) => (
-                      <li key={path}>
-                        {onOpenFile ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenFile(path)}
-                            style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
-                          >
-                            {path}
-                          </button>
-                        ) : (
-                          <span style={{ fontFamily: "var(--mono, monospace)" }}>{path}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
+              <ul style={listStyle}>{group.files.map((f) => fileRow(f, f.entry.path))}</ul>
             </div>
           );
         })}
+
+        {grouped.unclaimed.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div
+              style={{ fontWeight: 600, fontSize: 11, color: "var(--freshness-stale)" }}
+              title="Changed in this snapshot but no active effort claimed them — formatters, codegen, parallel actors, or a capture gap."
+            >
+              Unclaimed
+            </div>
+            <ul style={listStyle}>{grouped.unclaimed.map((f) => fileRow(f, f.entry.path))}</ul>
+          </div>
+        ) : null}
       </div>
+
+      {idleRows.length > 0 ? (
+        <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 8 }}>
+          Also active here (claimed no changes in this snapshot):{" "}
+          {idleRows.map((r, i) => (
+            <span key={r.effort.effortId}>
+              {i > 0 ? ", " : ""}
+              <button type="button" onClick={() => onOpenTask(r.effort.tasksId)} style={linkButton}>
+                {r.taskTitle}
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 8 }}>
-        {showAutoDiff ? (
-          <>
-            "Claimed" is the agent's declared authorship via{" "}
-            <code>complete_task</code>/<code>amend_effort</code>.
-            "Also changed in window" is the auto-diff between the
-            effort's start and end snapshots — included for reference
-            so you can spot omissions or contributions from another
-            actor.
-          </>
-        ) : (
-          <>
-            Files shown are the agent's declared authorship via{" "}
-            <code>complete_task</code>/<code>amend_effort</code>{" "}
-            so far. The effort hasn't ended yet, so the start↔end
-            auto-diff isn't computable for these rows.
-          </>
-        )}
+        Files are this snapshot's actual diff, attributed to the effort(s) whose declared
+        authorship (via <code>complete_task</code>/<code>amend_effort</code>) includes them.
       </div>
     </section>
   );
 }
+
+/// Small colored chip for a snapshot file status.
+function StatusBadge({ status }: { status: string }) {
+  const color =
+    status === "added"
+      ? "var(--status-done, #4caf50)"
+      : status === "deleted"
+        ? "var(--severity-critical, #f87171)"
+        : "var(--text-secondary)";
+  const label = status === "added" ? "A" : status === "deleted" ? "D" : status === "modified" ? "M" : status[0]?.toUpperCase() ?? "?";
+  return (
+    <span
+      title={status}
+      style={{
+        fontFamily: "var(--mono, monospace)",
+        fontSize: 10,
+        fontWeight: 700,
+        color,
+        minWidth: 12,
+        textAlign: "center",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 
 const listStyle: React.CSSProperties = {
   margin: 0,
   paddingLeft: 18,
   fontSize: 11,
   color: "var(--text-secondary)",
-};
-const referenceListStyle: React.CSSProperties = {
-  ...listStyle,
-  color: "var(--text-muted)",
+  listStyle: "none",
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
 };
 
 interface SnapshotMetaProps {
