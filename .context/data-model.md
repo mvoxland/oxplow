@@ -783,7 +783,7 @@ globally). `listRecentlyFinished` filters out rows whose timestamp is
 ≤ the matching watermark; `clearRecentlyFinished` upserts both scopes
 to `now()`.
 
-### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migration `V22__comments.sql`)
+### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migrations `V22__comments.sql`, `V23__comment_resolved_at.sql`)
 
 Threaded annotations the user anchors to a text selection on any page
 (wiki body, code file lines, task detail). The user collects notes
@@ -799,9 +799,17 @@ every message in the thread including the first. **Integer PK ids
 CASCADE), thread_id (nullable, FK threads ON DELETE SET NULL),
 target_kind, target_id, quote, anchor_json, intent ('note' |
 'followup'), status ('open' | 'resolved'), orphaned (0/1), author,
-created_at, updated_at, last_activity_at`. Indexes on `(stream_id,
-status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
-`(target_kind, target_id)`.
+created_at, updated_at, last_activity_at, resolved_at (nullable, V23)`.
+Indexes on `(stream_id, status, last_activity_at DESC)`, `(thread_id,
+last_activity_at DESC)`, `(target_kind, target_id)`.
+
+- **`resolved_at`** is stamped by `set_status` on `→resolved` and
+  cleared on `→open`. It exists because neither `updated_at` (bumped by
+  auto re-anchoring via `set_anchor`) nor `last_activity_at` (messages
+  only) reliably marks *when* a comment was resolved — the Comments
+  Dashboard's "resolved in the last N days" buckets read this column.
+  V23 backfills pre-existing resolved rows from `updated_at`
+  (best-effort).
 
 - **Scope.** `stream_id` is the hard scope so the agent can list every
   comment in a stream regardless of which thread authored it;

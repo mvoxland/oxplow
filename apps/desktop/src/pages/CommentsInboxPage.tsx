@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { listCommentsForStream, subscribeCommentEvents } from "../api.js";
 import { requestCommentReveal } from "../comment-reveal-bus.js";
+import { resolvedWindowOptions, visibleThreads } from "../comments-filter.js";
 import type { Stream } from "../api.js";
 import type { CommentThread } from "../tauri-bridge/generated/bindings.js";
 import { CommentPopover } from "../components/Comments/CommentPopover.js";
@@ -47,6 +48,9 @@ export function CommentsInboxPage({
   const ctxNav = useOptionalPageNavigation();
   const [threads, setThreads] = useState<CommentThread[]>([]);
   const [active, setActive] = useState<{ id: number; rect: DOMRect } | null>(null);
+  // null = unresolved only (default); a number N = also show threads
+  // resolved within the last N days.
+  const [resolvedWindowDays, setResolvedWindowDays] = useState<number | null>(null);
   const streamId = stream?.id ?? null;
 
   useEffect(() => {
@@ -67,9 +71,18 @@ export function CommentsInboxPage({
     };
   }, [streamId]);
 
+  // Recompute the "now" baseline whenever the thread list changes so the
+  // resolved-age buckets stay fresh without re-running every render.
+  const nowMs = useMemo(() => Date.now(), [threads]);
+  const resolvedOptions = useMemo(() => resolvedWindowOptions(threads, nowMs), [threads, nowMs]);
+  const visible = useMemo(
+    () => visibleThreads(threads, resolvedWindowDays, nowMs),
+    [threads, resolvedWindowDays, nowMs],
+  );
+
   const groups = useMemo(() => {
     const byTarget = new Map<string, { kind: string; id: string; threads: CommentThread[] }>();
-    for (const t of threads) {
+    for (const t of visible) {
       const key = `${t.comment.target_kind}:${t.comment.target_id}`;
       let g = byTarget.get(key);
       if (!g) {
@@ -79,7 +92,7 @@ export function CommentsInboxPage({
       g.threads.push(t);
     }
     return [...byTarget.values()];
-  }, [threads]);
+  }, [visible]);
 
   const navigate = (kind: string, id: string) => {
     const ref = targetRef(kind, id);
@@ -100,9 +113,46 @@ export function CommentsInboxPage({
   return (
     <Page title="Comments Dashboard">
       <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }} data-testid="page-comments">
-        {groups.length === 0 ? (
+        {resolvedOptions.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <label
+              htmlFor="comments-resolved-filter"
+              style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", textTransform: "uppercase", letterSpacing: "0.04em" }}
+            >
+              Show
+            </label>
+            <select
+              id="comments-resolved-filter"
+              data-testid="comments-resolved-filter"
+              value={resolvedWindowDays ?? ""}
+              onChange={(e) =>
+                setResolvedWindowDays(e.target.value === "" ? null : Number(e.target.value))
+              }
+              style={{
+                background: "var(--surface-card)",
+                color: "var(--text-primary)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 6,
+                padding: "4px 8px",
+                fontSize: "var(--text-xs)",
+              }}
+            >
+              <option value="">Unresolved only</option>
+              {resolvedOptions.map((o) => (
+                <option key={o.days} value={o.days}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {threads.length === 0 ? (
           <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
             No comments yet. Select text in a wiki page, file, or task and add one.
+          </div>
+        ) : groups.length === 0 ? (
+          <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
+            No unresolved comments.{resolvedOptions.length > 0 ? " Use the filter above to show resolved ones." : ""}
           </div>
         ) : (
           groups.map((g) => (

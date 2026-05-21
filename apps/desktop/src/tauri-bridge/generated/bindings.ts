@@ -970,6 +970,13 @@ export type Comment = {
 	created_at: Timestamp,
 	updated_at: Timestamp,
 	last_activity_at: Timestamp,
+	/**
+	 *  When the comment was last moved to `resolved`, or `None` while
+	 *  open. Cleared on reopen. Distinct from `updated_at` (which auto
+	 *  re-anchoring bumps) and `last_activity_at` (messages only), so it
+	 *  is the only reliable "when resolved" signal.
+	 */
+	resolved_at: Timestamp | null,
 };
 
 /**

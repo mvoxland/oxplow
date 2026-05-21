@@ -68,6 +68,11 @@ pub struct Comment {
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
     pub last_activity_at: Timestamp,
+    /// When the comment was last moved to `resolved`, or `None` while
+    /// open. Cleared on reopen. Distinct from `updated_at` (which auto
+    /// re-anchoring bumps) and `last_activity_at` (messages only), so it
+    /// is the only reliable "when resolved" signal.
+    pub resolved_at: Option<Timestamp>,
 }
 
 /// One message in a comment thread (the first message included).

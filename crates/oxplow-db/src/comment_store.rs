@@ -71,6 +71,7 @@ fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
     let last_activity_at: String = row.get("last_activity_at")?;
+    let resolved_at: Option<String> = row.get("resolved_at")?;
     Ok(Comment {
         id: CommentId::new(row.get("id")?),
         stream_id: StreamId::from(row.get::<_, String>("stream_id")?),
@@ -86,6 +87,9 @@ fn row_to_comment(row: &rusqlite::Row<'_>) -> rusqlite::Result<Comment> {
         created_at: string_to_ts(&created_at).map_err(map_err)?,
         updated_at: string_to_ts(&updated_at).map_err(map_err)?,
         last_activity_at: string_to_ts(&last_activity_at).map_err(map_err)?,
+        resolved_at: resolved_at
+            .map(|s| string_to_ts(&s).map_err(map_err))
+            .transpose()?,
     })
 }
 
@@ -208,6 +212,7 @@ impl CommentStore for SqliteCommentStore {
                     created_at: now,
                     updated_at: now,
                     last_activity_at: now,
+                    resolved_at: None,
                 };
                 let messages = load_messages(conn, comment_id)?;
                 Ok(CommentThread { comment, messages })
@@ -328,13 +333,16 @@ impl CommentStore for SqliteCommentStore {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
+                // Stamp resolved_at on →resolved, clear it on →open, so
+                // the dashboard can bucket resolved comments by date.
+                let now = ts_to_string(Timestamp::now());
+                let resolved_at = match status {
+                    CommentStatus::Resolved => Some(now.clone()),
+                    CommentStatus::Open => None,
+                };
                 conn.execute(
-                    "UPDATE comment SET status = ?2, updated_at = ?3 WHERE id = ?1",
-                    params![
-                        id.value(),
-                        status_to_str(status),
-                        ts_to_string(Timestamp::now())
-                    ],
+                    "UPDATE comment SET status = ?2, updated_at = ?3, resolved_at = ?4 WHERE id = ?1",
+                    params![id.value(), status_to_str(status), now, resolved_at],
                 )?;
                 Ok(())
             })
@@ -498,6 +506,48 @@ mod tests {
         let listed = store.list_for_target(&target()).await.unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].comment.id, created.comment.id);
+    }
+
+    #[tokio::test]
+    async fn resolved_at_set_on_resolve_cleared_on_reopen() {
+        let (db, stream, thread) = fixture().await;
+        let store = SqliteCommentStore::new(db);
+        let c = store
+            .create(
+                &stream,
+                Some(&thread),
+                &target(),
+                "words",
+                "{\"from\":1,\"to\":3}",
+                CommentIntent::Note,
+                "user",
+                "hmm",
+            )
+            .await
+            .unwrap();
+        // Open comments carry no resolved_at.
+        assert!(c.comment.resolved_at.is_none());
+
+        store
+            .set_status(c.comment.id, CommentStatus::Resolved)
+            .await
+            .unwrap();
+        let resolved = store.get(c.comment.id).await.unwrap().unwrap();
+        assert!(
+            resolved.comment.resolved_at.is_some(),
+            "resolving should stamp resolved_at",
+        );
+
+        // Reopening clears it again.
+        store
+            .set_status(c.comment.id, CommentStatus::Open)
+            .await
+            .unwrap();
+        let reopened = store.get(c.comment.id).await.unwrap().unwrap();
+        assert!(
+            reopened.comment.resolved_at.is_none(),
+            "reopening should clear resolved_at",
+        );
     }
 
     #[tokio::test]
