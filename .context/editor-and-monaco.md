@@ -199,6 +199,13 @@ rich-text integration:
   native DOM one), so the rect comes from
   `editor.getScrolledVisiblePosition` + the editor DOM node's bounding
   rect — NOT `window.getSelection()`.
+- **Cross-page reveal:** the layer subscribes to `comment-reveal-bus.ts`.
+  When the Comments Dashboard's "Go to location" button fires
+  `requestCommentReveal(id)` and navigation lands on this file, the layer
+  (once its decoration is painted) calls `editor.revealRangeInCenter` on
+  the matching decoration range, opens the popover, and clears the bus.
+  The request survives the async mount + threads fetch because it stays
+  pending until consumed.
 
 ## LSP bridge
 

@@ -2,6 +2,11 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { createComment, setCommentAnchor } from "../../api.js";
+import {
+  clearCommentReveal,
+  peekPendingCommentReveal,
+  subscribeCommentReveal,
+} from "../../comment-reveal-bus.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { resolveQuoteOffset } from "./anchor.js";
 import { CommentPopover } from "./CommentPopover.js";
@@ -108,6 +113,27 @@ export const MonacoCommentLayer = forwardRef<
     const host = dom.getBoundingClientRect();
     return new DOMRect(host.left + vis.left, host.top + vis.top, 0, vis.height);
   };
+
+  // Honor cross-page "go to location" requests from the Comments
+  // dashboard. We only act when the pending comment is one of ours; the
+  // request stays on the bus until the decoration is painted (the
+  // re-anchor effect above runs first), so a slow threads fetch after
+  // navigation still resolves. `revealTick` re-runs this when a new
+  // request arrives even if the thread list is unchanged.
+  const [revealTick, setRevealTick] = useState(0);
+  useEffect(() => subscribeCommentReveal(() => setRevealTick((t) => t + 1)), []);
+  useEffect(() => {
+    const id = peekPendingCommentReveal();
+    if (id == null || !ready) return;
+    if (!threadsRef.current.some((t) => t.comment.id === id)) return;
+    const model = editor?.getModel?.();
+    const entry = decoMapRef.current.find((e) => e.commentId === id);
+    const range = entry && model ? model.getDecorationRange(entry.decoId) : null;
+    if (!range) return; // decorations not painted yet — retry on next deps change
+    editor.revealRangeInCenter(range);
+    setActive({ id, rect: rectAtPosition(range.getStartPosition()) ?? new DOMRect(120, 120, 0, 0) });
+    clearCommentReveal(id);
+  }, [revealTick, threads, ready, editor]);
 
   useImperativeHandle(
     ref,

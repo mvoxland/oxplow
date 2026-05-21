@@ -169,6 +169,13 @@ item.thread_id }`.
   the wrapper's editor-focus `onClick` doesn't steal focus. The
   highlight CSS class is `.oxplow-comment-highlight`
   (`--comment-highlight*` tokens).
+- **Cross-page reveal.** The field subscribes to `comment-reveal-bus.ts`.
+  When the Comments Dashboard's "Go to location" button fires
+  `requestCommentReveal(id)` and navigation lands on this wiki page, the
+  field finds the decoration's rendered `[data-comment-id]` node,
+  `scrollIntoView`s it, opens its `CommentPopover`, and clears the bus.
+  The request stays pending until the node exists, so the async mount +
+  threads fetch after navigation still resolves.
 
 ## Related
 

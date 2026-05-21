@@ -16,6 +16,11 @@ import {
 import { createComment, setCommentAnchor } from "../../api.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { useCommentsForTarget } from "../Comments/useCommentsForTarget.js";
+import {
+  clearCommentReveal,
+  peekPendingCommentReveal,
+  subscribeCommentReveal,
+} from "../../comment-reveal-bus.js";
 import { CommentPopover } from "../Comments/CommentPopover.js";
 import { NewCommentPopover } from "../Comments/NewCommentPopover.js";
 import { ContextMenu } from "../ContextMenu.js";
@@ -212,6 +217,28 @@ export function RichTextField({
     }
     editor.view.dispatch(editor.state.tr.setMeta(commentDecorationsKey, ranges));
   }, [editor, threads, comments, value]);
+
+  // Honor cross-page "go to location" requests from the Comments
+  // dashboard. The decoration plugin renders each anchored range as a
+  // `[data-comment-id]` span (the re-anchor effect above runs first), so
+  // we scroll that node into view and open its popover. The request
+  // stays on the bus until the node exists, surviving the async mount +
+  // threads fetch after navigation.
+  const [revealTick, setRevealTick] = useState(0);
+  useEffect(() => subscribeCommentReveal(() => setRevealTick((t) => t + 1)), []);
+  useEffect(() => {
+    if (!editor || !comments) return;
+    const id = peekPendingCommentReveal();
+    if (id == null) return;
+    if (!threads.some((t) => t.comment.id === id)) return;
+    const dom = editor.view.dom as HTMLElement;
+    const el = dom.querySelector(`[data-comment-id="${id}"]`) as HTMLElement | null;
+    if (!el) return; // decoration not painted yet — retry on next deps change
+    el.scrollIntoView({ block: "center" });
+    setPendingSel(null);
+    setActiveComment({ id, rect: el.getBoundingClientRect() });
+    clearCommentReveal(id);
+  }, [revealTick, threads, comments, value, editor]);
 
   // Open the new-comment composer anchored to the current selection.
   // Anchors to the caret at the END of the selection (coordsAtPos), not

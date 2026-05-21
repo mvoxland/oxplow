@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { listCommentsForStream, subscribeCommentEvents } from "../api.js";
+import { requestCommentReveal } from "../comment-reveal-bus.js";
 import type { Stream } from "../api.js";
 import type { CommentThread } from "../tauri-bridge/generated/bindings.js";
 import { CommentPopover } from "../components/Comments/CommentPopover.js";
@@ -42,7 +43,7 @@ export function CommentsInboxPage({
   stream: Stream | null;
   onOpenPage: (ref: TabRef) => void;
 }) {
-  usePageTitle("Comments");
+  usePageTitle("Comments Dashboard");
   const ctxNav = useOptionalPageNavigation();
   const [threads, setThreads] = useState<CommentThread[]>([]);
   const [active, setActive] = useState<{ id: number; rect: DOMRect } | null>(null);
@@ -87,8 +88,17 @@ export function CommentsInboxPage({
     else onOpenPage(ref);
   };
 
+  // Open the comment's target page and ask that surface to scroll to and
+  // open the anchored comment. The reveal request is stashed on the bus
+  // because navigation is async — the target mounts and fetches its
+  // threads after this returns (see comment-reveal-bus.ts).
+  const goToLocation = (t: CommentThread) => {
+    requestCommentReveal(t.comment.id);
+    navigate(t.comment.target_kind, t.comment.target_id);
+  };
+
   return (
-    <Page title="Comments">
+    <Page title="Comments Dashboard">
       <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }} data-testid="page-comments">
         {groups.length === 0 ? (
           <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
@@ -121,15 +131,13 @@ export function CommentsInboxPage({
               {g.threads.map((t) => {
                 const lastMsg = t.messages[t.messages.length - 1];
                 return (
-                  <button
+                  // Card holds two distinct actions, so it's a div (not a
+                  // button): the header carries "Go to location" and the
+                  // body button opens the thread popover inline.
+                  <div
                     key={t.comment.id}
-                    type="button"
                     data-testid={`comments-row-${t.comment.id}`}
-                    onClick={(e) =>
-                      setActive({ id: t.comment.id, rect: e.currentTarget.getBoundingClientRect() })
-                    }
                     style={{
-                      textAlign: "left",
                       display: "flex",
                       flexDirection: "column",
                       gap: 4,
@@ -137,7 +145,6 @@ export function CommentsInboxPage({
                       background: "var(--surface-card)",
                       border: "1px solid var(--border-subtle)",
                       borderRadius: 6,
-                      cursor: "pointer",
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -160,30 +167,68 @@ export function CommentsInboxPage({
                         <span style={{ fontSize: "var(--text-xs)", color: "var(--freshness-stale)" }}>orphaned</span>
                       )}
                       <span style={{ flex: 1 }} />
-                      <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-                        {t.messages.length} {t.messages.length === 1 ? "message" : "messages"}
-                      </span>
+                      <button
+                        type="button"
+                        data-testid={`comments-goto-${t.comment.id}`}
+                        disabled={t.comment.orphaned}
+                        title={
+                          t.comment.orphaned
+                            ? "This comment's anchor was lost, so its location can't be shown"
+                            : "Open the page and scroll to this comment"
+                        }
+                        onClick={() => goToLocation(t)}
+                        style={{
+                          fontSize: "var(--text-xs)",
+                          padding: "1px 8px",
+                          borderRadius: 4,
+                          background: "transparent",
+                          color: t.comment.orphaned ? "var(--text-muted)" : "var(--accent)",
+                          border: "1px solid var(--border-subtle)",
+                          cursor: t.comment.orphaned ? "default" : "pointer",
+                        }}
+                      >
+                        Go to location
+                      </button>
                     </div>
-                    <div
+                    <button
+                      type="button"
+                      data-testid={`comments-open-${t.comment.id}`}
+                      onClick={(e) =>
+                        setActive({ id: t.comment.id, rect: e.currentTarget.getBoundingClientRect() })
+                      }
                       style={{
-                        fontSize: "var(--text-xs)",
-                        color: "var(--text-secondary)",
-                        fontStyle: "italic",
-                        borderLeft: "2px solid var(--comment-highlight)",
-                        paddingLeft: 8,
+                        textAlign: "left",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                        padding: 0,
+                        background: "transparent",
+                        border: "none",
+                        color: "inherit",
+                        cursor: "pointer",
                       }}
                     >
-                      “{t.comment.quote}”
-                    </div>
-                    {lastMsg && (
-                      <div style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)", whiteSpace: "pre-wrap" }}>
-                        <span style={{ color: lastMsg.author === "agent" ? "var(--accent)" : "var(--text-secondary)", fontWeight: 600 }}>
-                          {lastMsg.author}:{" "}
-                        </span>
-                        {lastMsg.body}
+                      <div
+                        style={{
+                          fontSize: "var(--text-xs)",
+                          color: "var(--text-secondary)",
+                          fontStyle: "italic",
+                          borderLeft: "2px solid var(--comment-highlight)",
+                          paddingLeft: 8,
+                        }}
+                      >
+                        “{t.comment.quote}”
                       </div>
-                    )}
-                  </button>
+                      {lastMsg && (
+                        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-primary)", whiteSpace: "pre-wrap" }}>
+                          <span style={{ color: lastMsg.author === "agent" ? "var(--accent)" : "var(--text-secondary)", fontWeight: 600 }}>
+                            {lastMsg.author}:{" "}
+                          </span>
+                          {lastMsg.body}
+                        </div>
+                      )}
+                    </button>
+                  </div>
                 );
               })}
             </section>

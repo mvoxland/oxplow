@@ -2961,7 +2961,7 @@ export function App() {
       } else if (ref.kind === "comments") {
         tabs.push({
           id: ref.id,
-          label: "Comments",
+          label: "Comments Dashboard",
           closable: true,
           render: () => <CommentsInboxPage stream={stream} onOpenPage={navOpen} />,
         });
