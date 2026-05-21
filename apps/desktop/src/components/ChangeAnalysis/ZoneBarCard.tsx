@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { BranchChangeEntry } from "../../api-types.js";
 import type { ImportDelta } from "../../tauri-bridge/index.js";
-import { classifyZone, ZONE_LABELS, type Zone } from "./zones.js";
+import { classifyZone, ZONE_COLORS, ZONE_LABELS, type Zone } from "./zones.js";
 
 interface Props {
   files: BranchChangeEntry[];
@@ -141,31 +141,6 @@ function shortPath(p: string): string {
     .replace(/^apps\/desktop\/src\//, "ui/")
     .replace(/^apps\/desktop\/src-tauri\//, "shell/");
 }
-
-const ZONE_COLORS: Record<Zone, string> = {
-  ui: "#4f46e5",
-  shell: "#0ea5e9",
-  ipc: "#06b6d4",
-  domain: "#0891b2",
-  store: "#ea580c",
-  git: "#dc2626",
-  lsp: "#ca8a04",
-  runtime: "#9333ea",
-  fs_watch: "#a16207",
-  terminal: "#525252",
-  mcp: "#16a34a",
-  app_orchestration: "#2563eb",
-  config: "#737373",
-  session: "#7c3aed",
-  plugin: "#c026d3",
-  analysis: "#0d9488",
-  migration: "#b91c1c",
-  test: "#22c55e",
-  docs: "#a3a3a3",
-  project_meta: "#64748b",
-  external: "#6b7280",
-  other: "#94a3b8",
-};
 
 function zoneColor(z: Zone): string {
   return ZONE_COLORS[z];

@@ -54,6 +54,34 @@ export const ZONE_LABELS: Record<Zone, string> = {
   other: "other",
 };
 
+// Per-zone fill color, shared by every Change Analysis surface that
+// paints zones (ZoneBarCard bars + chips, ChangeTreemapCard cells +
+// header bands). Single source of truth — don't re-declare locally.
+export const ZONE_COLORS: Record<Zone, string> = {
+  ui: "#4f46e5",
+  shell: "#0ea5e9",
+  ipc: "#06b6d4",
+  domain: "#0891b2",
+  store: "#ea580c",
+  git: "#dc2626",
+  lsp: "#ca8a04",
+  runtime: "#9333ea",
+  fs_watch: "#a16207",
+  terminal: "#525252",
+  mcp: "#16a34a",
+  app_orchestration: "#2563eb",
+  config: "#737373",
+  session: "#7c3aed",
+  plugin: "#c026d3",
+  analysis: "#0d9488",
+  migration: "#b91c1c",
+  test: "#22c55e",
+  docs: "#a3a3a3",
+  project_meta: "#64748b",
+  external: "#6b7280",
+  other: "#94a3b8",
+};
+
 type Rule =
   | { type: "basename"; value: string; zone: Zone }
   | { type: "prefix"; value: string; zone: Zone }

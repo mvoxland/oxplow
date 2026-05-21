@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import type { BranchChangeEntry } from "../../api-types.js";
-import { classifyZone, ZONE_LABELS, type Zone } from "./zones.js";
+import { classifyZone, ZONE_COLORS, ZONE_LABELS, type Zone } from "./zones.js";
 
 interface Props {
   files: BranchChangeEntry[];
@@ -345,33 +345,6 @@ function truncate(s: string, max: number): string {
   if (max <= 1) return s.slice(0, max);
   return s.slice(0, max - 1) + "…";
 }
-
-// Mirrors the palette in ZoneBarCard. Kept in sync by hand for now —
-// promotable to a shared module if a third consumer appears.
-const ZONE_COLORS: Record<Zone, string> = {
-  ui: "#4f46e5",
-  shell: "#0ea5e9",
-  ipc: "#06b6d4",
-  domain: "#0891b2",
-  store: "#ea580c",
-  git: "#dc2626",
-  lsp: "#ca8a04",
-  runtime: "#9333ea",
-  fs_watch: "#a16207",
-  terminal: "#525252",
-  mcp: "#16a34a",
-  app_orchestration: "#2563eb",
-  config: "#737373",
-  session: "#7c3aed",
-  plugin: "#c026d3",
-  analysis: "#0d9488",
-  migration: "#b91c1c",
-  test: "#22c55e",
-  docs: "#a3a3a3",
-  project_meta: "#64748b",
-  external: "#6b7280",
-  other: "#94a3b8",
-};
 
 const card: React.CSSProperties = {
   border: "1px solid var(--border-subtle)",
