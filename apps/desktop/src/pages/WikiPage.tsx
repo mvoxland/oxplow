@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Stream, ThreadWorkState } from "../tauri-bridge/index.js";
 import { commands } from "../tauri-bridge/index.js";
 import { Page } from "../tabs/Page.js";
+import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { WikiPageTab, FreshnessBadge } from "../components/Wiki/WikiPageTab.js";
 import { useWikiPageController } from "../components/Wiki/useWikiPageController.js";
 import { WikiTableOfContents } from "../components/Wiki/WikiTableOfContents.js";
@@ -159,6 +160,7 @@ function WikiPageBody({
       }
       backlinks={backlinks}
       outbound={outbound}
+      commentsNav={<CommentNavigator targetKind="wiki" targetId={slug} />}
       layout="details"
       rightRail={rail}
     >

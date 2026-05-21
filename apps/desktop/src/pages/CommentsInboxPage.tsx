@@ -106,7 +106,10 @@ export function CommentsInboxPage({
   // because navigation is async — the target mounts and fetches its
   // threads after this returns (see comment-reveal-bus.ts).
   const goToLocation = (t: CommentThread) => {
-    requestCommentReveal(t.comment.id);
+    // Orphaned comments have no resolvable anchor to scroll to, so just
+    // open the target page (where the user can re-select the text and
+    // relink). Anchored ones also request a reveal to scroll/open inline.
+    if (!t.comment.orphaned) requestCommentReveal(t.comment.id);
     navigate(t.comment.target_kind, t.comment.target_id);
   };
 
@@ -228,10 +231,9 @@ export function CommentsInboxPage({
                       <button
                         type="button"
                         data-testid={`comments-goto-${t.comment.id}`}
-                        disabled={t.comment.orphaned}
                         title={
                           t.comment.orphaned
-                            ? "This comment's anchor was lost, so its location can't be shown"
+                            ? "Anchor lost — opens the target page so you can re-select the text and relink"
                             : "Open the page and scroll to this comment"
                         }
                         onClick={() => goToLocation(t)}
@@ -240,12 +242,12 @@ export function CommentsInboxPage({
                           padding: "1px 8px",
                           borderRadius: 4,
                           background: "transparent",
-                          color: t.comment.orphaned ? "var(--text-muted)" : "var(--accent)",
+                          color: "var(--accent)",
                           border: "1px solid var(--border-subtle)",
-                          cursor: t.comment.orphaned ? "default" : "pointer",
+                          cursor: "pointer",
                         }}
                       >
-                        Go to location
+                        {t.comment.orphaned ? "Go to page" : "Go to location"}
                       </button>
                     </div>
                     <button

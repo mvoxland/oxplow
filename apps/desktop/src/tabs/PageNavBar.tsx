@@ -64,6 +64,10 @@ export interface PageNavBarProps {
     count: number;
     body: ReactNode;
   };
+  /** Optional self-contained comment navigator (count + prev/next jump
+   *  + orphaned list) for comment-bearing pages. Rendered before the
+   *  backlinks dropdown. */
+  comments?: ReactNode;
   /** Optional kebab actions slot at the right edge. */
   actions?: ReactNode;
 }
@@ -86,6 +90,7 @@ export function PageNavBar({
   backlinks,
   outbound,
   snapshots,
+  comments,
   actions,
 }: PageNavBarProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
@@ -426,6 +431,8 @@ export function PageNavBar({
           ) : null}
         </div>
       ) : null}
+
+      {comments ?? null}
 
       {backlinks ? (
         <div style={{ position: "relative" }}>

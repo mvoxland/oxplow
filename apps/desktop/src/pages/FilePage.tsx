@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import { useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { EditorPane } from "../components/EditorPane.js";
+import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { usePageTitle, useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { fileRef, snapshotRef } from "../tabs/pageRefs.js";
@@ -119,6 +120,7 @@ export function FilePage({ dirty, ...editorProps }: FilePageProps) {
       backlinks={backlinks}
       outbound={outbound}
       snapshots={snapshots}
+      commentsNav={path ? <CommentNavigator targetKind="file" targetId={path} /> : undefined}
     >
       <EditorPane {...editorProps} />
     </Page>

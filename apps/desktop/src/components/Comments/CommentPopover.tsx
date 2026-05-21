@@ -12,6 +12,16 @@ import { CommentComposer } from "./CommentComposer.js";
 
 const CARD_WIDTH = 420;
 
+const stepButtonStyle: React.CSSProperties = {
+  border: "1px solid var(--border-subtle)",
+  background: "transparent",
+  color: "var(--text-secondary)",
+  borderRadius: 4,
+  padding: "1px 8px",
+  fontSize: "var(--text-xs)",
+  cursor: "pointer",
+};
+
 /// Whether the stored anchor was a fuzzy (approximate) re-attachment.
 export function anchorIsApprox(anchorJson: string): boolean {
   try {
@@ -46,11 +56,21 @@ export function CommentPopover({
   author = "user",
   anchorRect,
   onClose,
+  onStep,
+  onRelink,
 }: {
   thread: CommentThread;
   author?: string;
   anchorRect: DOMRect | null;
   onClose: () => void;
+  /// Step to the prev/next comment on the page. When provided, ◀ ▶
+  /// buttons render in the header; the host scrolls to + reopens the
+  /// adjacent comment. Omitted when there's nowhere to step.
+  onStep?: (dir: -1 | 1) => void;
+  /// Re-attach an orphaned comment to the editor's current selection.
+  /// When provided (orphaned + host has a live editor), a "Relink to
+  /// selection" button renders.
+  onRelink?: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const { comment, messages } = thread;
@@ -101,6 +121,30 @@ export function CommentPopover({
         fontFamily: "var(--font-ui)",
       }}
     >
+      {/* Prev/next stepper across the page's comments */}
+      {onStep ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            data-testid={`comment-step-prev-${comment.id}`}
+            title="Previous comment on this page"
+            onClick={() => onStep(-1)}
+            style={stepButtonStyle}
+          >
+            ◀ Prev
+          </button>
+          <button
+            type="button"
+            data-testid={`comment-step-next-${comment.id}`}
+            title="Next comment on this page"
+            onClick={() => onStep(1)}
+            style={stepButtonStyle}
+          >
+            Next ▶
+          </button>
+        </div>
+      ) : null}
+
       {/* Anchored quote */}
       <div
         style={{
@@ -128,8 +172,30 @@ export function CommentPopover({
         )}
         “{comment.quote}”
         {comment.orphaned && (
-          <div style={{ marginTop: 4, fontStyle: "normal", color: "var(--text-muted)" }}>
-            Select the intended text in the editor and right-click → “Relink orphaned…”.
+          <div style={{ marginTop: 6, fontStyle: "normal", display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ color: "var(--text-muted)" }}>
+              Anchor lost. Select the intended text in the editor, then relink.
+            </span>
+            {onRelink ? (
+              <button
+                type="button"
+                data-testid={`comment-relink-${comment.id}`}
+                onClick={() => onRelink()}
+                title="Re-attach this comment to the text currently selected in the editor"
+                style={{
+                  alignSelf: "flex-start",
+                  border: "1px solid var(--border-subtle)",
+                  background: "transparent",
+                  color: "var(--accent)",
+                  borderRadius: 4,
+                  padding: "2px 8px",
+                  fontSize: "var(--text-xs)",
+                  cursor: "pointer",
+                }}
+              >
+                Relink to selection
+              </button>
+            ) : null}
           </div>
         )}
       </div>

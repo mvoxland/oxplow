@@ -18,10 +18,12 @@ import {
 import { createComment, relinkComment, setCommentAnchor } from "../../api.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { extractContext } from "../Comments/anchor.js";
+import { partitionPageComments, stepComment } from "../Comments/pageCommentNav.js";
 import { useCommentsForTarget } from "../Comments/useCommentsForTarget.js";
 import {
   clearCommentReveal,
   peekPendingCommentReveal,
+  requestCommentReveal,
   subscribeCommentReveal,
 } from "../../comment-reveal-bus.js";
 import { CommentPopover } from "../Comments/CommentPopover.js";
@@ -280,14 +282,24 @@ export function RichTextField({
     if (!editor || !comments) return;
     const id = peekPendingCommentReveal();
     if (id == null) return;
-    if (!threads.some((t) => t.comment.id === id)) return;
+    const target = threads.find((t) => t.comment.id === id);
+    if (!target) return;
     const dom = editor.view.dom as HTMLElement;
     const el = dom.querySelector(`[data-comment-id="${id}"]`) as HTMLElement | null;
-    if (!el) return; // decoration not painted yet — retry on next deps change
-    el.scrollIntoView({ block: "center" });
-    setPendingSel(null);
-    setActiveComment({ id, rect: el.getBoundingClientRect() });
-    clearCommentReveal(id);
+    if (el) {
+      el.scrollIntoView({ block: "center" });
+      setPendingSel(null);
+      setActiveComment({ id, rect: el.getBoundingClientRect() });
+      clearCommentReveal(id);
+    } else if (target.comment.orphaned) {
+      // Orphaned: no decoration to scroll to — open the popover anyway
+      // (near the editor's top-left) so the user can read it and relink.
+      const r = dom.getBoundingClientRect();
+      setPendingSel(null);
+      setActiveComment({ id, rect: new DOMRect(r.left + 24, r.top + 24, 0, 0) });
+      clearCommentReveal(id);
+    }
+    // else: anchored but decoration not painted yet — retry on next deps change.
   }, [revealTick, threads, comments, value, editor]);
 
   // Open the new-comment composer anchored to the current selection.
@@ -534,6 +546,28 @@ export function RichTextField({
           author={comments.author ?? "user"}
           anchorRect={activeComment.rect}
           onClose={() => setActiveComment(null)}
+          onStep={
+            partitionPageComments(threads).jumpable.length >= 2
+              ? (dir) => {
+                  const next = stepComment(threads, activeComment.id, dir);
+                  if (next != null) requestCommentReveal(next);
+                }
+              : undefined
+          }
+          onRelink={
+            activeThread.comment.orphaned
+              ? () => {
+                  if (!editor) return;
+                  const { from, to, empty } = editor.state.selection;
+                  if (empty) return; // hint tells the user to select text first
+                  const captured = captureAnchor(from, to);
+                  if (captured) {
+                    void relinkComment(activeComment.id, captured.quote, captured.anchorJson);
+                    setActiveComment(null);
+                  }
+                }
+              : undefined
+          }
         />
       )}
       {commentMenu && (

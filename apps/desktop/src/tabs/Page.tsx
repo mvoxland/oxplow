@@ -39,6 +39,9 @@ export interface PageNavBarConfig {
   /** Optional snapshots dropdown — same shape. FilePage uses this
    *  to expose the file's per-snapshot history. */
   snapshots?: { count: number; body: ReactNode };
+  /** Optional comment navigator node (count + prev/next + orphaned
+   *  list) for comment-bearing pages. */
+  comments?: ReactNode;
   actions?: ReactNode;
 }
 
@@ -80,6 +83,10 @@ export interface PageProps {
    *  history is meaningful (currently just FilePage). Renders as a
    *  sibling dropdown next to Backlinks/Outbound. */
   snapshots?: { count: number; body: ReactNode };
+  /** Optional comment navigator node, rendered in the nav bar before
+   *  Backlinks. Comment-bearing pages (file/wiki/task) pass a
+   *  `<CommentNavigator targetKind targetId />`. */
+  commentsNav?: ReactNode;
   /** Optional nav-bar config. When supplied, the browser-style nav bar
    *  renders between header and body, and (if it carries a `backlinks`
    *  block) suppresses the legacy footer panel. */
@@ -116,7 +123,7 @@ const DETAILS_RAIL_THRESHOLD_PX = 960;
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, navBar, testId, showNavBar = true, showHeader = true, layout = "full", rightRail }: PageProps) {
+export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, layout = "full", rightRail }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -180,6 +187,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
             : undefined),
         outbound: baseNavBar.outbound ?? outbound,
         snapshots: baseNavBar.snapshots ?? snapshots,
+        comments: baseNavBar.comments ?? commentsNav,
       }
     : undefined;
   const navBarOwnsBacklinks = effectiveNavBar?.backlinks !== undefined;
@@ -209,6 +217,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           backlinks={effectiveNavBar.backlinks}
           outbound={effectiveNavBar.outbound}
           snapshots={effectiveNavBar.snapshots}
+          comments={effectiveNavBar.comments}
           actions={effectiveNavBar.actions}
         />
       ) : null}

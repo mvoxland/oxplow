@@ -5,8 +5,10 @@ import { createComment, relinkComment, setCommentAnchor } from "../../api.js";
 import {
   clearCommentReveal,
   peekPendingCommentReveal,
+  requestCommentReveal,
   subscribeCommentReveal,
 } from "../../comment-reveal-bus.js";
+import { partitionPageComments, stepComment } from "./pageCommentNav.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { extractContext, resolveAnchor } from "./anchor.js";
 import { CommentPopover } from "./CommentPopover.js";
@@ -202,14 +204,26 @@ export const MonacoCommentLayer = forwardRef<
   useEffect(() => {
     const id = peekPendingCommentReveal();
     if (id == null || !ready) return;
-    if (!threadsRef.current.some((t) => t.comment.id === id)) return;
+    const target = threadsRef.current.find((t) => t.comment.id === id);
+    if (!target) return;
     const model = editor?.getModel?.();
     const entry = decoMapRef.current.find((e) => e.commentId === id);
     const range = entry && model ? model.getDecorationRange(entry.decoId) : null;
-    if (!range) return; // decorations not painted yet — retry on next deps change
-    editor.revealRangeInCenter(range);
-    setActive({ id, rect: rectAtPosition(range.getStartPosition()) ?? new DOMRect(120, 120, 0, 0) });
-    clearCommentReveal(id);
+    if (range) {
+      editor.revealRangeInCenter(range);
+      setActive({ id, rect: rectAtPosition(range.getStartPosition()) ?? new DOMRect(120, 120, 0, 0) });
+      clearCommentReveal(id);
+    } else if (target.comment.orphaned) {
+      // Orphaned: no decoration to scroll to — open the popover anyway so
+      // the user can read it and relink.
+      const host = editor?.getDomNode?.()?.getBoundingClientRect?.();
+      setActive({
+        id,
+        rect: host ? new DOMRect(host.left + 24, host.top + 24, 0, 0) : new DOMRect(120, 120, 0, 0),
+      });
+      clearCommentReveal(id);
+    }
+    // else: anchored but decoration not painted yet — retry on next deps change.
   }, [revealTick, threads, ready, editor]);
 
   useImperativeHandle(
@@ -287,6 +301,25 @@ export const MonacoCommentLayer = forwardRef<
           thread={activeThread}
           anchorRect={active.rect}
           onClose={() => setActive(null)}
+          onStep={
+            partitionPageComments(threads).jumpable.length >= 2
+              ? (dir) => {
+                  const next = stepComment(threads, active.id, dir);
+                  if (next != null) requestCommentReveal(next);
+                }
+              : undefined
+          }
+          onRelink={
+            activeThread.comment.orphaned
+              ? () => {
+                  const captured = captureSelection();
+                  if (captured) {
+                    void relinkComment(active.id, captured.quote, captured.anchorJson);
+                    setActive(null);
+                  }
+                }
+              : undefined
+          }
         />
       )}
     </>
