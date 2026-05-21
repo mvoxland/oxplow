@@ -344,6 +344,14 @@ capture against the task's actual worktree — a task on a
 worktree stream never bleeds into the primary's snapshot
 history.
 
+`unregister` calls `SnapshotCaptureService::shutdown()`, which
+fires a `tokio::sync::Notify` the `spawn_watcher` task selects on
+alongside `rx.recv()`. This is required because the watcher task
+holds its own clone of the service and its `FsWatcher` is a
+task-local — dropping the registry's `Arc` alone never wakes the
+task, so without the signal an archived stream's watcher would
+linger until process exit.
+
 `effort_id` (nullable, FK → `task_effort.id` ON DELETE SET NULL)
 ties `task-start` / `task-end` rows back to the effort that produced
 them. `startup` snapshots leave it null. The mirror columns on the

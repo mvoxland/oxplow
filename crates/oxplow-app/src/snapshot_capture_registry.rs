@@ -101,13 +101,20 @@ impl SnapshotCaptureRegistry {
         Some(svc)
     }
 
-    /// Drop the service for `id`. The fs-watch task spawned by
-    /// `spawn_watcher` exits when its broadcast receiver closes (the
-    /// `FsWatcher` is held inside the service's `Inner`, so dropping
-    /// the last `Arc` ends the watcher).
+    /// Drop the service for `id` and tear down its watcher. The
+    /// `spawn_watcher` task holds its own clone of the service and its
+    /// `FsWatcher` is a task-local, so dropping the registry's `Arc`
+    /// alone never wakes it — we must `shutdown()` to signal the task
+    /// to exit. Done outside the write lock so we don't hold it across
+    /// the notify.
     pub fn unregister(&self, id: &StreamId) {
-        let mut services = self.services.write().unwrap();
-        services.remove(id);
+        let removed = {
+            let mut services = self.services.write().unwrap();
+            services.remove(id)
+        };
+        if let Some(svc) = removed {
+            svc.shutdown();
+        }
     }
 
     pub fn get(&self, id: &StreamId) -> Option<Arc<SnapshotCaptureService>> {
@@ -152,5 +159,64 @@ impl SnapshotCaptureRegistry {
     pub fn insert_for_test(&self, id: StreamId, svc: Arc<SnapshotCaptureService>) {
         let mut services = self.services.write().unwrap();
         services.insert(id, svc);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_db::Database;
+    use oxplow_domain::{StreamKind, Timestamp};
+    use std::time::Duration;
+
+    fn config_for(project: &std::path::Path) -> SnapshotCaptureRegistryConfig {
+        let db = Database::in_memory();
+        SnapshotCaptureRegistryConfig {
+            snapshot_store: Arc::new(SqliteSnapshotStore::new(db)),
+            blobs: BlobStore::new(project.join(".oxplow/snapshots")),
+            max_file_bytes: 1_000_000,
+            workspace_filter: WorkspaceFilter::default(),
+            events: EventBus::new(),
+        }
+    }
+
+    fn stream_at(path: &std::path::Path) -> Stream {
+        Stream {
+            id: StreamId::from("s-reg"),
+            kind: StreamKind::Primary,
+            title: "p".into(),
+            branch: "main".into(),
+            branch_ref: "refs/heads/main".into(),
+            branch_source: "main".into(),
+            worktree_path: path.to_string_lossy().into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: Timestamp::from_unix_ms(1),
+            updated_at: Timestamp::from_unix_ms(1),
+            archived_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn unregister_tears_down_the_watcher() {
+        let project = tempfile::tempdir().unwrap();
+        let reg = SnapshotCaptureRegistry::new(config_for(project.path()));
+        let stream = stream_at(project.path());
+        let svc = reg.register(&stream).expect("worktree exists");
+        let handle = svc.spawn_watcher();
+        // Let the watcher park on rx.recv().
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        reg.unregister(&stream.id);
+        assert!(reg.get(&stream.id).is_none(), "service should be removed");
+
+        let joined = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        assert!(
+            joined.is_ok(),
+            "unregister must shut the watcher down, but it stayed parked",
+        );
     }
 }
