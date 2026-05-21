@@ -134,6 +134,7 @@ import { OpErrorPage } from "./pages/OpErrorPage.js";
 import { closedThreadsRef, commentsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, snapshotRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
+import { installContextMenuSuppressor } from "./context-menu.js";
 import { TerminalPane } from "./components/TerminalPane.js";
 import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
@@ -1712,6 +1713,9 @@ export function App() {
       .then(setRecentProjects)
       .catch((e) => logUi("warn", "failed to load recent projects for menu", { error: String(e) }));
   }, []);
+  // Cancel the native WKWebView context menu everywhere except inputs,
+  // contenteditable, Monaco, and the terminal (see context-menu.ts).
+  useEffect(() => installContextMenuSuppressor(), []);
   const menuGroupSnapshots = useMemo(() => buildMenuGroupSnapshots(commandState), [commandState]);
   const nativeMenuSnapshots = useMemo(
     () => buildNativeMenuSnapshots(commandState, recentProjects),

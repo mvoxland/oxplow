@@ -128,6 +128,17 @@ Things I keep forgetting. Read this before adding any UI.
   (e.g. `menu-item-task.delete`,
   `menu-item-task.rename`).
 - Close on outside click, scroll, window resize.
+- **The native WKWebView context menu is globally suppressed.**
+  `installContextMenuSuppressor()` (in `apps/desktop/src/context-menu.ts`,
+  mounted once from `App.tsx`) cancels the OS-default right-click menu
+  (Look Up / Translate / Copy / Share / Inspect Element / Services) so it
+  never appears on arbitrary surfaces — Oxplow's own per-row menus are
+  the visible kebab `⋯` popovers instead. It exempts text inputs /
+  textareas, contenteditable (Tiptap), Monaco (`.monaco-editor`), and the
+  terminal (`.xterm`) so right-click copy/paste and the editor's own menu
+  still work there. The decision is a pure `shouldSuppressContextMenu`
+  predicate over an ancestor-descriptor chain (unit-tested without a DOM);
+  add new exempt surfaces there.
 
 ## Keyboard
 
