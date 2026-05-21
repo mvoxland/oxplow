@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BacklogState, FinishedEntry, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, opErrorRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId } from "../../tabs/pageRefs.js";
 import { computePagesDirectory, RAIL_PAGE_IDS } from "./sections.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext, sortRecentFiles, type RecentFileEntry } from "./sections.js";
@@ -1135,7 +1135,10 @@ function HistorySection({
       </div>
       <div data-testid="rail-history" style={{ paddingBottom: 4 }}>
         {entries.map((e) => {
-          const ref: TabRef = { id: e.refId, kind: e.refKind as TabRef["kind"], payload: e.payload };
+          // Reconstruct the full ref (with payload) from the id —
+          // page-visit rows don't persist payload, so a file ref needs
+          // its `path` rebuilt or it won't open. See refFromTabId.
+          const ref: TabRef = refFromTabId(e.refId);
           const trailing = effectiveMode === "top" ? (e as TopVisitedRowApi).count : null;
           // Wiki: prefer the live title over the stored visit label.
           // Falls back to a non-empty stored label, then to the slug,

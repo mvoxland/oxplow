@@ -278,3 +278,55 @@ export interface ExternalUrlPayload {
 export function externalUrlRef(url: string): TabRef {
   return { id: `external-url:${url}`, kind: "external-url", payload: { url } };
 }
+
+/**
+ * Reconstruct a full `TabRef` (with payload) from a tab id alone.
+ *
+ * Page-visit history rows persist only the id (`page_id`) and kind, not
+ * the ref payload — so a naive `{ id, kind, payload: null }` rebuild
+ * leaves payload-bearing pages broken (a `file` ref with no `path`
+ * never opens; `wiki`/`task`/etc. render empty). Each payload-bearing
+ * scheme parses its key out of the id here. Index/dashboard kinds carry
+ * no payload, so the id IS the kind and the fallback is fine.
+ */
+export function refFromTabId(id: string): TabRef {
+  const colon = id.indexOf(":");
+  const scheme = colon === -1 ? id : id.slice(0, colon);
+  const rest = colon === -1 ? "" : id.slice(colon + 1);
+  switch (scheme) {
+    case "file": {
+      // Disk file id is `file:<path>`; a versioned-viewer id appends
+      // `:@<frag>`. Strip that so history reopens the disk file.
+      const at = rest.lastIndexOf(":@");
+      return fileRef(at === -1 ? rest : rest.slice(0, at));
+    }
+    case "wiki":
+      return wikiPageRef(rest);
+    case "wiki-freshness":
+      return wikiFreshnessRef(rest);
+    case "task": {
+      const n = Number(rest);
+      return Number.isFinite(n) ? taskRef(n) : { id, kind: "task", payload: { itemId: n } };
+    }
+    case "finding":
+      return findingRef(rest);
+    case "directory":
+      return directoryRef(rest);
+    case "snapshot": {
+      const n = Number(rest);
+      return Number.isFinite(n) ? snapshotRef(n) : { id, kind: "snapshot", payload: null };
+    }
+    case "git-commit":
+      // Id may carry a `:scope:value` suffix; the bare sha reopens the
+      // full-commit view, which is the right default from history.
+      return gitCommitRef(rest.split(":")[0] ?? rest);
+    case "external-url":
+      return externalUrlRef(rest);
+    case "op-error":
+      return opErrorRef(rest);
+    default:
+      // Index/dashboard kinds (`tasks`, `files`, `git-dashboard`, …) and
+      // any unknown scheme: no payload needed; the id is the kind.
+      return { id, kind: scheme as TabRef["kind"], payload: null };
+  }
+}
