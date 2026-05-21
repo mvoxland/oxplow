@@ -226,11 +226,13 @@ pub trait TaskEffortStore: Send + Sync {
     /// All paths the agent has explicitly acknowledged as
     /// not-mine-but-in-the-diff for this effort.
     async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError>;
-    /// Paths claimed (via `task_effort_file`) by OTHER efforts that
-    /// finished within this effort's snapshot window
-    /// (`other.end_snapshot_id ∈ (self.start, self.end]`). Such a path
-    /// changed during this effort's bracket but another effort already
-    /// owns it, so we shouldn't ask this one to claim it too.
+    /// Paths claimed (via `task_effort_file`) by OTHER efforts whose
+    /// snapshot window OVERLAPS this effort's window (not merely ends
+    /// inside it): `other.start < self.end AND (other.end IS NULL OR
+    /// other.end > self.start)`. Such a path changed during this
+    /// effort's bracket but another (possibly later-completed) effort
+    /// already owns it, so we shouldn't ask this one to claim it too —
+    /// regardless of the order the sibling efforts were completed in.
     async fn paths_claimed_by_intervening_efforts(
         &self,
         id: &EffortId,
@@ -768,12 +770,23 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut stmt = conn.prepare(
+                    // Any OTHER effort whose snapshot window OVERLAPS
+                    // self's window (10,30] — not just one that ends
+                    // inside it. Overlap of half-open intervals
+                    // (a.start, a.end] and (b.start, b.end] is
+                    // `a.start < b.end AND a.end > b.start`. An ongoing
+                    // effort (NULL end) overlaps if it started before
+                    // self's window closed. This way a sibling effort
+                    // that's claimed later (ends after self's window)
+                    // still suppresses the nag, regardless of the order
+                    // the efforts were completed in.
                     "SELECT DISTINCT tef.path
                      FROM task_effort self
                      JOIN task_effort other
                        ON other.id != self.id
-                      AND other.end_snapshot_id > self.start_snapshot_id
-                      AND other.end_snapshot_id <= self.end_snapshot_id
+                      AND other.start_snapshot_id < self.end_snapshot_id
+                      AND (other.end_snapshot_id IS NULL
+                           OR other.end_snapshot_id > self.start_snapshot_id)
                      JOIN task_effort_file tef ON tef.effort_id = other.id
                      WHERE self.id = ?1
                        AND self.start_snapshot_id IS NOT NULL
@@ -859,18 +872,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn intervening_efforts_claims_within_window() {
-        // self effort B spans snapshots (10, 30]. Effort A finishes at
-        // 20 (inside) and claims shared.rs; effort C finishes at 40
-        // (outside) and claims outside.rs. Only shared.rs should be
-        // reported as already-claimed-by-an-intervening-effort.
+    async fn intervening_efforts_claims_overlapping_window() {
+        // self effort spans snapshots (10, 30]. We report a path when
+        // the claiming effort's window *overlaps* self's window,
+        // regardless of completion order:
+        //   ef-inside  (15, 20]  fully inside        → reported
+        //   ef-after   (25, 40]  starts in, ends out → reported (the
+        //                        sibling-completed-later case)
+        //   ef-before  ( 1,  5]  entirely before     → not reported
+        //   ef-later   (35, 50]  entirely after      → not reported
         let db = Database::in_memory();
         let store = SqliteTaskEffortStore::new(db.clone());
         let db2 = db.clone();
         tokio::task::spawn_blocking(move || {
             db2.with_conn(|conn| {
                 conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-                for (id, start, end) in [("ef-self", 10, 30), ("ef-a", 15, 20), ("ef-c", 25, 40)] {
+                for (id, start, end) in [
+                    ("ef-self", 10, 30),
+                    ("ef-inside", 15, 20),
+                    ("ef-after", 25, 40),
+                    ("ef-before", 1, 5),
+                    ("ef-later", 35, 50),
+                ] {
                     conn.execute(
                         "INSERT INTO task_effort
                            (id, task_id, thread_id, started_at, ended_at,
@@ -880,7 +903,12 @@ mod tests {
                         params![id, start, end],
                     )?;
                 }
-                for (eid, path) in [("ef-a", "shared.rs"), ("ef-c", "outside.rs")] {
+                for (eid, path) in [
+                    ("ef-inside", "inside.rs"),
+                    ("ef-after", "after.rs"),
+                    ("ef-before", "before.rs"),
+                    ("ef-later", "later.rs"),
+                ] {
                     conn.execute(
                         "INSERT INTO task_effort_file
                            (effort_id, path, change_kind, local_snapshot_id,
@@ -900,7 +928,8 @@ mod tests {
             .paths_claimed_by_intervening_efforts(&EffortId::from("ef-self"))
             .await
             .unwrap();
-        assert_eq!(got, vec!["shared.rs".to_string()]);
+        // Ordered by path; overlapping efforts only.
+        assert_eq!(got, vec!["after.rs".to_string(), "inside.rs".to_string()]);
     }
 
     async fn fixture_with_db() -> (SqliteTaskEffortStore, Database, TaskId, ThreadId) {

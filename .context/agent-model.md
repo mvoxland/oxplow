@@ -482,9 +482,14 @@ intermediate `ready` step.
   but the worktree didn't change;
   `changed_but_not_claimed` lists files that did change but the
   agent didn't declare — minus any path another effort already
-  claimed whose `end_snapshot_id` falls inside this effort's window
-  (`paths_claimed_by_intervening_efforts`), since a concurrent/
-  intervening effort already owns it. The latter is capped at 10
+  claimed whose snapshot window *overlaps* this effort's window
+  (`paths_claimed_by_intervening_efforts`: `other.start < self.end
+  AND (other.end IS NULL OR other.end > self.start)`), since that
+  concurrent/sibling effort already owns it. Overlap (not "ends
+  inside") is deliberate: when sibling efforts are filed in one turn
+  and completed in sequence, the earliest-completed one would
+  otherwise be nagged for files a later-completed sibling claims
+  (whose end lands *after* this window). The latter is capped at 10
   entries (`unclaimed_overflow` carries the original count when
   truncated) so the agent isn't asked to triage a wall of paths
   from parallel efforts or formatters. `amend_effort(effort_id, add_files,
