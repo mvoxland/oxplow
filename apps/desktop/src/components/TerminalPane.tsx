@@ -19,8 +19,6 @@ import {
   readContextRef,
 } from "../agent-context-dnd.js";
 import { formatContextMention } from "../agent-context-ref.js";
-import { Kebab } from "./Kebab.js";
-import type { MenuItem } from "../menu.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 
 const XTERM_THEME = {
@@ -132,54 +130,6 @@ export function TerminalPane({
     modeRef.current = next;
     setMode(next);
   }
-
-  const pasteFromClipboard = () => {
-    const term = termRef.current;
-    if (!term) return;
-    void readClipboard().then((text) => {
-      if (text) {
-        term.paste(text);
-        term.focus();
-      }
-    }).catch((error) => {
-      logUi("warn", "terminal paste: clipboard read failed", { error: String(error) });
-    });
-  };
-
-  const copySelection = () => {
-    const term = termRef.current;
-    if (!term) return;
-    const selection = term.getSelection();
-    if (!selection) return;
-    try {
-      void navigator.clipboard.writeText(selection).catch((error) => {
-        logUi("warn", "terminal copy: clipboard write failed", { error: String(error) });
-      });
-    } catch {
-      // ignored — older browsers without async clipboard API
-    }
-  };
-
-  const headerMenu: MenuItem[] = [
-    {
-      id: "terminal.copy",
-      label: "Copy selection",
-      enabled: true,
-      run: copySelection,
-    },
-    {
-      id: "terminal.paste",
-      label: "Paste",
-      enabled: true,
-      run: pasteFromClipboard,
-    },
-    {
-      id: "terminal.clear",
-      label: "Clear",
-      enabled: true,
-      run: () => { termRef.current?.clear(); termRef.current?.focus(); },
-    },
-  ];
 
   useEffect(() => {
     if (!visible) return;
@@ -591,24 +541,6 @@ export function TerminalPane({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          padding: "2px 6px",
-          borderBottom: "1px solid var(--border-subtle)",
-          background: "var(--surface-rail)",
-          flex: "0 0 auto",
-        }}
-      >
-        <Kebab
-          items={headerMenu}
-          size={16}
-          testId="terminal-pane-kebab"
-          label="Terminal actions"
-        />
-      </div>
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, width: "100%" }} />
       {dragHovering ? (
         <div

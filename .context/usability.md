@@ -144,6 +144,32 @@ Things I keep forgetting. Read this before adding any UI.
   `buildNativeMenuSnapshots`) use free-form ids like
   `project.openRecent:<path>` that the `menu:command` handler matches by
   prefix rather than going through the static `CommandId` map.
+- **The macOS application submenu is added in Rust, not the snapshot.**
+  `build_menu` prepends a `#[cfg(target_os = "macos")]` "Oxplow"
+  submenu of `PredefinedMenuItem`s (About / Hide / Hide Others / Show
+  All / Quit) before the renderer's groups, because on macOS the first
+  submenu always renders bold under the app name — without it the File
+  group lands there and there's no visible Quit. These items are
+  OS-standard and state-free, so they stay out of the snapshot (and out
+  of the off-Mac in-window `Menubar`).
+- **The View menu is tab-IA navigation**, not a view toggle: Files /
+  Uncommitted Changes / Comments Dashboard / Wiki / History each open
+  the matching page in the active thread's tab set (via `indexRef` /
+  `uncommittedChangesRef` / `commentsRef`). The old binary
+  Agent-vs-Editor `checked` toggle from the pre-IA two-pane layout is
+  gone, and Agent itself is no longer a View item — the agent tab is
+  the pinned center tab. The Git and Tasks dashboards moved out of View
+  into their own top-level menus (below).
+- **The Git menu** carries the working-tree git surface: `Dashboard`
+  (opens `gitDashboardRef`, gated on a stream) plus `Commit Changes…`,
+  `Pull Changes`, and `Push Changes` (gated on `canCommit` — stream +
+  git enabled). Pull/Push run via `gitPull` / `gitPush` as background
+  tasks; failures record an op-error and surface a "Show details" toast
+  (same pattern as the Git Dashboard's `runOp`). Commit opens the Files
+  page and triggers the commit slideover.
+- **The Tasks menu** (group id is still `plan` for keybinding/command-id
+  stability; label is "Tasks") leads with `Dashboard` (opens the tasks
+  index) followed by `New Task…` / `New Thread…` / `New Stream…`.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
   Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.
@@ -180,8 +206,9 @@ Things I keep forgetting. Read this before adding any UI.
   (the palette reads from the same `buildMenuGroups` registry). When
   adding a user-visible action, prefer wiring it as a CommandId over
   a bespoke button so it stays keyboard-reachable. Current entries
-  include `stream.new`, `thread.new`, `history.open`, `snapshots.open`
-  alongside save/find/quick-open/new-task.
+  include `stream.new`, `thread.new`, `history.open`, `git.dashboard`,
+  `git.commit`, `git.pull`, `git.push`, `tasks.dashboard` alongside
+  save/find/quick-open/new-task.
 
 ## Test-driveability
 

@@ -59,6 +59,26 @@ pub async fn set_native_menu(
 
 fn build_menu(app: &AppHandle, groups: &[MenuGroupSnapshot]) -> tauri::Result<Menu<Wry>> {
     let mut menu = MenuBuilder::new(app);
+    // On macOS the first submenu is always rendered bold under the
+    // application name, so prepend a proper app menu (About / Hide /
+    // Quit). Without it, the renderer's first group (File) lands under
+    // the app-name slot and there's no visible Quit. The label is
+    // irrelevant on macOS — the OS substitutes the app name — but the
+    // predefined Hide/Show All items are macOS-shaped, so this is
+    // macOS-only; off-Mac the in-window Menubar carries File/Edit/etc.
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = SubmenuBuilder::new(app, "Oxplow")
+            .item(&PredefinedMenuItem::about(app, None, None)?)
+            .item(&PredefinedMenuItem::separator(app)?)
+            .item(&PredefinedMenuItem::hide(app, None)?)
+            .item(&PredefinedMenuItem::hide_others(app, None)?)
+            .item(&PredefinedMenuItem::show_all(app, None)?)
+            .item(&PredefinedMenuItem::separator(app)?)
+            .item(&PredefinedMenuItem::quit(app, None)?)
+            .build()?;
+        menu = menu.item(&app_menu);
+    }
     for group in groups {
         let submenu = build_submenu(app, &group.label, &group.items)?;
         menu = menu.item(&submenu);

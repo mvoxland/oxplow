@@ -24,6 +24,10 @@ import {
   deleteWorkspacePath,
   getCurrentStream,
   getWorkspaceContext,
+  gitPull,
+  gitPush,
+  type GitOpKickoff,
+  type GitOpResult,
   desktopBridge,
   listStreams,
   probeDaemon,
@@ -127,7 +131,7 @@ import { NewStreamPage } from "./pages/NewStreamPage.js";
 import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
-import { closedThreadsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, indexRef, newStreamRef, newTaskRef, snapshotRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, commentsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, snapshotRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { TerminalPane } from "./components/TerminalPane.js";
@@ -1601,10 +1605,39 @@ export function App() {
       hasSelectedFile: !!selectedFilePath,
       canSave: !!currentFile && !currentFile.isLoading && currentFileDirty,
       hasThread: !!selectedThread,
-      activeTab: centerActive.startsWith("file:") ? "editor" : "agent",
       canCommit: !!stream && !!workspaceContext.gitEnabled,
     } as const),
-    [centerActive, currentFile, currentFileDirty, selectedThread, selectedFilePath, stream, workspaceContext.gitEnabled],
+    [currentFile, currentFileDirty, selectedThread, selectedFilePath, stream, workspaceContext.gitEnabled],
+  );
+  // Run a Git-menu mutation (pull/push) as a background task and surface
+  // any failure the same way the Git Dashboard does: record an op-error
+  // and offer a toast that opens its detail page. There's no page focus
+  // here, so we route through handleOpenPageRef rather than onOpenPage.
+  const runGitMenuOp = useCallback(
+    async (
+      label: string,
+      command: string,
+      action: () => Promise<GitOpKickoff>,
+    ) => {
+      const { awaitDone } = await action();
+      const task = await awaitDone;
+      const result = task?.result as GitOpResult | undefined;
+      if (result && result.success) return;
+      const errorId = recordOpError({
+        label,
+        command,
+        stderr: result?.stderr ?? task?.error ?? "",
+        stdout: result?.stdout ?? "",
+        exitCode: result?.status ?? null,
+        blankFailure: !result || (!result.stderr && !result.stdout && result.status == null),
+      });
+      showToast({
+        message: `${label} failed`,
+        actionLabel: "Show details",
+        onUndo: () => handleOpenPageRef.current?.(opErrorRef(errorId)),
+      });
+    },
+    [],
   );
   const commandHandlers = useMemo(() => ({
     save() {
@@ -1619,11 +1652,23 @@ export function App() {
       setCenterActive(`file:${selectedFilePath}`);
       setEditorFindRequest((current) => current + 1);
     },
-    showAgentPane() {
-      setCenterActive("agent");
+    showFiles() {
+      handleOpenPageRef.current?.(indexRef("files"));
     },
-    showEditorPane() {
-      if (selectedFilePath) setCenterActive(`file:${selectedFilePath}`);
+    showUncommitted() {
+      handleOpenPageRef.current?.(uncommittedChangesRef());
+    },
+    showComments() {
+      handleOpenPageRef.current?.(commentsRef());
+    },
+    showGit() {
+      handleOpenPageRef.current?.(gitDashboardRef());
+    },
+    showTasks() {
+      handleOpenPageRef.current?.(indexRef("tasks"));
+    },
+    showWiki() {
+      handleOpenPageRef.current?.(indexRef("wiki-index"));
     },
     newTask() {
       // handleOpenPage is declared further down; forward through the ref
@@ -1641,13 +1686,18 @@ export function App() {
     openHistory() {
       handleOpenPageRef.current?.(indexRef("git-history"));
     },
-    openSnapshots() {
-      handleOpenPageRef.current?.(indexRef("local-history"));
-    },
     commitFiles() {
       if (!stream || !workspaceContext.gitEnabled) return;
       handleOpenPageRef.current?.(indexRef("files"));
       setCommitFilesRequest((n) => n + 1);
+    },
+    pullChanges() {
+      if (!stream || !workspaceContext.gitEnabled) return;
+      void runGitMenuOp("Pull", "git pull", () => gitPull(stream.id));
+    },
+    pushChanges() {
+      if (!stream || !workspaceContext.gitEnabled) return;
+      void runGitMenuOp("Push", "git push", () => gitPush(stream.id));
     },
     openProject() {
       void pickAndOpenProject(false);
@@ -1655,7 +1705,7 @@ export function App() {
     openProjectNewWindow() {
       void pickAndOpenProject(true);
     },
-  }), [stream, selectedFilePath, workspaceContext.gitEnabled]);
+  }), [stream, selectedFilePath, workspaceContext.gitEnabled, runGitMenuOp]);
   const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
   useEffect(() => {
     listRecentProjects()

@@ -4,14 +4,19 @@ export type CommandId =
   | "file.save"
   | "file.quickOpen"
   | "edit.find"
-  | "view.agent"
-  | "view.editor"
+  | "view.files"
+  | "view.uncommitted"
+  | "view.comments"
+  | "view.wiki"
   | "history.open"
-  | "snapshots.open"
+  | "git.dashboard"
+  | "git.commit"
+  | "git.pull"
+  | "git.push"
+  | "tasks.dashboard"
   | "plan.newTask"
   | "stream.new"
   | "thread.new"
-  | "files.commit"
   | "project.open"
   | "project.openNewWindow"
   // Native (responder-chain) items. Activations are dispatched by the
@@ -26,8 +31,10 @@ export type CommandId =
   | "native.selectAll"
   | "native.separator";
 
-export type MenuId = "file" | "edit" | "view" | "plan";
-export type MainViewId = "agent" | "editor";
+// `plan` is the historical id of the Tasks menu group (label "Tasks");
+// the id is internal-only and kept stable so `plan.newTask` and its
+// keybinding don't churn.
+export type MenuId = "file" | "edit" | "view" | "git" | "plan";
 
 export interface MenuCommand extends MenuItem {
   id: CommandId;
@@ -58,7 +65,6 @@ export interface CommandState {
   hasSelectedFile: boolean;
   canSave: boolean;
   hasThread: boolean;
-  activeTab: MainViewId;
   canCommit?: boolean;
 }
 
@@ -66,14 +72,19 @@ export interface CommandHandlers {
   save(): void;
   quickOpen(): void;
   find(): void;
-  showAgentPane(): void;
-  showEditorPane(): void;
+  showFiles(): void;
+  showUncommitted(): void;
+  showComments(): void;
+  showGit(): void;
+  showTasks(): void;
+  showWiki(): void;
   newTask(): void;
   newStream(): void;
   newThread(): void;
   openHistory(): void;
-  openSnapshots(): void;
   commitFiles(): void;
+  pullChanges(): void;
+  pushChanges(): void;
   openProject(): void;
   openProjectNewWindow(): void;
 }
@@ -88,7 +99,6 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
         { id: "project.openNewWindow", label: "Open Project in New Window…", enabled: true },
         { id: "file.save", label: "Save", shortcut: "Ctrl/Cmd+S", enabled: state.canSave },
         { id: "file.quickOpen", label: "Quick Open…", shortcut: "Ctrl/Cmd+P", enabled: state.hasStream },
-        { id: "files.commit", label: "Commit Changes…", enabled: !!state.canCommit },
       ],
     },
     {
@@ -116,16 +126,35 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       id: "view",
       label: "View",
       items: [
-        { id: "view.agent", label: "Agent", enabled: state.hasStream, checked: state.activeTab === "agent" },
-        { id: "view.editor", label: "Editor", enabled: state.hasStream, checked: state.activeTab === "editor" },
+        // Tab-IA navigation: each item opens the matching page in the
+        // active thread's tab set. Agent is no longer here (the agent
+        // tab is the pinned center tab); the Git and Tasks dashboards
+        // moved to the Git and Tasks menus respectively.
+        { id: "view.files", label: "Files", enabled: state.hasStream },
+        { id: "view.uncommitted", label: "Uncommitted Changes", enabled: state.hasStream },
+        { id: "view.comments", label: "Comments Dashboard", enabled: state.hasStream },
+        { id: "view.wiki", label: "Wiki", enabled: state.hasStream },
         { id: "history.open", label: "History", enabled: state.hasStream },
-        { id: "snapshots.open", label: "Snapshots", enabled: state.hasStream },
       ],
     },
     {
-      id: "plan",
-      label: "Work",
+      id: "git",
+      label: "Git",
       items: [
+        // Dashboard navigates (gated on a stream); commit/pull/push are
+        // mutations gated on git actually being available (`canCommit`).
+        { id: "git.dashboard", label: "Dashboard", enabled: state.hasStream },
+        { id: "git.commit", label: "Commit Changes…", enabled: !!state.canCommit },
+        { id: "git.pull", label: "Pull Changes", enabled: !!state.canCommit },
+        { id: "git.push", label: "Push Changes", enabled: !!state.canCommit },
+      ],
+    },
+    {
+      // Group id stays "plan" (see MenuId) though the label is "Tasks".
+      id: "plan",
+      label: "Tasks",
+      items: [
+        { id: "tasks.dashboard", label: "Dashboard", enabled: state.hasStream },
         { id: "plan.newTask", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
         { id: "thread.new", label: "New Thread…", enabled: state.hasStream },
         { id: "stream.new", label: "New Stream…", enabled: true },
@@ -140,14 +169,19 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "file.save": handlers.save,
     "file.quickOpen": handlers.quickOpen,
     "edit.find": handlers.find,
-    "view.agent": handlers.showAgentPane,
-    "view.editor": handlers.showEditorPane,
+    "view.files": handlers.showFiles,
+    "view.uncommitted": handlers.showUncommitted,
+    "view.comments": handlers.showComments,
+    "view.wiki": handlers.showWiki,
+    "history.open": handlers.openHistory,
+    "git.dashboard": handlers.showGit,
+    "git.commit": handlers.commitFiles,
+    "git.pull": handlers.pullChanges,
+    "git.push": handlers.pushChanges,
+    "tasks.dashboard": handlers.showTasks,
     "plan.newTask": handlers.newTask,
     "stream.new": handlers.newStream,
     "thread.new": handlers.newThread,
-    "history.open": handlers.openHistory,
-    "snapshots.open": handlers.openSnapshots,
-    "files.commit": handlers.commitFiles,
     "project.open": handlers.openProject,
     "project.openNewWindow": handlers.openProjectNewWindow,
     // Native items dispatch through the OS responder chain.
