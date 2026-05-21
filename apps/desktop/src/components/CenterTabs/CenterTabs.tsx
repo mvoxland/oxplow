@@ -5,6 +5,7 @@ import { AgentStatusDot } from "../AgentStatusDot.js";
 import { Kebab } from "../Kebab.js";
 import type { MenuItem } from "../../menu.js";
 import { ErrorBoundary } from "../ErrorBoundary.js";
+import { leadingPinnedCount, moveToIndex, reorderToAfterPinned } from "./centerTabsReorder.js";
 
 export interface CenterTab {
   id: string;
@@ -18,9 +19,6 @@ export interface CenterTab {
    *  IA redesign — visible kebab buttons are the new primary path.)
    */
   contextMenu?: MenuItem[];
-  /** Tabs that share a `reorderGroup` can be drag-reordered relative to
-   *  each other. Tabs without a group are pinned (e.g. the agent tab). */
-  reorderGroup?: string;
   /** When true, this tab does NOT appear in the strip but its body
    *  still mounts (kept hidden via display:none). Used by the host
    *  to keep back/forward stack entries alive so navigation between
@@ -46,7 +44,10 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   const stripTabs = tabs.filter((t) => !t.hidden);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
+  // Where the dragged tab would land: an insertion line drawn on the
+  // `before` (left) or `after` (right) edge of `id`, chosen by which
+  // half of that tab the cursor is over.
+  const [dropTarget, setDropTarget] = useState<{ id: string; side: "before" | "after" } | null>(null);
   const draggingTab = draggingId ? tabs.find((t) => t.id === draggingId) ?? null : null;
   const stripScrollRef = useRef<HTMLDivElement>(null);
   // The outer flex container that wraps the strip + overflow button.
@@ -65,6 +66,12 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   const widthCacheRef = useRef<Map<string, number>>(new Map());
   const [hiddenInStripIds, setHiddenInStripIds] = useState<Set<string>>(new Set());
   const hasOverflow = hiddenInStripIds.size > 0;
+
+  // A tab is reorderable when reordering is wired and the tab isn't
+  // pinned. "Pinned" = non-closable (the Agent tab); it stays at the
+  // front and is never a drag source or drop target. Every other tab
+  // can be dragged anywhere in the strip — there are no per-kind groups.
+  const isReorderable = (tab: CenterTab): boolean => !!onReorder && tab.closable;
 
   useLayoutEffect(() => {
     const outer = outerBarRef.current;
@@ -129,14 +136,12 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
     if (!onReorder) return false;
     if (!hiddenInStripIds.has(id)) return false;
     const ids = tabs.map((t) => t.id);
-    const fromIdx = ids.indexOf(id);
-    let insertIdx = tabs.findIndex((t) => !!t.reorderGroup);
-    if (insertIdx < 0) insertIdx = Math.min(1, tabs.length);
-    if (fromIdx < 0 || fromIdx === insertIdx) return false;
-    const next = ids.slice();
-    const [moved] = next.splice(fromIdx, 1);
-    const adjusted = fromIdx < insertIdx ? insertIdx - 1 : insertIdx;
-    next.splice(adjusted, 0, moved);
+    // Land it right after the leading run of pinned (non-closable) tabs
+    // — i.e. directly after Agent — so it surfaces in the most prominent
+    // slot rather than wherever the first file tab happens to be.
+    const pinned = leadingPinnedCount(tabs.map((t) => t.closable));
+    const next = reorderToAfterPinned(ids, pinned, id);
+    if (next === ids) return false;
     onReorder(next);
     return true;
   };
@@ -158,13 +163,12 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
         {stripTabs.map((tab) => {
           const isActive = tab.id === active?.id;
           const isHover = !isActive && hoverId === tab.id;
-          const canDrag = !!onReorder && !!tab.reorderGroup;
-          const isDropTarget =
-            !!draggingTab &&
-            !!tab.reorderGroup &&
-            tab.reorderGroup === draggingTab.reorderGroup &&
-            overId === tab.id &&
-            draggingId !== tab.id;
+          const canDrag = isReorderable(tab);
+          // Insertion line on this tab's left/right edge when a drag is
+          // hovering it. Shown even when this is the dragged tab itself
+          // (so the line tracks the cursor across the whole strip).
+          const dropSide =
+            !!draggingTab && isReorderable(tab) && dropTarget?.id === tab.id ? dropTarget.side : null;
           const hiddenInStrip = hiddenInStripIds.has(tab.id);
           return (
             <div
@@ -182,37 +186,46 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               } : undefined}
               onDragEnd={canDrag ? () => {
                 setDraggingId(null);
-                setOverId(null);
+                setDropTarget(null);
               } : undefined}
               onDragOver={onReorder ? (event) => {
                 if (!draggingTab) return;
-                if (!tab.reorderGroup || tab.reorderGroup !== draggingTab.reorderGroup) return;
+                // Any reorderable tab is a valid drop target (no per-kind
+                // groups); pinned tabs are skipped so nothing lands
+                // before Agent. Which half of the tab the cursor is over
+                // decides whether the line sits before or after it.
+                if (!isReorderable(tab)) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
-                if (overId !== tab.id) setOverId(tab.id);
+                const rect = event.currentTarget.getBoundingClientRect();
+                const side: "before" | "after" =
+                  event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+                if (dropTarget?.id !== tab.id || dropTarget.side !== side) {
+                  setDropTarget({ id: tab.id, side });
+                }
               } : undefined}
               onDragLeave={onReorder ? () => {
-                if (overId === tab.id) setOverId(null);
+                if (dropTarget?.id === tab.id) setDropTarget(null);
               } : undefined}
               onDrop={onReorder ? (event) => {
                 if (!draggingTab) return;
-                if (!tab.reorderGroup || tab.reorderGroup !== draggingTab.reorderGroup) return;
+                if (!isReorderable(tab)) return;
                 event.preventDefault();
                 const sourceId = draggingTab.id;
-                const targetId = tab.id;
                 setDraggingId(null);
-                setOverId(null);
-                if (sourceId === targetId) return;
+                setDropTarget(null);
                 const ids = tabs.map((t) => t.id);
-                const fromIdx = ids.indexOf(sourceId);
-                const toIdx = ids.indexOf(targetId);
-                if (fromIdx < 0 || toIdx < 0) return;
-                const next = ids.slice();
-                const [moved] = next.splice(fromIdx, 1);
-                next.splice(toIdx, 0, moved);
-                onReorder(next);
+                const targetIdx = ids.indexOf(tab.id);
+                if (targetIdx < 0) return;
+                const rect = event.currentTarget.getBoundingClientRect();
+                const after = event.clientX >= rect.left + rect.width / 2;
+                // desiredIndex is the slot in the ORIGINAL order; moveToIndex
+                // handles the source-removal shift and no-ops in place.
+                const next = moveToIndex(ids, sourceId, after ? targetIdx + 1 : targetIdx);
+                if (next !== ids) onReorder(next);
               } : undefined}
               style={{
+                position: "relative",
                 padding: "10px 14px",
                 background: isActive
                   ? "var(--surface-tab-active)"
@@ -223,13 +236,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 borderRight: "1px solid var(--border-strong)",
                 borderTop: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
                 borderLeft: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
-                borderBottom: isActive
-                  ? "3px solid var(--accent)"
-                  : isDropTarget
-                    ? "3px dashed var(--accent)"
-                    : "3px solid transparent",
-                outline: isDropTarget ? "1px dashed var(--accent)" : "none",
-                outlineOffset: isDropTarget ? -2 : 0,
+                borderBottom: isActive ? "3px solid var(--accent)" : "3px solid transparent",
                 opacity: draggingId === tab.id ? 0.5 : 1,
                 cursor: canDrag ? "grab" : "pointer",
                 fontSize: "var(--text-sm)",
@@ -239,6 +246,23 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 gap: 6,
               }}
             >
+              {dropSide ? (
+                <span
+                  aria-hidden
+                  data-testid={`center-tab-drop-line-${tab.id}-${dropSide}`}
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    bottom: 2,
+                    [dropSide === "before" ? "left" : "right"]: -1,
+                    width: 3,
+                    background: "var(--accent)",
+                    borderRadius: 2,
+                    pointerEvents: "none",
+                    zIndex: 1,
+                  }}
+                />
+              ) : null}
               {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} /> : null}
               <PageKindIcon
                 kind={kindForTabId(tab.id)}

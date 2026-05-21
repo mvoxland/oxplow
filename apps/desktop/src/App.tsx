@@ -2020,11 +2020,9 @@ export function App() {
     if (!stream) return;
     const orderedFiles: string[] = [];
     const orderedDiffIds: string[] = [];
-    const orderedPageRefIds: string[] = [];
     for (const id of orderedIds) {
       if (id.startsWith("file:")) orderedFiles.push(id.slice("file:".length));
       else if (id.startsWith("diff:")) orderedDiffIds.push(id);
-      else orderedPageRefIds.push(id);
     }
     setFileSessions((prev) => {
       const base = prev[stream.id] ?? createEmptyFileSession();
@@ -2037,29 +2035,32 @@ export function App() {
       if (next.length !== prev.length) return prev;
       return next;
     });
-    // Persist the order for thread-scoped page tabs (wiki, task,
-    // finding, dashboard, settings, etc.). Without this, dragging
-    // or overflow-promoting a page tab would visually jump for one
-    // render then snap back to the source-of-truth order in
-    // `threadPageTabs`.
-    if (selectedThread?.id && orderedPageRefIds.length > 0) {
+    // `threadPageTabs` is the unified source of truth for the order of
+    // EVERY non-agent tab (files, diffs, dashboards, snapshots, wiki,
+    // tasks, …) — the strip renders `[agent, ...threadPageTabs]`. So
+    // reorder it with the full ordered id list (minus the pinned agent),
+    // not just the non-file/diff subset; splitting file/diff out here
+    // would shove them to the end on every drag/promote. The
+    // fileSessions/diffTabs reorders above are just bookkeeping for
+    // their own registries.
+    if (selectedThread?.id) {
       const threadId = selectedThread.id;
+      const orderedNonAgent = orderedIds.filter((id) => id !== "agent");
       setThreadPageTabs((prev) => {
         const current = prev[threadId] ?? [];
         if (current.length === 0) return prev;
         const byId = new Map(current.map((ref) => [ref.id, ref] as const));
         const next: TabRef[] = [];
-        for (const id of orderedPageRefIds) {
+        for (const id of orderedNonAgent) {
           const ref = byId.get(id);
           if (ref) next.push(ref);
         }
-        // Append any current refs that weren't in the ordered list
-        // so we don't accidentally drop tabs (defense in depth — the
-        // caller passes the full id list, but be safe).
+        // Append any current refs missing from the ordered list so we
+        // never drop a tab (defense in depth — the caller passes the
+        // full id list, but hidden back-stack entries aren't in it).
         for (const ref of current) {
           if (!next.find((r) => r.id === ref.id)) next.push(ref);
         }
-        // Only update if order actually changed.
         if (next.every((r, idx) => r.id === current[idx]?.id)) return prev;
         return { ...prev, [threadId]: next };
       });
@@ -2706,7 +2707,6 @@ export function App() {
             id: ref.id,
             label: `${basename} (${versionLabel})`,
             closable: true,
-            reorderGroup: "file",
             render: () => stream ? (
               <FileViewerPage
                 stream={stream}
@@ -2724,7 +2724,6 @@ export function App() {
           id: ref.id,
           label: `${dirty ? "● " : ""}${basename}`,
           closable: true,
-          reorderGroup: "file",
           render: () => stream ? (
             <FilePage
               dirty={dirty}

@@ -290,6 +290,15 @@ Things I keep forgetting. Read this before adding any UI.
 
 ## Drag and drop
 
+- **HTML5 DnD needs `dragDropEnabled: false` on the Tauri window.**
+  Tauri v2 defaults `dragDropEnabled` to `true`, which registers an
+  OS-level drag-drop handler that swallows `dragover`/`drop` before the
+  webview DOM sees them — the drag ghost appears but no drop ever fires.
+  Every in-app drag here (center-tab reorder, thread/stream rails,
+  add-to-agent-context) is DOM drag-and-drop, so the `main` window in
+  `apps/desktop/src-tauri/tauri.conf.json` sets `dragDropEnabled: false`.
+  Don't re-enable it unless something starts needing Tauri's *native*
+  file-drop events (and then reconcile both).
 - **Highlight the drop target** (dashed border + accent glow) whenever
   a compatible drag enters it. Clear the highlight on leave/drop.
 - **Use a custom MIME type** for internal drags so foreign drags
@@ -301,9 +310,20 @@ Things I keep forgetting. Read this before adding any UI.
 - **Tabs in the three tabbed sections (left dock rail, center pane, bottom
   dock rail) are drag-reorderable.** DockShell rail tabs persist their order
   in the dock's `localStorage` entry (`oxplow.layout.v1.dock.<key>.order`).
-  CenterTabs reorders within `reorderGroup` only — `file:`, `note:`, and
-  `diff:` tabs each shuffle within their own group; the `agent` tab is
-  pinned (no `reorderGroup`). Cross-group drops are no-ops.
+  CenterTabs reorders **every non-pinned tab freely across the whole
+  strip** — there are no per-kind groups. "Pinned" = non-closable (only
+  the `agent` tab); it stays at the front and is never a drag source or
+  drop target, so nothing lands before it. Reorders persist by rewriting
+  the unified `threadPageTabs` order (the strip renders
+  `[agent, ...threadPageTabs]`); `App.tsx`'s `handleReorderCenterTabs`
+  reorders that whole list, not a per-kind subset. Clicking a tab in the
+  overflow `▾` panel (or any activation of an overflowed tab) promotes it
+  to **right after `agent`** via `promoteHiddenIntoStrip` (inserts after
+  the leading run of pinned tabs), so it surfaces in the most prominent
+  slot. The drop indicator is a **vertical insertion line in the gap**
+  (not a box on the target tab): the cursor's half of the hovered tab
+  picks before/after, and the drop lands exactly there (`moveToIndex`).
+  Pure reorder math lives in `centerTabsReorder.ts` (unit-tested).
 
 ## Capitalization
 
