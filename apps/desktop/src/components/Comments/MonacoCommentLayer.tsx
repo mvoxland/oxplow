@@ -80,6 +80,26 @@ export const MonacoCommentLayer = forwardRef<
   const decoMapRef = useRef<{ decoId: string; commentId: number }[]>([]);
   const [active, setActive] = useState<{ id: number; rect: DOMRect } | null>(null);
   const [pending, setPending] = useState<PendingSel | null>(null);
+  // Bumped when the model's content or the model itself changes. The
+  // file's content loads asynchronously after the editor mounts, so
+  // without re-running the paint on content arrival a comment resolved
+  // against an empty model would (wrongly) orphan and never re-anchor.
+  const [contentTick, setContentTick] = useState(0);
+  useEffect(() => {
+    if (!ready || !editor) return;
+    let timer: number | null = null;
+    const bump = () => {
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setContentTick((t) => t + 1), 80);
+    };
+    const d1 = editor.onDidChangeModelContent?.(bump);
+    const d2 = editor.onDidChangeModel?.(bump);
+    return () => {
+      if (timer != null) window.clearTimeout(timer);
+      d1?.dispose?.();
+      d2?.dispose?.();
+    };
+  }, [ready, editor]);
 
   // Re-anchor each comment to a Monaco range and paint inline highlights.
   useEffect(() => {
@@ -150,7 +170,7 @@ export const MonacoCommentLayer = forwardRef<
     const ids: string[] = editor.deltaDecorations(decoIdsRef.current, decos);
     decoIdsRef.current = ids;
     decoMapRef.current = ids.map((decoId, i) => ({ decoId, commentId: map[i]?.commentId ?? -1 }));
-  }, [ready, editor, monaco, threads, filePath]);
+  }, [ready, editor, monaco, threads, filePath, contentTick]);
 
   // Build a viewport rect from a Monaco position (read model/editor live).
   const rectAtPosition = (position: any): DOMRect | null => {
@@ -224,7 +244,7 @@ export const MonacoCommentLayer = forwardRef<
       clearCommentReveal(id);
     }
     // else: anchored but decoration not painted yet — retry on next deps change.
-  }, [revealTick, threads, ready, editor]);
+  }, [revealTick, threads, ready, editor, contentTick]);
 
   useImperativeHandle(
     ref,
