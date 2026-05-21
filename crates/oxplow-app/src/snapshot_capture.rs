@@ -156,6 +156,15 @@ struct Inner {
     /// after the running capture publishes its result, so the next
     /// call starts fresh.
     in_flight: Mutex<Option<tokio::sync::watch::Receiver<Option<SharedSnapshotResult>>>>,
+    /// Signalled by [`SnapshotCaptureService::shutdown`] to tear down
+    /// the `spawn_watcher` task. `run_watcher` selects on this
+    /// alongside `rx.recv()`, so a registry `unregister` ends the
+    /// otherwise-immortal watcher (its `FsWatcher` is a task-local, and
+    /// the task holds its own clone of the service — dropping the
+    /// registry's `Arc` alone never wakes it). `notify_one` stores a
+    /// permit when no waiter is parked yet, so a shutdown that races
+    /// ahead of the watcher's first poll is not lost.
+    shutdown: tokio::sync::Notify,
 }
 
 impl SnapshotCaptureService {
@@ -180,6 +189,7 @@ impl SnapshotCaptureService {
                 settle_duration: DEFAULT_SETTLE_DURATION,
                 predrain_delay: DEFAULT_PREDRAIN_DELAY,
                 in_flight: Mutex::new(None),
+                shutdown: tokio::sync::Notify::new(),
             }),
         }
     }
@@ -241,6 +251,15 @@ impl SnapshotCaptureService {
     pub fn spawn_watcher(&self) -> tokio::task::JoinHandle<()> {
         let this = self.clone();
         tokio::spawn(async move { this.run_watcher().await })
+    }
+
+    /// Signal the `spawn_watcher` task (if any) to exit. Idempotent and
+    /// safe to call even when no watcher was spawned — the notification
+    /// is just dropped. Called by `SnapshotCaptureRegistry::unregister`
+    /// when a stream is archived/removed so its watcher doesn't linger
+    /// until process exit.
+    pub fn shutdown(&self) {
+        self.inner.shutdown.notify_one();
     }
 
     /// Spawn a listener that turns `OxplowEvent::GitRefsChanged` into
@@ -358,20 +377,33 @@ impl SnapshotCaptureService {
                 }
             };
         let mut rx = watcher.subscribe();
+        // Park on the shutdown signal once, before the loop, so a
+        // `notify_one` that fires between iterations isn't missed. The
+        // pinned future is re-polled by each `select!`; `notify_one`'s
+        // stored permit also covers a shutdown that races ahead of the
+        // first poll.
+        let shutdown = self.inner.shutdown.notified();
+        tokio::pin!(shutdown);
         loop {
-            match rx.recv().await {
-                Ok(event) => {
-                    let path = event.path;
-                    let rel = path.strip_prefix(&self.inner.project_dir).unwrap_or(&path);
-                    if self.inner.workspace_filter.ignore(rel) {
-                        continue;
+            tokio::select! {
+                _ = &mut shutdown => {
+                    debug!("snapshot capture: watcher shutting down");
+                    break;
+                }
+                ev = rx.recv() => match ev {
+                    Ok(event) => {
+                        let path = event.path;
+                        let rel = path.strip_prefix(&self.inner.project_dir).unwrap_or(&path);
+                        if self.inner.workspace_filter.ignore(rel) {
+                            continue;
+                        }
+                        self.mark_dirty(path, event.kind);
                     }
-                    self.mark_dirty(path, event.kind);
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    warn!(skipped = n, "snapshot capture: fs-watch lagged");
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(skipped = n, "snapshot capture: fs-watch lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                },
             }
         }
     }
@@ -1176,6 +1208,23 @@ mod tests {
         .with_settle_duration(Duration::ZERO)
         .with_predrain_delay(Duration::ZERO);
         (svc, store)
+    }
+
+    #[tokio::test]
+    async fn shutdown_ends_the_spawned_watcher_task() {
+        let project = tempdir().unwrap();
+        let (svc, _store) = svc_for(project.path()).await;
+        let handle = svc.spawn_watcher();
+        // Give the watcher a moment to start its FsWatcher and park on
+        // `rx.recv()`. Without the shutdown signal it would stay parked
+        // forever (no fs events arrive), so the handle would never join.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        svc.shutdown();
+        let joined = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        assert!(
+            joined.is_ok(),
+            "watcher task did not exit within 5s of shutdown()",
+        );
     }
 
     #[tokio::test]
