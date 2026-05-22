@@ -6,6 +6,7 @@ use specta::Type;
 use oxplow_app::agent_command::{AgentCommandOptions, PaneKind};
 use oxplow_app::agent_pane::EnsurePaneOutcome;
 use oxplow_app::agent_prompt::assemble_system_prompt;
+use oxplow_app::config_service::read_config;
 use oxplow_domain::stores::{StreamStore, ThreadStore};
 use oxplow_domain::{StreamId, ThreadId};
 
@@ -68,7 +69,7 @@ pub async fn ensure_agent_pane(
         None => None,
     };
 
-    let config = state.config.read().expect("config rwlock").clone();
+    let config = read_config(&state.config);
     let prompt =
         assemble_system_prompt(&state.layout.project_dir, &config, &stream, thread.as_ref());
 

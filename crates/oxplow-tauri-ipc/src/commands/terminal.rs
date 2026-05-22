@@ -1,5 +1,6 @@
 use oxplow_app::agent_command::{build_agent_command_for_session, AgentCommandOptions, PaneKind};
 use oxplow_app::agent_prompt::assemble_system_prompt;
+use oxplow_app::config_service::read_config;
 use oxplow_app::terminal_sessions::SpawnRequest;
 use oxplow_app::terminal_sessions::{AttachResult, TerminalSessionError};
 use oxplow_domain::stores::ThreadStore;
@@ -97,7 +98,7 @@ pub async fn open_terminal_session(
         None => None,
     };
 
-    let config = state.config.read().expect("config rwlock").clone();
+    let config = read_config(&state.config);
     let cols = cols.max(20);
     let rows = rows.max(5);
 
