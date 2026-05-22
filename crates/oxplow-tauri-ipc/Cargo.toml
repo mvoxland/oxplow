@@ -36,3 +36,6 @@ similar = "2"
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }
 git2 = { workspace = true }
+
+[lints]
+workspace = true

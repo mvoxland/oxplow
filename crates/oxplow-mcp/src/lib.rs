@@ -1189,7 +1189,10 @@ impl OxplowMcp {
         if (summary_has_body || !touched.is_empty() || !impacts.is_empty())
             && item.thread_id.is_some()
         {
-            let tid = item.thread_id.clone().unwrap();
+            let tid = item
+                .thread_id
+                .clone()
+                .expect("thread_id present — guarded by is_some() above");
             let summary = if summary_has_body {
                 Some(p.summary.clone())
             } else {

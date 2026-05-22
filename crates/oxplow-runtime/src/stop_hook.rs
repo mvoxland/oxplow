@@ -212,7 +212,7 @@ pub fn compute_audit_signature(items: &[Task]) -> String {
         .iter()
         .map(|item| {
             let updated_at = serde_json::to_string(&item.updated_at)
-                .unwrap()
+                .unwrap_or_default()
                 .trim_matches('"')
                 .to_string();
             format!("{}|{}|{}", item.id, updated_at, item.note_count)

@@ -915,12 +915,11 @@ impl SnapshotCaptureService {
         //   - unstaged — parallel stat / read / hash / blob.write.
         let mut staged_paths: Vec<(PathBuf, CaptureStaging)> = Vec::new();
         let mut unstaged_entries: Vec<(PathBuf, DirtyEntry)> = Vec::new();
-        for (path, entry) in drained {
-            match &entry.staging {
-                Some(_) => {
-                    // unwrap is safe — we just matched `Some`.
-                    staged_paths.push((path, entry.staging.unwrap()));
-                }
+        for (path, mut entry) in drained {
+            // `take()` moves the staging out when present (leaving the
+            // entry valid for the unstaged branch) — no unwrap needed.
+            match entry.staging.take() {
+                Some(staging) => staged_paths.push((path, staging)),
                 None => unstaged_entries.push((path, entry)),
             }
         }

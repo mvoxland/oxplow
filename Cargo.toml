@@ -32,6 +32,16 @@ authors = ["Nathan Voxland <nathan@voxland.net>"]
 license = "MIT"
 repository = "https://github.com/nvoxland/oxplow"
 
+# Guardrail against careless `.unwrap()` in production code. Each crate
+# opts in with `[lints] workspace = true`; tests are exempted via
+# clippy.toml (allow-unwrap-in-tests). `expect_used` is intentionally
+# NOT enabled — a documented `expect("why")` is the sanctioned way to
+# assert an invariant. CI runs clippy with `-D warnings`, so this is
+# effectively deny on opted-in crates. oxplow-db has not opted in yet
+# (188 spawn_blocking JoinError unwraps pending a db.call() helper).
+[workspace.lints.clippy]
+unwrap_used = "warn"
+
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1.52", features = ["full"] }

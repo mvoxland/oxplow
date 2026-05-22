@@ -96,7 +96,7 @@ impl FollowupStore {
 fn unix_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as i64
 }
 

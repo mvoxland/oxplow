@@ -20,3 +20,6 @@ async-trait = { workspace = true }
 [dev-dependencies]
 git2 = { workspace = true }
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

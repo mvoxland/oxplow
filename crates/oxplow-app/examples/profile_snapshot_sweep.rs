@@ -8,6 +8,10 @@
 //! the mtime+size short-circuit. Prints how many files reached each
 //! phase + cumulative bytes hashed.
 
+// Dev-only profiling tool — `unwrap()` is fine here, so relax the
+// workspace `unwrap_used` guardrail for this example.
+#![allow(clippy::unwrap_used)]
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

@@ -349,7 +349,9 @@ fn cpp_visibility(node: Node<'_>, src: &[u8]) -> Visibility {
     };
     // Walk the class body looking for the most recent
     // access_specifier preceding `node`.
-    let class_node = current.unwrap();
+    let Some(class_node) = current else {
+        return default_vis;
+    };
     let body = class_node.child_by_field_name("body").unwrap_or(class_node);
     let target_start = node.start_byte();
     let mut cursor = body.walk();

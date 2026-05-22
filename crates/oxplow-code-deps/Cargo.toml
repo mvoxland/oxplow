@@ -10,3 +10,6 @@ oxplow-code-metrics = { workspace = true }
 tree-sitter = { workspace = true }
 serde = { workspace = true }
 specta = { workspace = true }
+
+[lints]
+workspace = true

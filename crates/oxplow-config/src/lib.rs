@@ -262,7 +262,7 @@ pub fn write_project_config(
     if !config.generated.is_empty() {
         doc.insert(
             "generated".into(),
-            serde_yaml::to_value(&config.generated).unwrap(),
+            serde_yaml::to_value(&config.generated).expect("generated paths serialize"),
         );
     }
     if config.snapshot_max_file_bytes != DEFAULT_SNAPSHOT_MAX_FILE_BYTES {
@@ -287,11 +287,14 @@ pub fn write_project_config(
                 m.insert("languageId".into(), s.language_id.clone().into());
                 m.insert(
                     "extensions".into(),
-                    serde_yaml::to_value(&s.extensions).unwrap(),
+                    serde_yaml::to_value(&s.extensions).expect("extensions serialize"),
                 );
                 m.insert("command".into(), s.command.clone().into());
                 if !s.args.is_empty() {
-                    m.insert("args".into(), serde_yaml::to_value(&s.args).unwrap());
+                    m.insert(
+                        "args".into(),
+                        serde_yaml::to_value(&s.args).expect("args serialize"),
+                    );
                 }
                 serde_yaml::Value::Mapping(m)
             })

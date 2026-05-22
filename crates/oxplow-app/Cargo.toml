@@ -44,3 +44,6 @@ walkdir = "2.5"
 
 [dev-dependencies]
 git2 = { workspace = true }
+
+[lints]
+workspace = true

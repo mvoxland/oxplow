@@ -1,3 +1,8 @@
+// Integration-test code — `unwrap()` is idiomatic here; relax the
+// workspace `unwrap_used` guardrail (clippy.toml only exempts unit-test
+// modules, not `tests/` helper fns).
+#![allow(clippy::unwrap_used)]
+
 //! Integration coverage for the `#[tauri::command]` adapters.
 //!
 //! Each test builds a fresh `TestApp` (Services with in-memory DB
