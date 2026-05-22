@@ -74,6 +74,42 @@ jobs:
       - name: Cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  # Dependency vulnerability scan (RustSec + npm advisories). Advisory-
+  # only for now: each audit step is `continue-on-error` so a newly
+  # published advisory in a transitive dep can't block unrelated PRs
+  # before anyone has triaged it — the findings still show in the job
+  # log (red ✗ on the step, green job). Once the tree is confirmed
+  # clean, drop `continue-on-error` on each step to make it blocking,
+  # and use `cargo audit --ignore RUSTSEC-XXXX-NNNN` to allowlist any
+  # advisory we've consciously accepted.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: Cargo audit
+        continue-on-error: true
+        run: cargo audit
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      - name: Bun audit
+        continue-on-error: true
+        run: bun audit
+
   coverage:
     needs: test
     runs-on: ubuntu-latest
