@@ -8,17 +8,13 @@ import {
   getThreadWorkState,
   getThreadState,
   createWorkspaceDirectory,
-  listAgentStatuses,
   reorderTasks,
   moveTaskToThread,
-  getBacklogState,
   updateBacklogItem,
   deleteBacklogItem,
   reorderBacklog,
   moveTaskToBacklog,
   moveBacklogItemToThread,
-  subscribeBacklogEvents,
-  subscribeAgentStatus,
   type AgentStatus,
   createWorkspaceFile,
   deleteWorkspacePath,
@@ -35,10 +31,8 @@ import {
   renameWorkspacePath,
   renameThread,
   renameStream,
-  subscribeOxplowEvents,
   subscribeWikiPageEvents,
   subscribeTaskEvents,
-  subscribeWorkspaceContext,
   subscribeWorkspaceEvents,
   listRecentlyFinished,
   clearRecentlyFinished,
@@ -47,7 +41,6 @@ import {
   getBranchChanges,
   getRepoConflictState,
   subscribeGitRefsEvents,
-  getConfig,
   setGenerated,
   selectThread,
   promoteThread,
@@ -86,6 +79,7 @@ import { StatusBar } from "./components/StatusBar.js";
 import { showToast } from "./components/toastStore.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { subscribeUiError } from "./ui-error.js";
+import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
@@ -427,6 +421,11 @@ async function pickAndOpenProject(newWindow: boolean) {
 export function App() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [threadStates, setThreadStates] = useState<Record<string, ThreadState>>({});
+  // Mirror of threadStates for subscription callbacks that need the
+  // latest map without re-subscribing when it changes (see
+  // useBackendSubscriptions). Kept current on every render.
+  const threadStatesRef = useRef(threadStates);
+  threadStatesRef.current = threadStates;
   const [threadWorkStates, setThreadWorkStates] = useState<Record<string, ThreadWorkState>>({});
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
@@ -1317,22 +1316,20 @@ export function App() {
   }, [threadWorkStates, currentThreadState.threads, stream]);
 
 
-  useEffect(() => {
-    return subscribeWorkspaceContext((next) => setWorkspaceContext(next));
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getBacklogState()
-      .then((state) => { if (!cancelled) setBacklogState(state); })
-      .catch((error) => logUi("warn", "failed to load backlog state", { error: String(error) }));
-    const unsubscribe = subscribeBacklogEvents(() => {
-      void getBacklogState()
-        .then((state) => setBacklogState(state))
-        .catch((error) => logUi("warn", "failed to refresh backlog state", { error: String(error) }));
-    });
-    return () => { cancelled = true; unsubscribe(); };
-  }, []);
+  // Backend-event subscription wiring (workspace context, backlog, task
+  // events, followup/thread/stream changes, config, agent status) lives
+  // in this hook so App doesn't carry ~10 inline subscription effects.
+  useBackendSubscriptions({
+    threadStatesRef,
+    setWorkspaceContext,
+    setBacklogState,
+    setThreadWorkStates,
+    setThreadStates,
+    setStreams,
+    setStream,
+    setAgentStatuses,
+    setGeneratedState,
+  });
 
   useEffect(() => {
     for (const [streamId, state] of Object.entries(threadStates)) {
@@ -1345,152 +1342,6 @@ export function App() {
     }
   }, [threadStates]);
 
-  useEffect(() => {
-    const unsubscribe = subscribeTaskEvents("all", (event) => {
-      void getThreadWorkState(event.streamId, event.threadId)
-        .then((workState) => {
-          setThreadWorkStates((prev) => ({ ...prev, [event.threadId]: workState }));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh thread work state after change event", {
-            streamId: event.streamId,
-            threadId: event.threadId,
-            kind: event.kind,
-            error: String(error),
-          });
-        });
-    });
-    return unsubscribe;
-  }, []);
-
-  // Followups are transient (in-memory), but we still want the Ready
-  // section to live-update when the agent adds/removes one mid-turn.
-  // Re-fetch the same ThreadWorkState envelope (followups are layered
-  // in by the tasks API wrapper) after every followup.changed
-  // event. Stream id is recovered from the cached threadState map —
-  // the event itself only carries threadId.
-  useEffect(() => {
-    const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.type !== "followup.changed") return;
-      const threadId = event.threadId;
-      let streamIdForThread: string | null = null;
-      for (const [sid, state] of Object.entries(threadStates)) {
-        if (state.threads.some((t) => t.id === threadId)) {
-          streamIdForThread = sid;
-          break;
-        }
-      }
-      if (!streamIdForThread) return;
-      void getThreadWorkState(streamIdForThread, threadId)
-        .then((workState) => {
-          setThreadWorkStates((prev) => ({ ...prev, [threadId]: workState }));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh thread work state after followup.changed", {
-            threadId,
-            error: String(error),
-          });
-        });
-    });
-    return unsubscribe;
-  }, [threadStates]);
-
-  useEffect(() => {
-    const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.type !== "thread.changed") return;
-      void getThreadState(event.streamId)
-        .then((state) => {
-          setThreadStates((prev) => ({ ...prev, [event.streamId]: state }));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh thread state after change event", {
-            streamId: event.streamId,
-            threadId: event.threadId,
-            kind: event.kind,
-            error: String(error),
-          });
-        });
-    });
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.type !== "stream.changed" || event.kind !== "prompt-changed" || !event.streamId) return;
-      void listStreams()
-        .then((updated) => {
-          setStreams(updated);
-          const updatedStream = updated.find((s) => s.id === event.streamId);
-          if (updatedStream) setStream((prev) => (prev?.id === updatedStream.id ? updatedStream : prev));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh streams after prompt change", { error: String(error) });
-        });
-    });
-    return unsubscribe;
-  }, []);
-
-  // Refresh the stream list whenever the cross-store bus signals a
-  // streams.changed (creation, archive via Remove…, rename, reorder).
-  // If the currently-selected stream disappeared from the list (e.g.
-  // it was just archived), fall back to the primary so the rail
-  // doesn't render against a stale id.
-  useEffect(() => {
-    const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.kind !== "streamsChanged") return;
-      void listStreams()
-        .then((updated) => {
-          setStreams(updated);
-          setStream((prev) => {
-            if (!prev) return prev;
-            if (updated.some((s) => s.id === prev.id)) return prev;
-            const primary = updated.find((s) => s.kind === "primary");
-            return primary ?? updated[0] ?? null;
-          });
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh streams after streamsChanged", { error: String(error) });
-        });
-    });
-    return unsubscribe;
-  }, []);
-
-  // Backing worktree was deleted out from under a stream — runtime has
-  // already archived it, we just surface the toast so the user knows
-  // why the rail row vanished.
-  useEffect(() => {
-    const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.kind !== "streamOrphaned") return;
-      const title = typeof event.title === "string" ? event.title : "Stream";
-      showToast({
-        message: `“${title}” was closed: its worktree directory was deleted.`,
-      });
-    });
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const reload = () => {
-      void getConfig()
-        .then((cfg) => {
-          if (cancelled) return;
-          setGeneratedState(cfg.generated);
-        })
-        .catch((error) => {
-          logUi("warn", "failed to load config", { error: String(error) });
-        });
-    };
-    reload();
-    const unsub = subscribeOxplowEvents((event) => {
-      if (event.type === "config.changed") reload();
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, []);
-
   const handleToggleGenerated = async (entry: string, mark: boolean) => {
     const next = mark
       ? Array.from(new Set([...generated, entry])).sort()
@@ -1502,27 +1353,6 @@ export function App() {
       setError(`Failed to update generated paths: ${String(err)}`);
     }
   };
-
-  useEffect(() => {
-    let cancelled = false;
-    listAgentStatuses()
-      .then((entries) => {
-        if (cancelled) return;
-        const next: Record<string, AgentStatus> = {};
-        for (const entry of entries) next[entry.threadId] = entry.status;
-        setAgentStatuses(next);
-      })
-      .catch((error) => {
-        logUi("warn", "failed to seed agent statuses", { error: String(error) });
-      });
-    const unsubscribe = subscribeAgentStatus("all", (entry) => {
-      setAgentStatuses((prev) => ({ ...prev, [entry.threadId]: entry.status }));
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     if (!stream || !selectedFilePath) return;
