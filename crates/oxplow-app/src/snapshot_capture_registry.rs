@@ -81,7 +81,7 @@ impl SnapshotCaptureRegistry {
         }
         // Fast-path: already registered.
         {
-            let services = self.services.read().unwrap();
+            let services = self.services.read().unwrap_or_else(|e| e.into_inner());
             if let Some(existing) = services.get(&stream.id) {
                 return Some(existing.clone());
             }
@@ -100,7 +100,7 @@ impl SnapshotCaptureRegistry {
             )
             .with_events(self.config.events.clone()),
         );
-        let mut services = self.services.write().unwrap();
+        let mut services = self.services.write().unwrap_or_else(|e| e.into_inner());
         // Double-check after acquiring the write lock — a concurrent
         // register for the same id may have raced us.
         if let Some(existing) = services.get(&stream.id) {
@@ -118,7 +118,7 @@ impl SnapshotCaptureRegistry {
     /// the notify.
     pub fn unregister(&self, id: &StreamId) {
         let removed = {
-            let mut services = self.services.write().unwrap();
+            let mut services = self.services.write().unwrap_or_else(|e| e.into_inner());
             services.remove(id)
         };
         if let Some(svc) = removed {
@@ -141,14 +141,23 @@ impl SnapshotCaptureRegistry {
     }
 
     pub fn get(&self, id: &StreamId) -> Option<Arc<SnapshotCaptureService>> {
-        self.services.read().unwrap().get(id).cloned()
+        self.services
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
     }
 
     /// Snapshot of the currently-registered services. Order is not
     /// guaranteed; callers needing primary-first should query
     /// [`Self::primary`] explicitly.
     pub fn list(&self) -> Vec<Arc<SnapshotCaptureService>> {
-        self.services.read().unwrap().values().cloned().collect()
+        self.services
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Mark `id` as the primary stream — used by legacy callers that
@@ -156,13 +165,17 @@ impl SnapshotCaptureRegistry {
     /// MCP file-ref-version resolver). Must be called after the
     /// corresponding `register` so the lookup actually resolves.
     pub fn set_primary(&self, id: StreamId) {
-        *self.primary_id.write().unwrap() = Some(id);
+        *self.primary_id.write().unwrap_or_else(|e| e.into_inner()) = Some(id);
     }
 
     /// Fetch the primary stream's service. `None` only before boot
     /// has called [`Self::set_primary`].
     pub fn primary(&self) -> Option<Arc<SnapshotCaptureService>> {
-        let id = self.primary_id.read().unwrap().clone()?;
+        let id = self
+            .primary_id
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()?;
         self.get(&id)
     }
 
@@ -171,7 +184,7 @@ impl SnapshotCaptureRegistry {
     /// idempotently spawns at most one watcher per `Arc` (in practice
     /// only main.rs calls this, once at boot).
     pub fn spawn_all_watchers(&self) -> Vec<tokio::task::JoinHandle<()>> {
-        let services = self.services.read().unwrap();
+        let services = self.services.read().unwrap_or_else(|e| e.into_inner());
         services.values().map(|s| s.spawn_watcher()).collect()
     }
 
@@ -180,7 +193,7 @@ impl SnapshotCaptureRegistry {
     /// custom settle / predrain durations, for example) without
     /// re-implementing the full `register` path.
     pub fn insert_for_test(&self, id: StreamId, svc: Arc<SnapshotCaptureService>) {
-        let mut services = self.services.write().unwrap();
+        let mut services = self.services.write().unwrap_or_else(|e| e.into_inner());
         services.insert(id, svc);
     }
 }

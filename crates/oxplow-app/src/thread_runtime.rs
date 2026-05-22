@@ -75,7 +75,7 @@ impl ThreadRuntimeRegistry {
     /// the snapshot diff. The Stop hook drains the per-thread set
     /// and surfaces a directive listing each. Idempotent.
     pub fn record_pending_effort_review(&self, thread: &ThreadId, effort: EffortId) {
-        let mut m = self.inner.lock().expect("registry mutex");
+        let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let runtime = m.entry(thread.clone()).or_default();
         runtime.pending_effort_reviews.insert(effort);
     }
@@ -86,7 +86,7 @@ impl ThreadRuntimeRegistry {
     /// the prompt that's fine; this matches the "silent agreement"
     /// path in the design.
     pub fn take_pending_effort_reviews(&self, thread: &ThreadId) -> Vec<EffortId> {
-        let mut m = self.inner.lock().expect("registry mutex");
+        let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let Some(runtime) = m.get_mut(thread) else {
             return Vec::new();
         };
@@ -104,7 +104,7 @@ impl HookEventStore for ThreadRuntimeRegistry {
         let Some(tid) = event.thread_id.clone() else {
             return Ok(());
         };
-        let mut m = self.inner.lock().expect("registry mutex");
+        let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let runtime = m.entry(tid).or_default();
         runtime.hooks.push_back(event.clone());
         while runtime.hooks.len() > self.hook_capacity {
@@ -118,7 +118,7 @@ impl HookEventStore for ThreadRuntimeRegistry {
         thread: Option<&ThreadId>,
         limit: usize,
     ) -> Result<Vec<HookEvent>, DomainError> {
-        let m = self.inner.lock().expect("registry mutex");
+        let m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let events: Vec<HookEvent> = match thread {
             Some(t) => m
                 .get(t)
@@ -140,7 +140,7 @@ impl HookEventStore for ThreadRuntimeRegistry {
         kind: HookKind,
         limit: usize,
     ) -> Result<Vec<HookEvent>, DomainError> {
-        let m = self.inner.lock().expect("registry mutex");
+        let m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let mut all: Vec<HookEvent> = m
             .values()
             .flat_map(|r| r.hooks.iter().filter(|e| e.kind == kind).cloned())
@@ -167,7 +167,7 @@ impl AgentStatusStore for ThreadRuntimeRegistry {
             detail,
             updated_at: Timestamp::now(),
         };
-        let mut m = self.inner.lock().expect("registry mutex");
+        let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let runtime = m.entry(thread.clone()).or_default();
         runtime
             .statuses
@@ -180,13 +180,13 @@ impl AgentStatusStore for ThreadRuntimeRegistry {
         thread: &ThreadId,
         pane_target: &str,
     ) -> Result<Option<AgentStatus>, DomainError> {
-        let m = self.inner.lock().expect("registry mutex");
+        let m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         Ok(m.get(thread)
             .and_then(|r| r.statuses.get(pane_target).cloned()))
     }
 
     async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError> {
-        let m = self.inner.lock().expect("registry mutex");
+        let m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         Ok(m.values()
             .flat_map(|r| r.statuses.values().cloned())
             .collect())
