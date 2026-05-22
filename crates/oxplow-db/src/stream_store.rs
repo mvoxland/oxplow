@@ -90,9 +90,8 @@ fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {
 #[async_trait]
 impl StreamStore for SqliteStreamStore {
     async fn list(&self) -> Result<Vec<Stream>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM streams \
                      WHERE archived_at IS NULL \
@@ -102,16 +101,13 @@ impl StreamStore for SqliteStreamStore {
                 let rows = stmt.query_map([], row_to_stream)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn get(&self, id: &StreamId) -> Result<Option<Stream>, DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT * FROM streams WHERE id = ?1")?;
                 let mut rows = stmt.query_map(params![id.as_str()], row_to_stream)?;
                 match rows.next() {
@@ -119,16 +115,13 @@ impl StreamStore for SqliteStreamStore {
                     None => Ok(None),
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn upsert(&self, stream: &Stream) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let stream = stream.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "INSERT INTO streams (
                         id, kind, title, branch, branch_ref, branch_source,
@@ -168,29 +161,23 @@ impl StreamStore for SqliteStreamStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn delete(&self, id: &StreamId) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute("DELETE FROM streams WHERE id = ?1", params![id.as_str()])?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn archive(&self, id: &StreamId) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id = id.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let now = ts_to_string(Timestamp::now());
                 conn.execute(
                     "UPDATE streams SET archived_at = COALESCE(archived_at, ?2),
@@ -200,15 +187,12 @@ impl StreamStore for SqliteStreamStore {
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn current_id(&self) -> Result<Option<StreamId>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt =
                     conn.prepare("SELECT current_stream_id FROM runtime_state WHERE id = 1")?;
                 let mut rows = stmt.query_map([], |r| r.get::<_, Option<String>>(0))?;
@@ -219,31 +203,25 @@ impl StreamStore for SqliteStreamStore {
                     None => Ok(None),
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn set_current(&self, id: Option<&StreamId>) -> Result<(), DomainError> {
-        let db = self.db.clone();
         let id = id.cloned();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 conn.execute(
                     "UPDATE runtime_state SET current_stream_id = ?1 WHERE id = 1",
                     params![id.as_ref().map(|s| s.as_str())],
                 )?;
                 Ok(())
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 
     async fn primary(&self) -> Result<Option<Stream>, DomainError> {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| {
+        self.db
+            .call(move |conn| {
                 let mut stmt =
                     conn.prepare("SELECT * FROM streams WHERE kind = 'primary' LIMIT 1")?;
                 let mut rows = stmt.query_map([], row_to_stream)?;
@@ -252,9 +230,7 @@ impl StreamStore for SqliteStreamStore {
                     None => Ok(None),
                 }
             })
-        })
-        .await
-        .unwrap()
+            .await
     }
 }
 

@@ -101,6 +101,23 @@ impl Database {
             .map_err(|e| oxplow_domain::DomainError::Invalid(format!("pool: {e}")))?;
         f(&conn).map_err(|e| oxplow_domain::DomainError::Invalid(format!("sql: {e}")))
     }
+
+    /// Run a blocking DB closure off the async runtime. Wraps
+    /// `spawn_blocking` + [`Self::with_conn`] and flattens the
+    /// `JoinError` (a panicked blocking task) into a `DomainError`
+    /// instead of unwrapping it. Store methods should prefer this over
+    /// hand-rolling the `spawn_blocking(move || db.with_conn(…)).await
+    /// .unwrap()` dance.
+    pub(crate) async fn call<R, F>(&self, f: F) -> Result<R, oxplow_domain::DomainError>
+    where
+        F: FnOnce(&Connection) -> rusqlite::Result<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        let db = self.clone();
+        tokio::task::spawn_blocking(move || db.with_conn(f))
+            .await
+            .map_err(|e| oxplow_domain::DomainError::Invalid(format!("db task panicked: {e}")))?
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
