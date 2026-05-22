@@ -1,0 +1,4 @@
+# Register happy-dom globals before any test module loads, so component
+# tests can render React into a real DOM. See happydom.ts.
+[test]
+preload = ["./happydom.ts"]
