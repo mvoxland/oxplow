@@ -32,6 +32,7 @@ pub mod snapshot_capture_registry;
 pub mod task_service;
 pub mod terminal_sessions;
 pub mod thread_runtime;
+pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
 pub mod workspace_watch;

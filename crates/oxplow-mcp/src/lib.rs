@@ -130,6 +130,14 @@ pub struct SlugParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WikiRefDriftParams {
+    /// Wiki slug (without `.md`).
+    pub slug: String,
+    /// Repo-relative file path referenced by the page.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddFollowupParams {
     pub thread_id: String,
     pub body: String,
@@ -963,6 +971,34 @@ impl OxplowMcp {
             })
             .collect();
         json_result(&out)
+    }
+
+    #[tool(description = "For one wiki page file ref, return the unified diff \
+                       between the snapshot the ref was pinned to and the \
+                       file's CURRENT on-disk content — so you can read just \
+                       what drifted instead of re-opening the whole file. \
+                       Pair with `list_stale_wiki_pages` / \
+                       `get_wiki_page_metadata.stale_refs` to find which \
+                       (slug, path) drifted, then call this per ref. Returns \
+                       `{ slug, path, pinned_snapshot_id, status, \
+                       unified_diff, truncated }`; `status` is one of \
+                       drifted | unchanged | not_a_ref | no_pin | binary.")]
+    async fn wiki_ref_drift(
+        &self,
+        params: Parameters<WikiRefDriftParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let drift = oxplow_app::wiki_drift::compute_wiki_ref_drift(
+            &self.services.page_ref_store,
+            &self.services.snapshot_store,
+            &self.services.blobs,
+            &self.services.layout.project_dir,
+            &p.slug,
+            &p.path,
+        )
+        .await
+        .map_err(internal)?;
+        json_result(&drift)
     }
 
     // ---------- followups ----------
@@ -2673,6 +2709,40 @@ mod tests {
             }))
             .await
             .expect("empty lists are allowed");
+    }
+
+    #[tokio::test]
+    async fn wiki_ref_drift_reports_status_per_ref() {
+        let (proj, _svc, server) = boot();
+        seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
+        server
+            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
+                slug: "intro".into(),
+                verified_refs: vec![],
+                removed_refs: vec![],
+            }))
+            .await
+            .unwrap();
+        // The file IS referenced but has no pin (no snapshot service in tests).
+        let r = server
+            .wiki_ref_drift(Parameters(WikiRefDriftParams {
+                slug: "intro".into(),
+                path: "crates/foo.rs".into(),
+            }))
+            .await
+            .unwrap();
+        let body = text_payload(r);
+        assert!(body.contains("\"status\""), "{body}");
+        assert!(body.contains("no_pin"), "expected no_pin: {body}");
+        // A path the page doesn't reference at all.
+        let r2 = server
+            .wiki_ref_drift(Parameters(WikiRefDriftParams {
+                slug: "intro".into(),
+                path: "crates/zzz.rs".into(),
+            }))
+            .await
+            .unwrap();
+        assert!(text_payload(r2).contains("not_a_ref"));
     }
 
     #[tokio::test]

@@ -597,7 +597,13 @@ page). `list_wiki_pages` already returns the full per-page bulk fields
 (title, refs, excerpt, timestamps), so the only reason to call
 `get_wiki_page_metadata` after a `list` is its added `stale_refs` field
 — don't fan out per-page `get` calls for data `list` already gave you.
-The wiki-only
+`wiki_ref_drift({ slug, path })` closes the loop: for one stale ref it
+returns the unified diff between the snapshot the ref was pinned to and
+the file's current on-disk content (`compute_wiki_ref_drift` in
+`crates/oxplow-app/src/wiki_drift.rs`, via `similar`), so the agent reads
+only the changed hunks instead of re-opening the file. `status` is
+drifted | unchanged | not_a_ref | no_pin | binary; the diff is capped
+(`truncated` flags it). The wiki-only
 `find_wiki_pages_for_file` was removed in favour of `list_backlinks`
 (below) — every cross-kind backlinks question goes through one tool
 now. **There is intentionally no create/update tool** —
