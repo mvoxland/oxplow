@@ -881,18 +881,88 @@ impl OxplowMcp {
         json_result(&hits)
     }
 
-    #[tool(description = "Get a wiki page's metadata by slug.")]
+    #[tool(description = "Get one wiki page's metadata by slug, enriched with \
+                       `stale_refs` — the file refs whose pinned snapshot \
+                       is older than the file's latest snapshot. That \
+                       freshness detail is the one thing `list_wiki_pages` \
+                       does NOT carry; for the bulk fields (title, refs, \
+                       excerpt, timestamps) `list_wiki_pages` already \
+                       returns everything this does, so don't follow a \
+                       `list` with per-page `get` calls unless you need \
+                       `stale_refs`. Returns null for an unknown slug.")]
     async fn get_wiki_page_metadata(
         &self,
         params: Parameters<SlugParams>,
     ) -> Result<CallToolResult, McpError> {
-        let note = self
+        let Some(note) = self
             .services
             .wiki_page_store
             .get(&params.0.slug)
             .await
+            .map_err(internal)?
+        else {
+            return json_result(&serde_json::Value::Null);
+        };
+        let stale_refs: Vec<String> = self
+            .services
+            .page_ref_store
+            .list_wiki_file_freshness(&params.0.slug)
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .filter(|(_path, local, _git, _exact, latest)| wiki_ref_stale(*local, *latest))
+            .map(|(path, ..)| path)
+            .collect();
+        let mut value = serde_json::to_value(&note).map_err(internal)?;
+        if let serde_json::Value::Object(map) = &mut value {
+            map.insert("stale_refs".to_string(), serde_json::json!(stale_refs));
+        }
+        json_result(&value)
+    }
+
+    #[tool(description = "List wiki pages that have at least one STALE file \
+                       reference — a referenced file has been snapshotted \
+                       more recently than the page's captured pin (or the \
+                       ref was never pinned). Use this to find out-of-date \
+                       pages without reading any body. Returns \
+                       `{ slug, title, stale_refs }` per drifted page; an \
+                       empty array means every page is current.")]
+    async fn list_stale_wiki_pages(&self) -> Result<CallToolResult, McpError> {
+        let pairs = self
+            .services
+            .page_ref_store
+            .list_stale_wiki_pages()
+            .await
             .map_err(internal)?;
-        json_result(&note)
+        let titles: std::collections::HashMap<String, String> = self
+            .services
+            .wiki_page_store
+            .list()
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .map(|p| (p.slug, p.title))
+            .collect();
+        // Pairs arrive ordered by slug then path, so consecutive rows
+        // with the same slug group together.
+        let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
+        for (slug, path) in pairs {
+            match grouped.last_mut() {
+                Some((s, refs)) if *s == slug => refs.push(path),
+                _ => grouped.push((slug, vec![path])),
+            }
+        }
+        let out: Vec<serde_json::Value> = grouped
+            .into_iter()
+            .map(|(slug, stale_refs)| {
+                serde_json::json!({
+                    "slug": &slug,
+                    "title": titles.get(&slug).cloned().unwrap_or_default(),
+                    "stale_refs": stale_refs,
+                })
+            })
+            .collect();
+        json_result(&out)
     }
 
     // ---------- followups ----------
@@ -1839,7 +1909,12 @@ impl OxplowMcp {
                        `verified_refs` lists repo-relative file paths you \
                        re-read against the new body during this edit \
                        (those refs get their snapshot pin advanced to \
-                       current); `removed_refs` lists paths you \
+                       current). A verified path may be a file the body \
+                       cites directly OR a file under a directory the \
+                       body cites via `[[dir:…]]` — verifying a fact \
+                       against `crates/x/src/lib.rs` when the page only \
+                       cites `[[dir:crates/x]]` now records a precise \
+                       pin for that file. `removed_refs` lists paths you \
                        intentionally removed from the page (validated to \
                        no longer appear in the body). Refs left in place \
                        without re-checking should appear in NEITHER list \
@@ -1916,16 +1991,25 @@ impl OxplowMcp {
                 None,
             ));
         }
-        // verified_refs MUST appear in body.
+        // A verified_ref is acceptable if the body cites it directly
+        // as a file, OR it's a file living under a directory the body
+        // cites (`[[dir:…]]`) — the "I verified a fact against a file
+        // I reference only by its directory" case. Anything else is
+        // genuinely unreferenced and rejected.
         let missing: Vec<&String> = p
             .verified_refs
             .iter()
-            .filter(|path| !body_files.contains(path.as_str()))
+            .filter(|path| {
+                !body_files.contains(path.as_str())
+                    && !oxplow_app::wiki_pages::path_under_any_dir(path, &parsed.dir_refs)
+            })
             .collect();
         if !missing.is_empty() {
             return Err(McpError::invalid_params(
                 format!(
-                    "verified_refs entries not referenced by the body: {}",
+                    "verified_refs entries are neither referenced by the body nor under a \
+                     cited directory: {}. Reference the file in the body, or name a file \
+                     under a [[dir:…]] the page cites.",
                     missing
                         .iter()
                         .map(|s| s.as_str())
@@ -1935,28 +2019,50 @@ impl OxplowMcp {
                 None,
             ));
         }
-        // Re-stamp verified refs to current. We need a snapshot id;
-        // if we couldn't resolve one (no snapshot service in tests),
-        // there's nothing to re-stamp.
+        // Pin verified refs to the current snapshot. A body file ref
+        // re-stamps its existing edge; a file under a cited dir is
+        // *materialized* as a new `(wiki→file)` edge (the wiki sync
+        // preserves it as long as the dir ref stays). Without a
+        // resolved snapshot (no snapshot service, e.g. tests) the body
+        // ref can't be re-stamped, but a materialized edge is still
+        // created — unpinned, which the staleness signal treats as
+        // stale until a real snapshot lands.
         let mut restamped = Vec::new();
-        if let Some(v) = resolved_version.as_ref() {
-            for path in &p.verified_refs {
-                self.services
-                    .page_ref_store
-                    .restamp_edge_version(
-                        KIND_WIKI,
-                        &slug,
-                        KIND_FILE,
-                        path,
-                        RT_WIKI_FILE,
+        for path in &p.verified_refs {
+            if body_files.contains(path.as_str()) {
+                if let Some(v) = resolved_version.as_ref() {
+                    self.services
+                        .page_ref_store
+                        .restamp_edge_version(
+                            KIND_WIKI,
+                            &slug,
+                            KIND_FILE,
+                            path,
+                            RT_WIKI_FILE,
+                            v.local_snapshot_id,
+                            v.closest_git_version.clone(),
+                            v.git_version_exact,
+                        )
+                        .await
+                        .map_err(|e| internal(e.to_string()))?;
+                }
+            } else {
+                let mut edge =
+                    oxplow_db::PageRefEdge::new(KIND_WIKI, &slug, KIND_FILE, path, RT_WIKI_FILE);
+                if let Some(v) = resolved_version.as_ref() {
+                    edge = edge.with_version(
                         v.local_snapshot_id,
                         v.closest_git_version.clone(),
                         v.git_version_exact,
-                    )
+                    );
+                }
+                self.services
+                    .page_ref_store
+                    .upsert_edge(edge)
                     .await
                     .map_err(|e| internal(e.to_string()))?;
-                restamped.push(path.clone());
             }
+            restamped.push(path.clone());
         }
         json_result(&serde_json::json!({
             "slug": slug,
@@ -2076,6 +2182,16 @@ impl ServerHandler for OxplowMcp {
 
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
     McpError::internal_error(e.to_string(), None)
+}
+
+/// A wiki file ref is stale when its path has been snapshotted more
+/// recently than the ref's captured pin, or it was never pinned but the
+/// file has a snapshot. Mirrors the per-ref rule in the UI's
+/// `list_wiki_freshness` reader and the SQL in
+/// `SqlitePageRefStore::list_stale_wiki_pages`.
+fn wiki_ref_stale(local: Option<i64>, latest: Option<i64>) -> bool {
+    matches!((latest, local), (Some(l), Some(loc)) if l > loc)
+        || matches!((latest, local), (Some(_), None))
 }
 
 /// Validate that a caller-supplied id string carries the expected
@@ -2560,6 +2676,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn record_wiki_page_update_accepts_file_under_cited_dir_and_materializes_edge() {
+        let (proj, services, server) = boot();
+        // Body cites the directory, not the file.
+        seed_wiki(proj.path(), "intro", "see [[dir:crates/cp]] for details").await;
+        server
+            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
+                slug: "intro".into(),
+                verified_refs: vec!["crates/cp/src/lib.rs".into()],
+                removed_refs: vec![],
+            }))
+            .await
+            .expect("a file under a cited dir is an acceptable verified_ref");
+        // The verification edge was materialized as a wiki→file edge.
+        let backlinks = services
+            .page_ref_store
+            .list_backlinks("file", "crates/cp/src/lib.rs", None)
+            .await
+            .unwrap();
+        assert!(
+            backlinks.iter().any(|e| e.source_id == "intro"),
+            "expected a materialized wiki:intro → file edge, got {backlinks:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_wiki_page_update_rejects_file_not_under_any_cited_dir() {
+        let (proj, _svc, server) = boot();
+        seed_wiki(proj.path(), "intro", "see [[dir:crates/cp]] only").await;
+        let err = server
+            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
+                slug: "intro".into(),
+                verified_refs: vec!["crates/other/src/main.rs".into()],
+                removed_refs: vec![],
+            }))
+            .await
+            .expect_err("a file outside every cited dir must be rejected");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("crates/other/src/main.rs"),
+            "error should name the offending path: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_wiki_page_metadata_includes_stale_refs_field() {
+        // The enriched metadata carries `stale_refs` (empty here — no
+        // snapshots seeded), which is what distinguishes it from the
+        // bulk `list_wiki_pages` payload.
+        let (proj, _svc, server) = boot();
+        seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
+        server
+            .record_wiki_page_update(Parameters(RecordWikiPageUpdateParams {
+                slug: "intro".into(),
+                verified_refs: vec![],
+                removed_refs: vec![],
+            }))
+            .await
+            .unwrap();
+        let r = server
+            .get_wiki_page_metadata(Parameters(SlugParams {
+                slug: "intro".into(),
+            }))
+            .await
+            .unwrap();
+        let body = text_payload(r);
+        assert!(
+            body.contains("\"stale_refs\""),
+            "metadata should carry stale_refs: {body}"
+        );
+    }
+
+    #[test]
+    fn wiki_ref_stale_rule() {
+        assert!(
+            wiki_ref_stale(Some(100), Some(200)),
+            "newer snapshot is stale"
+        );
+        assert!(!wiki_ref_stale(Some(200), Some(200)), "equal is fresh");
+        assert!(
+            !wiki_ref_stale(Some(200), Some(50)),
+            "older file snapshot is fresh"
+        );
+        assert!(
+            wiki_ref_stale(None, Some(50)),
+            "unpinned but snapshotted is stale"
+        );
+        assert!(
+            !wiki_ref_stale(Some(100), None),
+            "no snapshot for path is fresh"
+        );
+        assert!(!wiki_ref_stale(None, None), "neither is fresh");
+    }
+
+    #[tokio::test]
     async fn create_task_rejects_stream_id_passed_as_thread_id() {
         let (_proj, _svc, server) = boot();
         let err = server
@@ -2638,6 +2848,16 @@ mod tests {
         // No notes seeded — the tool should still respond with an
         // empty-list payload rather than erroring.
         let r = server.list_wiki_pages().await.unwrap();
+        let body = text_payload(r);
+        assert_eq!(body.trim(), "[]");
+    }
+
+    #[tokio::test]
+    async fn list_stale_wiki_pages_empty_when_nothing_stale() {
+        let (_proj, _services, server) = boot();
+        // No snapshots / refs seeded — no page can be stale, so the
+        // tool returns an empty array rather than erroring.
+        let r = server.list_stale_wiki_pages().await.unwrap();
         let body = text_payload(r);
         assert_eq!(body.trim(), "[]");
     }

@@ -292,6 +292,43 @@ impl SqlitePageRefStore {
         .unwrap()
     }
 
+    /// Insert or replace a single edge, stamping the caller-supplied
+    /// version data. Unlike `merge_source`/`replace_source`, this
+    /// touches exactly one `(source, target, ref_type)` row and never
+    /// prunes. Used to **materialize a verification edge** — e.g. a
+    /// wiki page the agent verified against a file it cites only via
+    /// the file's containing directory, which the body parser would
+    /// not emit. The wiki sync preserves such edges as long as their
+    /// path stays under a cited directory ref.
+    pub async fn upsert_edge(&self, edge: PageRefEdge) -> Result<(), DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute(
+                    "INSERT OR REPLACE INTO page_ref
+                       (source_kind, source_id, target_kind, target_id, ref_type,
+                        source_extra, local_snapshot_id, closest_git_version,
+                        git_version_exact)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        edge.source_kind,
+                        edge.source_id,
+                        edge.target_kind,
+                        edge.target_id,
+                        edge.ref_type,
+                        edge.source_extra,
+                        edge.local_snapshot_id,
+                        edge.closest_git_version,
+                        if edge.git_version_exact { 1 } else { 0 },
+                    ],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+    }
+
     /// Per-target freshness rows for the wiki page identified by
     /// `slug`. Each row carries the captured snapshot pin from
     /// `page_ref` joined to the latest `snapshot.id` whose
@@ -327,6 +364,48 @@ impl SqlitePageRefStore {
                     let exact: i64 = r.get(3)?;
                     let latest: Option<i64> = r.get(4)?;
                     Ok((path, local, git, exact != 0, latest))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Every wiki page that has at least one **stale** file ref, with
+    /// the stale paths. A file ref is stale when a `file_snapshot` for
+    /// its path exists at a snapshot newer than the ref's captured pin
+    /// (`local_snapshot_id`), or when the ref has no pin yet but the
+    /// file has been snapshotted at all. This is the same rule the UI
+    /// `list_wiki_freshness` reader applies per-ref (`latest > local`,
+    /// or `latest present && local NULL`), expressed once here so an
+    /// agent can find drifted pages without reading any body.
+    ///
+    /// Returns `(slug, path)` pairs ordered by slug then path; the
+    /// caller groups them per page.
+    pub async fn list_stale_wiki_pages(&self) -> Result<Vec<(String, String)>, DomainError> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT pr.source_id, pr.target_id
+                       FROM page_ref pr
+                      WHERE pr.source_kind = 'wiki'
+                        AND pr.target_kind = 'file'
+                        AND EXISTS (
+                            SELECT 1
+                              FROM file_snapshot fs
+                              JOIN snapshot s ON s.id = fs.snapshot_id
+                             WHERE fs.path = pr.target_id
+                               AND (pr.local_snapshot_id IS NULL
+                                    OR s.id > pr.local_snapshot_id)
+                        )
+                      ORDER BY pr.source_id ASC, pr.target_id ASC",
+                )?;
+                let rows = stmt.query_map([], |r| {
+                    let slug: String = r.get(0)?;
+                    let path: String = r.get(1)?;
+                    Ok((slug, path))
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -631,6 +710,115 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outbound, vec![e]);
+    }
+
+    #[tokio::test]
+    async fn list_stale_wiki_pages_flags_drifted_and_unpinned_refs() {
+        let store = SqlitePageRefStore::new(Database::in_memory());
+        // Seed a stream, two snapshots (id 100 < 200), and file
+        // snapshots: stale.rs captured at the newer snapshot 200,
+        // fresh.rs at 100.
+        store
+            .db
+            .with_conn(|conn| {
+                conn.execute(
+                    "INSERT INTO streams
+                       (id, kind, title, branch, branch_ref, branch_source,
+                        worktree_path, created_at, updated_at)
+                     VALUES ('s1','primary','S','main','refs/heads/main','local',
+                             '/tmp/s1','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
+                    [],
+                )?;
+                for id in [100i64, 200] {
+                    conn.execute(
+                        "INSERT INTO snapshot (id, stream_id, created_at)
+                         VALUES (?1,'s1','2026-01-01T00:00:00Z')",
+                        params![id],
+                    )?;
+                }
+                conn.execute(
+                    "INSERT INTO file_snapshot
+                       (stream_id, path, size_bytes, captured_at, oversize, snapshot_id)
+                     VALUES ('s1','stale.rs',0,'2026-01-01T00:00:00Z',0,200),
+                            ('s1','fresh.rs',0,'2026-01-01T00:00:00Z',0,100)",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        // p-stale: pinned at 100, file last snapshotted at 200 → stale.
+        store
+            .replace_source(
+                "wiki",
+                "p-stale",
+                vec![edge("wiki", "p-stale", "file", "stale.rs", "wiki_file_ref")
+                    .with_version(100, None, false)],
+            )
+            .await
+            .unwrap();
+        // p-fresh: pinned at 100, file last snapshotted at 100 → fresh.
+        store
+            .replace_source(
+                "wiki",
+                "p-fresh",
+                vec![edge("wiki", "p-fresh", "file", "fresh.rs", "wiki_file_ref")
+                    .with_version(100, None, false)],
+            )
+            .await
+            .unwrap();
+        // p-nopin: no pin at all, file has a snapshot → stale.
+        store
+            .replace_source(
+                "wiki",
+                "p-nopin",
+                vec![edge("wiki", "p-nopin", "file", "stale.rs", "wiki_file_ref")],
+            )
+            .await
+            .unwrap();
+
+        let stale = store.list_stale_wiki_pages().await.unwrap();
+        assert_eq!(
+            stale,
+            vec![
+                ("p-nopin".to_string(), "stale.rs".to_string()),
+                ("p-stale".to_string(), "stale.rs".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_edge_inserts_then_overwrites_version() {
+        let store = SqlitePageRefStore::new(Database::in_memory());
+        let e = edge(
+            "wiki",
+            "intro",
+            "file",
+            "crates/x/src/lib.rs",
+            "wiki_file_ref",
+        )
+        .with_version(100, Some("aaaa".into()), true);
+        store.upsert_edge(e).await.unwrap();
+        let out = store.list_outbound("wiki", "intro", None).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].local_snapshot_id, Some(100));
+
+        // Re-verifying overwrites the pin (unlike merge_source, which
+        // preserves) — an explicit verification advances the pin.
+        let e2 = edge(
+            "wiki",
+            "intro",
+            "file",
+            "crates/x/src/lib.rs",
+            "wiki_file_ref",
+        )
+        .with_version(200, Some("bbbb".into()), false);
+        store.upsert_edge(e2).await.unwrap();
+        let out2 = store.list_outbound("wiki", "intro", None).await.unwrap();
+        assert_eq!(out2.len(), 1);
+        assert_eq!(out2[0].local_snapshot_id, Some(200));
+        assert_eq!(out2[0].closest_git_version.as_deref(), Some("bbbb"));
+        assert!(!out2[0].git_version_exact);
     }
 
     #[tokio::test]

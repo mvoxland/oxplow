@@ -570,18 +570,34 @@ etc.) from `[[…]]` and `(file:…@…)` / `(dir:…@…)` body forms
 before parsing, and writes the normalised body back to disk —
 version state lives in the row, not the prose.
 
+**Verification edges under cited dirs survive sync.** One exception
+to "edges not in the body are deleted": a `wiki_file_ref` edge whose
+`target_id` is a file under a directory the body cites
+(`[[dir:…]]`) is re-included by the sync (`path_under_any_dir` in
+`crates/oxplow-app/src/wiki_pages.rs`) so `merge_source` preserves it
+and its pin. These are **verification edges** materialized by
+`record_wiki_page_update` when the agent verifies a fact against a
+specific file it references only by directory. They self-clean: once
+the covering `[[dir:…]]` ref leaves the body, the edge is no longer
+re-included and gets pruned.
+
 **Agent-driven `verified_refs` / `removed_refs`.** The
 `record_wiki_page_update` MCP tool takes two required arrays:
 `verified_refs` (paths the agent re-read against the new body
 this turn) and `removed_refs` (paths intentionally removed).
 The tool re-runs the sync synchronously, validates the
 declarations against the new body (every removed path MUST be
-absent, every verified path MUST be present), then re-stamps
-the `page_ref` rows for `verified_refs` via
-`SqlitePageRefStore::restamp_edge_version`. Refs left in the
-body but in NEITHER list keep their existing pin — that's how
-"this content relies on a stale source" stays accurate. Skill
-prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
+absent; every verified path MUST be either a body file ref OR a
+file under a directory the body cites), then pins `verified_refs`
+to the current snapshot. A body file ref re-stamps its existing
+edge via `SqlitePageRefStore::restamp_edge_version`; a file under a
+cited dir is **materialized** as a new `wiki_file_ref` edge via
+`SqlitePageRefStore::upsert_edge` (see "Verification edges" above) —
+this is how the agent records "I verified a fact against
+`crates/x/src/lib.rs`" when the page only cites `[[dir:crates/x]]`.
+Refs left in the body but in NEITHER list keep their existing pin —
+that's how "this content relies on a stale source" stays accurate.
+Skill prompt at `crates/oxplow-plugin/assets/oxplow-wiki-capture.SKILL.md`.
 
 **User-facing Freshness view.** The
 `list_wiki_freshness(slug)` IPC

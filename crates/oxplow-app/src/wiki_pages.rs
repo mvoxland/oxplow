@@ -22,7 +22,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, KIND_WIKI};
+use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, KIND_FILE, KIND_WIKI};
 use oxplow_db::{SqlitePageRefStore, SqliteWikiPageStore, WikiPage};
 use oxplow_domain::{DomainError, Timestamp};
 
@@ -137,6 +137,11 @@ pub fn parse_refs(body: &str) -> ParsedRefs {
     if body.is_empty() {
         return ParsedRefs::default();
     }
+    // Blank out code spans / fenced blocks first (shared with the
+    // unified `refs::extract`) so illustrative `[[...]]` or path
+    // tokens written inside backticks don't become refs.
+    let masked = oxplow_domain::refs::mask_code_regions(body);
+    let body = masked.as_str();
     let mut files = BTreeSet::new();
     let mut dirs = BTreeSet::new();
     let mut notes = BTreeSet::new();
@@ -297,6 +302,30 @@ pub async fn sync_from_disk_with_refs_versioned(
         if let Some(v) = file_version.as_ref() {
             stamp_file_versions(&mut edges, v.as_ref());
         }
+        // Preserve "verification" file edges: file refs the body
+        // doesn't literally cite but that live under a directory the
+        // body DOES cite (`[[dir:…]]`). The agent materializes these
+        // via `record_wiki_page_update` when it verifies a fact
+        // against a specific file it only references by directory.
+        // Re-including them here keeps merge_source from pruning them
+        // (and preserves their pins, since the PK matches the existing
+        // row). When the covering dir ref is removed from the body,
+        // the edge is no longer re-included → merge_source prunes it,
+        // so they self-clean.
+        if !note.dir_refs.is_empty() {
+            let existing = page_refs.list_outbound(KIND_WIKI, slug, None).await?;
+            for e in existing {
+                if e.target_kind != KIND_FILE {
+                    continue;
+                }
+                let already = edges
+                    .iter()
+                    .any(|b| b.target_kind == KIND_FILE && b.target_id == e.target_id);
+                if !already && path_under_any_dir(&e.target_id, &note.dir_refs) {
+                    edges.push(e);
+                }
+            }
+        }
         // merge_source preserves the existing local_snapshot_id /
         // closest_git_version / git_version_exact on any edge that
         // matches an existing row by PK. New edges get the freshly
@@ -307,6 +336,16 @@ pub async fn sync_from_disk_with_refs_versioned(
         page_refs.merge_source(KIND_WIKI, slug, edges).await?;
     }
     Ok(())
+}
+
+/// True if `path` is a file located under any of `dirs` (a directory
+/// ref the body cites). Workspace-relative, `/`-separated; an exact
+/// equality is not a match (a file path can't equal a directory).
+pub fn path_under_any_dir(path: &str, dirs: &[String]) -> bool {
+    dirs.iter().any(|d| {
+        let prefix = format!("{}/", d.trim_end_matches('/'));
+        path.starts_with(&prefix)
+    })
 }
 
 /// Strip `@<version>` suffixes from `file:`, `dir:`, and bare
@@ -633,7 +672,11 @@ fn find_inline_paths(body: &str) -> Vec<String> {
         ' ', '\t', '\n', '\r', ',', ';', '(', ')', '[', ']', '"', '\'',
     ];
     for token in body.split(|c: char| separators.contains(&c)) {
-        let trimmed = token.trim_matches(|c: char| matches!(c, '.' | ',' | ';' | ':'));
+        // Trim *trailing* punctuation only (sentence periods, commas,
+        // etc.). A leading `.` is significant — it marks a dotfile dir
+        // like `.context/…` or `.github/…`; stripping it would forge a
+        // phantom dot-less path that collides with nothing on disk.
+        let trimmed = token.trim_end_matches(['.', ',', ';', ':']);
         if trimmed.is_empty() || trimmed.starts_with('/') {
             continue;
         }
@@ -722,6 +765,53 @@ mod tests {
         let refs = parse_refs("see [[src/foo.ts]] and [[src/bar.tsx:42]]");
         assert_eq!(refs.file_refs, vec!["src/bar.tsx", "src/foo.ts"]);
         assert!(refs.related_notes.is_empty());
+    }
+
+    #[test]
+    fn dotfile_dir_wikilink_keeps_leading_dot_and_does_not_duplicate() {
+        // Regression: a `[[.context/foo.md]]` wikilink must yield
+        // exactly one file ref WITH its leading dot. The inline-path
+        // fallback used to trim the leading `.` (treating it like
+        // trailing sentence punctuation), producing a phantom
+        // dot-stripped `context/foo.md` alongside the real ref.
+        let refs = parse_refs("see [[.context/data-model.md]] for the schema");
+        assert_eq!(refs.file_refs, vec![".context/data-model.md"]);
+    }
+
+    #[test]
+    fn inline_dotfile_path_keeps_leading_dot() {
+        // A bare inline dotfile path (no wikilink) must also keep its
+        // leading dot.
+        let refs = parse_refs("edit .github/workflows/ci.yml to fix CI");
+        assert_eq!(refs.file_refs, vec![".github/workflows/ci.yml"]);
+    }
+
+    #[test]
+    fn inline_path_still_strips_trailing_sentence_period() {
+        // The trailing-punctuation trim must still work: a path that
+        // ends a sentence keeps no trailing dot.
+        let refs = parse_refs("we touched src/lib.rs.");
+        assert_eq!(refs.file_refs, vec!["src/lib.rs"]);
+    }
+
+    #[test]
+    fn parse_ignores_links_inside_inline_code() {
+        // Regression: `` `[[path]]` `` in a freshness note created a
+        // phantom "path" related-note. Code spans must be opaque.
+        let refs = parse_refs("normalized to the bare `[[path]]` form, e.g. `src/foo.rs`");
+        assert!(
+            refs.related_notes.is_empty(),
+            "got {:?}",
+            refs.related_notes
+        );
+        assert!(refs.file_refs.is_empty(), "got {:?}", refs.file_refs);
+    }
+
+    #[test]
+    fn parse_ignores_links_inside_fenced_block() {
+        let refs = parse_refs("text\n```\n[[in-fence]] [[src/x.rs]]\n```\nkeep [[real-slug]]");
+        assert_eq!(refs.related_notes, vec!["real-slug"]);
+        assert!(refs.file_refs.is_empty(), "got {:?}", refs.file_refs);
     }
 
     #[test]
@@ -1150,6 +1240,82 @@ mod tests {
         assert!(targets.contains(&("task", "1")));
         assert!(targets.contains(&("file", "src/app.rs")));
         assert!(targets.contains(&("finding", "fnd-1")));
+    }
+
+    #[test]
+    fn path_under_any_dir_matches_only_descendants() {
+        let dirs = vec!["crates/oxplow-control-plane".to_string()];
+        assert!(path_under_any_dir(
+            "crates/oxplow-control-plane/src/lib.rs",
+            &dirs
+        ));
+        // The directory itself is not "under" itself.
+        assert!(!path_under_any_dir("crates/oxplow-control-plane", &dirs));
+        // A sibling that merely shares a prefix is not under it.
+        assert!(!path_under_any_dir(
+            "crates/oxplow-control-plane-x/y.rs",
+            &dirs
+        ));
+        assert!(!path_under_any_dir("crates/other/z.rs", &dirs));
+    }
+
+    #[tokio::test]
+    async fn wiki_sync_preserves_verification_edge_under_cited_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        std::fs::create_dir_all(wiki_pages_dir(project)).unwrap();
+        let body_path = wiki_pages_dir(project).join("intro.md");
+        // Body cites the DIRECTORY only, not the file.
+        std::fs::write(&body_path, "see [[dir:crates/cp]] for details").unwrap();
+
+        let db = oxplow_db::Database::in_memory();
+        let store = oxplow_db::SqliteWikiPageStore::new(db.clone());
+        let page_refs = oxplow_db::SqlitePageRefStore::new(db);
+
+        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
+            .await
+            .unwrap();
+        // Materialize a verification edge for a file under the cited dir.
+        page_refs
+            .upsert_edge(
+                oxplow_db::PageRefEdge::new(
+                    "wiki",
+                    "intro",
+                    "file",
+                    "crates/cp/src/lib.rs",
+                    "wiki_file_ref",
+                )
+                .with_version(42, None, false),
+            )
+            .await
+            .unwrap();
+
+        // Re-sync with the body UNCHANGED: the verification edge must
+        // survive (and keep its pin), even though it isn't in the body.
+        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
+            .await
+            .unwrap();
+        let after = page_refs
+            .list_backlinks("file", "crates/cp/src/lib.rs", None)
+            .await
+            .unwrap();
+        assert_eq!(after.len(), 1, "verification edge should survive re-sync");
+        assert_eq!(after[0].local_snapshot_id, Some(42), "pin preserved");
+
+        // Remove the dir ref from the body → next sync prunes the now-
+        // orphaned verification edge.
+        std::fs::write(&body_path, "no refs at all now").unwrap();
+        sync_from_disk_with_refs(project, &store, Some(&page_refs), "intro")
+            .await
+            .unwrap();
+        let gone = page_refs
+            .list_backlinks("file", "crates/cp/src/lib.rs", None)
+            .await
+            .unwrap();
+        assert!(
+            gone.is_empty(),
+            "verification edge should self-clean once its dir ref is gone, got {gone:?}"
+        );
     }
 
     /// When a wiki body changes to remove a ref, the next sync must

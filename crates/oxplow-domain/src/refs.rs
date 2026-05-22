@@ -70,6 +70,10 @@ pub fn extract(body: &str) -> ExtractedRefs {
     if body.is_empty() {
         return ExtractedRefs::default();
     }
+    // Neutralize code spans / fenced blocks first so illustrative
+    // `[[...]]` or path tokens inside them never become refs.
+    let masked = mask_code_regions(body);
+    let body = masked.as_str();
     let mut files: BTreeSet<String> = BTreeSet::new();
     let mut dirs: BTreeSet<String> = BTreeSet::new();
     let mut wikis: BTreeSet<String> = BTreeSet::new();
@@ -489,6 +493,117 @@ fn is_id_boundary_char(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
 }
 
+/// Replace the contents of fenced code blocks and inline code spans
+/// with spaces so ref extraction never treats illustrative code — e.g.
+/// `` `[[path]]` `` written in prose — as a real link or file path.
+/// Backticks/fences are ASCII, so every replaced byte becomes one
+/// single-byte space and the output length equals the input length.
+pub fn mask_code_regions(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    // (fence byte, run length) while inside a fenced block.
+    let mut in_fence: Option<(u8, usize)> = None;
+    for line in body.split_inclusive('\n') {
+        let fence = leading_fence(line);
+        match in_fence {
+            Some((fc, flen)) => {
+                blank_line(&mut out, line);
+                // A closing fence is a run of the same char, length ≥ opener.
+                if let Some((c, len)) = fence {
+                    if c == fc && len >= flen {
+                        in_fence = None;
+                    }
+                }
+            }
+            None => match fence {
+                Some((c, len)) => {
+                    blank_line(&mut out, line);
+                    in_fence = Some((c, len));
+                }
+                None => mask_inline_code(&mut out, line),
+            },
+        }
+    }
+    out
+}
+
+/// A leading code fence on a line: 3+ backticks or 3+ tildes after
+/// optional leading whitespace. Returns `(fence_byte, run_len)`.
+fn leading_fence(line: &str) -> Option<(u8, usize)> {
+    let t = line.trim_start();
+    let bytes = t.as_bytes();
+    let c = *bytes.first()?;
+    if c != b'`' && c != b'~' {
+        return None;
+    }
+    let run = bytes.iter().take_while(|&&b| b == c).count();
+    (run >= 3).then_some((c, run))
+}
+
+/// Push `line` with every byte except line terminators replaced by a
+/// space.
+fn blank_line(out: &mut String, line: &str) {
+    for &b in line.as_bytes() {
+        out.push(if b == b'\n' || b == b'\r' {
+            b as char
+        } else {
+            ' '
+        });
+    }
+}
+
+/// Mask inline code spans within a single (non-fenced) line. A span
+/// opens on a run of N backticks and closes on the next run of exactly
+/// N backticks (CommonMark). Spans (backticks + contents) become
+/// spaces; text outside spans is copied verbatim. An unterminated run
+/// is not a span — the rest of the line is copied as-is.
+fn mask_inline_code(out: &mut String, line: &str) {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    let mut copy_from = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let open = i;
+        let mut n = 0;
+        while i < bytes.len() && bytes[i] == b'`' {
+            i += 1;
+            n += 1;
+        }
+        // Scan for a closing run of exactly n backticks.
+        let mut j = i;
+        let mut end = None;
+        while j < bytes.len() {
+            if bytes[j] == b'`' {
+                let mut m = 0;
+                while j < bytes.len() && bytes[j] == b'`' {
+                    j += 1;
+                    m += 1;
+                }
+                if m == n {
+                    end = Some(j);
+                    break;
+                }
+            } else {
+                j += 1;
+            }
+        }
+        match end {
+            Some(end) => {
+                out.push_str(&line[copy_from..open]);
+                for _ in open..end {
+                    out.push(' ');
+                }
+                copy_from = end;
+                i = end;
+            }
+            None => break, // unterminated — copy the remainder verbatim
+        }
+    }
+    out.push_str(&line[copy_from..]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,6 +749,48 @@ mod tests {
     fn bare_tilde_without_slash_is_not_a_path() {
         let r = extract("approximately ~5 items");
         assert!(r.files.is_empty(), "got {:?}", r.files);
+    }
+
+    #[test]
+    fn wikilink_inside_inline_code_is_ignored() {
+        // Regression: `` `[[path]]` `` in prose is illustrative, not a
+        // link. Neither the wiki slug nor a file path should extract.
+        let r = extract("normalized to the `[[some-slug]]` form, see `[[src/foo.rs]]`");
+        assert!(r.wikis.is_empty(), "got wikis {:?}", r.wikis);
+        assert!(r.files.is_empty(), "got files {:?}", r.files);
+    }
+
+    #[test]
+    fn wikilink_inside_fenced_block_is_ignored() {
+        let body = "before\n```\n[[src/foo.rs]] and [[in-fence-slug]]\n```\nafter [[real-slug]]";
+        let r = extract(body);
+        assert!(r.files.is_empty(), "got files {:?}", r.files);
+        assert_eq!(r.wikis, vec!["real-slug"]);
+    }
+
+    #[test]
+    fn inline_path_inside_code_span_is_ignored() {
+        let r = extract("run `cargo test src/lib.rs` to check");
+        assert!(r.files.is_empty(), "got {:?}", r.files);
+    }
+
+    #[test]
+    fn link_outside_code_still_extracted_alongside_code() {
+        let r = extract("see [[src/foo.rs]] and run `cargo build`");
+        assert_eq!(r.files, vec!["src/foo.rs"]);
+    }
+
+    #[test]
+    fn unterminated_backtick_does_not_swallow_rest() {
+        // A lone backtick is not a code span — refs after it still parse.
+        let r = extract("a stray ` then [[real-slug]]");
+        assert_eq!(r.wikis, vec!["real-slug"]);
+    }
+
+    #[test]
+    fn mask_preserves_byte_length() {
+        let body = "x `code` y\n```\nfenced\n```\nz";
+        assert_eq!(mask_code_regions(body).len(), body.len());
     }
 
     #[test]

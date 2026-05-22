@@ -137,6 +137,12 @@ calls `onDrop` after validating the target. The entry point
    re-check anything" / "I didn't remove anything." Refs left in
    place without re-checking go in NEITHER list and keep their
    existing freshness pin so the staleness signal stays honest.
+   A `verified_ref` may be a file the body cites directly OR a file
+   under a directory the body cites (`[[dir:…]]`) — so if you
+   verified a fact against `crates/x/src/lib.rs` but the page only
+   links `[[dir:crates/x]]`, list the specific file; it gets its own
+   precise freshness pin (and survives future syncs while the dir
+   ref stays).
 4. When you close the surrounding task via `complete_task`,
    declare the wiki page in `impacts`:
    `{ kind: "wiki", id: "<slug>", action: "created" | "updated" }`.

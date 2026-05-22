@@ -588,7 +588,16 @@ Each row carries `ref_type` so you can tell e.g. a commit's
 per-project wiki (`wiki_page` table + `.oxplow/wiki/*.md` files — see
 `data-model.md`). Tools are metadata-only: `list_wiki_pages`,
 `get_wiki_page_metadata`, `resync_wiki_page`, `search_wiki_pages` (title),
-`search_wiki_page_bodies` (content), `delete_wiki_page`. The wiki-only
+`search_wiki_page_bodies` (content), `delete_wiki_page`, and
+`list_stale_wiki_pages` (pages with ≥1 file ref whose pinned snapshot is
+older than the file's latest snapshot — same staleness rule as the UI
+`list_wiki_freshness` reader, surfaced so the agent can find drifted
+pages without reading bodies; returns `{ slug, title, stale_refs }` per
+page). `list_wiki_pages` already returns the full per-page bulk fields
+(title, refs, excerpt, timestamps), so the only reason to call
+`get_wiki_page_metadata` after a `list` is its added `stale_refs` field
+— don't fan out per-page `get` calls for data `list` already gave you.
+The wiki-only
 `find_wiki_pages_for_file` was removed in favour of `list_backlinks`
 (below) — every cross-kind backlinks question goes through one tool
 now. **There is intentionally no create/update tool** —
