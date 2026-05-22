@@ -46,6 +46,11 @@ pub struct SnapshotCaptureRegistry {
     /// watcher, MCP file-ref-version resolver, and bootloader logs
     /// all need it. Set once at boot.
     primary_id: Arc<RwLock<Option<StreamId>>>,
+    /// Live workspace filter, seeded from `config.workspace_filter`.
+    /// Kept separate (and behind a lock) so [`Self::set_workspace_filter`]
+    /// can update the filter handed to *future* `register()` calls when
+    /// the project's `generated` config changes at runtime.
+    workspace_filter: Arc<RwLock<WorkspaceFilter>>,
     config: SnapshotCaptureRegistryConfig,
 }
 
@@ -54,6 +59,7 @@ impl SnapshotCaptureRegistry {
         Self {
             services: Arc::new(RwLock::new(HashMap::new())),
             primary_id: Arc::new(RwLock::new(None)),
+            workspace_filter: Arc::new(RwLock::new(config.workspace_filter.clone())),
             config,
         }
     }
@@ -87,7 +93,10 @@ impl SnapshotCaptureRegistry {
                 worktree,
                 stream.id.clone(),
                 self.config.max_file_bytes,
-                self.config.workspace_filter.clone(),
+                self.workspace_filter
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
             )
             .with_events(self.config.events.clone()),
         );
@@ -114,6 +123,20 @@ impl SnapshotCaptureRegistry {
         };
         if let Some(svc) = removed {
             svc.shutdown();
+        }
+    }
+
+    /// Swap the workspace path filter for every live service AND the
+    /// copy used to build future ones. Called when the project's
+    /// `generated` config changes (via the `set_generated` IPC) so
+    /// snapshot include/exclude edits take effect without a restart.
+    pub fn set_workspace_filter(&self, filter: WorkspaceFilter) {
+        *self
+            .workspace_filter
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = filter.clone();
+        for svc in self.list() {
+            svc.set_workspace_filter(filter.clone());
         }
     }
 

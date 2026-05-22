@@ -118,7 +118,11 @@ struct Inner {
     /// `generated` config at bootstrap; the default segments
     /// (`.git`, `.oxplow`, `target`, `node_modules`, …) are always
     /// in effect even with an empty user list.
-    workspace_filter: WorkspaceFilter,
+    ///
+    /// Behind a lock so the UI's generated-paths toggle (`set_generated`
+    /// IPC) can swap it at runtime via [`SnapshotCaptureService::set_workspace_filter`]
+    /// without restarting the app.
+    workspace_filter: RwLock<WorkspaceFilter>,
     /// Optional event bus. When set, each captured snapshot fires a
     /// `FileSnapshotCreated` event so the renderer can refresh the
     /// Snapshots panel without polling.
@@ -183,7 +187,7 @@ impl SnapshotCaptureService {
                 project_dir,
                 stream_id,
                 max_file_bytes,
-                workspace_filter,
+                workspace_filter: RwLock::new(workspace_filter),
                 events: RwLock::new(None),
                 dirty: Mutex::new(HashMap::new()),
                 settle_duration: DEFAULT_SETTLE_DURATION,
@@ -192,6 +196,18 @@ impl SnapshotCaptureService {
                 shutdown: tokio::sync::Notify::new(),
             }),
         }
+    }
+
+    /// Swap the workspace path filter at runtime. Called when the
+    /// project's `generated` config changes (via the `set_generated`
+    /// IPC) so include/exclude edits take effect on the next fs-watch
+    /// event and the next startup sweep without an app restart.
+    pub fn set_workspace_filter(&self, filter: WorkspaceFilter) {
+        *self
+            .inner
+            .workspace_filter
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = filter;
     }
 
     /// Override the settle window (default [`DEFAULT_SETTLE_DURATION`]).
@@ -225,7 +241,7 @@ impl SnapshotCaptureService {
     /// Attach an `EventBus` so capture emits `FileSnapshotCreated`
     /// after each successful insert.
     pub fn with_events(self, events: EventBus) -> Self {
-        *self.inner.events.write().unwrap() = Some(events);
+        *self.inner.events.write().unwrap_or_else(|e| e.into_inner()) = Some(events);
         self
     }
 
@@ -272,7 +288,12 @@ impl SnapshotCaptureService {
     /// Requires `with_events` to have been called. No-op (returns a
     /// finished task) when no bus is attached.
     pub fn spawn_git_refs_listener(&self) -> tokio::task::JoinHandle<()> {
-        let bus = self.inner.events.read().unwrap().clone();
+        let bus = self
+            .inner
+            .events
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let Some(bus) = bus else {
             return tokio::spawn(async {});
         };
@@ -394,7 +415,13 @@ impl SnapshotCaptureService {
                     Ok(event) => {
                         let path = event.path;
                         let rel = path.strip_prefix(&self.inner.project_dir).unwrap_or(&path);
-                        if self.inner.workspace_filter.ignore(rel) {
+                        if self
+                            .inner
+                            .workspace_filter
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .ignore(rel)
+                        {
                             continue;
                         }
                         self.mark_dirty(path, event.kind);
@@ -419,7 +446,7 @@ impl SnapshotCaptureService {
     /// from real ones. Callers without an event source (tests, manual
     /// triggers) pass `WatchEventKind::Other`.
     pub fn mark_dirty(&self, path: PathBuf, kind: WatchEventKind) {
-        let mut set = self.inner.dirty.lock().unwrap();
+        let mut set = self.inner.dirty.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
         set.entry(path)
             .and_modify(|e| {
@@ -449,7 +476,7 @@ impl SnapshotCaptureService {
     /// already proved the file existed when it staged the row, so
     /// there's no transient-file concern.
     pub fn mark_dirty_with_staging(&self, path: PathBuf, staging: CaptureStaging) {
-        let mut set = self.inner.dirty.lock().unwrap();
+        let mut set = self.inner.dirty.lock().unwrap_or_else(|e| e.into_inner());
         // Anchor `first_seen` to a point comfortably before any
         // realistic settle window so staged entries are never gated.
         let bypass = Instant::now()
@@ -562,7 +589,12 @@ impl SnapshotCaptureService {
         let project_dir = self.inner.project_dir.clone();
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
-        let filter = self.inner.workspace_filter.clone();
+        let filter = self
+            .inner
+            .workspace_filter
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
 
         // Walk + stat off the async runtime — it's all blocking I/O.
         // The walk + per-file stat-shortcircuit stays single-threaded
@@ -789,7 +821,11 @@ impl SnapshotCaptureService {
         }
 
         let action = {
-            let mut slot = self.inner.in_flight.lock().unwrap();
+            let mut slot = self
+                .inner
+                .in_flight
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(rx) = slot.as_ref() {
                 SlotAction::Wait(rx.clone())
             } else {
@@ -820,7 +856,11 @@ impl SnapshotCaptureService {
                 };
                 let _ = tx.send(Some(shared));
                 {
-                    let mut slot = self.inner.in_flight.lock().unwrap();
+                    let mut slot = self
+                        .inner
+                        .in_flight
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     *slot = None;
                 }
                 result
@@ -846,7 +886,7 @@ impl SnapshotCaptureService {
             tokio::time::sleep(predrain).await;
         }
         let drained: Vec<(PathBuf, DirtyEntry)> = {
-            let mut set = self.inner.dirty.lock().unwrap();
+            let mut set = self.inner.dirty.lock().unwrap_or_else(|e| e.into_inner());
             set.drain().collect()
         };
         if drained.is_empty() {
@@ -1037,7 +1077,7 @@ impl SnapshotCaptureService {
         // suppressing transient-file rows.
         let deferred_count = deferred.len() as u64;
         if !deferred.is_empty() {
-            let mut set = self.inner.dirty.lock().unwrap();
+            let mut set = self.inner.dirty.lock().unwrap_or_else(|e| e.into_inner());
             for (path, entry) in deferred {
                 set.entry(path).or_insert(entry);
             }
@@ -1141,7 +1181,7 @@ impl SnapshotCaptureService {
     }
 
     fn emit_batch_event(&self, snapshot_id: i64, file_count: u32, source: SnapshotSourceKind) {
-        let guard = self.inner.events.read().unwrap();
+        let guard = self.inner.events.read().unwrap_or_else(|e| e.into_inner());
         if let Some(bus) = guard.as_ref() {
             bus.emit(OxplowEvent::FileSnapshotsBatchCreated {
                 stream_id: Some(self.inner.stream_id.clone()),
@@ -1224,6 +1264,29 @@ mod tests {
         assert!(
             joined.is_ok(),
             "watcher task did not exit within 5s of shutdown()",
+        );
+    }
+
+    #[tokio::test]
+    async fn set_workspace_filter_swaps_the_effective_filter_at_runtime() {
+        let project = tempdir().unwrap();
+        let (svc, _store) = svc_for(project.path()).await;
+        let rel = std::path::Path::new("build/out.js");
+
+        // Default filter doesn't ignore a "build" dir.
+        assert!(
+            !svc.inner.workspace_filter.read().unwrap().ignore(rel),
+            "precondition: default filter should not ignore build/",
+        );
+
+        // Simulate the `set_generated` toggle adding "build" to the
+        // generated list — the new filter must take effect immediately.
+        svc.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
+            "build",
+        ]));
+        assert!(
+            svc.inner.workspace_filter.read().unwrap().ignore(rel),
+            "set_workspace_filter must swap the live filter without a restart",
         );
     }
 

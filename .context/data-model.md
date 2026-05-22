@@ -438,6 +438,13 @@ the workspace watcher and the snapshot store. No changes to
 existing snapshots on toggle; newly ignored paths simply stop
 appearing in future dirty sets.
 
+Toggling the list at runtime (the UI's generated-paths control →
+`set_generated` IPC) takes effect immediately, no restart: the
+command rebuilds the `WorkspaceFilter` and calls
+`SnapshotCaptureRegistry::set_workspace_filter`, which swaps the
+filter on every live per-stream `SnapshotCaptureService` (each holds
+it behind an `RwLock`) and on the copy used to build future ones.
+
 ### `wiki_page` — `WikiPageStore` (`crates/oxplow-db/src/wiki_page_store.rs`)
 
 User-curated personal knowledgebase — agent-written writeups, diagrams,

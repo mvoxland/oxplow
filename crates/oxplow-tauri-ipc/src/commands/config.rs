@@ -57,8 +57,15 @@ pub async fn set_generated(
     entries: Vec<String>,
 ) -> Result<OxplowConfig, IpcError> {
     let project = state.layout.project_dir.clone();
-    mutate_config(&state.config, &project, |c| c.generated = entries)
-        .map_err(|e| IpcError::internal(e.to_string()))
+    let updated = mutate_config(&state.config, &project, |c| c.generated = entries)
+        .map_err(|e| IpcError::internal(e.to_string()))?;
+    // Push the new filter into every live snapshot capture so the
+    // include/exclude change takes effect immediately — without this
+    // the toggle would silently no-op until the app restarts.
+    state.snapshot_captures.set_workspace_filter(
+        oxplow_fs_watch::WorkspaceFilter::with_user_entries(&updated.generated),
+    );
+    Ok(updated)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

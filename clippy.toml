@@ -1,0 +1,5 @@
+# Tests legitimately use `.unwrap()`/`.expect()` for terse assertions, so
+# the `clippy::unwrap_used` / `clippy::expect_used` guardrail (enabled in
+# the root Cargo.toml `[workspace.lints]`) only fires on production code.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
