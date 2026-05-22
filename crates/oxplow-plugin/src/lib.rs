@@ -30,7 +30,7 @@ use serde_json::json;
 use thiserror::Error;
 
 const PLUGIN_DIR_REL: &str = ".oxplow/runtime/claude-plugin";
-const PLUGIN_NAME: &str = "oxplow-runtime";
+const PLUGIN_NAME: &str = "oxplow";
 const PLUGIN_VERSION: &str = "0.0.0";
 
 /// Hook event names mirrored from main. SessionStart is registered
@@ -257,6 +257,18 @@ mod tests {
         assert!(paths.work_next_command.exists());
         assert!(paths.review_comments_command.exists());
         assert!(paths.agent_guide.exists());
+    }
+
+    #[test]
+    fn manifest_name_drives_oxplow_command_prefix() {
+        // The plugin `name` is the Claude Code command/skill prefix:
+        // commands surface as `/<name>:<command>`. Keep it `oxplow`
+        // so users type `/oxplow:work-next`, not `/oxplow-runtime:…`.
+        let tmp = TempDir::new().unwrap();
+        let paths = write_plugin(tmp.path(), "http://h/hook", "http://h/mcp", "tok").unwrap();
+        let body = fs::read_to_string(&paths.manifest).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["name"], "oxplow");
     }
 
     #[test]
