@@ -55,6 +55,12 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      # Frontend unit + component tests (happy-dom harness lives in
+      # apps/desktop/bunfig.toml, so run from there).
+      - name: Frontend tests
+        run: bun test
+        working-directory: apps/desktop
+
       - name: Cargo test
         run: cargo test --workspace --all-features
 
