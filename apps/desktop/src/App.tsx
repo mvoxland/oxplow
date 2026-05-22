@@ -80,6 +80,7 @@ import { showToast } from "./components/toastStore.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { subscribeUiError } from "./ui-error.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
+import { useFileSessions } from "./useFileSessions.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
@@ -458,7 +459,7 @@ export function App() {
   const [diffTabs, setDiffTabs] = useState<Array<{ id: string; spec: DiffSpec }>>(() => readPersistedDiffSpecs());
   const [error, setError] = useState<string | null>(null);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
-  const [fileSessions, setFileSessions] = useState<Record<string, FileSessionState>>({});
+  const { fileSessions, setFileSessions, getFileSession, mutateFileSession } = useFileSessions();
   const restoredStreamsRef = useRef<Set<string>>(new Set());
   const centerActiveValidatedRef = useRef(false);
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ gitEnabled: false });
@@ -577,7 +578,7 @@ export function App() {
       }
       setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
       setStream(next);
-      const nextSession = fileSessions[next.id] ?? createEmptyFileSession();
+      const nextSession = getFileSession(next.id);
       // Seed the new thread's center-active only if we don't already have a
       // remembered value for it. Per-thread persistence means returning to a
       // thread restores its prior tab; only initial entry uses the file-session
@@ -659,14 +660,13 @@ export function App() {
 
   async function handleOpenFile(path: string) {
     if (!stream) return;
-    const currentSession = fileSessions[stream.id] ?? createEmptyFileSession();
+    const currentSession = getFileSession(stream.id);
     const existing = currentSession.files[path];
-    setFileSessions((prev) => {
-      const base = prev[stream.id] ?? createEmptyFileSession();
+    mutateFileSession(stream.id, (base) => {
       const opened = existing
         ? selectOpenFile(base, path)
         : setOpenFileLoading(openFileInSession(base, path, "", true), path, true);
-      return { ...prev, [stream.id]: enforceOpenFileLimit(opened, MAX_OPEN_FILE_TABS) };
+      return enforceOpenFileLimit(opened, MAX_OPEN_FILE_TABS);
     });
     // File tabs participate in the unified per-thread page tab list
     // so they share the same chrome and back/forward substrate as
@@ -699,18 +699,12 @@ export function App() {
         size: file.content.length,
         lineCount: file.content.split("\n").length,
       });
-      setFileSessions((prev) => ({
-        ...prev,
-        [stream.id]: setLoadedFileContent(prev[stream.id] ?? createEmptyFileSession(), file.path, file.content),
-      }));
+      mutateFileSession(stream.id, (s) => setLoadedFileContent(s, file.path, file.content));
       logUi("info", "opened file", { streamId: stream.id, path: file.path });
     } catch (e) {
       setError(String(e));
       logUi("error", "failed to open file", { streamId: stream.id, path, error: String(e) });
-      setFileSessions((prev) => ({
-        ...prev,
-        [stream.id]: closeOpenFile(prev[stream.id] ?? createEmptyFileSession(), path),
-      }));
+      mutateFileSession(stream.id, (s) => closeOpenFile(s, path));
     }
   }
 
@@ -722,49 +716,34 @@ export function App() {
 
   function handleEditorChange(value: string) {
     if (!stream) return;
-    const session = fileSessions[stream.id] ?? createEmptyFileSession();
+    const session = getFileSession(stream.id);
     if (!session.selectedPath) return;
-    setFileSessions((prev) => ({
-      ...prev,
-      [stream.id]: updateFileDraft(prev[stream.id] ?? createEmptyFileSession(), session.selectedPath!, value),
-    }));
+    mutateFileSession(stream.id, (s) => updateFileDraft(s, session.selectedPath!, value));
   }
 
   async function handleEditorSave() {
     if (!stream) return;
-    const session = fileSessions[stream.id] ?? createEmptyFileSession();
+    const session = getFileSession(stream.id);
     const selectedPath = session.selectedPath;
     if (!selectedPath) return;
     const current = session.files[selectedPath];
     if (!current || current.isLoading) return;
-    setFileSessions((prev) => ({
-      ...prev,
-      [stream.id]: setOpenFileLoading(prev[stream.id] ?? createEmptyFileSession(), selectedPath, true),
-    }));
+    mutateFileSession(stream.id, (s) => setOpenFileLoading(s, selectedPath, true));
     try {
       const saved = await writeWorkspaceFile(stream.id, selectedPath, current.draftContent);
-      setFileSessions((prev) => ({
-        ...prev,
-        [stream.id]: markFileSaved(prev[stream.id] ?? createEmptyFileSession(), saved.path, saved.content),
-      }));
+      mutateFileSession(stream.id, (s) => markFileSaved(s, saved.path, saved.content));
       setError(null);
       logUi("info", "saved file", { streamId: stream.id, path: saved.path });
     } catch (e) {
       setError(String(e));
       logUi("error", "failed to save file", { streamId: stream.id, path: selectedPath, error: String(e) });
-      setFileSessions((prev) => ({
-        ...prev,
-        [stream.id]: setOpenFileLoading(prev[stream.id] ?? createEmptyFileSession(), selectedPath, false),
-      }));
+      mutateFileSession(stream.id, (s) => setOpenFileLoading(s, selectedPath, false));
     }
   }
 
   function handleSelectOpenFile(path: string) {
     if (!stream) return;
-    setFileSessions((prev) => ({
-      ...prev,
-      [stream.id]: selectOpenFile(prev[stream.id] ?? createEmptyFileSession(), path),
-    }));
+    mutateFileSession(stream.id, (s) => selectOpenFile(s, path));
     setCenterActive(`file:${path}`);
   }
 
@@ -776,7 +755,7 @@ export function App() {
     // toast that offers Undo for ~7s. The toast captures the draft so
     // undo restores the unsaved buffer; if the user lets the toast
     // expire, the draft is gone (same end-state as the old "Discard").
-    const currentFile = fileSessions[stream.id]?.files[path];
+    const currentFile = getFileSession(stream.id).files[path];
     const targetStream = stream;
     if (currentFile && currentFile.draftContent !== currentFile.savedContent) {
       const basename = path.split("/").pop() ?? path;
@@ -789,11 +768,9 @@ export function App() {
         message: `Closed "${basename}" with unsaved changes.`,
         actionLabel: "Undo",
         onUndo: () => {
-          setFileSessions((prev) => {
-            const session = prev[targetStream.id] ?? createEmptyFileSession();
+          mutateFileSession(targetStream.id, (session) => {
             const restored = setLoadedFileContent(session, path, stashed.savedContent);
-            const withDraft = updateFileDraft(restored, path, stashed.draftContent);
-            return { ...prev, [targetStream.id]: withDraft };
+            return updateFileDraft(restored, path, stashed.draftContent);
           });
           setCenterActive(`file:${path}`);
         },
@@ -805,10 +782,7 @@ export function App() {
 
   function closeOpenFileNow(path: string) {
     if (!stream) return;
-    setFileSessions((prev) => ({
-      ...prev,
-      [stream.id]: closeOpenFile(prev[stream.id] ?? createEmptyFileSession(), path),
-    }));
+    mutateFileSession(stream.id, (s) => closeOpenFile(s, path));
     setEditorNavigationTarget((current) => (current?.path === path ? null : current));
   }
 
@@ -829,16 +803,15 @@ export function App() {
     if (!stream) return;
     const renamed = await renameWorkspacePath(stream.id, fromPath, toPath);
     setError(null);
-    setFileSessions((prev) => ({
-      ...prev,
-      [stream.id]: renameOpenFilePaths(prev[stream.id] ?? createEmptyFileSession(), (path) => {
+    mutateFileSession(stream.id, (s) =>
+      renameOpenFilePaths(s, (path) => {
         if (path === renamed.fromPath) return renamed.toPath;
         if (path.startsWith(renamed.fromPath + "/")) {
           return `${renamed.toPath}${path.slice(renamed.fromPath.length)}`;
         }
         return path;
       }),
-    }));
+    );
     setEditorNavigationTarget((current) => {
       if (!current) return current;
       if (current.path === renamed.fromPath) {
@@ -855,13 +828,9 @@ export function App() {
     if (!stream) return;
     await deleteWorkspacePath(stream.id, path);
     setError(null);
-    setFileSessions((prev) => {
-      const current = prev[stream.id] ?? createEmptyFileSession();
+    mutateFileSession(stream.id, (current) => {
       const toRemove = current.openOrder.filter((candidate) => candidate === path || candidate.startsWith(path + "/"));
-      return {
-        ...prev,
-        [stream.id]: removeOpenFiles(current, toRemove),
-      };
+      return removeOpenFiles(current, toRemove);
     });
     setEditorNavigationTarget((current) => {
       if (!current) return current;
@@ -1092,7 +1061,7 @@ export function App() {
   }
 
   const currentSession = useMemo(
-    () => (stream ? fileSessions[stream.id] ?? createEmptyFileSession() : createEmptyFileSession()),
+    () => (stream ? getFileSession(stream.id) : createEmptyFileSession()),
     [fileSessions, stream],
   );
   const selectedFilePath = currentSession.selectedPath;
@@ -1247,8 +1216,8 @@ export function App() {
     const streamId = stream.id;
     // Seed the session with placeholder loading entries so the tabs render
     // immediately.
-    setFileSessions((prev) => {
-      let base = prev[streamId] ?? createEmptyFileSession();
+    mutateFileSession(streamId, (initial) => {
+      let base = initial;
       for (const path of paths) {
         if (base.files[path]) continue;
         base = setOpenFileLoading(openFileInSession(base, path, "", true), path, true);
@@ -1256,23 +1225,17 @@ export function App() {
       // Drop the selection that openFileInSession implicitly set — we want
       // the persisted centerActive, not the last restored file, to decide.
       base = { ...base, selectedPath: null };
-      return { ...prev, [streamId]: enforceOpenFileLimit(base, MAX_OPEN_FILE_TABS) };
+      return enforceOpenFileLimit(base, MAX_OPEN_FILE_TABS);
     });
     // Fire content fetches in parallel.
     for (const path of paths) {
       void (async () => {
         try {
           const file = await readWorkspaceFile(streamId, path);
-          setFileSessions((prev) => ({
-            ...prev,
-            [streamId]: setLoadedFileContent(prev[streamId] ?? createEmptyFileSession(), file.path, file.content),
-          }));
+          mutateFileSession(streamId, (s) => setLoadedFileContent(s, file.path, file.content));
         } catch (err) {
           logUi("warn", "failed to restore open file tab", { streamId, path, error: String(err) });
-          setFileSessions((prev) => ({
-            ...prev,
-            [streamId]: closeOpenFile(prev[streamId] ?? createEmptyFileSession(), path),
-          }));
+          mutateFileSession(streamId, (s) => closeOpenFile(s, path));
         }
       })();
     }
@@ -1370,16 +1333,10 @@ export function App() {
           case "noop":
             return;
           case "update-saved":
-            setFileSessions((prev) => ({
-              ...prev,
-              [stream.id]: setLoadedFileContent(prev[stream.id] ?? createEmptyFileSession(), file.path, file.content),
-            }));
+            mutateFileSession(stream.id, (s) => setLoadedFileContent(s, file.path, file.content));
             return;
           case "replace-draft":
-            setFileSessions((prev) => ({
-              ...prev,
-              [stream.id]: markFileSaved(prev[stream.id] ?? createEmptyFileSession(), file.path, file.content),
-            }));
+            mutateFileSession(stream.id, (s) => markFileSaved(s, file.path, file.content));
             setExternalFilePrompt((current) => (current?.path === file.path ? null : current));
             return;
           case "prompt":
@@ -1854,10 +1811,7 @@ export function App() {
       if (id.startsWith("file:")) orderedFiles.push(id.slice("file:".length));
       else if (id.startsWith("diff:")) orderedDiffIds.push(id);
     }
-    setFileSessions((prev) => {
-      const base = prev[stream.id] ?? createEmptyFileSession();
-      return { ...prev, [stream.id]: reorderOpenFiles(base, orderedFiles) };
-    });
+    mutateFileSession(stream.id, (base) => reorderOpenFiles(base, orderedFiles));
     setDiffTabs((prev) => {
       if (orderedDiffIds.length !== prev.length) return prev;
       const byId = new Map(prev.map((d) => [d.id, d] as const));
@@ -3353,21 +3307,15 @@ export function App() {
         <ExternalFileChangedDialog
           path={externalFilePrompt.path}
           onReload={() => {
-            setFileSessions((prev) => ({
-              ...prev,
-              [stream.id]: markFileSaved(prev[stream.id] ?? createEmptyFileSession(), externalFilePrompt.path, externalFilePrompt.content),
-            }));
+            mutateFileSession(stream.id, (s) =>
+              markFileSaved(s, externalFilePrompt.path, externalFilePrompt.content),
+            );
             setExternalFilePrompt(null);
           }}
           onKeepMine={() => {
-            setFileSessions((prev) => ({
-              ...prev,
-              [stream.id]: setLoadedFileContent(
-                prev[stream.id] ?? createEmptyFileSession(),
-                externalFilePrompt.path,
-                externalFilePrompt.content,
-              ),
-            }));
+            mutateFileSession(stream.id, (s) =>
+              setLoadedFileContent(s, externalFilePrompt.path, externalFilePrompt.content),
+            );
             setExternalFilePrompt(null);
           }}
         />
