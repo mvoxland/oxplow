@@ -456,10 +456,10 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
     // git dashboard, etc. refresh without polling. Held in a registry
     // for the life of the daemon; dropping it cancels every watcher.
     //
-    // Pushed off the synchronous boot path: the initial cache walk that
-    // notify_debouncer_full performs can take seconds on large
-    // worktrees. Surfacing it as a BackgroundTask lets the renderer
-    // paint while watchers settle.
+    // Pushed off the synchronous boot path: registering recursive
+    // watches over a large worktree can take a moment to settle.
+    // Surfacing it as a BackgroundTask lets the renderer paint while
+    // watchers come up.
     {
         let stream_service = state.streams.clone();
         let watch_bus = event_bus.clone();

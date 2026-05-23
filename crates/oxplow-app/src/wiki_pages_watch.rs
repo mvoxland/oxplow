@@ -47,14 +47,16 @@ impl WikiPagesWatcher {
             info!(dir = %dir.display(), "wiki pages initial scan complete");
         }
 
-        let watcher = match FsWatcher::watch(&dir, Duration::from_millis(250)) {
+        let watcher = match FsWatcher::watch(&dir) {
             Ok(w) => w,
             Err(err) => {
                 warn!(?err, "wiki pages watcher failed to start");
                 return None;
             }
         };
-        let mut rx = watcher.subscribe();
+        // Debounced: editors save `.md` files in a few rapid writes;
+        // one re-sync per slug per burst is enough.
+        let mut rx = watcher.subscribe_debounced(Duration::from_millis(250));
 
         let project_dir_for_loop = project_dir.clone();
         let store_for_loop = store.clone();

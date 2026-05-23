@@ -1,23 +1,31 @@
-//! Debounced filesystem watcher.
+//! Filesystem watcher.
 //!
 //! Wraps `notify::RecommendedWatcher` and exposes a single broadcast
-//! channel of `WatchEvent`s with built-in debouncing. Reused by
-//! oxplow-git for `.git/refs` watching, and (in a future pass) by
-//! the analysis pipeline.
+//! channel of `WatchEvent`s. Raw events fire **immediately** — there is
+//! no built-in debounce. Reused by oxplow-git for `.git/refs` watching,
+//! and by the snapshot-capture and analysis pipelines.
+//!
+//! Two ways to consume:
+//!   - [`FsWatcher::subscribe`] — the raw, immediate stream. Every
+//!     OS-level event flows through with no coalescing. The snapshot
+//!     singleton uses this so its dirty set is always current the
+//!     instant a snapshot is requested.
+//!   - [`FsWatcher::subscribe_debounced`] — a coalescing listener that
+//!     batches a burst into at most one event per `(path, kind)` pair
+//!     per debounce window. This is what most of the system (file
+//!     tree, editor prompts, git-context UI) should watch, so a single
+//!     `git checkout` or save-storm doesn't spam every subscriber.
 //!
 //! Replaces the `chokidar` usage scattered through the TS codebase.
-//! The contract:
-//!   - Subscribers see at most one event per (path, kind) pair within
-//!     the debounce window.
-//!   - The watcher is cancelled by dropping the `FsWatcher` handle —
-//!     internal threads exit cleanly, no zombie threads.
+//! The watcher is cancelled by dropping the `FsWatcher` handle —
+//! internal threads exit cleanly, no zombie threads.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use notify::RecommendedWatcher;
 pub use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
+use notify::{RecommendedWatcher, Watcher};
 use thiserror::Error;
 use tokio::sync::broadcast;
 
@@ -28,7 +36,7 @@ pub enum FsWatchError {
 }
 
 /// What happened to a watched path.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WatchEventKind {
     Created,
     Modified,
@@ -47,60 +55,114 @@ pub struct WatchEvent {
 ///
 /// Hold this for as long as you want to watch. Drop it to cancel.
 pub struct FsWatcher {
-    // Holding the debouncer alive keeps the watcher running. Drop
-    // releases all OS handles.
-    _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
+    // Holding the watcher alive keeps it running. Drop releases all OS
+    // handles.
+    _watcher: RecommendedWatcher,
     sender: broadcast::Sender<WatchEvent>,
 }
 
 impl FsWatcher {
-    /// Watch `path` recursively, debouncing events within `debounce_window`.
-    pub fn watch(path: impl AsRef<Path>, debounce_window: Duration) -> Result<Self, FsWatchError> {
-        Self::watch_paths(
-            vec![(path.as_ref().to_path_buf(), RecursiveMode::Recursive)],
-            debounce_window,
-        )
+    /// Watch `path` recursively. Events fire immediately, with no
+    /// coalescing — see [`FsWatcher::subscribe_debounced`] for the
+    /// batched view.
+    pub fn watch(path: impl AsRef<Path>) -> Result<Self, FsWatchError> {
+        Self::watch_paths(vec![(
+            path.as_ref().to_path_buf(),
+            RecursiveMode::Recursive,
+        )])
     }
 
-    /// Watch a set of paths with per-path recursion modes, debouncing
-    /// events within `debounce_window`. A single OS-level debouncer is
-    /// shared across every entry, so an event on any registered path
-    /// flows through the same broadcast channel.
-    pub fn watch_paths(
-        paths: Vec<(PathBuf, RecursiveMode)>,
-        debounce_window: Duration,
-    ) -> Result<Self, FsWatchError> {
-        let (tx, _) = broadcast::channel(256);
+    /// Watch a set of paths with per-path recursion modes. A single
+    /// OS-level watcher is shared across every entry, so an event on
+    /// any registered path flows through the same broadcast channel.
+    /// Events are emitted immediately as the OS reports them.
+    pub fn watch_paths(paths: Vec<(PathBuf, RecursiveMode)>) -> Result<Self, FsWatchError> {
+        // Capacity is generous because the raw stream is un-coalesced:
+        // a `git checkout` or build can fire hundreds of events before
+        // a slow subscriber drains them. Lagged subscribers log and
+        // recover; they never block the watcher thread.
+        let (tx, _) = broadcast::channel(1024);
         let tx_clone = tx.clone();
 
-        let mut debouncer =
-            new_debouncer(debounce_window, None, move |res: DebounceEventResult| {
-                let Ok(events) = res else { return };
-                for evt in events {
-                    let kind = classify(&evt.event);
-                    for path in evt.event.paths.iter() {
-                        let _ = tx_clone.send(WatchEvent {
-                            path: path.clone(),
-                            kind: kind.clone(),
-                        });
-                    }
+        let mut watcher =
+            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                let Ok(event) = res else { return };
+                let kind = classify(&event);
+                for path in event.paths.iter() {
+                    let _ = tx_clone.send(WatchEvent {
+                        path: path.clone(),
+                        kind: kind.clone(),
+                    });
                 }
             })?;
 
         for (p, mode) in paths {
-            debouncer.watch(&p, mode)?;
+            watcher.watch(&p, mode)?;
         }
 
         Ok(Self {
-            _debouncer: debouncer,
+            _watcher: watcher,
             sender: tx,
         })
     }
 
-    /// Subscribe to events. Subscribers can connect at any time; events
-    /// emitted before subscription are dropped.
+    /// Subscribe to the raw, immediate event stream. Every OS-level
+    /// event flows through with no coalescing. Subscribers can connect
+    /// at any time; events emitted before subscription are dropped.
     pub fn subscribe(&self) -> broadcast::Receiver<WatchEvent> {
         self.sender.subscribe()
+    }
+
+    /// Subscribe to a debounced view of the event stream. A burst of
+    /// events is collected for `window` after the first one arrives,
+    /// then flushed as at most one `WatchEvent` per `(path, kind)`
+    /// pair. This is the feed most of the system should watch — it
+    /// turns a save-storm or `git checkout` into a single round of
+    /// notifications instead of one per touched file.
+    ///
+    /// The coalescing task lives until the underlying watcher is
+    /// dropped (which closes the raw stream); the returned receiver
+    /// then closes too.
+    pub fn subscribe_debounced(&self, window: Duration) -> broadcast::Receiver<WatchEvent> {
+        let mut raw = self.subscribe();
+        let (tx, rx) = broadcast::channel(1024);
+        tokio::spawn(async move {
+            use broadcast::error::RecvError;
+            loop {
+                // Block until the first event of a new burst (or the
+                // raw stream closes).
+                let mut pending: HashSet<(PathBuf, WatchEventKind)> = HashSet::new();
+                match raw.recv().await {
+                    Ok(ev) => {
+                        pending.insert((ev.path, ev.kind));
+                    }
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => break,
+                }
+                // Accumulate everything that lands within `window`,
+                // then flush the de-duplicated set.
+                let deadline = tokio::time::sleep(window);
+                tokio::pin!(deadline);
+                let mut closed = false;
+                loop {
+                    tokio::select! {
+                        _ = &mut deadline => break,
+                        ev = raw.recv() => match ev {
+                            Ok(ev) => { pending.insert((ev.path, ev.kind)); }
+                            Err(RecvError::Lagged(_)) => {}
+                            Err(RecvError::Closed) => { closed = true; break; }
+                        },
+                    }
+                }
+                for (path, kind) in pending.drain() {
+                    let _ = tx.send(WatchEvent { path, kind });
+                }
+                if closed {
+                    break;
+                }
+            }
+        });
+        rx
     }
 }
 
@@ -251,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn detects_new_file() {
         let dir = tempdir().unwrap();
-        let watcher = FsWatcher::watch(dir.path(), Duration::from_millis(50)).unwrap();
+        let watcher = FsWatcher::watch(dir.path()).unwrap();
         let mut rx = watcher.subscribe();
 
         let target = dir.path().join("hello.txt");
@@ -270,17 +332,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn debounces_rapid_writes() {
+    async fn debounced_subscription_coalesces_rapid_writes() {
         let dir = tempdir().unwrap();
-        let watcher = FsWatcher::watch(dir.path(), Duration::from_millis(150)).unwrap();
-        let mut rx = watcher.subscribe();
+        let watcher = FsWatcher::watch(dir.path()).unwrap();
+        let mut rx = watcher.subscribe_debounced(Duration::from_millis(150));
 
         let target = dir.path().join("hot.txt");
         for i in 0..20 {
             std::fs::write(&target, format!("{i}")).unwrap();
         }
 
-        // Collect everything that lands within 1s. The debouncer
+        // Collect everything that lands within 1s. The debounced view
         // should coalesce 20 writes into a small number of events.
         let mut count = 0;
         while let Ok(Ok(_)) = timeout(Duration::from_millis(800), rx.recv()).await {
@@ -292,16 +354,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn raw_subscription_fires_per_distinct_file() {
+        // The raw stream does not coalesce across distinct paths: a
+        // write to each of N files surfaces N separate events. (Same
+        // file may dedup at the OS layer, so we use distinct files.)
+        let dir = tempdir().unwrap();
+        let watcher = FsWatcher::watch(dir.path()).unwrap();
+        let mut rx = watcher.subscribe();
+
+        let mut targets = HashSet::new();
+        for i in 0..5 {
+            let p = dir.path().join(format!("f{i}.txt"));
+            std::fs::write(&p, b"x").unwrap();
+            targets.insert(p.canonicalize().unwrap());
+        }
+
+        let mut seen = HashSet::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline && seen.len() < targets.len() {
+            if let Ok(Ok(evt)) = timeout(Duration::from_millis(500), rx.recv()).await {
+                if let Ok(canon) = evt.path.canonicalize() {
+                    if targets.contains(&canon) {
+                        seen.insert(canon);
+                    }
+                }
+            }
+        }
+        assert_eq!(seen, targets, "raw stream should surface each file");
+    }
+
+    #[tokio::test]
     async fn watch_paths_registers_multiple_dirs() {
         let a = tempdir().unwrap();
         let b = tempdir().unwrap();
-        let watcher = FsWatcher::watch_paths(
-            vec![
-                (a.path().to_path_buf(), RecursiveMode::Recursive),
-                (b.path().to_path_buf(), RecursiveMode::Recursive),
-            ],
-            Duration::from_millis(50),
-        )
+        let watcher = FsWatcher::watch_paths(vec![
+            (a.path().to_path_buf(), RecursiveMode::Recursive),
+            (b.path().to_path_buf(), RecursiveMode::Recursive),
+        ])
         .unwrap();
         let mut rx = watcher.subscribe();
 
@@ -334,10 +423,10 @@ mod tests {
         let sub = dir.path().join("nested");
         std::fs::create_dir(&sub).unwrap();
 
-        let watcher = FsWatcher::watch_paths(
-            vec![(dir.path().to_path_buf(), RecursiveMode::NonRecursive)],
-            Duration::from_millis(50),
-        )
+        let watcher = FsWatcher::watch_paths(vec![(
+            dir.path().to_path_buf(),
+            RecursiveMode::NonRecursive,
+        )])
         .unwrap();
         let mut rx = watcher.subscribe();
 
@@ -474,7 +563,7 @@ mod tests {
     #[tokio::test]
     async fn drop_cancels_watcher() {
         let dir = tempdir().unwrap();
-        let watcher = FsWatcher::watch(dir.path(), Duration::from_millis(50)).unwrap();
+        let watcher = FsWatcher::watch(dir.path()).unwrap();
         let mut rx = watcher.subscribe();
         drop(watcher);
         // After drop, no further events are emitted; channel closes

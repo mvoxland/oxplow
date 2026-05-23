@@ -28,8 +28,8 @@ use tracing::{debug, warn};
 /// Top-level worktree entries we never want to watch — they're noisy
 /// and the renderer never reacts to changes inside them. Skipping them
 /// at registration time (rather than just filtering events afterwards)
-/// is what makes boot fast: `notify_debouncer_full` walks every
-/// registered subtree to seed its cache, and these dirs dominate.
+/// keeps event volume down: these dirs churn constantly (build output,
+/// dependency installs) and would otherwise flood the watcher.
 const EXCLUDED_TOP_LEVEL: &[&str] = &[".git", ".oxplow", "target", "node_modules"];
 
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
@@ -162,7 +162,7 @@ fn spawn_for_stream(
             warn!(error = %e, %stream_id, ?worktree, "could not enumerate worktree top-level");
         }
     }
-    let fs = match FsWatcher::watch_paths(paths, Duration::from_millis(250)) {
+    let fs = match FsWatcher::watch_paths(paths) {
         Ok(w) => w,
         Err(e) => {
             warn!(error = %e, %stream_id, ?worktree, "fs watcher failed to start");
@@ -170,7 +170,10 @@ fn spawn_for_stream(
         }
     };
     {
-        let mut rx = fs.subscribe();
+        // Debounced: a `git checkout` or save-storm should refresh the
+        // file tree / editor once, not once per touched file. (The
+        // snapshot dirty set listens to the raw stream separately.)
+        let mut rx = fs.subscribe_debounced(Duration::from_millis(250));
         let bus = events.clone();
         let id = stream_id.clone();
         let root = worktree.clone();
@@ -256,17 +259,17 @@ fn spawn_project_context(project_dir: PathBuf, events: EventBus) -> Option<FsWat
     // Non-recursive: we only care about whether `.git` appears or
     // disappears at the project root. A recursive watch here would
     // re-walk the entire .git tree on boot for nothing.
-    let watcher = match FsWatcher::watch_paths(
-        vec![(project_dir.clone(), RecursiveMode::NonRecursive)],
-        Duration::from_millis(500),
-    ) {
-        Ok(w) => w,
-        Err(e) => {
-            warn!(error = %e, ?project_dir, "project context watcher failed to start");
-            return None;
-        }
-    };
-    let mut rx = watcher.subscribe();
+    let watcher =
+        match FsWatcher::watch_paths(vec![(project_dir.clone(), RecursiveMode::NonRecursive)]) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!(error = %e, ?project_dir, "project context watcher failed to start");
+                return None;
+            }
+        };
+    // Debounced: `git init`/`rm -rf .git` churns the root briefly; we
+    // only need to settle on the final `.git` presence state.
+    let mut rx = watcher.subscribe_debounced(Duration::from_millis(500));
     let mut last_state = project_dir.join(".git").exists();
     tokio::spawn(async move {
         loop {

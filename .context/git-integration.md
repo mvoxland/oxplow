@@ -12,6 +12,25 @@ points), see [data-model.md](./data-model.md) and
 The runtime keeps three independent `fs.watch`-based watchers running.
 Each cares about a different slice of the project state.
 
+### Immediate vs. debounced (the `FsWatcher` contract)
+
+`oxplow_fs_watch::FsWatcher` fires events **immediately** — there is no
+built-in debounce anymore. Consumers pick the view they need:
+
+- `subscribe()` — the raw, un-coalesced stream. Every OS-level event
+  flows through as it arrives. **Snapshot capture uses this** so its
+  in-memory dirty set is always current the instant a snapshot is
+  requested (the old 250ms debounce let an edit's watch event lag the
+  effort-completion snapshot, so genuinely-edited files showed up as
+  `claimed_but_not_changed` in the effort file-review).
+- `subscribe_debounced(window)` — a coalescing listener that batches a
+  burst into at most one event per `(path, kind)` pair per window. This
+  is what the general-purpose, UI-facing consumers watch (workspace,
+  wiki, git-context, git-refs) so a `git checkout` or save-storm fires
+  one round of notifications instead of one per touched file.
+
+So debounce is a per-consumer choice, not a property of the watcher.
+
 ### 1. Workspace watcher
 
 `crates/oxplow-app/src/workspace_watch.rs` — `WorkspaceWatchRegistry`.
@@ -32,16 +51,17 @@ win is at registration: we never seed cache for the dirs we never
 care about. `EXCLUDED_TOP_LEVEL` is the single source of truth for
 both pieces.
 
-Drives `workspace.changed` events. Consumed by:
+Subscribes via the **debounced** view (`subscribe_debounced(250ms)`)
+and bridges each batch onto `OxplowEvent::WorkspaceChanged`. Consumed by:
 
 - `ProjectPanel` to refresh the file tree.
 - `EditorPane` for external-file-changed prompts.
-- `runtime.markDirty` (invoked from the watcher callback) to add the
-  path to the per-stream in-memory dirty set, which the next snapshot
-  flush reads as its optimizer hint.
 
 Source files mutate constantly; this watcher's job is to keep the
-file-tree current and to feed the snapshot dirty set.
+file-tree current. Note that the snapshot dirty set is **not** fed from
+here — `SnapshotCaptureService` runs its own `FsWatcher` and subscribes
+to the *raw* (immediate) stream so the dirty set never lags a snapshot
+request (see the immediate-vs-debounced note above).
 
 ### 2. Git root watcher
 

@@ -36,8 +36,10 @@ impl GitRefsWatcher {
         let refs_dir = repo_path.join(".git").join("refs");
         let (sender, _) = broadcast::channel::<RefsChangeEvent>(64);
 
-        let watcher = FsWatcher::watch(&refs_dir, debounce)?;
-        let mut sub = watcher.subscribe();
+        let watcher = FsWatcher::watch(&refs_dir)?;
+        // A single `git commit` writes several ref files in quick
+        // succession; debounce so consumers re-query once per burst.
+        let mut sub = watcher.subscribe_debounced(debounce);
         let tx = sender.clone();
         let path_str = repo_path.to_string_lossy().into_owned();
         tokio::spawn(async move {

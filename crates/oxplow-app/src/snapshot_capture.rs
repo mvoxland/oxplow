@@ -389,14 +389,18 @@ impl SnapshotCaptureService {
     }
 
     async fn run_watcher(self) {
-        let watcher =
-            match FsWatcher::watch(self.inner.project_dir.clone(), Duration::from_millis(250)) {
-                Ok(w) => w,
-                Err(e) => {
-                    warn!(error = %e, "snapshot capture: failed to start fs-watch");
-                    return;
-                }
-            };
+        let watcher = match FsWatcher::watch(self.inner.project_dir.clone()) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!(error = %e, "snapshot capture: failed to start fs-watch");
+                return;
+            }
+        };
+        // Subscribe to the raw, un-debounced stream: the dirty set must
+        // be current the instant a snapshot is requested, so we mark
+        // paths dirty as soon as the OS reports them rather than after
+        // a debounce window. The general-purpose `WorkspaceChanged`
+        // feed (workspace_watch) is the one that debounces.
         let mut rx = watcher.subscribe();
         // Park on the shutdown signal once, before the loop, so a
         // `notify_one` that fires between iterations isn't missed. The
