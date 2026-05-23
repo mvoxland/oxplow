@@ -4,6 +4,7 @@ import {
   applyStatusFilter,
   buildBacklogGroups,
   buildGroups,
+  openBacklogCount,
   classifyEpic,
   classifyRow,
   classifyTaskStatus,
@@ -114,6 +115,41 @@ test("buildBacklogGroups returns a single empty group for an empty backlog so se
   expect(groups).toHaveLength(1);
   expect(groups[0]?.items).toEqual([]);
   expect(groups[0]?.epic).toBeNull();
+});
+
+test("buildBacklogGroups includes ready items so backlog tasks render, not just count in the chip", () => {
+  // Regression: buildBacklogGroups used to spread only waiting/in_progress/done
+  // and drop state.items (the `ready` bucket), so ready backlog tasks rendered
+  // in no section — they only bumped the toggle-chip count. The To-Do section
+  // must list them.
+  const state: BacklogState = {
+    items: [item("r1", "ready", 0), item("r2", "ready", 1)],
+    waiting: [item("b1", "blocked", 2)],
+    in_progress: [item("p1", "in_progress", 3)],
+    done: [item("d1", "done", 4)],
+  };
+  const groups = buildBacklogGroups(state);
+  expect(groups).toHaveLength(1);
+  const ids = groups[0]?.items.map((i) => i.id) ?? [];
+  expect(ids).toContain("r1");
+  expect(ids).toContain("r2");
+});
+
+test("openBacklogCount counts ready + blocked + in_progress, excludes done", () => {
+  // The BacklogDrawer badge must reflect outstanding backlog work. Counting
+  // only `waiting` (the old bug) read "(0)" / "empty" for a backlog full of
+  // ready tasks. Done items are finished, so they don't count toward the badge.
+  const state: BacklogState = {
+    items: [item("r1", "ready", 0), item("r2", "ready", 1)],
+    waiting: [item("b1", "blocked", 2)],
+    in_progress: [item("p1", "in_progress", 3)],
+    done: [item("d1", "done", 4), item("d2", "done", 5)],
+  };
+  expect(openBacklogCount(state)).toBe(4);
+});
+
+test("openBacklogCount is 0 when state is null", () => {
+  expect(openBacklogCount(null)).toBe(0);
 });
 
 test("buildBacklogGroups still returns an empty group when state is null", () => {

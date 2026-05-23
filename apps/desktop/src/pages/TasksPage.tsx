@@ -37,7 +37,6 @@ export type TasksPageProps =
     | "excludeStatuses"
   > & {
     onOpenPage(ref: TabRef): void;
-    onMoveBacklogItemToThread(itemId: number, toThreadId: string): Promise<void>;
     streams: Stream[];
     currentStreamId: string | null;
   };
@@ -59,7 +58,6 @@ const NOOP_ASYNC = async () => {};
  */
 export function TasksPage({
   onOpenPage,
-  onMoveBacklogItemToThread,
   streams,
   currentStreamId,
   ...rest
@@ -251,8 +249,6 @@ export function TasksPage({
         </div>
         <BacklogDrawer
           backlog={rest.backlog}
-          activeThreadId={rest.activeThreadId}
-          onPromote={onMoveBacklogItemToThread}
           onOpenBacklog={() => onOpenPage(backlogRef())}
         />
       </div>

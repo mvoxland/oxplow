@@ -14,7 +14,6 @@ import {
   deleteBacklogItem,
   reorderBacklog,
   moveTaskToBacklog,
-  moveBacklogItemToThread,
   type AgentStatus,
   createWorkspaceFile,
   deleteWorkspacePath,
@@ -1007,19 +1006,6 @@ export function App() {
       const { from, backlog } = await moveTaskToBacklog(stream.id, fromThreadId, itemId);
       setThreadWorkStates((prev) => ({ ...prev, [fromThreadId]: from }));
       setBacklogState(backlog);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
-  }
-
-  async function handleMoveBacklogItemToThread(itemId: number, toThreadId: string) {
-    if (!stream) return;
-    try {
-      const { backlog, to } = await moveBacklogItemToThread(stream.id, itemId, toThreadId);
-      setBacklogState(backlog);
-      setThreadWorkStates((prev) => ({ ...prev, [toThreadId]: to }));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -2786,7 +2772,7 @@ export function App() {
           render: () => {
             switch (ref.kind) {
               case "tasks":
-                return <TasksPage {...sharedProps} streams={streams} currentStreamId={stream?.id ?? null} onOpenPage={navOpen} onMoveBacklogItemToThread={handleMoveBacklogItemToThread} />;
+                return <TasksPage {...sharedProps} streams={streams} currentStreamId={stream?.id ?? null} onOpenPage={navOpen} />;
               case "done-work":
                 return <DoneWorkPage {...sharedProps} onOpenPage={navOpen} />;
               case "backlog":

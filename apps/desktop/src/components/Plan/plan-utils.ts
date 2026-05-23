@@ -215,6 +215,17 @@ export function finalizeReorderIds(
   return ids;
 }
 
+/**
+ * Count of outstanding backlog work for the Tasks-page badge: ready +
+ * blocked + in_progress. Excludes `done` (finished items don't count as
+ * backlog). Pure — exported for tests. Counting only `waiting` was the bug
+ * that made a ready-only backlog read "(0) / empty".
+ */
+export function openBacklogCount(state: BacklogState | null): number {
+  if (!state) return 0;
+  return state.items.length + state.waiting.length + state.in_progress.length;
+}
+
 export function buildBacklogGroups(state: BacklogState | null): TaskGroup[] {
   // Always yield exactly one root group, even when the backlog is empty or
   // `state` is still loading — the Plan pane renders the section chrome
@@ -222,7 +233,11 @@ export function buildBacklogGroups(state: BacklogState | null): TaskGroup[] {
   // which only runs when a group exists. Without a group the empty backlog
   // would fall back to a blank "Backlog is empty." label with no way to
   // create the first task.
-  const items = state ? [...state.waiting, ...state.in_progress, ...state.done] : [];
+  // `state.items` is the `ready` bucket — it must be included or ready backlog
+  // tasks render in no section (they'd only bump the toggle-chip count).
+  const items = state
+    ? [...state.items, ...state.waiting, ...state.in_progress, ...state.done]
+    : [];
   items.sort((a, b) => a.sort_index - b.sort_index);
   return [{ epic: null, items, epicChildren: new Map() }];
 }
