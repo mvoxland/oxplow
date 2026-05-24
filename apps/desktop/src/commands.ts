@@ -46,6 +46,7 @@ export interface MenuCommandSnapshot {
   label: string;
   shortcut?: string;
   enabled: boolean;
+  separator?: boolean;
   checked?: boolean;
 }
 
@@ -114,12 +115,12 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
         // (see `crates/oxplow-tauri-ipc/src/commands/menu.rs`).
         { id: "native.undo", label: "Undo", enabled: true },
         { id: "native.redo", label: "Redo", enabled: true },
-        { id: "native.separator.1", label: "", enabled: true },
+        { id: "native.separator.1", label: "", separator: true, enabled: true },
         { id: "native.cut", label: "Cut", enabled: true },
         { id: "native.copy", label: "Copy", enabled: true },
         { id: "native.paste", label: "Paste", enabled: true },
         { id: "native.selectAll", label: "Select All", enabled: true },
-        { id: "native.separator.2", label: "", enabled: true },
+        { id: "native.separator.2", label: "", separator: true, enabled: true },
         { id: "edit.find", label: "Find", shortcut: "Ctrl/Cmd+F", enabled: state.hasSelectedFile },
       ],
     },
